@@ -4291,6 +4291,115 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_supports_cell_brace_linear_gap_growth_for_vectors() {
+        let ast = runmat_parser::parse(
+            "c = {1, 2}; c{5} = 9; a = isempty(c{3}); b = isempty(c{4}); x = c{5};",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let c_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "c")
+            .expect("c export");
+        let a_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "a")
+            .expect("a export");
+        let b_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "b")
+            .expect("b export");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[a_export.slot.0], Value::Bool(true));
+        assert_eq!(vars[b_export.slot.0], Value::Bool(true));
+        assert_eq!(vars[x_export.slot.0], Value::Num(9.0));
+        match &vars[c_export.slot.0] {
+            Value::Cell(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 5);
+            }
+            other => panic!("expected cell export, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors() {
+        let ast = runmat_parser::parse("c = {1, 2}; c{end+3} = 9; a = isempty(c{3}); x = c{5};")
+            .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                Instr::StoreIndexCell {
+                    num_indices: 1,
+                    end_offsets,
+                    ..
+                } if end_offsets == &vec![(0, 3)]
+            )
+        }));
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let a_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "a")
+            .expect("a export");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[a_export.slot.0], Value::Bool(true));
+        assert_eq!(vars[x_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
+    fn primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector() {
+        let ast = runmat_parser::parse("c = cell(5,0); c{3} = 2; v = c{3};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let c_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "c")
+            .expect("c export");
+        let v_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "v")
+            .expect("v export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[v_export.slot.0], Value::Num(2.0));
+        match &vars[c_export.slot.0] {
+            Value::Cell(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 3);
+            }
+            other => panic!("expected cell export, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn primary_compile_rejects_cell_brace_end_plus_one_growth_for_matrix_linear_assignment() {
         let ast = runmat_parser::parse("c = {1, 2; 3, 4}; c{end+1} = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

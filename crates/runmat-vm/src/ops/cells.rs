@@ -289,16 +289,25 @@ where
     match indices.len() {
         1 => {
             let i = indices[0];
-            if i == ca.data.len() + 1 {
+            let old_len = ca.data.len();
+            if i > old_len {
                 if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
                     return Err(mex(
                         "UnsupportedCellGrowth",
                         "Cell growth via linear brace assignment is only supported for vectors",
                     ));
                 }
-                ca.data.push(allocate_cell_handle(rhs)?);
+                while ca.data.len() < i {
+                    ca.data.push(allocate_empty_cell_handle()?);
+                }
                 let len = ca.data.len();
-                if ca.rows <= 1 {
+                if old_len == 0 {
+                    // MATLAB linear growth from empty cell shapes (for example `0x5` or `5x0`)
+                    // normalizes to a row vector.
+                    ca.rows = 1;
+                    ca.cols = len;
+                    ca.shape = vec![1, len];
+                } else if ca.rows <= 1 {
                     ca.rows = 1;
                     ca.cols = len;
                     ca.shape = vec![1, len];
@@ -307,11 +316,12 @@ where
                     ca.cols = 1;
                     ca.shape = vec![len, 1];
                 }
-                return Ok(Value::Cell(ca));
             }
             let pos = row_major_pos_from_linear(&ca, i)?;
-            if let Some(oldv) = ca.data.get(pos) {
-                on_write(oldv, &rhs);
+            if i <= old_len {
+                if let Some(oldv) = ca.data.get(pos) {
+                    on_write(oldv, &rhs);
+                }
             }
             ca.data[pos] = allocate_cell_handle(rhs)?;
             Ok(Value::Cell(ca))

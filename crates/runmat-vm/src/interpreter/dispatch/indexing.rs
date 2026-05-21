@@ -132,8 +132,7 @@ fn apply_cell_end_offsets_for_base(
             ca.cols
         };
         let resolved = (len as isize) + *offset;
-        let can_grow = allow_end_plus_one_growth && resolved == (len as isize + 1);
-        if resolved < 1 || ((resolved as usize) > len && !can_grow) {
+        if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > len) {
             return Err(crate::interpreter::errors::mex(
                 "CellIndexOutOfBounds",
                 "Cell index out of bounds",
@@ -173,8 +172,7 @@ async fn apply_cell_end_exprs_for_base(
             ca.cols
         };
         let resolved = resolve_range_end_index(dim_len, end_expr, vars).await?;
-        let can_grow = allow_end_plus_one_growth && resolved == (dim_len as i64 + 1);
-        if resolved < 1 || ((resolved as usize) > dim_len && !can_grow) {
+        if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > dim_len) {
             return Err(crate::interpreter::errors::mex(
                 "CellIndexOutOfBounds",
                 "Cell index out of bounds",
