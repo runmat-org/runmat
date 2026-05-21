@@ -279,6 +279,47 @@ pub struct ExprPlanSpec<'a> {
     pub shape: &'a [usize],
 }
 
+fn validate_expr_range_selector_plan(
+    spec: &ExprPlanSpec<'_>,
+) -> Result<Vec<Option<usize>>, RuntimeError> {
+    let range_len = spec.range_dims.len();
+    if spec.range_params.len() != range_len
+        || spec.range_start_exprs.len() != range_len
+        || spec.range_step_exprs.len() != range_len
+        || spec.range_end_exprs.len() != range_len
+    {
+        return Err(mex(
+            "InvalidRangeSelectorPlan",
+            "inconsistent range selector metadata",
+        ));
+    }
+
+    let mut by_dim = vec![None; spec.dims];
+    for (pos, &dim) in spec.range_dims.iter().enumerate() {
+        if dim >= spec.dims {
+            return Err(mex(
+                "InvalidRangeSelectorDim",
+                "range selector dimension is out of bounds",
+            ));
+        }
+        let conflicts_with_colon = (spec.colon_mask & (1u32 << dim)) != 0;
+        let conflicts_with_end = (spec.end_mask & (1u32 << dim)) != 0;
+        if conflicts_with_colon || conflicts_with_end {
+            return Err(mex(
+                "InvalidRangeSelectorPlan",
+                "range selector conflicts with colon/end selector masks",
+            ));
+        }
+        if by_dim[dim].replace(pos).is_some() {
+            return Err(mex(
+                "InvalidRangeSelectorPlan",
+                "range selector dimension appears more than once",
+            ));
+        }
+    }
+    Ok(by_dim)
+}
+
 pub async fn build_expr_index_plan<ResolveEnd, Fut>(
     spec: ExprPlanSpec<'_>,
     mut resolve_end: ResolveEnd,
@@ -298,9 +339,9 @@ where
         spec.shape.to_vec()
     };
 
+    let range_pos_by_dim = validate_expr_range_selector_plan(&spec)?;
     let mut selectors: Vec<ExprSel> = Vec::with_capacity(spec.dims);
     let mut num_iter = 0usize;
-    let mut rp_iter = 0usize;
     for d in 0..spec.dims {
         let is_colon = (spec.colon_mask & (1u32 << d)) != 0;
         let is_end = (spec.end_mask & (1u32 << d)) != 0;
@@ -308,20 +349,19 @@ where
             selectors.push(ExprSel::Colon);
         } else if is_end {
             selectors.push(ExprSel::Scalar(*full_shape.get(d).unwrap_or(&1)));
-        } else if let Some(pos) = spec.range_dims.iter().position(|&rd| rd == d) {
-            let (raw_st, raw_sp) = spec.range_params[rp_iter];
+        } else if let Some(pos) = range_pos_by_dim[d] {
+            let (raw_st, raw_sp) = spec.range_params[pos];
             let dim_len = *full_shape.get(d).unwrap_or(&1);
-            let st = if let Some(expr) = &spec.range_start_exprs[rp_iter] {
+            let st = if let Some(expr) = &spec.range_start_exprs[pos] {
                 resolve_end(dim_len, expr).await? as f64
             } else {
                 raw_st
             };
-            let sp = if let Some(expr) = &spec.range_step_exprs[rp_iter] {
+            let sp = if let Some(expr) = &spec.range_step_exprs[pos] {
                 resolve_end(dim_len, expr).await? as f64
             } else {
                 raw_sp
             };
-            rp_iter += 1;
             let off = spec.range_end_exprs[pos].clone();
             selectors.push(ExprSel::Range {
                 start: st as i64,
@@ -667,6 +707,78 @@ mod tests {
             assert_eq!(plain.properties.full_column, Some(2));
             assert_eq!(plain.properties.full_column, expr.properties.full_column);
             assert_eq!(plain.properties.full_row, expr.properties.full_row);
+        })
+    }
+
+    #[test]
+    fn expr_plan_rejects_range_dim_conflicting_with_colon_mask() {
+        futures::executor::block_on(async {
+            let err = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0b01,
+                    end_mask: 0,
+                    range_dims: &[0],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::End],
+                    numeric: &[Value::Num(1.0)],
+                    shape: &[3, 3],
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .expect_err("range/colon conflict should fail");
+            assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+        })
+    }
+
+    #[test]
+    fn expr_plan_rejects_duplicate_range_dims() {
+        futures::executor::block_on(async {
+            let err = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[1, 1],
+                    range_params: &[(1.0, 1.0), (1.0, 1.0)],
+                    range_start_exprs: &[None, None],
+                    range_step_exprs: &[None, None],
+                    range_end_exprs: &[EndExpr::End, EndExpr::End],
+                    numeric: &[Value::Num(1.0)],
+                    shape: &[3, 3],
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .expect_err("duplicate range dims should fail");
+            assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+        })
+    }
+
+    #[test]
+    fn expr_plan_rejects_inconsistent_range_metadata_lengths() {
+        futures::executor::block_on(async {
+            let err = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[1],
+                    range_params: &[],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::End],
+                    numeric: &[Value::Num(1.0)],
+                    shape: &[3, 3],
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .expect_err("inconsistent range metadata should fail");
+            assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
         })
     }
 }

@@ -237,6 +237,15 @@ This audit maps the active objective to concrete repository evidence and marks e
     - interpreter ratchets:
       - `resolve_cell_indices_rejects_fractional_values`
       - `resolve_cell_indices_rejects_zero_values`
+  - non-object expr-slice range metadata now has explicit selector-plan invariants in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
+    - `build_expr_index_plan(...)` now pre-validates range selector metadata consistency/arity, duplicate dimensions, out-of-bounds dimensions, and conflicts against colon/end masks.
+    - malformed metadata now fails with stable identifiers:
+      - `RunMat:InvalidRangeSelectorPlan` for inconsistent/conflicting/duplicate range metadata
+      - `RunMat:InvalidRangeSelectorDim` for out-of-bounds range dimensions
+    - direct ratchets:
+      - `expr_plan_rejects_range_dim_conflicting_with_colon_mask`
+      - `expr_plan_rejects_duplicate_range_dims`
+      - `expr_plan_rejects_inconsistent_range_metadata_lengths`
   - VM source-level callable identifier contracts now explicitly cover classref and event-target boundaries in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - classref non-static call boundary: `classref_nonstatic_method_call_errors_with_identifier_contract` -> `RunMat:MethodNotStatic`
     - classref unknown-static unresolved policy boundary: `classref_unknown_static_method_call_remains_unresolved_with_identifier_contract` -> `RunMat:UndefinedFunction`

@@ -30,6 +30,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Plan 3 selector-plan metadata invariant ratchet for non-object expr-slice lowering
+  - `scope: in-scope`
+  - `blocker: non-object expr-slice plan construction accepted malformed range metadata (mask conflicts, duplicate dims, and inconsistent metadata arity), leaving selector-plan normalization partially runtime-order-dependent instead of explicitly validated.`
+  - Hardened expr-slice plan validation in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
+    - added `validate_expr_range_selector_plan(...)` preflight for `build_expr_index_plan(...)`
+    - rejects inconsistent range metadata lengths with `RunMat:InvalidRangeSelectorPlan`
+    - rejects range selector dimensions conflicting with colon/end masks with `RunMat:InvalidRangeSelectorPlan`
+    - rejects duplicate range selector dimensions with `RunMat:InvalidRangeSelectorPlan`
+    - rejects out-of-bounds range selector dimensions with `RunMat:InvalidRangeSelectorDim`
+    - switched expr-range selector lookup to validated dimension-to-position mapping, removing implicit first-match behavior for malformed duplicate metadata.
+  - Added ratchets in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
+    - `expr_plan_rejects_range_dim_conflicting_with_colon_mask`
+    - `expr_plan_rejects_duplicate_range_dims`
+    - `expr_plan_rejects_inconsistent_range_metadata_lengths`
+  - Validation:
+    - `cargo test -p runmat-vm --lib expr_plan_rejects_ -- --nocapture`
+    - `cargo test -p runmat-vm --lib indexing::plan::tests:: -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM source-level callable identifier-contract ratchet follow-through
   - `scope: in-scope`
   - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
