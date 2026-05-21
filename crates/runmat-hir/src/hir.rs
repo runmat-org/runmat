@@ -372,10 +372,6 @@ impl CallableFallbackPolicy {
     }
 
     pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
-        self.allows_vm_name_fallback_for(identity)
-    }
-
-    pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
         match identity {
             CallableIdentity::DynamicName(_)
             | CallableIdentity::Imported(_)
@@ -388,14 +384,50 @@ impl CallableFallbackPolicy {
         }
     }
 
-    pub fn vm_fallback_name_for(self, identity: &CallableIdentity) -> Option<String> {
-        if !self.allows_vm_name_fallback_for(identity) {
+    pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
+        match identity {
+            CallableIdentity::DynamicName(_) | CallableIdentity::Imported(_) => {
+                self.allows_runtime_name_resolution()
+            }
+            CallableIdentity::ExternalName(name) => {
+                matches!(self, CallableFallbackPolicy::ExternalBoundary)
+                    && Self::is_well_formed_external_name(name)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn semantic_resolution_name_for(self, identity: &CallableIdentity) -> Option<String> {
+        if !self.allows_semantic_name_resolution_for(identity) {
             return None;
         }
 
         match identity {
             CallableIdentity::DynamicName(SymbolName(name))
             | CallableIdentity::Method(MethodId(name)) => {
+                (!name.is_empty()).then_some(name.clone())
+            }
+            CallableIdentity::Imported(path) => path.module.display_name(),
+            CallableIdentity::ExternalName(name) if Self::is_well_formed_external_name(name) => {
+                Some(
+                    name.0
+                        .iter()
+                        .map(|segment| segment.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    pub fn vm_fallback_name_for(self, identity: &CallableIdentity) -> Option<String> {
+        if !self.allows_vm_name_fallback_for(identity) {
+            return None;
+        }
+
+        match identity {
+            CallableIdentity::DynamicName(SymbolName(name)) => {
                 (!name.is_empty()).then_some(name.clone())
             }
             CallableIdentity::Imported(path) => path.module.display_name(),
@@ -1341,7 +1373,7 @@ mod tests {
         assert!(
             CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&imported)
         );
-        assert!(CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&method));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&method));
         assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
         assert!(
             !CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&single_external)
@@ -1365,6 +1397,10 @@ mod tests {
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&method),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution.semantic_resolution_name_for(&method),
             Some("deal".into())
         );
         assert_eq!(
@@ -1372,7 +1408,16 @@ mod tests {
             None
         );
         assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary.semantic_resolution_name_for(&single_external),
+            None
+        );
+        assert_eq!(
             CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&qualified_external),
+            Some("OverIdx.plus".into())
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary
+                .semantic_resolution_name_for(&qualified_external),
             Some("OverIdx.plus".into())
         );
         assert_eq!(

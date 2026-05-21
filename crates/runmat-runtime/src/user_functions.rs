@@ -141,6 +141,6 @@ pub async fn try_call_semantic_descriptor(
     if !fallback_policy.allows_semantic_name_resolution_for(&identity) {
         return None;
     }
-    let name = fallback_policy.vm_fallback_name_for(&identity)?;
+    let name = fallback_policy.semantic_resolution_name_for(&identity)?;
     try_call_semantic_function_by_name(&name, &args, requested_outputs).await
 }

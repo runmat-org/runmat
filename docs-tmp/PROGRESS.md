@@ -12,6 +12,29 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Callable method-identity semantic-resolution vs VM-fallback policy split
+  - `scope: in-scope`
+  - Closed a remaining callable ABI seam where method identities under runtime-name policy could fall through to builtin-name fallback:
+    - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now separates semantic resolver eligibility from VM named-fallback eligibility:
+      - `CallableFallbackPolicy::allows_semantic_name_resolution_for(...)` continues to allow `Method` under `RuntimeNameResolution`.
+      - `CallableFallbackPolicy::allows_vm_name_fallback_for(...)` now excludes `Method`, so unresolved method identities no longer dispatch via builtin-name fallback.
+      - added shared `semantic_resolution_name_for(...)` to derive semantic-resolver names without reopening VM fallback.
+    - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) now uses `semantic_resolution_name_for(...)` for semantic descriptor resolver lookups instead of `vm_fallback_name_for(...)`.
+  - Added/updated ratchets:
+    - [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+      - `method_identity_never_falls_back_to_builtin_name_resolution`
+      - existing `method_identity_runtime_name_resolution_can_use_semantic_resolver` remains green (semantic resolver path preserved).
+    - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs):
+      - `callable_name_fallback_policies_require_well_formed_external_names` now also ratchets method semantic-name resolution vs VM fallback split.
+  - Validation:
+    - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
+    - `cargo test -p runmat-vm --lib method_identity_ -- --nocapture`
+    - `cargo test -p runmat-runtime method_identity_runtime_name_resolution_policy_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM cell end-selector metadata duplicate-position invariant ratchet
   - `scope: in-scope`
   - Closed remaining non-tensor selector-plan normalization holes in cell end-selector metadata helpers:

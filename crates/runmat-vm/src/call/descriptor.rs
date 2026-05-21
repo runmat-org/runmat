@@ -791,6 +791,20 @@ mod tests {
     }
 
     #[test]
+    fn method_identity_never_falls_back_to_builtin_name_resolution() {
+        let descriptor = CallableDescriptor::resolved(
+            method_identity("sqrt"),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("method identities should not fall back to builtin name resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
     fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver() {
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| (name == "sqrt").then_some(4242))),

@@ -222,6 +222,13 @@ This audit maps the active objective to concrete repository evidence and marks e
     - interpreter ratchets:
       - `apply_cell_end_offsets_rejects_duplicate_positions`
       - `apply_cell_end_exprs_rejects_duplicate_positions`
+  - callable method-identity runtime policy now separates semantic resolver lookup from VM named fallback:
+    - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now keeps `Method` identities eligible for semantic name resolution under `RuntimeNameResolution`, while excluding `Method` from VM named fallback eligibility.
+    - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) now resolves semantic descriptor names through `semantic_resolution_name_for(...)` instead of `vm_fallback_name_for(...)`.
+    - descriptor/runtime ratchets:
+      - `method_identity_never_falls_back_to_builtin_name_resolution`
+      - `method_identity_runtime_name_resolution_can_use_semantic_resolver`
+      - `method_identity_runtime_name_resolution_policy_uses_semantic_resolver`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
