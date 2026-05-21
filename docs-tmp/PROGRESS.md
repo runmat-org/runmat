@@ -12,6 +12,29 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime/VM callback forwarding now routes through typed `feval` helper boundary
+  - `scope: in-scope`
+  - `blocker: several runtime/VM callback entrypoints still invoked `feval` through internal builtin-name dispatch (`call_builtin_async_with_outputs("feval", ...)`), keeping a name-shaped internal service hook in otherwise typed callable descriptor paths.`
+  - Tightened callback forwarding in:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs)
+    - [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs)
+    - [feval.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/feval.rs)
+  - Added `runmat_runtime::call_feval_async_with_outputs(...)` helper (typed runtime `feval` boundary using output-count guard + direct `feval_builtin` dispatch).
+  - `notify_builtin(...)` now dispatches supported callback shapes through the typed helper rather than repeated internal `"feval"` string calls.
+  - optimizer callback forwarding (`optim::common::call_function`) and VM feval fallback forwarding (`forward_builtin_feval`) now also route through the typed helper.
+  - Added ratchet:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `call_feval_async_with_outputs_preserves_unresolved_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime call_feval_async_with_outputs_preserves_unresolved_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime notify_char_handle_callback_surfaces_unresolved_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_binds_function_handle_when_resolved -- --nocapture`
+    - `cargo test -p runmat-vm feval_external_function_handle_can_use_semantic_resolver -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `feval` object payload cell-build error normalization
   - `scope: in-scope`
   - `blocker: runtime `feval` object/handle-object dispatch still stringified object-index payload cell construction failures (`map_err(|err| format!(...))`), which could erase typed identifier contracts at the runtime callable boundary.`

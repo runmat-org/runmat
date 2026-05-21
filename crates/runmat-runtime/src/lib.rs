@@ -222,6 +222,15 @@ async fn dispatch_callable_with_policy(
     Err(undefined_callable_error(&identity))
 }
 
+pub async fn call_feval_async_with_outputs(
+    func_value: Value,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    let _guard = crate::output_count::push_output_count(Some(requested_outputs));
+    feval_builtin(func_value, args.to_vec()).await
+}
+
 pub use runtime_error::{
     build_runtime_error, replay_error, replay_error_with_source, CallFrame, ErrorContext,
     ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
@@ -673,51 +682,26 @@ async fn notify_builtin(
         }
     }
     for l in to_call {
-        // Call callback via feval-like protocol
+        // Call callback via feval-like protocol.
         let mut args = Vec::new();
         args.push(target.clone());
         args.extend(rest.iter().cloned());
         let cbv: Value = (*l.callback).clone();
-        match &cbv {
-            Value::String(s) if s.starts_with('@') => {
-                let mut a = vec![Value::String(s.clone())];
-                a.extend(args.into_iter());
-                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-            }
-            Value::StringArray(sa) if sa.data.len() == 1 && sa.data[0].starts_with('@') => {
-                let mut a = vec![Value::StringArray(sa.clone())];
-                a.extend(args.into_iter());
-                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-            }
+        let should_dispatch = match &cbv {
+            Value::String(s) => s.starts_with('@'),
+            Value::StringArray(sa) => sa.data.len() == 1 && sa.data[0].starts_with('@'),
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text: String = ca.data.iter().collect();
-                if text.starts_with('@') {
-                    let mut a = vec![Value::CharArray(ca.clone())];
-                    a.extend(args.into_iter());
-                    let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-                }
+                text.starts_with('@')
             }
-            Value::FunctionHandle(name) => {
-                let mut a = vec![Value::FunctionHandle(name.clone())];
-                a.extend(args.into_iter());
-                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-            }
-            Value::ExternalFunctionHandle(name) => {
-                let mut a = vec![Value::ExternalFunctionHandle(name.clone())];
-                a.extend(args.into_iter());
-                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-            }
-            Value::SemanticFunctionHandle { .. } => {
-                let mut a = vec![cbv.clone()];
-                a.extend(args.into_iter());
-                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-            }
-            Value::Closure(_) => {
-                let mut a = vec![cbv.clone()];
-                a.extend(args.into_iter());
-                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
-            }
-            _ => {}
+            Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::SemanticFunctionHandle { .. }
+            | Value::Closure(_) => true,
+            _ => false,
+        };
+        if should_dispatch {
+            let _ = call_feval_async_with_outputs(cbv.clone(), &args, 0).await?;
         }
     }
     Ok(Value::Num(0.0))
@@ -2738,6 +2722,17 @@ mod tests {
         ))
         .expect_err("nonscalar string-array handle should fail");
         assert_eq!(err.identifier(), Some("RunMat:FevalHandleShapeInvalid"));
+    }
+
+    #[test]
+    fn call_feval_async_with_outputs_preserves_unresolved_identifier() {
+        let err = block_on(super::call_feval_async_with_outputs(
+            Value::ExternalFunctionHandle("missing.external".to_string()),
+            &[Value::Num(3.0)],
+            1,
+        ))
+        .expect_err("unresolved external handle should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
     #[test]

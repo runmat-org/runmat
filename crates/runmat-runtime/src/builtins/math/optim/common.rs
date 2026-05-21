@@ -36,10 +36,8 @@ fn canonicalize_callback_handle(handle: &Value) -> Value {
 }
 
 pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinResult<Value> {
-    let mut call_args = Vec::with_capacity(args.len() + 1);
-    call_args.push(canonicalize_callback_handle(handle));
-    call_args.extend(args);
-    crate::call_builtin_async_with_outputs("feval", &call_args, 1).await
+    let callback = canonicalize_callback_handle(handle);
+    crate::call_feval_async_with_outputs(callback, &args, 1).await
 }
 
 pub(crate) async fn call_scalar_function(name: &str, handle: &Value, x: f64) -> BuiltinResult<f64> {
