@@ -4725,6 +4725,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --test functions semantic_function_handle_ -- --nocapture`
     - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_ -- --nocapture`
     - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
     - `git diff --check`
 
 ## Next Resolution Items
