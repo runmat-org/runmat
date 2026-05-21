@@ -4608,6 +4608,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: normalize indexed expansion error identifier
+  - Tightened expanded-argument ABI contracts in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - non-cell/non-object indexed expansion failures now emit `RunMat:InvalidExpandTarget` instead of the generic `RunMat:ExpandError`.
+  - Updated source-level ratchet in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `expansion_on_non_cell_errors` now asserts `RunMat:InvalidExpandTarget`.
+  - Validation:
+    - `cargo test -p runmat-vm expansion_on_non_cell_errors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

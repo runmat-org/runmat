@@ -2096,7 +2096,7 @@ fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
     let bytecode = compile_semantic_source(program).expect("compile expansion error source");
     let err = interpret(&bytecode).expect_err("expansion on non-cell should fail");
-    assert_eq!(err.identifier(), Some("RunMat:ExpandError"));
+    assert_eq!(err.identifier(), Some("RunMat:InvalidExpandTarget"));
 }
 
 #[cfg(any(feature = "test-classes", test))]

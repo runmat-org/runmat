@@ -864,7 +864,7 @@ where
                     }
                     _ => {
                         return Err(crate::interpreter::errors::mex(
-                            "ExpandError",
+                            "InvalidExpandTarget",
                             invalid_expand_msg,
                         ))
                     }
