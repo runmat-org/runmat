@@ -4969,6 +4969,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: extend `str2func` unresolved external-callback failure lanes
+  - Added source-level runtime contracts in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs) for unresolved `str2func` external callback execution across additional output/arg-shape lanes:
+    - `str2func_unresolved_external_callback_zero_output_errors_without_legacy_fallback`
+    - `str2func_qualified_external_callback_zero_output_errors_without_legacy_fallback`
+    - `str2func_qualified_external_expand_callback_errors_without_legacy_fallback`
+  - These tests pin stable `RunMat:UndefinedFunction` failures for fixed zero-output and expanded single-output unresolved external callback shapes, complementing existing single-output unresolved and qualified callback coverage.
+  - This reduces callable ABI execution-surface drift by widening unresolved `str2func` external callback identifier contracts beyond one output-policy lane.
+  - Validation:
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_callback_zero_output_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_callback_zero_output_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_expand_callback_errors_without_legacy_fallback -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
