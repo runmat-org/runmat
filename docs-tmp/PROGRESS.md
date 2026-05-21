@@ -12,6 +12,25 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Expr linear-selector shape parity now matches plain selector planning
+  - `scope: in-scope`
+  - `blocker: expr-slice planning in `build_expr_index_plan(...)` defaulted linear (`dims == 1`) non-tensor selector outputs to row shape (`[1, n]`), while plain selector planning (`build_index_plan`) materialized non-linear-index selectors as column shape (`[n, 1]`) unless selector tensor shape was explicitly carried.`
+  - Tightened linear expr selector output-shape rules in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
+    - non-tensor linear selector outputs now default to column shape (`[n, 1]`) to match plain selector planning.
+    - tensor linear selector shapes remain explicitly preserved via carried selector tensor shape.
+  - Added ratchets:
+    - `expr_plan_linear_colon_selector_matches_plain_shape`
+    - `expr_plan_linear_logical_mask_matches_plain_shape`
+    - `expr_plan_linear_tensor_selector_preserves_tensor_shape`
+  - Validation:
+    - `cargo test -p runmat-vm expr_plan_linear_colon_selector_matches_plain_shape -- --nocapture`
+    - `cargo test -p runmat-vm expr_plan_linear_logical_mask_matches_plain_shape -- --nocapture`
+    - `cargo test -p runmat-vm expr_plan_linear_tensor_selector_preserves_tensor_shape -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime optimizer/ODE callback canonicalization now prebinds resolver-known text handles
   - `scope: in-scope`
   - `blocker: optimization/ODE callback canonicalization in `optim::common::canonicalize_callback_handle(...)` only prebound `FunctionHandle`/`ExternalFunctionHandle` forms, leaving text handle forms (`"@name"`, scalar string-array, row char) name-shaped even when semantic resolver identity was available.`

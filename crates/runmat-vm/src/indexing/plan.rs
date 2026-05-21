@@ -575,7 +575,7 @@ where
         } else if total_out <= 1 {
             vec![1, 1]
         } else {
-            vec![1, total_out]
+            vec![total_out, 1]
         }
     } else {
         let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
@@ -617,7 +617,7 @@ where
 mod tests {
     use super::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
     use crate::bytecode::EndExpr;
-    use crate::indexing::selectors::build_slice_selectors;
+    use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
     use runmat_builtins::{LogicalArray, Tensor, Value};
 
     #[test]
@@ -907,6 +907,68 @@ mod tests {
             let shape = vec![1, 10];
             let numeric = vec![Value::Tensor(
                 Tensor::new(vec![2.0, 4.0], vec![2, 1]).expect("selector tensor"),
+            )];
+            let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn expr_plan_linear_colon_selector_matches_plain_shape() {
+        futures::executor::block_on(async {
+            let shape = vec![1, 5];
+            let plain = build_index_plan(&[SliceSelector::Colon], 1, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0b1,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &[],
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn expr_plan_linear_logical_mask_matches_plain_shape() {
+        futures::executor::block_on(async {
+            let shape = vec![1, 5];
+            let numeric = vec![Value::LogicalArray(
+                LogicalArray::new(vec![1, 0, 1, 0, 1], vec![1, 5]).expect("logical selector"),
             )];
             let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
                 .await
