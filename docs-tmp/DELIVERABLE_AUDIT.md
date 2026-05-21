@@ -145,6 +145,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
       - `primary_compile_rejects_static_call_with_single_segment_external_identity`
+      - `primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).

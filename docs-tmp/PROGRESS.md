@@ -37,6 +37,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
     - `primary_compile_rejects_static_call_with_single_segment_external_identity`
+    - `primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape`
   - Validation:
     - `cargo test -p runmat-vm static_call_with_ -- --nocapture`
     - `cargo fmt --all --check`
