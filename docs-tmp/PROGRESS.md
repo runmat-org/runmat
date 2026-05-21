@@ -4801,6 +4801,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete nested qualified external-handle output-shape opcode matrix
+  - Extended nested qualified unresolved external-handle call coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to close missing output-shape variants:
+    - `unresolved_nested_qualified_external_handle_zero_output_direct_call_uses_typed_instruction`
+    - `unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction`
+    - `unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction`
+  - Combined with existing nested qualified external-handle tests, this now ratchets full direct and expanded output-count matrices (0/1/2) with explicit opcode boundaries:
+    - direct single-output via `Index(1)`
+    - direct zero/multi-output via `CallFevalMulti`
+    - expanded zero/single/multi-output via `CallFevalExpandMultiOutput`
+    - all unresolved paths pinned to `RunMat:UndefinedFunction`.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_nested_qualified_external_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
