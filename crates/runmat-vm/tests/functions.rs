@@ -2927,7 +2927,7 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
     let has_msg = vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::String(s) if s=="inner fail"));
-    assert!(has_exc || has_id || has_msg);
+    assert!(has_exc || (has_id && has_msg));
 }
 
 #[test]

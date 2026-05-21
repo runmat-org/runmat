@@ -4620,6 +4620,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: tighten nested rethrow fallback assertion
+  - Hardened nested rethrow contract fallback in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `nested_try_catch_rethrow_unified_exception_ids` now requires both identifier and message surfacing when direct `MException` object preservation is not observed, replacing the prior single-field (`id` or `msg`) fallback acceptance.
+  - Validation:
+    - `cargo test -p runmat-vm nested_try_catch_rethrow_unified_exception_ids -- --nocapture`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
