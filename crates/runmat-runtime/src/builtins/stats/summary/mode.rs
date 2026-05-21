@@ -357,8 +357,8 @@ fn reduce_along_dim(
         return ModeEvaluation::empty(output_shape, output_class);
     }
 
-    let stride_before = dim_product(&tensor.shape[..dim_index]);
-    let stride_after = dim_product(&tensor.shape[dim_index + 1..]);
+    let stride_before = dim_product(&tensor.shape[..dim_index])?;
+    let stride_after = dim_product(&tensor.shape[dim_index + 1..])?;
     let output_len = stride_before
         .checked_mul(stride_after)
         .ok_or_else(|| mode_error("mode: output size overflow"))?;
@@ -585,8 +585,11 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
     }
 }
 
-fn dim_product(dims: &[usize]) -> usize {
-    dims.iter().copied().fold(1usize, usize::saturating_mul)
+fn dim_product(dims: &[usize]) -> BuiltinResult<usize> {
+    dims.iter()
+        .copied()
+        .try_fold(1usize, |acc, dim| acc.checked_mul(dim))
+        .ok_or_else(|| mode_error("mode: output size overflow"))
 }
 
 #[derive(Debug, Clone)]
