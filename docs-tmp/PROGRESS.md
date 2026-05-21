@@ -51,8 +51,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - malformed helper-path indexed contexts now fail with stable identifier `RunMat:MirIndexContextInvalid`.
   - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
+    - `primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier`
   - Validation:
     - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`

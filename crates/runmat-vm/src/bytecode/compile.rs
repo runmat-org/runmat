@@ -3173,6 +3173,47 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier() {
+        let ast = runmat_parser::parse("s = struct('x', {1, 2}); s(1).x = 3;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
+                    if let MirPlace::Member(base, _) = place {
+                        if let MirPlace::Index(_, indexing) = base.as_mut() {
+                            if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
+                                indexing.result_context =
+                                    runmat_hir::IndexResultContext::ReadSingle;
+                                patched = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected member-over-paren assignment in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirIndexContextInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier() {
         let ast = runmat_parser::parse("[a, b] = deal(1, 2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

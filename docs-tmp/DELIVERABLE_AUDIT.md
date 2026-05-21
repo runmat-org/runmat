@@ -163,6 +163,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `compile_mir_store_indexed_value_from_temp(...)` now requires brace store-back index components to satisfy the same `IndexResultContext::AssignmentTarget` compatibility invariant.
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
+      - `primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).
