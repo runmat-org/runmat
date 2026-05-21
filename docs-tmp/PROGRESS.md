@@ -4649,6 +4649,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: ratchet indexed-member vector/logical store-back to slice ABI
+  - Added member store-back compile/execution ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_indexed_member_vector_store_back_lowers_to_slice_instruction`
+    - `semantic_indexed_member_logical_store_back_lowers_to_slice_instruction`
+  - Both tests assert indexed member vector/logical assignments lower through `StoreSlice*` instructions (never `StoreIndex*`) and validate runtime mutation semantics.
+  - This narrows a remaining callable/assignment ABI gap by extending explicit non-scalar assignment-shape contracts from top-level lvalues to member store-back paths.
+  - Validation:
+    - `cargo test -p runmat-vm semantic_indexed_member_vector_store_back_lowers_to_slice_instruction -- --nocapture`
+    - `cargo test -p runmat-vm semantic_indexed_member_logical_store_back_lowers_to_slice_instruction -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

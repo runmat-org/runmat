@@ -749,6 +749,10 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `vector_index_assignment_lowers_to_store_slice`
     - `logical_mask_assignment_lowers_to_store_slice`
   - These contracts assert vector/logical paren assignment lowers through `StoreSlice*` (not `StoreIndex*`) and preserve expected runtime mutation semantics, reducing remaining runtime selector-classification dependence in assignment paths.
+  - VM member store-back assignment-shape coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now extends this contract to indexed member paths:
+    - `semantic_indexed_member_vector_store_back_lowers_to_slice_instruction`
+    - `semantic_indexed_member_logical_store_back_lowers_to_slice_instruction`
+  - These contracts assert `s.a(idx)=...` and `s.a(mask)=...` lower through `StoreSlice*` (not `StoreIndex*`) while preserving runtime member mutation semantics, reducing assignment-shape inference dependence in nested store-back flows.
   - Core entrypoint-resolution error coverage in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now also asserts runtime identifier contract (`RunMat:EntrypointResolveFailed`) instead of matching rendered error text.
   - Manifest/composition tests in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs) now assert typed error variants/fields (`ProjectManifestLoadError`, `ProjectSourceIndexError`, `ProjectEntrypointResolveError`, `DiscoverProjectEntrypointError`, `ProjectCompositionError`) rather than formatted error strings.
   - Semicolon suppression matrix-path coverage in [semicolon_suppression.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/semicolon_suppression.rs) now asserts typed tensor contracts (`shape`/`data`) instead of display substring checks.
