@@ -12,6 +12,26 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `cellfun`/`arrayfun` now prebind resolver-known name-only closures to semantic IDs
+  - `scope: in-scope`
+  - `blocker: callback parsing in `cellfun`/`arrayfun` still accepted `Value::Closure` callbacks with `semantic_function = None` as raw name-shaped closures, missing an early semantic-binding step already present for text and external-handle callback forms.`
+  - Tightened callback parsing in:
+    - [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs)
+    - [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs)
+  - `Callable::from_function(Value::Closure(...))` now prebinds resolver-known closure function names (`semantic_function = Some(id)`) while preserving closure captures.
+  - Added ratchets:
+    - `cellfun_name_only_closure_prefers_semantic_handle_binding_when_resolved`
+    - `arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime cellfun_name_only_closure_prefers_semantic_handle_binding_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime cellfun_external_handle_prefers_semantic_handle_binding_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `feval` now resolves name-only closures through semantic resolver before name fallback
   - `scope: in-scope`
   - `blocker: non-semantic closures (`Value::Closure` with `semantic_function = None`) still dispatched through pure name-shaped `call_by_name(...)`, even when the active semantic resolver could provide a stable function identity.`

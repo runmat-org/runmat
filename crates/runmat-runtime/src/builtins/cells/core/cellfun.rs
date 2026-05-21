@@ -467,7 +467,16 @@ impl Callable {
                 semantic_function: Some(function),
                 captures: Vec::new(),
             })),
-            Value::Closure(c) => Ok(Callable::Closure(c)),
+            Value::Closure(mut c) => {
+                if c.semantic_function.is_none() {
+                    if let Some(function) =
+                        user_functions::resolve_semantic_function_by_name(&c.function_name)
+                    {
+                        c.semantic_function = Some(function);
+                    }
+                }
+                Ok(Callable::Closure(c))
+            }
             other => Err(cellfun_error_with_identifier(
                 format!("cellfun: expected function handle or builtin name, got {other:?}"),
                 IDENT_INVALID_INPUT,
@@ -940,6 +949,28 @@ pub(crate) mod tests {
                 semantic_function: Some(86),
                 ..
             }) if function_name == "pkg.callback"
+        ));
+    }
+
+    #[test]
+    fn cellfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(186)
+            })));
+        let callable = Callable::from_function(Value::Closure(Closure {
+            function_name: "pkg.callback".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(9.0)],
+        }))
+        .expect("closure callback should parse");
+        assert!(matches!(
+            callable,
+            Callable::Closure(Closure {
+                function_name,
+                semantic_function: Some(186),
+                captures
+            }) if function_name == "pkg.callback" && captures == vec![Value::Num(9.0)]
         ));
     }
 

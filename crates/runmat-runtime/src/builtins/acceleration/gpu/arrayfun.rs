@@ -613,7 +613,16 @@ impl Callable {
                 semantic_function: Some(function),
                 captures: Vec::new(),
             })),
-            Value::Closure(closure) => Ok(Callable::Closure(closure)),
+            Value::Closure(mut closure) => {
+                if closure.semantic_function.is_none() {
+                    if let Some(function) =
+                        user_functions::resolve_semantic_function_by_name(&closure.function_name)
+                    {
+                        closure.semantic_function = Some(function);
+                    }
+                }
+                Ok(Callable::Closure(closure))
+            }
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(arrayfun_flow(
                 "arrayfun: expected function handle or builtin name, not a scalar value",
             )),
@@ -1240,6 +1249,28 @@ pub(crate) mod tests {
                 semantic_function: Some(87),
                 ..
             }) if function_name == "pkg.callback"
+        ));
+    }
+
+    #[test]
+    fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(187)
+            })));
+        let callable = Callable::from_function(Value::Closure(Closure {
+            function_name: "pkg.callback".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(5.0)],
+        }))
+        .expect("closure callback should parse");
+        assert!(matches!(
+            callable,
+            Callable::Closure(Closure {
+                function_name,
+                semantic_function: Some(187),
+                captures
+            }) if function_name == "pkg.callback" && captures == vec![Value::Num(5.0)]
         ));
     }
 
