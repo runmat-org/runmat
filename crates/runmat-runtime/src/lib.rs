@@ -531,7 +531,24 @@ fn events() -> &'static Mutex<EventRegistry> {
 }
 
 fn canonicalize_listener_callback(callback: Value) -> Value {
+    fn resolve_text_handle(text: &str) -> Option<Value> {
+        let name = text.strip_prefix('@')?;
+        if name.is_empty() {
+            return None;
+        }
+        let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
+        Some(Value::SemanticFunctionHandle {
+            name: name.to_string(),
+            function,
+        })
+    }
+
     match callback {
+        Value::String(text) => resolve_text_handle(&text).unwrap_or(Value::String(text)),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            let text: String = chars.data.iter().collect();
+            resolve_text_handle(&text).unwrap_or(Value::CharArray(chars))
+        }
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
@@ -2694,6 +2711,54 @@ mod tests {
             &*listener.callback,
             Value::SemanticFunctionHandle { name, function }
                 if name == "pkg.event_callback" && *function == 62
+        ));
+    }
+
+    #[test]
+    fn addlistener_string_handle_prefers_semantic_identity_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "event_callback").then_some(63)
+            })));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let listener = block_on(addlistener_builtin(
+            target,
+            "Changed".to_string(),
+            Value::String("@event_callback".to_string()),
+        ))
+        .expect("listener registered");
+        let Value::Listener(listener) = listener else {
+            panic!("expected listener value");
+        };
+        assert!(matches!(
+            &*listener.callback,
+            Value::SemanticFunctionHandle { name, function }
+                if name == "event_callback" && *function == 63
+        ));
+    }
+
+    #[test]
+    fn addlistener_char_handle_prefers_semantic_identity_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "event_callback").then_some(64)
+            })));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let listener = block_on(addlistener_builtin(
+            target,
+            "Changed".to_string(),
+            Value::CharArray(runmat_builtins::CharArray::new_row("@event_callback")),
+        ))
+        .expect("listener registered");
+        let Value::Listener(listener) = listener else {
+            panic!("expected listener value");
+        };
+        assert!(matches!(
+            &*listener.callback,
+            Value::SemanticFunctionHandle { name, function }
+                if name == "event_callback" && *function == 64
         ));
     }
 

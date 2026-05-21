@@ -12,6 +12,26 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime event-listener text-handle callback prebinding to semantic identity
+  - `scope: in-scope`
+  - `blocker: listener callback prebinding covered function-handle values but still left `@name` callback text handles (`String`/row `CharArray`) name-shaped at registration, keeping repeated semantic resolver lookups on notify dispatch.`
+  - Tightened listener registration normalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `canonicalize_listener_callback(...)` now also canonicalizes resolver-known `@name` callback text handles (`Value::String("@...")` and row `Value::CharArray`) to `Value::SemanticFunctionHandle`.
+    - empty/non-handle text forms are preserved unchanged.
+  - Added ratchets:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `addlistener_string_handle_prefers_semantic_identity_when_resolved`
+      - `addlistener_char_handle_prefers_semantic_identity_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime addlistener_string_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime addlistener_char_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime addlistener_function_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime addlistener_external_function_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime event-listener callback prebinding to semantic identity
   - `scope: in-scope`
   - `blocker: event listener registration (`addlistener`) stored raw name-shaped function handles even when semantic identity was resolvable, leaving repeated name-resolution churn at `notify` call boundaries.`
