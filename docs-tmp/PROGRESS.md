@@ -5048,6 +5048,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete unresolved `@string` feval failure matrix
+  - Extended unresolved string-handle `feval('@definitely_missing_callback', ...)` contracts in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
+    - fixed-arg lanes:
+      - `feval_with_unresolved_string_handle_zero_output_errors`
+      - `feval_with_unresolved_string_handle_multi_output_errors`
+    - expanded-arg lanes:
+      - `feval_with_unresolved_string_handle_expand_errors`
+      - `feval_with_unresolved_string_handle_expand_zero_output_errors`
+      - `feval_with_unresolved_string_handle_expand_multi_output_errors`
+  - Together with existing single-output fixed-arg coverage (`feval_with_unresolved_string_handle_errors`), unresolved `@string` callback behavior now has fixed+expanded output-count `0/1/2` failure coverage.
+  - All lanes are pinned to stable `RunMat:UndefinedFunction`, closing another text-handle callable ABI execution gap.
+  - Validation:
+    - `cargo test -p runmat-vm --test closures feval_with_unresolved_string_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

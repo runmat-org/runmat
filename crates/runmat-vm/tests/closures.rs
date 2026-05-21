@@ -56,6 +56,45 @@ fn feval_with_unresolved_string_handle_errors() {
 }
 
 #[test]
+fn feval_with_unresolved_string_handle_zero_output_errors() {
+    let err = execute_semantic_source("feval('@definitely_missing_callback', 1);")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_multi_output_errors() {
+    let err = execute_semantic_source("[a,b] = feval('@definitely_missing_callback', 1);")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_expand_errors() {
+    let err =
+        execute_semantic_source("C = deal(1,2); y = feval('@definitely_missing_callback', C{:});")
+            .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_expand_zero_output_errors() {
+    let err =
+        execute_semantic_source("C = deal(1,2); feval('@definitely_missing_callback', C{:});")
+            .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_expand_multi_output_errors() {
+    let err = execute_semantic_source(
+        "C = deal(1,2); [a,b] = feval('@definitely_missing_callback', C{:});",
+    )
+    .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn feval_string_without_at_errors_with_identifier_contract() {
     let err = execute_semantic_source("r = feval('sin', 0);")
         .expect_err("string handle without @ should fail");
