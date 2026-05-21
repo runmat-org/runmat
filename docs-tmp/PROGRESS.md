@@ -4595,6 +4595,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: tighten VM exception identifier contracts
+  - Hardened semantic VM exception-path coverage in [exceptions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/exceptions.rs):
+    - `error_identifier_and_catch` now ratchets exact exception identifier/message preservation (`RunMat:domainError` / `bad`) via both caught `MException` shape and surfaced catch variables.
+    - `dot_access_identifier_and_message` now asserts exact dot-accessed identifier (`RunMat:IndexOutOfBounds`) plus non-empty message payload instead of broad string-type presence.
+    - `catch_and_multi_assign_propagation` and `catch_index_error_and_continue` now assert explicit caught identifier propagation (`RunMat:IndexOutOfBounds`) in addition to recovery flow markers.
+  - This removes remaining broad message-fragment/catch-ran-only assertions in active VM exception semantics tests.
+  - Validation:
+    - `cargo test -p runmat-vm --test exceptions -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
