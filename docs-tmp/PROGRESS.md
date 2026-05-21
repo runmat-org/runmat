@@ -4455,6 +4455,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `git diff --check`
   - Result: all gates green on 2026-05-21.
 
+- RM-378: ratchet expr stmt output policy (`20304639`)
+  - Added HIR lowering regression coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `expr_stmt_output_policy_controls_binding_call_lowering_shape`
+  - This explicitly locks the semantic lowering contract introduced by `dcbf9a1e`:
+    - unsuppressed expression statements request one output and lower binding calls as paren indexing
+    - semicolon-suppressed expression statements request zero outputs and lower binding calls as dynamic-call dispatch
+  - Validation:
+    - `cargo test -p runmat-hir --test semantic_lowering expr_stmt_output_policy_controls_binding_call_lowering_shape -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
