@@ -1099,26 +1099,28 @@ impl Compiler {
             MirPlace::Index(base, indexing) => {
                 if let Ok(base_slot) = self.mir_place_slot(base) {
                     self.emit(Instr::LoadVar(base_slot));
-                    self.compile_mir_store_indexed_value_from_temp(indexing, value_slot, false)?;
+                    self.compile_mir_store_indexed_value_from_temp(
+                        indexing, value_slot, false, false,
+                    )?;
                     self.emit(Instr::StoreVar(base_slot));
                     return Ok(());
                 }
                 self.compile_mir_place_read(base)?;
-                self.compile_mir_store_indexed_value_from_temp(indexing, value_slot, false)?;
-                self.emit_store_back_mir_member_chain(base)
+                self.compile_mir_store_indexed_value_from_temp(indexing, value_slot, false, false)?;
+                self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::Member(base, member) => {
-                self.compile_mir_member_base_for_assignment(base)?;
+                self.compile_mir_member_base_for_assignment(base, false)?;
                 self.emit(Instr::LoadVar(value_slot));
                 self.emit(Instr::StoreMemberOrInit(member.0.clone()));
-                self.emit_store_back_mir_member_chain(base)
+                self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::DynamicMember(base, member) => {
-                self.compile_mir_member_base_for_assignment(base)?;
+                self.compile_mir_member_base_for_assignment(base, false)?;
                 self.compile_mir_operand(member)?;
                 self.emit(Instr::LoadVar(value_slot));
                 self.emit(Instr::StoreMemberDynamicOrInit);
-                self.emit_store_back_mir_member_chain(base)
+                self.emit_store_back_mir_member_chain(base, false)
             }
         }
     }
@@ -1404,20 +1406,20 @@ impl Compiler {
                 }
                 self.compile_mir_place_read(base)?;
                 self.compile_mir_index_assignment_after_base(indexing, value, delete)?;
-                self.emit_store_back_mir_member_chain(base)
+                self.emit_store_back_mir_member_chain(base, delete)
             }
             MirPlace::Member(base, member) => {
-                self.compile_mir_member_base_for_assignment(base)?;
+                self.compile_mir_member_base_for_assignment(base, false)?;
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::StoreMemberOrInit(member.0.clone()));
-                self.emit_store_back_mir_member_chain(base)
+                self.emit_store_back_mir_member_chain(base, false)
             }
             MirPlace::DynamicMember(base, member) => {
-                self.compile_mir_member_base_for_assignment(base)?;
+                self.compile_mir_member_base_for_assignment(base, false)?;
                 self.compile_mir_operand(member)?;
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::StoreMemberDynamicOrInit);
-                self.emit_store_back_mir_member_chain(base)
+                self.emit_store_back_mir_member_chain(base, false)
             }
         }
     }
@@ -1425,19 +1427,20 @@ impl Compiler {
     fn compile_mir_member_base_for_assignment(
         &mut self,
         base: &MirPlace,
+        allow_deletion_context: bool,
     ) -> Result<(), CompileError> {
         match base {
             MirPlace::Index(parent, indexing) => {
                 self.compile_mir_place_read(parent)?;
-                self.compile_mir_index_after_base(indexing)
+                self.compile_mir_index_after_base(indexing, allow_deletion_context)
             }
             MirPlace::Member(parent, field) => {
-                self.compile_mir_member_base_for_assignment(parent)?;
+                self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
                 self.emit(Instr::LoadMemberOrInit(field.0.clone()));
                 Ok(())
             }
             MirPlace::DynamicMember(parent, name) => {
-                self.compile_mir_member_base_for_assignment(parent)?;
+                self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
                 self.compile_mir_operand(name)?;
                 self.emit(Instr::LoadMemberDynamicOrInit);
                 Ok(())
@@ -1551,7 +1554,11 @@ impl Compiler {
         Ok(())
     }
 
-    fn emit_store_back_mir_member_chain(&mut self, base: &MirPlace) -> Result<(), CompileError> {
+    fn emit_store_back_mir_member_chain(
+        &mut self,
+        base: &MirPlace,
+        allow_deletion_context: bool,
+    ) -> Result<(), CompileError> {
         match base {
             MirPlace::Local(_) | MirPlace::Binding(_) => {
                 let slot = self.mir_place_slot(base)?;
@@ -1559,26 +1566,31 @@ impl Compiler {
                 Ok(())
             }
             MirPlace::Member(parent, field) => {
-                self.compile_mir_member_base_for_assignment(parent)?;
+                self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
                 self.emit(Instr::Swap);
                 self.emit(Instr::StoreMemberOrInit(field.0.clone()));
-                self.emit_store_back_mir_member_chain(parent)
+                self.emit_store_back_mir_member_chain(parent, allow_deletion_context)
             }
             MirPlace::DynamicMember(parent, name) => {
                 let tmp = self.alloc_temp();
                 self.emit(Instr::StoreVar(tmp));
-                self.compile_mir_member_base_for_assignment(parent)?;
+                self.compile_mir_member_base_for_assignment(parent, allow_deletion_context)?;
                 self.compile_mir_operand(name)?;
                 self.emit(Instr::LoadVar(tmp));
                 self.emit(Instr::StoreMemberDynamicOrInit);
-                self.emit_store_back_mir_member_chain(parent)
+                self.emit_store_back_mir_member_chain(parent, allow_deletion_context)
             }
             MirPlace::Index(parent, indexing) => {
                 let tmp = self.alloc_temp();
                 self.emit(Instr::StoreVar(tmp));
                 self.compile_mir_place_read(parent)?;
-                self.compile_mir_store_indexed_value_from_temp(indexing, tmp, false)?;
-                self.emit_store_back_mir_member_chain(parent)
+                self.compile_mir_store_indexed_value_from_temp(
+                    indexing,
+                    tmp,
+                    false,
+                    allow_deletion_context,
+                )?;
+                self.emit_store_back_mir_member_chain(parent, allow_deletion_context)
             }
         }
     }
@@ -1603,19 +1615,28 @@ impl Compiler {
             }
             MirPlace::Index(base, indexing) => {
                 self.compile_mir_place_read(base)?;
-                self.compile_mir_index_after_base(indexing)
+                self.compile_mir_index_after_base(indexing, true)
             }
         }
     }
 
-    fn compile_mir_index_after_base(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
-        if !mir_indexing_context_matches(
-            indexing.result_context.clone(),
-            IndexResultContext::AssignmentTarget,
-        ) {
+    fn compile_mir_index_after_base(
+        &mut self,
+        indexing: &MirIndexing,
+        allow_deletion_context: bool,
+    ) -> Result<(), CompileError> {
+        let context_ok = if allow_deletion_context {
+            mir_indexing_context_matches(
+                indexing.result_context.clone(),
+                IndexResultContext::AssignmentTarget,
+            )
+        } else {
+            indexing.result_context == IndexResultContext::AssignmentTarget
+        };
+        if !context_ok {
             return Err(self
                 .compile_error(
-                    "MIR indexed helper-read invariant violated: lvalue base indexing requires AssignmentTarget/DeletionTarget context",
+                    "MIR indexed helper-read invariant violated: lvalue base indexing requires AssignmentTarget context",
                 )
                 .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
         }
@@ -1641,8 +1662,17 @@ impl Compiler {
         indexing: &MirIndexing,
         tmp: usize,
         delete: bool,
+        allow_deletion_context: bool,
     ) -> Result<(), CompileError> {
-        if indexing.result_context != IndexResultContext::AssignmentTarget {
+        let context_ok = if allow_deletion_context {
+            mir_indexing_context_matches(
+                indexing.result_context.clone(),
+                IndexResultContext::AssignmentTarget,
+            )
+        } else {
+            indexing.result_context == IndexResultContext::AssignmentTarget
+        };
+        if !context_ok {
             return Err(self
                 .compile_error(
                     "MIR indexed helper store-back invariant violated: assignment-index context must be AssignmentTarget",

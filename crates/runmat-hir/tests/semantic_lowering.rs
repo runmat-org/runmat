@@ -1,8 +1,8 @@
 use runmat_hir::{
     lower, AssignmentCreationPolicy, BindingRole, BindingStorage, CallKind, CommandArgument,
     FunctionKind, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexComponent, IndexKind,
-    IndexResultContext, LoweringContext, MemberAccess, OutputTarget, PlaceMutationKind,
-    RequestedOutputCount, SourceUnitKind, WorkspaceVisibility,
+    IndexResultContext, IndexingSemantics, LoweringContext, MemberAccess, OutputTarget,
+    PlaceMutationKind, RequestedOutputCount, SourceUnitKind, WorkspaceVisibility,
 };
 
 fn lower_result(src: &str) -> runmat_hir::LoweringResult {
@@ -938,6 +938,71 @@ fn empty_array_index_assignment_records_deletion_target() {
     let HirPlace::Index(_, indexing) = &mutation.place else {
         panic!("expected indexed place");
     };
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::DeletionTarget
+    ));
+}
+
+#[test]
+fn empty_array_indexed_member_assignment_records_deletion_target() {
+    let result = lower_result("s.a = {1, 2, 3}; s.a(2) = [];");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| {
+            matches!(mutation.kind, PlaceMutationKind::Delete)
+                && matches!(mutation.place, HirPlace::Index(_, _))
+        })
+        .expect("expected indexed delete mutation");
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::Delete));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::ExistingOnly
+    ));
+    let HirPlace::Index(base, indexing) = &mutation.place else {
+        panic!("expected indexed place");
+    };
+    assert!(matches!(&base.kind, HirExprKind::Member(_, _)));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::DeletionTarget
+    ));
+}
+
+#[test]
+fn empty_array_indexed_cell_content_assignment_records_deletion_target() {
+    let result = lower_result("c = {{1, 2, 3}}; c{1}(2) = [];");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| {
+            matches!(mutation.kind, PlaceMutationKind::Delete)
+                && matches!(mutation.place, HirPlace::Index(_, _))
+        })
+        .expect("expected indexed delete mutation");
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::Delete));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::ExistingOnly
+    ));
+    let HirPlace::Index(base, indexing) = &mutation.place else {
+        panic!("expected indexed place");
+    };
+    assert!(matches!(
+        &base.kind,
+        HirExprKind::Index(
+            _,
+            IndexingSemantics {
+                kind: IndexKind::Brace,
+                ..
+            }
+        )
+    ));
     assert!(matches!(
         indexing.result_context,
         IndexResultContext::DeletionTarget

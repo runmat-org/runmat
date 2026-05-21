@@ -1615,6 +1615,27 @@ fn indexed_member_assignment_lowers_to_index_place_over_member_base() {
 }
 
 #[test]
+fn indexed_member_delete_lowers_to_index_place_over_member_base() {
+    let mir = lower_mir("function s = delete_member_index(s); s.a = {1, 2, 3}; s.a(2) = []; end");
+    let body = mir.bodies.values().next().expect("body");
+
+    assert!(matches!(
+        body.blocks[0].statements[2].kind,
+        MirStmtKind::PlaceMutation(ref mutation)
+            if mutation.kind == runmat_hir::PlaceMutationKind::Delete
+                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::ExistingOnly
+    ));
+    assert!(matches!(
+        &body.blocks[0].statements[3].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::Index(base, indexing),
+            ..
+        } if matches!(&**base, MirPlace::Member(_, _))
+            && indexing.plan == MirIndexPlan::Scalar
+    ));
+}
+
+#[test]
 fn if_statement_lowers_to_branch_blocks_and_merge() {
     let mir = lower_mir("function y = choose(c, x); if c; y = x; else; y = 0; end; end");
     let body = mir.bodies.values().next().unwrap();

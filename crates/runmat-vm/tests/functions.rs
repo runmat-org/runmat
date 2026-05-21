@@ -1040,6 +1040,22 @@ fn cell_paren_delete_executes_with_semantic_store_back() {
 }
 
 #[test]
+fn indexed_member_delete_executes_with_semantic_store_back() {
+    let vars = execute_semantic_source("s.a = {1, 2, 3}; s.a(2) = []; y = s.a{2};");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn indexed_cell_content_delete_executes_with_semantic_store_back() {
+    let vars = execute_semantic_source("c = {{1, 2, 3}}; c{1}(2) = []; y = c{1}{2};");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
 fn matrix_delete_reports_unsupported_deletion_identifier_contract() {
     let err = execute_semantic_source_result("x = [1 2; 3 4]; x(2) = [];")
         .expect_err("matrix delete should fail");

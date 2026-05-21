@@ -112,17 +112,31 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
-- Helper store-back assignment paths now reject `DeletionTarget` index contexts in non-delete flows
+- Helper store-back paths now preserve nested delete semantics while keeping non-delete deletion-context ratchets
   - `scope: in-scope`
-  - `blocker: helper store-back lowering reused assignment-compatible context matching that accepted `DeletionTarget` metadata on non-delete indexed assignment flows, leaving a malformed MIR assignment-context ABI seam in member-chain/indexed store-back paths.`
-  - Tightened compile invariant in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
-    - `compile_mir_store_indexed_value_from_temp(...)` now requires `IndexResultContext::AssignmentTarget` exactly.
-    - malformed contexts fail with stable identifier `RunMat:MirIndexContextInvalid`.
-  - Added compile ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+  - `blocker: strict helper store-back `AssignmentTarget`-only gating regressed valid nested delete semantics (`c{1}(2)=[]`) by rejecting delete-flow base store-back contexts with `RunMat:MirIndexContextInvalid`, while malformed non-delete helper contexts still need compile-time rejection.`
+  - Updated helper/context propagation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - delete-flow helper store-back and helper-read paths now allow assignment-compatible deletion context only when threaded from an active delete mutation.
+    - non-delete member/dynamic-member helper paths still require exact `AssignmentTarget` context and continue to fail malformed deletion-context metadata with `RunMat:MirIndexContextInvalid`.
+  - Added nested delete contracts:
+    - HIR: `empty_array_indexed_member_assignment_records_deletion_target`, `empty_array_indexed_cell_content_assignment_records_deletion_target`
+    - MIR: `indexed_member_delete_lowers_to_index_place_over_member_base`
+    - VM: `indexed_member_delete_executes_with_semantic_store_back`, `indexed_cell_content_delete_executes_with_semantic_store_back`
+  - Preserved non-delete malformed-context ratchets:
     - `primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier`
+    - `primary_compile_rejects_member_store_back_brace_index_with_deletion_context_identifier`
+    - `primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier`
+    - `primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier`
   - Validation:
+    - `cargo test -p runmat-hir --test semantic_lowering empty_array_indexed_member_assignment_records_deletion_target -- --nocapture`
+    - `cargo test -p runmat-hir --test semantic_lowering empty_array_indexed_cell_content_assignment_records_deletion_target -- --nocapture`
+    - `cargo test -p runmat-mir --test lowering indexed_member_delete_lowers_to_index_place_over_member_base -- --nocapture`
+    - `cargo test -p runmat-vm --test functions indexed_member_delete_executes_with_semantic_store_back -- --nocapture`
+    - `cargo test -p runmat-vm --test functions indexed_cell_content_delete_executes_with_semantic_store_back -- --nocapture`
     - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_interprets_member_store_back_paren_assignment -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
