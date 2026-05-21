@@ -279,6 +279,26 @@ where
     match indices.len() {
         1 => {
             let i = indices[0];
+            if i == ca.data.len() + 1 {
+                if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
+                    return Err(mex(
+                        "UnsupportedCellGrowth",
+                        "Cell growth via linear brace assignment is only supported for vectors",
+                    ));
+                }
+                ca.data.push(allocate_cell_handle(rhs)?);
+                let len = ca.data.len();
+                if ca.rows <= 1 {
+                    ca.rows = 1;
+                    ca.cols = len;
+                    ca.shape = vec![1, len];
+                } else {
+                    ca.rows = len;
+                    ca.cols = 1;
+                    ca.shape = vec![len, 1];
+                }
+                return Ok(Value::Cell(ca));
+            }
             let pos = row_major_pos_from_linear(&ca, i)?;
             if let Some(oldv) = ca.data.get(pos) {
                 on_write(oldv, &rhs);
