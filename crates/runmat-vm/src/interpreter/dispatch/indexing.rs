@@ -132,7 +132,10 @@ fn apply_cell_end_offsets_for_base(
     let mut seen = vec![false; raw_indices.len()];
     for (position, _) in end_offsets {
         if *position >= raw_indices.len() {
-            continue;
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position is out of bounds",
+            ));
         }
         if std::mem::replace(&mut seen[*position], true) {
             return Err(crate::interpreter::errors::mex(
@@ -184,7 +187,10 @@ async fn apply_cell_end_exprs_for_base(
     let mut seen = vec![false; raw_indices.len()];
     for (position, _) in end_exprs {
         if *position >= raw_indices.len() {
-            continue;
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position is out of bounds",
+            ));
         }
         if std::mem::replace(&mut seen[*position], true) {
             return Err(crate::interpreter::errors::mex(
@@ -1988,6 +1994,14 @@ mod tests {
     }
 
     #[test]
+    fn apply_cell_end_offsets_rejects_out_of_bounds_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let err = apply_cell_end_offsets_for_base(&base, &[Value::Num(1.0)], &[(1, 0)], false)
+            .expect_err("out-of-bounds cell end-offset positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
     fn apply_cell_end_exprs_rejects_duplicate_positions() {
         let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
         let mut vars = vec![];
@@ -1999,6 +2013,21 @@ mod tests {
             false,
         ))
         .expect_err("duplicate cell end-expression positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_exprs_rejects_out_of_bounds_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let mut vars = vec![];
+        let err = block_on(apply_cell_end_exprs_for_base(
+            &base,
+            &[Value::Num(1.0)],
+            &[(1, EndExpr::End)],
+            &mut vars,
+            false,
+        ))
+        .expect_err("out-of-bounds cell end-expression positions should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
     }
 

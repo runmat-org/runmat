@@ -12,6 +12,20 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM cell end-selector out-of-bounds metadata normalization ratchet
+  - `scope: in-scope`
+  - Closed a remaining cell selector-plan normalization edge where malformed cell end-selector metadata reported runtime index bounds instead of plan-shape failure:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now classifies out-of-bounds cell end-selector positions as `RunMat:InvalidEndSelectorPlan` in both `apply_cell_end_offsets_for_base(...)` and `apply_cell_end_exprs_for_base(...)`, aligning with existing expr/object selector-plan invariants.
+  - Added interpreter invariant ratchets in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `apply_cell_end_offsets_rejects_out_of_bounds_positions`
+    - `apply_cell_end_exprs_rejects_out_of_bounds_positions`
+  - Validation:
+    - `cargo test -p runmat-vm --lib apply_cell_end_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM string-array scalar paren assignment ratchet
   - `scope: in-scope`
   - Closed an assignment-place execution gap for string-array scalar paren stores:
