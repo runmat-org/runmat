@@ -5252,6 +5252,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: tighten feval text-handle name invariants
+  - Runtime `feval` name-based dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now normalizes handle names through an explicit non-empty trim boundary before callable identity classification.
+  - Empty/whitespace handle names now fail early with stable identifier `RunMat:FevalHandleNameInvalid` instead of falling into unresolved dynamic-name dispatch.
+  - Text `@`-handle names now trim surrounding whitespace before semantic-resolution/name classification, aligning `feval` callback handling with `str2func` non-empty-name semantics.
+  - Added ratchets:
+    - `feval_rejects_empty_at_string_handle_with_identifier`
+    - `feval_rejects_empty_function_handle_value_with_identifier`
+    - `feval_trims_text_handle_name_for_resolution`
+  - Validation:
+    - `cargo test -p runmat-runtime feval_rejects_empty_at_string_handle_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime feval_rejects_empty_function_handle_value_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime feval_trims_text_handle_name_for_resolution -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

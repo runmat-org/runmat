@@ -1306,6 +1306,11 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    fn normalize_feval_handle_name(name: &str) -> Option<String> {
+        let trimmed = name.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
+
     async fn call_by_identity(
         identity: runmat_hir::CallableIdentity,
         fallback_policy: runmat_hir::CallableFallbackPolicy,
@@ -1321,7 +1326,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         args: &[Value],
         requested_outputs: usize,
     ) -> crate::BuiltinResult<Value> {
-        let (identity, fallback_policy) = callable_identity_for_handle_name(name);
+        let normalized = normalize_feval_handle_name(name).ok_or_else(|| {
+            build_runtime_error("feval: function handle name must not be empty")
+                .with_identifier("RunMat:FevalHandleNameInvalid")
+                .build()
+        })?;
+        let (identity, fallback_policy) = callable_identity_for_handle_name(&normalized);
         call_by_identity(identity, fallback_policy, args, requested_outputs).await
     }
 
@@ -2053,6 +2063,49 @@ mod tests {
         ))
         .expect_err("feval non-row char handle should fail");
         assert_eq!(err.identifier(), Some("RunMat:FevalHandleShapeInvalid"));
+    }
+
+    #[test]
+    fn feval_rejects_empty_at_string_handle_with_identifier() {
+        let err = block_on(feval_builtin(
+            Value::String("@".to_string()),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("feval empty @string handle should fail");
+        assert_eq!(err.identifier(), Some("RunMat:FevalHandleNameInvalid"));
+    }
+
+    #[test]
+    fn feval_rejects_empty_function_handle_value_with_identifier() {
+        let err = block_on(feval_builtin(
+            Value::FunctionHandle(String::new()),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("feval empty function-handle value should fail");
+        assert_eq!(err.identifier(), Some("RunMat:FevalHandleNameInvalid"));
+    }
+
+    #[test]
+    fn feval_trims_text_handle_name_for_resolution() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(9876)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 9876);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(12.0)) })
+            }),
+        ));
+
+        let value = block_on(feval_builtin(
+            Value::String("@ resolved_target ".to_string()),
+            vec![Value::Num(4.0)],
+        ))
+        .expect("trimmed text handle should resolve");
+        assert_eq!(value, Value::Num(12.0));
     }
 
     #[test]
