@@ -12,6 +12,24 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `timeit` text callback handles now prebind resolver-known semantic identity
+  - `scope: in-scope`
+  - `blocker: `timeit` callback normalization in `prepare_callable(...)` still left text handle forms (`Value::String("@name")`, row `Value::CharArray('@name')`, scalar `Value::StringArray(["@name"])`) name-shaped even when semantic resolver identity was available.`
+  - Tightened callback normalization in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+    - text handle forms now prebind to `Value::SemanticFunctionHandle` when resolver identity exists.
+    - unresolved text handles preserve existing string-handle execution behavior.
+  - Added ratchets:
+    - `timeit_string_handle_prefers_semantic_resolver_identity`
+    - `timeit_char_handle_prefers_semantic_resolver_identity`
+  - Validation:
+    - `cargo test -p runmat-runtime timeit_string_handle_prefers_semantic_resolver_identity -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_char_handle_prefers_semantic_resolver_identity -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_external_function_handle_prefers_semantic_resolver_identity -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr linear-selector shape parity now matches plain selector planning
   - `scope: in-scope`
   - `blocker: expr-slice planning in `build_expr_index_plan(...)` defaulted linear (`dims == 1`) non-tensor selector outputs to row shape (`[1, n]`), while plain selector planning (`build_index_plan`) materialized non-linear-index selectors as column shape (`[n, 1]`) unless selector tensor shape was explicitly carried.`

@@ -216,9 +216,14 @@ fn prepare_callable(
     func: Value,
     num_outputs: Option<usize>,
 ) -> Result<TimeitCallable, crate::RuntimeError> {
+    fn canonicalize_text_handle(handle: String) -> Value {
+        let name = handle.strip_prefix('@').unwrap_or(handle.as_str());
+        semantic_handle_for_name(name).unwrap_or(Value::String(handle))
+    }
+
     match func {
         Value::String(text) => parse_handle_string(&text).map(|handle| TimeitCallable {
-            handle: Value::String(handle),
+            handle: canonicalize_text_handle(handle),
             num_outputs,
         }),
         Value::CharArray(arr) => {
@@ -229,7 +234,7 @@ fn prepare_callable(
             } else {
                 let text: String = arr.data.iter().collect();
                 parse_handle_string(&text).map(|handle| TimeitCallable {
-                    handle: Value::String(handle),
+                    handle: canonicalize_text_handle(handle),
                     num_outputs,
                 })
             }
@@ -237,7 +242,7 @@ fn prepare_callable(
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 parse_handle_string(&sa.data[0]).map(|handle| TimeitCallable {
-                    handle: Value::String(handle),
+                    handle: canonicalize_text_handle(handle),
                     num_outputs,
                 })
             } else {
@@ -387,6 +392,48 @@ pub(crate) mod tests {
             Value::ExternalFunctionHandle("pkg.callback".to_string())
         );
         assert_eq!(callable.num_outputs, Some(2));
+    }
+
+    #[test]
+    fn timeit_string_handle_prefers_semantic_resolver_identity() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "__timeit_helper_counter_default").then_some(87)
+            })));
+        let callable = prepare_callable(
+            Value::String("@__timeit_helper_counter_default".to_string()),
+            None,
+        )
+        .expect("timeit should accept string function handle");
+        assert_eq!(
+            callable.handle,
+            Value::SemanticFunctionHandle {
+                name: "__timeit_helper_counter_default".to_string(),
+                function: 87,
+            }
+        );
+    }
+
+    #[test]
+    fn timeit_char_handle_prefers_semantic_resolver_identity() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "__timeit_helper_counter_default").then_some(88)
+            })));
+        let callable = prepare_callable(
+            Value::CharArray(runmat_builtins::CharArray::new_row(
+                "@__timeit_helper_counter_default",
+            )),
+            None,
+        )
+        .expect("timeit should accept char function handle");
+        assert_eq!(
+            callable.handle,
+            Value::SemanticFunctionHandle {
+                name: "__timeit_helper_counter_default".to_string(),
+                function: 88,
+            }
+        );
     }
 
     #[test]
