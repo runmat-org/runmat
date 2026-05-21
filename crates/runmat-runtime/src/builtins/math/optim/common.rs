@@ -51,6 +51,18 @@ fn canonicalize_callback_handle(handle: &Value) -> Value {
             }
             handle.clone()
         }
+        Value::Closure(closure) => {
+            if closure.semantic_function.is_none() {
+                if let Some(function) =
+                    crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
+                {
+                    let mut bound = closure.clone();
+                    bound.semantic_function = Some(function);
+                    return Value::Closure(bound);
+                }
+            }
+            handle.clone()
+        }
         _ => handle.clone(),
     }
 }
@@ -303,7 +315,7 @@ pub(crate) struct InitialGuess {
 #[cfg(test)]
 mod tests {
     use super::canonicalize_callback_handle;
-    use runmat_builtins::{CharArray, StringArray, Value};
+    use runmat_builtins::{CharArray, Closure, StringArray, Value};
     use std::sync::Arc;
 
     #[test]
@@ -399,5 +411,38 @@ mod tests {
                 function: 47,
             }
         );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_name_only_closure_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(48)
+            })));
+        let raw = Value::Closure(Closure {
+            function_name: "decay".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(9.0)],
+        });
+        let canonical = canonicalize_callback_handle(&raw);
+        assert_eq!(
+            canonical,
+            Value::Closure(Closure {
+                function_name: "decay".to_string(),
+                semantic_function: Some(48),
+                captures: vec![Value::Num(9.0)],
+            })
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_keeps_name_only_closure_without_resolver() {
+        let raw = Value::Closure(Closure {
+            function_name: "decay".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(9.0)],
+        });
+        let canonical = canonicalize_callback_handle(&raw);
+        assert_eq!(canonical, raw);
     }
 }

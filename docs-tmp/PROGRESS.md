@@ -4517,6 +4517,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: prebind optim/ode closure callbacks
+  - Reduced remaining name-shaped callback behavior at the shared optimization/ODE callback boundary in [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+    - `canonicalize_callback_handle(...)` now upgrades `Value::Closure` callbacks with `semantic_function: None` to `semantic_function: Some(id)` when the semantic resolver can resolve `closure.function_name`.
+    - Existing closure captures are preserved exactly; this is semantic identity tightening, not callback argument-shape behavior change.
+  - Added canonicalizer contracts:
+    - `callback_handle_canonicalizer_binds_name_only_closure_when_resolved`
+    - `callback_handle_canonicalizer_keeps_name_only_closure_without_resolver`
+  - Validation:
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_ -- --nocapture`
+    - `cargo test -p runmat-runtime fzero_accepts_semantic_function_handle_callback -- --nocapture`
+    - `cargo test -p runmat-runtime fsolve_accepts_semantic_function_handle_callback -- --nocapture`
+    - `cargo test -p runmat-runtime ode45_accepts_external_function_handle_rhs -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
