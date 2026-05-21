@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM DefPath/static-method function-handle direct-call ratchet
+  - `scope: in-scope`
+  - Closed a callable ABI coverage gap where imported/qualified static-method function handles were ratcheted only through `feval(...)` callsites:
+    - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now explicitly asserts direct handle invocation (`h()`) execution for both specific-import (`@origin` from `import Point.origin`) and qualified (`@Point.origin`) static-method handles.
+    - this pins semantic runtime behavior for DefPath/external-boundary function-handle targets across direct-call dispatch, not just `feval` fallback paths.
+  - Added VM end-to-end ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `import_static_method_function_handle_direct_call_executes`
+    - `qualified_static_method_function_handle_direct_call_executes`
+  - Validation:
+    - `cargo test -p runmat-vm static_method_function_handle_direct_call_executes -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM cell end-selector out-of-bounds metadata normalization ratchet
   - `scope: in-scope`
   - Closed a remaining cell selector-plan normalization edge where malformed cell end-selector metadata reported runtime index bounds instead of plan-shape failure:
