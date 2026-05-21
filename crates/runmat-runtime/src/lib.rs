@@ -1323,10 +1323,11 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             {
                 return result;
             }
-            Err(
-                (format!("feval: semantic function handle '{name}' ({function}) is unavailable"))
-                    .into(),
-            )
+            Err(build_runtime_error(format!(
+                "feval: semantic function handle '{name}' ({function}) is unavailable"
+            ))
+            .with_identifier("RunMat:SemanticFunctionUnavailable")
+            .build())
         }
         Value::Closure(c) => {
             let mut args = c.captures.clone();
@@ -1342,11 +1343,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 {
                     return result;
                 }
-                return Err((format!(
+                return Err(build_runtime_error(format!(
                     "feval: semantic closure '{}' ({function}) is unavailable",
                     c.function_name
                 ))
-                .into());
+                .with_identifier("RunMat:SemanticFunctionUnavailable")
+                .build());
             }
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
@@ -1800,6 +1802,7 @@ mod tests {
         let err = block_on(feval_builtin(handle, vec![Value::Num(3.0)])).expect_err(
             "semantic function handle should not fall back to name-based dispatch when unavailable",
         );
+        assert_eq!(err.identifier(), Some("RunMat:SemanticFunctionUnavailable"));
         assert!(
             err.message()
                 .contains("semantic function handle 'semantic_target' (9043) is unavailable"),
@@ -2610,6 +2613,7 @@ mod tests {
 
         let err = block_on(feval_builtin(closure, vec![Value::Num(2.0)]))
             .expect_err("semantic closure should not fall back to name-based dispatch");
+        assert_eq!(err.identifier(), Some("RunMat:SemanticFunctionUnavailable"));
         assert!(
             err.message()
                 .contains("semantic closure 'semantic_target' (9044) is unavailable"),

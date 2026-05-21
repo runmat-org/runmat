@@ -45,11 +45,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
       - `RunMat:FevalHandleShapeInvalid` for non-row char-array handle values
     - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `func2str` now emits:
       - `RunMat:Func2StrHandleTypeInvalid` for non-handle inputs
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `feval` semantic-handle/semantic-closure invoker-unavailable paths now emit:
+      - `RunMat:SemanticFunctionUnavailable` instead of message-only errors
   - Added runtime identifier ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
     - `feval_rejects_string_without_at_with_identifier`
     - `feval_rejects_char_handle_without_at_with_identifier`
     - `feval_rejects_non_row_char_handle_with_identifier`
     - `func2str_rejects_non_handle_with_identifier`
+    - `feval_semantic_function_handle_errors_when_semantic_invoker_unavailable`
+    - `feval_semantic_closure_errors_when_semantic_invoker_unavailable`
   - Added VM end-to-end source-level identifier ratchets in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
     - `feval_string_without_at_errors_with_identifier_contract`
     - `feval_nonrow_char_handle_errors_with_identifier_contract`
@@ -60,6 +64,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm feval_string_without_at_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm feval_nonrow_char_handle_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm func2str_non_handle_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-runtime feval_semantic_function_handle_errors_when_semantic_invoker_unavailable -- --nocapture`
+    - `cargo test -p runmat-runtime feval_semantic_closure_errors_when_semantic_invoker_unavailable -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
