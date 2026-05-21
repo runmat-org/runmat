@@ -1,5 +1,5 @@
 use cranelift::prelude::isa::CallConv;
-use runmat_builtins::{CellArray, Value};
+use runmat_builtins::{CellArray, StructValue, Value};
 use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
@@ -1493,6 +1493,50 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
     assert!(result.is_ok(), "semantic cell expansion should JIT");
     assert_eq!(result.unwrap(), (0, true));
     assert_eq!(vars[1], Value::Num(12.0));
+}
+
+#[test]
+fn test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::LoadVar(0),
+            Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
+                    "a".to_string(),
+                )),
+                fallback_policy: ::runmat_hir::CallableFallbackPolicy::ObjectDispatch,
+                specs: vec![ArgSpec {
+                    is_expand: false,
+                    num_indices: 0,
+                    expand_all: false,
+                }],
+                out_count: 1,
+            },
+            Instr::StoreVar(1),
+        ],
+        2,
+    );
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut st = StructValue::new();
+    st.insert("a", Value::Num(9.0));
+    let mut vars = vec![Value::Struct(st), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "unresolved method/member expanded struct member access should JIT through typed host bridge"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[1], Value::Num(9.0));
 }
 
 #[test]

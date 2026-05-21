@@ -244,6 +244,29 @@ fn declare_host_builtin_expanded_value_outputs_in_module(module: &mut JITModule)
         .expect("Failed to declare runmat_call_builtin_expanded_values")
 }
 
+fn declare_host_method_member_expanded_value_outputs_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(pointer_type)); // name_ptr: u8*
+    sig.params.push(AbiParam::new(types::I32)); // name_len
+    sig.params.push(AbiParam::new(types::I32)); // fallback_policy
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr: TurbineValue[]
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // specs_ptr: TurbineArgSpec[]
+    sig.params.push(AbiParam::new(types::I32)); // specs_len
+    sig.params.push(AbiParam::new(types::I32)); // out_count
+    sig.params.push(AbiParam::new(pointer_type)); // results_ptr: TurbineValue[]
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function(
+            "runmat_call_method_member_expanded_values",
+            Linkage::Import,
+            &sig,
+        )
+        .expect("Failed to declare runmat_call_method_member_expanded_values")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -260,6 +283,7 @@ pub struct TurbineEngine {
     runmat_call_semantic_function_expanded_values_id: FuncId,
     runmat_call_feval_expanded_values_id: FuncId,
     runmat_call_builtin_expanded_values_id: FuncId,
+    runmat_call_method_member_expanded_values_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -405,6 +429,10 @@ impl TurbineEngine {
             "runmat_call_builtin_expanded_values",
             runmat_call_builtin_expanded_values as *const u8,
         );
+        builder.symbol(
+            "runmat_call_method_member_expanded_values",
+            runmat_call_method_member_expanded_values as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
@@ -425,6 +453,8 @@ impl TurbineEngine {
             declare_host_feval_expanded_value_outputs_in_module(&mut module);
         let runmat_call_builtin_expanded_values_id =
             declare_host_builtin_expanded_value_outputs_in_module(&mut module);
+        let runmat_call_method_member_expanded_values_id =
+            declare_host_method_member_expanded_value_outputs_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -443,6 +473,7 @@ impl TurbineEngine {
             runmat_call_semantic_function_expanded_values_id,
             runmat_call_feval_expanded_values_id,
             runmat_call_builtin_expanded_values_id,
+            runmat_call_method_member_expanded_values_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -520,6 +551,7 @@ impl TurbineEngine {
             self.runmat_call_semantic_function_expanded_values_id,
             self.runmat_call_feval_expanded_values_id,
             self.runmat_call_builtin_expanded_values_id,
+            self.runmat_call_method_member_expanded_values_id,
         )?;
 
         // Compile to machine code
@@ -1603,6 +1635,93 @@ pub extern "C" fn runmat_call_builtin_expanded_values(
         let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
         if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
             error!("Expanded Turbine builtin output write failed: {err}");
+            return 1;
+        }
+    }
+    0
+}
+
+fn decode_callable_fallback_policy(policy: i32) -> Result<runmat_hir::CallableFallbackPolicy> {
+    match policy {
+        0 => Ok(runmat_hir::CallableFallbackPolicy::None),
+        1 => Ok(runmat_hir::CallableFallbackPolicy::RuntimeNameResolution),
+        2 => Ok(runmat_hir::CallableFallbackPolicy::ObjectDispatch),
+        3 => Ok(runmat_hir::CallableFallbackPolicy::ExternalBoundary),
+        _ => Err(execution_error(format!(
+            "invalid callable fallback policy tag: {policy}"
+        ))),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_method_member_expanded_values(
+    name_ptr: *const u8,
+    name_len: i32,
+    fallback_policy: i32,
+    args_ptr: *const TurbineValue,
+    args_len: i32,
+    specs_ptr: *const TurbineArgSpec,
+    specs_len: i32,
+    out_count: i32,
+    results_ptr: *mut TurbineValue,
+) -> i32 {
+    let requested_out_count = out_count;
+    let output = (|| -> Result<Vec<Value>> {
+        if name_len < 0 {
+            return Err(execution_error("negative callable name length"));
+        }
+        if name_ptr.is_null() {
+            return Err(execution_error("null callable name pointer"));
+        }
+        if out_count < 0 {
+            return Err(execution_error("negative TurbineValue output count"));
+        }
+        if out_count > 0 && results_ptr.is_null() {
+            return Err(execution_error("null TurbineValue results pointer"));
+        }
+
+        let name = unsafe {
+            std::str::from_utf8(std::slice::from_raw_parts(name_ptr, name_len as usize))
+                .map_err(|_| execution_error("invalid UTF-8 in callable name"))?
+        };
+        let policy = decode_callable_fallback_policy(fallback_policy)?;
+        let args = read_turbine_value_args(args_ptr, args_len)?;
+        let specs = read_turbine_arg_specs(specs_ptr, specs_len)?;
+        let mut expanded_args = expand_turbine_args(args, &specs)?;
+        if expanded_args.is_empty() {
+            return Err(execution_error(
+                "method/member expanded call requires base receiver argument",
+            ));
+        }
+        let base = expanded_args.remove(0);
+        let output = run_immediate(Box::pin(
+            runmat_vm::call_method_or_member_index_named_with_outputs(
+                base,
+                name.to_string(),
+                expanded_args,
+                out_count as usize,
+                policy,
+            ),
+        ))?
+        .map_err(TurbineError::ExecutionError)?;
+        Ok(match output {
+            Value::OutputList(values) => values,
+            value => vec![value],
+        })
+    })();
+
+    let outputs = match output {
+        Ok(outputs) => outputs,
+        Err(err) => {
+            error!("Expanded Turbine method/member outputs call failed: {err}");
+            return 1;
+        }
+    };
+
+    for index in 0..requested_out_count as usize {
+        let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
+        if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
+            error!("Expanded Turbine method/member output write failed: {err}");
             return 1;
         }
     }

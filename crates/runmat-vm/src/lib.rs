@@ -39,3 +39,20 @@ pub use layout::{
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
 };
+
+pub async fn call_method_or_member_index_named_with_outputs(
+    base: runmat_builtins::Value,
+    name: String,
+    args: Vec<runmat_builtins::Value>,
+    requested_outputs: usize,
+    fallback_policy: runmat_hir::CallableFallbackPolicy,
+) -> Result<runmat_builtins::Value, runmat_runtime::RuntimeError> {
+    call::closures::call_method_or_member_index_named_with_outputs(
+        base,
+        name,
+        args,
+        requested_outputs,
+        fallback_policy,
+    )
+    .await
+}

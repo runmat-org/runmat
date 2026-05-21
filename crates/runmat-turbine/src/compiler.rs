@@ -23,6 +23,7 @@ struct CompileContext<'a> {
     runmat_call_semantic_function_expanded_values_id: FuncId,
     runmat_call_feval_expanded_values_id: FuncId,
     runmat_call_builtin_expanded_values_id: FuncId,
+    runmat_call_method_member_expanded_values_id: FuncId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -242,6 +243,7 @@ impl BytecodeCompiler {
         runmat_call_semantic_function_expanded_values_id: FuncId,
         runmat_call_feval_expanded_values_id: FuncId,
         runmat_call_builtin_expanded_values_id: FuncId,
+        runmat_call_method_member_expanded_values_id: FuncId,
     ) -> Result<()> {
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
@@ -280,6 +282,7 @@ impl BytecodeCompiler {
             runmat_call_semantic_function_expanded_values_id,
             runmat_call_feval_expanded_values_id,
             runmat_call_builtin_expanded_values_id,
+            runmat_call_method_member_expanded_values_id,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -894,26 +897,49 @@ impl BytecodeCompiler {
                             }
                         }
 
-                        let results = if specs.iter().any(|spec| spec.is_expand) {
+                        let has_expansion = specs.iter().any(|spec| spec.is_expand);
+                        let results = if Self::resolve_named_multi_call_target(
+                            identity,
+                            *fallback_policy,
+                            ctx.semantic_registry,
+                        )
+                        .is_some()
+                        {
+                            if has_expansion {
+                                let args =
+                                    Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                                Self::compile_named_function_expand_multi_call_jit(
+                                    builder,
+                                    ctx,
+                                    identity,
+                                    *fallback_policy,
+                                    &args,
+                                    specs,
+                                    *out_count,
+                                )?
+                            } else {
+                                let args =
+                                    Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                                Self::compile_named_function_multi_call_jit(
+                                    builder,
+                                    ctx,
+                                    identity,
+                                    *fallback_policy,
+                                    &args,
+                                    *out_count,
+                                )?
+                            }
+                        } else {
                             let args =
                                 Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
-                            Self::compile_named_function_expand_multi_call_jit(
+                            Self::call_method_member_expanded_values_jit(
                                 builder,
-                                ctx,
+                                ctx.module,
+                                ctx.runmat_call_method_member_expanded_values_id,
                                 identity,
                                 *fallback_policy,
                                 &args,
                                 specs,
-                                *out_count,
-                            )?
-                        } else {
-                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
-                            Self::compile_named_function_multi_call_jit(
-                                builder,
-                                ctx,
-                                identity,
-                                *fallback_policy,
-                                &args,
                                 *out_count,
                             )?
                         };
@@ -1611,6 +1637,85 @@ impl BytecodeCompiler {
             &[
                 name_ptr,
                 name_len,
+                args_ptr,
+                arg_count,
+                specs_ptr,
+                spec_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
+    }
+
+    fn method_member_identity_name(identity: &runmat_hir::CallableIdentity) -> Option<&str> {
+        match identity {
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            | runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(name))
+                if !name.is_empty() =>
+            {
+                Some(name.as_str())
+            }
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+                if segments.len() == 1 && !segments[0].0.is_empty() =>
+            {
+                Some(segments[0].0.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    fn encode_callable_fallback_policy(policy: runmat_hir::CallableFallbackPolicy) -> i32 {
+        match policy {
+            runmat_hir::CallableFallbackPolicy::None => 0,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution => 1,
+            runmat_hir::CallableFallbackPolicy::ObjectDispatch => 2,
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary => 3,
+        }
+    }
+
+    fn call_method_member_expanded_values_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_method_member_expanded_values_id: FuncId,
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let name = Self::method_member_identity_name(identity).ok_or_else(|| {
+            execution_error("method/member expanded call missing callable name for JIT bridge")
+        })?;
+        let name_ptr = Self::store_utf8_bytes(builder, name.as_bytes())
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let name_len = builder.ins().iconst(types::I32, name.len() as i64);
+        let fallback_value = builder.ins().iconst(
+            types::I32,
+            Self::encode_callable_fallback_policy(fallback_policy) as i64,
+        );
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_method_member_expanded_values_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
+        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
+        let call = builder.ins().call(
+            runtime_fn,
+            &[
+                name_ptr,
+                name_len,
+                fallback_value,
                 args_ptr,
                 arg_count,
                 specs_ptr,

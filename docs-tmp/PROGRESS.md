@@ -3874,9 +3874,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - expanding specs route through `compile_named_function_expand_multi_call_jit(...)`
     - non-expanding specs route through `compile_named_function_multi_call_jit(...)`
     - multi-output calls require a following `Unpack(count == out_count)` contract.
-  - Remaining expanded-call blocker surface is now unresolved/non-semantic object-dispatch method/member cases (explicit interpreter fallback via semantic-resolution gate failure), not blanket method/member expanded opcode blocking.
+  - Remaining expanded-call blocker surface is now unresolved/non-semantic object-dispatch method/member cases.
   - Validation:
     - `cargo test -p runmat-turbine --lib -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
+- (pending commit) Plan 3/7 Turbine unresolved method/member expanded-call typed bridge
+  - Added a typed Turbine host callback path for unresolved/non-semantic method/member expanded multi-output execution in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/lib.rs):
+    - `runmat_call_method_member_expanded_values(...)` decodes method/member name + fallback policy + `TurbineValue` args/spec payloads, expands arguments via `TurbineArgSpec`, and dispatches through `runmat_vm::call_method_or_member_index_named_with_outputs(...)`.
+    - Added fallback-policy ABI encode/decode (`None`/`RuntimeNameResolution`/`ObjectDispatch`/`ExternalBoundary`) so method/member unresolved semantics stay policy-driven at runtime boundary.
+  - Added VM callable bridge entrypoint in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/lib.rs) and shared closure helper in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs):
+    - `call_method_or_member_index_named_with_outputs(...)` reuses existing method/member dispatch semantics without requiring Turbine to serialize `CallableIdentity` internals.
+  - Turbine compile for `Instr::CallMethodOrMemberIndexExpandMultiOutput` in [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs) now:
+    - preserves semantic fast-path lowering when identity resolves in semantic registry.
+    - routes unresolved/non-semantic identities through the new typed host bridge (no compile-time fallback gate to interpreter).
+  - Added JIT ratchet in [jit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/tests/jit.rs):
+    - `test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path` asserts unresolved struct member expanded call executes with `used_jit == true` and preserves member-read semantics.
+  - Validation:
+    - `cargo test -p runmat-turbine test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path -- --nocapture`
+    - `cargo test -p runmat-turbine --lib compiler::tests::named_user_call_lowering_stays_centralized -- --nocapture`
+    - `cargo test -p runmat-vm call::closures::tests::classref_external_method_uses_external_boundary_semantic_resolution -- --nocapture`
+    - `cargo test -p runmat-turbine --lib --tests -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
 

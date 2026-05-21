@@ -263,6 +263,23 @@ pub async fn call_method_or_member_index_with_outputs(
             "method/member-index call missing callable name",
         )
     })?;
+    call_method_or_member_index_named_with_outputs(
+        base,
+        name,
+        args,
+        requested_outputs,
+        fallback_policy,
+    )
+    .await
+}
+
+pub(crate) async fn call_method_or_member_index_named_with_outputs(
+    base: Value,
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    fallback_policy: CallableFallbackPolicy,
+) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();

@@ -143,7 +143,7 @@ The fast semantic-call cleanup slices are complete. The next changes should avoi
 
 Concrete next targets:
 
-- Continue widening Turbine value-lane coverage beyond semantic cell expansion; semantic expanded calls, expanded `feval` calls, semantic-resolvable named expanded calls, expanded builtin calls, and semantic-resolvable method/member expanded calls can now cross the JIT boundary with tagged variables and `TurbineArgSpec`, while unresolved object-dispatch method/member expansion paths still need descriptor/ABI work.
+- Continue widening Turbine value-lane coverage beyond semantic cell expansion; semantic expanded calls, expanded `feval` calls, semantic-resolvable named expanded calls, expanded builtin calls, semantic-resolvable method/member expanded calls, and unresolved method/member expanded object/member dispatch now cross the JIT boundary through typed host bridges with tagged variables + `TurbineArgSpec` (no compile-time fallback gate for unresolved method/member expanded calls).
 - Treat unresolved/external callback identities that are not present in a semantic registry as unresolved calls; the VM no longer recompiles legacy HIR as a dynamic fallback.
 - Continue moving object/index call sites to structured descriptors; VM object protocol dispatch now has an `ObjectIndexDescriptor` serialization boundary instead of ad hoc method argument assembly in the public helper functions.
 
