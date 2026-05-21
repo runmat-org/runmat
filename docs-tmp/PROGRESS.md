@@ -5239,10 +5239,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Expr and plain slice planning now safely treat mask bits outside mask width as absent, closing additional high-dimension panic seams in non-object selector materialization paths.
   - Added ratchets:
     - `primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
+    - `primary_compile_rejects_slice_plan_end_dimension_beyond_mask_width`
     - `build_slice_selectors_supports_dims_beyond_mask_width`
     - `expr_plan_supports_dims_beyond_mask_width`
   - Validation:
     - `cargo test -p runmat-vm primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_slice_plan_end_dimension_beyond_mask_width -- --nocapture`
     - `cargo test -p runmat-vm build_slice_selectors_supports_dims_beyond_mask_width -- --nocapture`
     - `cargo test -p runmat-vm expr_plan_supports_dims_beyond_mask_width -- --nocapture`
     - `cargo fmt --all --check`
