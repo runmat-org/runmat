@@ -125,30 +125,31 @@ fn assign_scalar_struct_index(
     }
 }
 
-fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
-    fn resolve_cell_index(value: &Value) -> Result<usize, RuntimeError> {
-        let index_value = match value {
-            Value::Num(index) => *index,
-            Value::Int(index) => index.to_f64(),
-            _ => value.try_into().map_err(|_| {
+async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
+    let mut indices = Vec::with_capacity(values.len());
+    for value in values {
+        let index = index_scalar_from_value(value)
+            .await?
+            .ok_or_else(|| {
                 crate::interpreter::errors::mex("CellIndexType", "Unsupported cell index type")
-            })?,
-        };
-        let index = exact_index_from_f64(index_value).ok_or_else(|| {
-            crate::interpreter::errors::mex("CellIndexType", "Cell indices must be integers")
-        })?;
-        if index < 1 {
-            return Err(crate::interpreter::errors::mex(
-                "CellIndexOutOfBounds",
-                "Cell index out of bounds",
-            ));
-        }
-        usize::try_from(index).map_err(|_| {
-            crate::interpreter::errors::mex("CellIndexOutOfBounds", "Cell index out of bounds")
-        })
+            })
+            .and_then(|index| {
+                if index < 1 {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellIndexOutOfBounds",
+                        "Cell index out of bounds",
+                    ));
+                }
+                usize::try_from(index).map_err(|_| {
+                    crate::interpreter::errors::mex(
+                        "CellIndexOutOfBounds",
+                        "Cell index out of bounds",
+                    )
+                })
+            })?;
+        indices.push(index);
     }
-
-    values.iter().map(resolve_cell_index).collect()
+    Ok(indices)
 }
 
 fn apply_cell_end_offsets_for_base(
@@ -344,7 +345,7 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(raw_indices)?;
+                    let indices = resolve_cell_indices(raw_indices).await?;
                     crate::ops::cells::index_cell_value(&ca, &indices)?
                 }
                 _ => {
@@ -404,7 +405,7 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(raw_indices)?;
+                    let indices = resolve_cell_indices(raw_indices).await?;
                     crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
                         runmat_gc::gc_record_write(oldv, newv);
                     })?
@@ -2182,15 +2183,25 @@ mod tests {
 
     #[test]
     fn resolve_cell_indices_rejects_fractional_values() {
-        let err = super::resolve_cell_indices(&[Value::Num(1.5)])
+        let err = block_on(super::resolve_cell_indices(&[Value::Num(1.5)]))
             .expect_err("fractional cell index should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
     }
 
     #[test]
     fn resolve_cell_indices_rejects_zero_values() {
-        let err = super::resolve_cell_indices(&[Value::Num(0.0)])
+        let err = block_on(super::resolve_cell_indices(&[Value::Num(0.0)]))
             .expect_err("zero cell index should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    }
+
+    #[test]
+    fn resolve_cell_indices_accepts_scalar_tensor_values() {
+        let scalar = Value::Tensor(
+            runmat_builtins::Tensor::new(vec![2.0], vec![1, 1]).expect("scalar tensor"),
+        );
+        let indices = block_on(super::resolve_cell_indices(&[scalar]))
+            .expect("scalar tensor index should pass");
+        assert_eq!(indices, vec![2]);
     }
 }

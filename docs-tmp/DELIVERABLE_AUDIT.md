@@ -238,6 +238,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now rejects inconsistent `range_dims`/`range_has_step` metadata as `RunMat:InvalidRangeSelectorPlan` and rejects non-numeric range start/step operands as `RunMat:UnsupportedIndexType` via shared `range_selector_scalar_to_f64(...)`.
     - `IndexSliceExpr` no longer silently coerces malformed range start/step operands to `1.0`.
     - scalar `StoreIndex` now rejects non-positive indices directly as `RunMat:IndexOutOfBounds` instead of clamping them to zero before assignment dispatch.
+    - brace cell scalar index decoding now reuses shared `index_scalar_from_value` normalization (`resolve_cell_indices`), so scalar tensor cell indices follow the same integer/in-bounds contracts as other scalar index paths.
     - direct ratchets:
       - `validate_expr_range_step_metadata_rejects_mismatched_arity`
       - `range_selector_scalar_to_f64_rejects_non_numeric_scalar`
@@ -245,6 +246,8 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `range_step_selector_rejects_non_numeric_value`
       - `scalar_store_index_rejects_negative_index`
       - `scalar_store_index_rejects_zero_index`
+      - `resolve_cell_indices_accepts_scalar_tensor_values`
+      - `cell_brace_scalar_tensor_index_reads_value`
   - callable method-identity runtime policy now separates semantic resolver lookup from VM named fallback:
     - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now keeps `Method` identities eligible for semantic name resolution under `RuntimeNameResolution`, while excluding `Method` from VM named fallback eligibility.
     - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) now resolves semantic descriptor names through `semantic_resolution_name_for(...)` instead of `vm_fallback_name_for(...)`.

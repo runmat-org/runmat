@@ -155,3 +155,14 @@ fn scalar_store_index_rejects_zero_index() {
         .expect_err("zero scalar store index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
+
+#[test]
+fn cell_brace_scalar_tensor_index_reads_value() {
+    let vars = execute_semantic_source("C={10,20,30}; k=[2]; v=C{k};")
+        .expect("scalar tensor cell index should execute");
+    if let Value::Num(v) = &vars[2] {
+        assert_eq!(*v, 20.0);
+    } else {
+        panic!("expected numeric cell value from scalar tensor index");
+    }
+}
