@@ -4,6 +4,7 @@ import Link from "next/link";
 import Hero from "@/components/Hero";
 import Media from "@/components/Media";
 import { Button } from "@/components/ui/button";
+import { DetectedDownloadLabel } from "@/components/DetectedDownloadLabel";
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -21,7 +22,7 @@ const jsonLd = {
         "caption": "RunMat",
       },
       "description":
-        "RunMat is a GPU-first platform for engineering math with MATLAB syntax, real-time visualization, and an agent that understands runtime state.",
+        "RunMat is a GPU-first platform for engineering math with MATLAB syntax, real-time feedback, and an agent that understands runtime state.",
       "sameAs": [
         "https://github.com/runmat-org/runmat",
         "https://x.com/runmat_com",
@@ -135,8 +136,8 @@ const hero = {
   description:
     "Run MATLAB syntax workloads with real-time feedback and GPU acceleration across desktop, browser, and CLI.",
   primaryCta: {
-    label: "Download for macOS",
-    href: "/download",
+    label: <DetectedDownloadLabel />,
+    href: "/download/latest",
   },
   secondaryCta: {
     label: "Open Browser Sandbox",
@@ -223,8 +224,8 @@ const features = [
 const surfaces = [
   {
     title: "Start in the desktop app",
-    cta: "Download for macOS",
-    href: "/download",
+    cta: <DetectedDownloadLabel />,
+    href: "/download/latest",
     mediaLabel: "Desktop app media",
   },
   {
@@ -323,7 +324,7 @@ export default function HomePage() {
                   <h3 className="text-lg font-medium text-card-foreground">
                     {surface.title}
                   </h3>
-                  <div className="mt-5 rounded-full bg-primary px-4 py-2 text-center text-xs font-medium text-primary-foreground transition-opacity group-hover:opacity-90">
+                  <div className="mt-5 rounded-none bg-[hsl(var(--brand))] px-4 py-2 text-center text-xs font-semibold text-white transition-colors group-hover:bg-[hsl(var(--brand))]/90">
                     {surface.cta}
                   </div>
                 </div>
@@ -346,9 +347,11 @@ export default function HomePage() {
               <Button
                 size="lg"
                 asChild
-                className="h-11 rounded-full bg-primary px-7 text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
+                className="h-11 rounded-none border-0 bg-[hsl(var(--brand))] px-7 text-sm font-semibold text-white shadow-none hover:bg-[hsl(var(--brand))]/90"
               >
-                <Link href="/download">Download for macOS</Link>
+                <Link href="/download/latest">
+                  <DetectedDownloadLabel />
+                </Link>
               </Button>
             </div>
           </div>

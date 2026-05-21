@@ -1,9 +1,10 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import Media, { type MediaTone } from "@/components/Media";
 
 interface HeroLink {
-  label: string;
+  label: ReactNode;
   href: string;
 }
 
@@ -50,15 +51,15 @@ export default function Hero({
             <Button
               size="lg"
               asChild
-              className="h-10 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground shadow-none hover:bg-primary/90"
+              className="h-11 rounded-none border-0 bg-[hsl(var(--brand))] px-7 text-sm font-semibold text-white shadow-none hover:bg-[hsl(var(--brand))]/90"
             >
               <Link href={primaryCta.href}>{primaryCta.label}</Link>
             </Button>
             <Button
               size="lg"
-              variant="secondary"
+              variant="outline"
               asChild
-              className="h-10 rounded-full bg-secondary px-6 text-sm font-medium text-secondary-foreground shadow-none hover:bg-secondary/80"
+              className="h-11 rounded-none border-border bg-card px-7 text-sm font-medium text-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
             >
               <Link href={secondaryCta.href}>{secondaryCta.label}</Link>
             </Button>

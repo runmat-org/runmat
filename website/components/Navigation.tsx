@@ -271,7 +271,7 @@ export default function Navigation() {
             </Link>
             <ThemeToggle />
             <Link
-              href="/download"
+              href="/download/latest"
               className="inline-flex items-center gap-1.5 h-11 px-4 text-sm text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               <Download className="h-4 w-4" />
@@ -390,7 +390,7 @@ export default function Navigation() {
                 Pricing
               </Link>
               <Link
-                href="/download"
+                href="/download/latest"
                 className="flex w-full items-center p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >

@@ -11,22 +11,42 @@ import { SiGithub } from "react-icons/si";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
 import Link from "next/link";
 
-const directDownloads: { os: string; arch: string; filename: string }[] = [
-  { os: "macOS", arch: "Apple Silicon", filename: "runmat-macos-aarch64.tar.gz" },
-  { os: "macOS", arch: "Intel", filename: "runmat-macos-x86_64.tar.gz" },
-  { os: "Linux", arch: "x86_64", filename: "runmat-linux-x86_64.tar.gz" },
-  { os: "Windows", arch: "x86_64", filename: "runmat-windows-x86_64.zip" },
+const desktopDownloads: { os: string; arch: string; format: string; href: string }[] = [
+  {
+    os: "macOS",
+    arch: "Apple Silicon",
+    format: "DMG",
+    href: "/download/latest?platform=darwin-aarch64",
+  },
+  {
+    os: "macOS",
+    arch: "Intel",
+    format: "DMG",
+    href: "/download/latest?platform=darwin-x86_64",
+  },
+  {
+    os: "Windows",
+    arch: "x86_64",
+    format: "Installer",
+    href: "/download/latest?platform=windows-x86_64",
+  },
+  {
+    os: "Linux",
+    arch: "x86_64",
+    format: "AppImage",
+    href: "/download/latest?platform=linux-x86_64",
+  },
 ];
 
 export const metadata: Metadata = {
-  title: "Download RunMat | Free, MATLAB-compatible runtime",
+  title: "Download RunMat | Desktop app and CLI",
   description:
-    "Install the free, open-source RunMat runtime in seconds. MATLAB-compatible, GPU-accelerated, MIT-licensed. macOS, Linux, and Windows.",
+    "Download the RunMat desktop app or install the free, open-source RunMat CLI. macOS, Linux, and Windows.",
   alternates: { canonical: "https://runmat.com/download" },
   openGraph: {
-    title: "Download RunMat | Free, MATLAB-compatible runtime",
+    title: "Download RunMat | Desktop app and CLI",
     description:
-      "Install the free, open-source RunMat runtime in seconds. MATLAB-compatible, GPU-accelerated, MIT-licensed. macOS, Linux, and Windows.",
+      "Download the RunMat desktop app or install the free, open-source RunMat CLI. macOS, Linux, and Windows.",
     url: "https://runmat.com/download",
   },
 };
@@ -43,18 +63,40 @@ export default function DownloadPage() {
               Download RunMat
             </h1>
             <p className="mx-auto max-w-[40rem] text-[0.938rem] leading-relaxed text-foreground">
-              The fast, MATLAB-compatible runtime. Install in seconds &mdash; free, open source, MIT licensed.
+              Get the RunMat desktop app for your machine, or install the open-source CLI runtime.
             </p>
           </div>
 
           <div className="mx-auto mt-10 max-w-3xl">
-            <OSInstallCommand />
+            <div className="rounded-lg border border-border bg-card p-5 sm:p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-left">
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Desktop app
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Download the latest signed installer for your current environment.
+                  </p>
+                </div>
+                <Button
+                  asChild
+                  size="lg"
+                  className="h-11 px-7 text-sm font-semibold rounded-none bg-[hsl(var(--brand))] text-white border-0 shadow-none hover:bg-[hsl(var(--brand))]/90"
+                >
+                  <Link href="/download/latest">
+                    Download for this device
+                    <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
+                  </Link>
+                </Button>
+              </div>
+            </div>
 
             <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-3">
               <Button
                 asChild
                 size="lg"
-                className="h-11 px-7 text-sm font-semibold rounded-none bg-[hsl(var(--brand))] text-white border-0 shadow-none hover:bg-[hsl(var(--brand))]/90"
+                variant="outline"
+                className="h-11 px-7 text-sm rounded-none bg-card border-border text-foreground"
               >
                 <Link
                   href="/sandbox"
@@ -68,8 +110,8 @@ export default function DownloadPage() {
               </Button>
               <Button
                 asChild
-                variant="outline"
                 size="lg"
+                variant="outline"
                 className="h-11 px-7 text-sm rounded-none bg-card border-border text-foreground"
               >
                 <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
@@ -80,8 +122,54 @@ export default function DownloadPage() {
             </div>
 
             <p className="mt-5 text-center text-xs text-muted-foreground">
-              Free forever &middot; MIT licensed &middot; No account required
+              Signed desktop installers &middot; CLI remains free and MIT licensed
             </p>
+          </div>
+        </section>
+
+        {/* Desktop downloads */}
+        <section className="pb-16 md:pb-24">
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-4 text-center">
+              <h2 className="text-xl font-semibold text-foreground">Choose a desktop installer</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                If automatic detection cannot determine your Mac architecture, pick the installer explicitly.
+              </p>
+            </div>
+            <ul className="divide-y divide-border rounded-lg border border-border bg-card overflow-hidden">
+              {desktopDownloads.map((download) => (
+                <li key={download.href} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-foreground">
+                      {download.os}{" "}
+                      <span className="text-muted-foreground">&middot; {download.arch}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Latest {download.format} from the matching RunMat desktop release channel.
+                    </div>
+                  </div>
+                  <Button asChild variant="outline" size="sm" className="rounded-none flex-shrink-0">
+                    <Link href={download.href}>
+                      Download
+                      <ArrowRight className="ml-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                    </Link>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        {/* CLI install */}
+        <section className="pb-16 md:pb-24">
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-4 text-center">
+              <h2 className="text-xl font-semibold text-foreground">Install the CLI runtime</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Prefer a terminal workflow? Install the open-source runtime in seconds.
+              </p>
+            </div>
+            <OSInstallCommand />
           </div>
         </section>
 
@@ -202,7 +290,7 @@ export default function DownloadPage() {
           </div>
         </section>
 
-        {/* Direct binary downloads */}
+        {/* CLI release archives */}
         <section className="pb-16 md:pb-24">
           <div className="mx-auto max-w-3xl">
             <details className="rounded-lg border border-border bg-card group">
@@ -212,9 +300,9 @@ export default function DownloadPage() {
                     <DownloadIcon className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <div className="min-w-0">
-                    <div className="text-base font-semibold text-foreground">Direct binary downloads</div>
+                    <div className="text-base font-semibold text-foreground">CLI release archives</div>
                     <div className="text-xs text-muted-foreground">
-                      For air-gapped, enterprise, or restricted environments.
+                      For air-gapped, enterprise, or restricted CLI installs.
                     </div>
                   </div>
                 </div>
@@ -222,31 +310,8 @@ export default function DownloadPage() {
               </summary>
               <div className="px-5 pb-5 pt-1 space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Grab pre-built archives directly from the GitHub release page.
-                  Verify checksums and signatures alongside each artifact.
+                  Grab pre-built CLI/runtime archives directly from the public GitHub release page.
                 </p>
-                <ul className="divide-y divide-border rounded-md border border-border overflow-hidden">
-                  {directDownloads.map((d) => (
-                    <li key={d.filename} className="flex items-center justify-between gap-3 px-4 py-2.5 bg-card">
-                      <div className="min-w-0">
-                        <div className="text-sm text-foreground">
-                          {d.os}{" "}
-                          <span className="text-muted-foreground">&middot; {d.arch}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground font-mono truncate">{d.filename}</div>
-                      </div>
-                      <Link
-                        href="https://github.com/runmat-org/runmat/releases/latest"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-[hsl(var(--brand))] hover:opacity-80 inline-flex items-center gap-1 flex-shrink-0"
-                      >
-                        Download
-                        <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
                 <Link
                   href="https://github.com/runmat-org/runmat/releases/latest"
                   target="_blank"
