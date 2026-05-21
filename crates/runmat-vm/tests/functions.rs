@@ -1186,6 +1186,63 @@ fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
 }
 
 #[test]
+fn semantic_indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
+    let source = "s.a = [10 20 30 40]; f = 'a'; idx = [2 4]; s.(f)(idx) = 99; y = s.(f)(4);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile indexed dynamic member vector store");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "indexed dynamic-member vector assignment should lower through StoreSlice*"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreIndex(_) | runmat_vm::Instr::StoreIndexDelete(_)
+        )),
+        "indexed dynamic-member vector assignment should not lower through StoreIndex*"
+    );
+    let vars = interpret(&bytecode).expect("execute indexed dynamic member vector store");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+}
+
+#[test]
+fn semantic_indexed_dynamic_member_logical_store_back_lowers_to_slice_instruction() {
+    let source =
+        "s.a = [1 2 3 4]; f = 'a'; mask = logical([1 0 1 0]); s.(f)(mask) = 0; y = s.(f)(3);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile indexed dynamic member logical store");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "indexed dynamic-member logical assignment should lower through StoreSlice*"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreIndex(_) | runmat_vm::Instr::StoreIndexDelete(_)
+        )),
+        "indexed dynamic-member logical assignment should not lower through StoreIndex*"
+    );
+    let vars = interpret(&bytecode).expect("execute indexed dynamic member logical store");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+}
+
+#[test]
 fn cell_paren_delete_executes_with_semantic_store_back() {
     let vars = execute_semantic_source("c = {1, 2, 3}; c(2) = []; y = c{2};");
     assert!(vars
