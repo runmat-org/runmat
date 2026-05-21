@@ -76,6 +76,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `function_handle_selector_colon_errors_with_identifier_contract` asserts `RunMat:UnsupportedFunctionHandleSelector` for colon-selector misuse on function handles.
     - `function_handle_scalar_assignment_selector_errors_with_identifier_contract` and `function_handle_slice_assignment_selector_errors_with_identifier_contract` assert the same identifier for function-handle paren-assignment selector misuse (`f(1)=...`, `f(:)=...`) instead of generic non-tensor assignment identifiers.
     - `function_handle_brace_selector_errors_with_identifier_contract` and `function_handle_brace_assignment_selector_errors_with_identifier_contract` assert the same identifier for function-handle brace selector misuse (`f{1}`, `f{1}=...`) instead of generic cell-on-noncell identifiers.
+  - VM direct function-handle invocation now also has explicit opcode-shape contracts for call-vs-index boundaries in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - single-output handle invocation (`h(1)`) is pinned to dynamic `Index(1)` dispatch (runtime handle/index boundary).
+    - multi-output handle invocation (`[a,b]=h(1)`) is pinned to typed `CallFevalMulti(1,2)`.
+    - expanded handle invocation (`h(C{:})`, `[a,b]=h(C{:})`) is pinned to typed `CallFevalExpandMultiOutput(..., out_count)`.
+    - unresolved qualified external-handle variants are pinned to the same opcode boundaries plus stable `RunMat:UndefinedFunction` error contracts.
   - VM source-level brace selector misuse now also has explicit non-cell identifier contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `brace_read_on_noncell_errors_with_identifier_contract` pins `x = 10{1};` to `RunMat:CellIndexingOnNonCell` (plain brace-read selector boundary).
     - `brace_assignment_on_noncell_errors_with_identifier_contract` pins `x{1} = ...` to `RunMat:CellAssignmentOnNonCell`.
