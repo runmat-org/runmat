@@ -276,18 +276,19 @@ pub async fn build_cell_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<
                 "Cell indexing requires scalar numeric indices",
             )
         })?;
-        selectors.push(SliceSelector::Scalar(if idx_val <= 0 {
-            0
-        } else {
-            idx_val as usize
-        }));
+        if idx_val < 1 {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        let idx =
+            usize::try_from(idx_val).map_err(|_| mex("IndexOutOfBounds", "Index out of bounds"))?;
+        selectors.push(SliceSelector::Scalar(idx));
     }
     Ok(selectors)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{indices_from_value_linear, selector_from_value_dim};
+    use super::{build_cell_scalar_selectors, indices_from_value_linear, selector_from_value_dim};
     use runmat_builtins::{Tensor, Value};
 
     #[test]
@@ -304,5 +305,19 @@ mod tests {
         );
         let err = futures::executor::block_on(indices_from_value_linear(&value, 8)).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
+    fn build_cell_scalar_selectors_rejects_zero_index() {
+        let err = futures::executor::block_on(build_cell_scalar_selectors(&[Value::Num(0.0)]))
+            .expect_err("zero cell scalar index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+    }
+
+    #[test]
+    fn build_cell_scalar_selectors_rejects_negative_index() {
+        let err = futures::executor::block_on(build_cell_scalar_selectors(&[Value::Num(-2.0)]))
+            .expect_err("negative cell scalar index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
     }
 }

@@ -168,6 +168,20 @@ fn scalar_store_index_rejects_zero_index() {
 }
 
 #[test]
+fn cell_paren_read_rejects_zero_index() {
+    let err = execute_semantic_source("C={10,20,30}; D=C(0);")
+        .expect_err("zero cell paren index should fail");
+    assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+}
+
+#[test]
+fn cell_paren_read_rejects_negative_index() {
+    let err = execute_semantic_source("C={10,20,30}; D=C(-1);")
+        .expect_err("negative cell paren index should fail");
+    assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+}
+
+#[test]
 fn cell_brace_scalar_tensor_index_reads_value() {
     let vars = execute_semantic_source("C={10,20,30}; k=[2]; v=C{k};")
         .expect("scalar tensor cell index should execute");

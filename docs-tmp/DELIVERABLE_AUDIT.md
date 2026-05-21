@@ -325,6 +325,12 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `arrayfun_single_segment_external_handle_uses_runtime_name_resolution`
       - `cellfun_external_handle_errors_as_undefined_when_unresolved`
       - `arrayfun_external_handle_errors_as_undefined_when_unresolved`
+  - non-tensor cell paren selector materialization in [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) now rejects non-positive scalar selectors directly (`RunMat:IndexOutOfBounds`) instead of sentinel-zero normalization before plan construction.
+    - direct ratchets:
+      - `build_cell_scalar_selectors_rejects_zero_index`
+      - `build_cell_scalar_selectors_rejects_negative_index`
+      - `cell_paren_read_rejects_zero_index`
+      - `cell_paren_read_rejects_negative_index`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

@@ -12,6 +12,27 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Cell paren scalar-selector normalization now rejects non-positive indices at selector materialization
+  - `scope: in-scope`
+  - `blocker: non-tensor cell paren selector materialization (`build_cell_scalar_selectors`) still converted non-positive scalar selectors to sentinel zero values before plan construction, leaving an avoidable normalization seam in selector planning.`
+  - Tightened selector normalization in [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs):
+    - non-positive scalar cell selectors now fail directly with `RunMat:IndexOutOfBounds` during selector materialization.
+    - positive selector conversion now uses checked integer conversion before building `SliceSelector::Scalar`.
+  - Added ratchets:
+    - `build_cell_scalar_selectors_rejects_zero_index`
+    - `build_cell_scalar_selectors_rejects_negative_index`
+    - `cell_paren_read_rejects_zero_index`
+    - `cell_paren_read_rejects_negative_index`
+  - Validation:
+    - `cargo test -p runmat-vm build_cell_scalar_selectors_rejects_zero_index -- --nocapture`
+    - `cargo test -p runmat-vm build_cell_scalar_selectors_rejects_negative_index -- --nocapture`
+    - `cargo test -p runmat-vm cell_paren_read_rejects_zero_index -- --nocapture`
+    - `cargo test -p runmat-vm cell_paren_read_rejects_negative_index -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - `cellfun`/`arrayfun` external-handle callback parsing now mirrors shared runtime-name classification
   - `scope: in-scope`
   - `blocker: `Callable::from_function(Value::ExternalFunctionHandle(name))` in runtime `cellfun` and `arrayfun` still forced callback identity to external-boundary shape for any unresolved name, so single-segment external handles could not use runtime-name semantic resolution despite equivalent `feval`/descriptor policy updates.`
