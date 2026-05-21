@@ -3214,6 +3214,28 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_interprets_member_store_back_paren_assignment() {
+        let ast = runmat_parser::parse(
+            "s = struct('x', {1, 2}); s(2).x = 9; t = s(2); y = getfield(t, 'x');",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let y_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "y")
+            .expect("y export");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[y_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
     fn primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier() {
         let ast = runmat_parser::parse("[a, b] = deal(1, 2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

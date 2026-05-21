@@ -960,3 +960,25 @@ fn struct_field_path_assignment_records_member_creation_policy() {
         AssignmentCreationPolicy::CreateStructFieldPath
     ));
 }
+
+#[test]
+fn member_assignment_indexed_base_uses_assignment_target_context() {
+    let result = lower_result("s = struct('x', {1, 2}); s(2).x = 9;");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::Member(_, _)))
+        .expect("expected member mutation");
+
+    let HirPlace::Member(base, _) = &mutation.place else {
+        panic!("expected member place");
+    };
+    let HirExprKind::Index(_, indexing) = &base.kind else {
+        panic!("expected indexed assignment base");
+    };
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::AssignmentTarget
+    ));
+}

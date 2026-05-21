@@ -60,6 +60,24 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Indexed assignment-base expressions in lvalue member paths now preserve assignment-context indexing metadata
+  - `scope: in-scope`
+  - `blocker: HIR assignment-base lowering treated nested indexed bases in member lvalues (`s(2).x = ...`) as read expressions, emitting `ReadSingle` index contexts that violated helper-path lvalue index invariants and blocked valid member store-back lowering.`
+  - Updated HIR assignment-base lowering in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `lower_assignment_base_expr(...)` now lowers `AstExpr::Index`/`AstExpr::IndexCell` with the assignment/deletion context propagated from lvalue lowering.
+    - recursive assignment-base lowering for member/member-dynamic/indexed bases now threads the same context through nested base expressions.
+  - Added regression coverage:
+    - HIR semantic-lowering contract in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs): `member_assignment_indexed_base_uses_assignment_target_context`.
+    - VM compile+execute contract in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs): `primary_compile_interprets_member_store_back_paren_assignment`.
+  - Validation:
+    - `cargo test -p runmat-hir member_assignment_indexed_base_uses_assignment_target_context -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_interprets_member_store_back_paren_assignment -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`

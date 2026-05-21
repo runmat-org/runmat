@@ -1050,15 +1050,27 @@ impl SemanticCtx {
         Ok(match lvalue {
             LValue::Var(name) => HirPlace::Binding(self.binding_for_write(name, span)),
             LValue::Member(base, name) => HirPlace::Member(
-                Box::new(self.lower_assignment_base_expr(base, span)?),
+                Box::new(self.lower_assignment_base_expr(
+                    base,
+                    span,
+                    assignment_index_context(deletion),
+                )?),
                 crate::MemberName(name.clone()),
             ),
             LValue::MemberDynamic(base, name) => HirPlace::MemberDynamic(
-                Box::new(self.lower_assignment_base_expr(base, span)?),
+                Box::new(self.lower_assignment_base_expr(
+                    base,
+                    span,
+                    assignment_index_context(deletion),
+                )?),
                 Box::new(self.lower_expr_semantic(name)?),
             ),
             LValue::Index(base, indices) => HirPlace::Index(
-                Box::new(self.lower_assignment_base_expr(base, span)?),
+                Box::new(self.lower_assignment_base_expr(
+                    base,
+                    span,
+                    assignment_index_context(deletion),
+                )?),
                 self.lower_indexing_with_context(
                     indices,
                     IndexKind::Paren,
@@ -1066,7 +1078,11 @@ impl SemanticCtx {
                 )?,
             ),
             LValue::IndexCell(base, indices) => HirPlace::IndexCell(
-                Box::new(self.lower_assignment_base_expr(base, span)?),
+                Box::new(self.lower_assignment_base_expr(
+                    base,
+                    span,
+                    assignment_index_context(deletion),
+                )?),
                 self.lower_indexing_with_context(
                     indices,
                     IndexKind::Brace,
@@ -1080,6 +1096,7 @@ impl SemanticCtx {
         &mut self,
         expr: &AstExpr,
         span: Span,
+        index_context: IndexResultContext,
     ) -> Result<HirExpr, SemanticError> {
         match expr {
             AstExpr::Ident(name, _) => {
@@ -1093,7 +1110,7 @@ impl SemanticCtx {
             AstExpr::Member(base, name, _) => Ok(HirExpr {
                 id: self.alloc_expr_id(),
                 kind: HirExprKind::Member(
-                    Box::new(self.lower_assignment_base_expr(base, span)?),
+                    Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
                     crate::MemberName(name.clone()),
                 ),
                 span: expr.span(),
@@ -1101,8 +1118,24 @@ impl SemanticCtx {
             AstExpr::MemberDynamic(base, name, _) => Ok(HirExpr {
                 id: self.alloc_expr_id(),
                 kind: HirExprKind::MemberDynamic(
-                    Box::new(self.lower_assignment_base_expr(base, span)?),
+                    Box::new(self.lower_assignment_base_expr(base, span, index_context)?),
                     Box::new(self.lower_expr_semantic(name)?),
+                ),
+                span: expr.span(),
+            }),
+            AstExpr::Index(base, indices, _) => Ok(HirExpr {
+                id: self.alloc_expr_id(),
+                kind: HirExprKind::Index(
+                    Box::new(self.lower_assignment_base_expr(base, span, index_context.clone())?),
+                    self.lower_indexing_with_context(indices, IndexKind::Paren, index_context)?,
+                ),
+                span: expr.span(),
+            }),
+            AstExpr::IndexCell(base, indices, _) => Ok(HirExpr {
+                id: self.alloc_expr_id(),
+                kind: HirExprKind::Index(
+                    Box::new(self.lower_assignment_base_expr(base, span, index_context.clone())?),
+                    self.lower_indexing_with_context(indices, IndexKind::Brace, index_context)?,
                 ),
                 span: expr.span(),
             }),
