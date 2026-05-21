@@ -4758,6 +4758,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: extend nested qualified unresolved direct-call typed-opcode coverage
+  - Added nested qualified external-boundary callable contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) for unresolved `pkg.sub.remote(...)` paths beyond single-output fixed-arg calls:
+    - `unresolved_nested_qualified_direct_call_zero_output_uses_external_boundary_typed_instruction`
+    - `unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_typed_instruction`
+    - `unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction`
+  - These tests now pin typed instruction/lowering boundaries for nested qualified unresolved callees across:
+    - fixed-arg zero/multi-output `CallFunctionMulti`
+    - expanded-arg multi-output `CallFunctionExpandMultiOutput`
+    - and preserve stable `RunMat:UndefinedFunction` error contracts.
+  - This closes a remaining callable ABI coverage gap where nested qualified unresolved calls were only ratcheted for single-output fixed-arg shape.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_nested_qualified_direct_call_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -530,6 +530,103 @@ fn unresolved_nested_qualified_direct_call_uses_external_boundary_typed_instruct
 }
 
 #[test]
+fn unresolved_nested_qualified_direct_call_zero_output_uses_external_boundary_typed_instruction() {
+    let bytecode = compile_semantic_source("pkg.sub.remote(7);")
+        .expect("nested qualified zero-output direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            arg_count,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("sub".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *arg_count == 1
+            && *out_count == 0
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified zero-output direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_typed_instruction() {
+    let bytecode = compile_semantic_source("[a,b] = pkg.sub.remote(7);")
+        .expect("nested qualified multi-output direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            arg_count,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("sub".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *arg_count == 1
+            && *out_count == 2
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified multi-output direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction(
+) {
+    let source = "C = deal(1,2); [a,b] = pkg.sub.remote(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified expanded multi-output direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionExpandMultiOutput {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            specs,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("sub".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *out_count == 2
+            && specs.len() == 1
+            && specs[0].is_expand
+            && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified expanded multi-output direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_external_cellfun_callback_fails_without_legacy_fallback() {
     let err = execute_semantic_source_result(
         "xs = {1, 2}; ys = cellfun(@definitely_missing_callback, xs);",
