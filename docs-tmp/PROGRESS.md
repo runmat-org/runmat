@@ -70,6 +70,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm unresolved_function_expand_single_output_uses_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm unresolved_function_single_output_uses_typed_instruction -- --nocapture`
 
+- Validation cadence checkpoint refresh
+  - `scope: in-scope`
+  - Re-ran the agreed closure cadence after callable ABI/identifier ratchets:
+    - `cargo fmt --all`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+  - Status: green.
+
 - VM DefPath/static-method function-handle direct-call ratchet
   - `scope: in-scope`
   - Closed a callable ABI coverage gap where imported/qualified static-method function handles were ratcheted only through `feval(...)` callsites:
