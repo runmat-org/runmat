@@ -1,6 +1,6 @@
 # Completion Audit
 
-Date: 2026-05-20
+Date: 2026-05-21
 
 ## Objective Checklist
 
@@ -51,6 +51,7 @@ Date: 2026-05-20
 - Incremental update: qualified `Value::ExternalFunctionHandle` descriptors now also bind directly to session bytecode semantic identities when the active semantic registry already has the qualified callback name, removing an avoidable name-shaped descriptor hop before runtime fallback; ratcheted by `feval_external_function_handle_prefers_registry_semantic_identity` while preserving unresolved external-boundary behavior when no registry identity exists.
 - Incremental update: runtime `timeit` callback preparation now prebinds resolver-known `FunctionHandle` and well-formed qualified `ExternalFunctionHandle` values to `Value::SemanticFunctionHandle` before timing-loop invocation (`semantic_handle_for_name(...)` in `prepare_callable(...)`), reducing repeated name-shaped callback dispatch where semantic identity is already known; ratcheted by `timeit_external_function_handle_prefers_semantic_resolver_identity` while preserving unresolved external-handle `RunMat:UndefinedFunction` behavior.
 - Incremental update: runtime `cellfun` and `arrayfun` callback parsing now prebinds resolver-known `Value::ExternalFunctionHandle(name)` values to semantic closure callables during `Callable::from_function(...)` (via `resolved_semantic_handle(name)`), reducing repeated name-shaped external callback dispatch when semantic identity is already available; ratcheted by `cellfun_external_handle_prefers_semantic_handle_binding_when_resolved` and `arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved` while preserving unresolved external callback `RunMat:UndefinedFunction` behavior.
+- Incremental update: optimizer/ODE callback dispatch now canonicalizes callback handles before `feval` invocation (`canonicalize_callback_handle(...)` in `optim/common.rs`), prebinding resolver-known `FunctionHandle` and well-formed qualified `ExternalFunctionHandle` values to `Value::SemanticFunctionHandle` while preserving malformed/unresolved external-handle name-shaped behavior; ratcheted by `callback_handle_canonicalizer_binds_function_handle_when_resolved`, `callback_handle_canonicalizer_binds_qualified_external_handle_when_resolved`, and `callback_handle_canonicalizer_keeps_malformed_external_handle_name_shaped`.
 - Incremental update: semantic `feval` multi-output lowering now has explicit instruction-shape ratchets for both fixed and expanded-argument forms (`semantic_feval_multi_assign_uses_typed_instruction`, `semantic_feval_expand_multi_assign_uses_typed_instruction`), pinning `CallFevalMulti`/`CallFevalExpandMultiOutput` contracts at `out_count == 2` and preserving expanded-path execution semantics.
 - Incremental update: unresolved qualified external-handle `feval` multi-output paths now have explicit typed-opcode + error-surface ratchets (`unresolved_qualified_external_handle_multi_output_feval_uses_typed_instruction`, `unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction`), preserving external-handle classification and stable `RunMat:UndefinedFunction` failures.
 - Incremental update: callable-descriptor `feval` closure handling now has direct registry-resolution coverage (`feval_closure_without_embedded_semantic_uses_registry_name_resolution`), pinning the non-embedded-identity closure path to semantic registry lookup before runtime fallback.
@@ -100,7 +101,7 @@ Date: 2026-05-20
   - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
   - `cargo check --workspace`
   - `git diff --check`
-- Latest result: all green on 2026-05-20.
+- Latest result: all green on 2026-05-21.
 
 ## Missing / Incomplete Requirements
 

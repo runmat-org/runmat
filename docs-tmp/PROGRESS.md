@@ -12,6 +12,30 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime optimizer/ODE callback-handle canonicalization to semantic identity
+  - `scope: in-scope`
+  - `blocker: optimizer/ODE callback entrypoints still forwarded name-shaped handles into `feval` even when semantic identity was already resolvable, leaving avoidable name-resolution seams in iterative callback paths.`
+  - Tightened callback dispatch normalization in [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+    - added `canonicalize_callback_handle(...)` and now prebind resolver-known `FunctionHandle(name)` and well-formed qualified `ExternalFunctionHandle(name)` values to `Value::SemanticFunctionHandle` before `feval` dispatch.
+    - malformed/unresolved external-handle names remain name-shaped and preserve unresolved behavior.
+    - shared helper applies to `fzero`/`fsolve` and ODE callbacks via `optim::common::call_function(...)`.
+  - Added ratchets:
+    - [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+      - `callback_handle_canonicalizer_binds_function_handle_when_resolved`
+      - `callback_handle_canonicalizer_binds_qualified_external_handle_when_resolved`
+      - `callback_handle_canonicalizer_keeps_malformed_external_handle_name_shaped`
+  - Validation:
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_ -- --nocapture`
+    - `cargo test -p runmat-runtime fzero_accepts_semantic_function_handle_callback -- --nocapture`
+    - `cargo test -p runmat-runtime fsolve_accepts_semantic_function_handle_callback -- --nocapture`
+    - `cargo test -p runmat-runtime ode45_accepts_external_function_handle_rhs -- --nocapture`
+    - `cargo test -p runmat-runtime ode23_accepts_semantic_function_handle_rhs -- --nocapture`
+    - `cargo test -p runmat-runtime ode15s_accepts_semantic_function_handle_rhs -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM `feval` external-handle semantic binding for qualified registry-known callbacks
   - `scope: in-scope`
   - `blocker: qualified `ExternalFunctionHandle` callback values stayed name-shaped until runtime semantic resolver fallback even when the active semantic function registry already had a stable `FunctionId`, leaving an avoidable name-resolution seam in callable descriptor execution.`
