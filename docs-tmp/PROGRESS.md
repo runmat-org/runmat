@@ -113,6 +113,29 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime object receiver identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: object protocol helper builtins/method shims still had message-only non-object receiver failures, leaving object-call ABI boundaries partially untyped.`
+  - Closed non-object receiver identifier gaps in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `get.p` non-object receiver now emits `RunMat:GetPReceiverInvalid`
+    - `set.p` non-object receiver now emits `RunMat:SetPReceiverInvalid`
+    - `Point.move` non-object receiver now emits `RunMat:PointMoveReceiverInvalid`
+    - `Circle.area` non-object receiver now emits `RunMat:CircleAreaReceiverInvalid`
+  - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `get_p_rejects_non_object_receiver_with_identifier`
+    - `set_p_rejects_non_object_receiver_with_identifier`
+    - `point_move_rejects_non_object_receiver_with_identifier`
+    - `circle_area_rejects_non_object_receiver_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime get_p_rejects_non_object_receiver_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime set_p_rejects_non_object_receiver_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime point_move_rejects_non_object_receiver_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime circle_area_rejects_non_object_receiver_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:

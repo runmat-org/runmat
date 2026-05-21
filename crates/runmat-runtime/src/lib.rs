@@ -642,7 +642,11 @@ async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
                 Ok(Value::Num(0.0))
             }
         }
-        other => Err((format!("get.p requires object, got {other:?}")).into()),
+        other => Err(
+            build_runtime_error(format!("get.p requires object, got {other:?}"))
+                .with_identifier("RunMat:GetPReceiverInvalid")
+                .build(),
+        ),
     }
 }
 
@@ -653,7 +657,11 @@ async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
             o.properties.insert("p_backing".to_string(), val);
             Ok(Value::Object(o))
         }
-        other => Err((format!("set.p requires object, got {other:?}")).into()),
+        other => Err(
+            build_runtime_error(format!("set.p requires object, got {other:?}"))
+                .with_identifier("RunMat:SetPReceiverInvalid")
+                .build(),
+        ),
     }
 }
 
@@ -941,7 +949,11 @@ async fn point_move_method(obj: Value, dx: f64, dy: f64) -> crate::BuiltinResult
             o.properties.insert("y".to_string(), Value::Num(y + dy));
             Ok(Value::Object(o))
         }
-        other => Err((format!("Point.move requires object receiver, got {other:?}")).into()),
+        other => Err(build_runtime_error(format!(
+            "Point.move requires object receiver, got {other:?}"
+        ))
+        .with_identifier("RunMat:PointMoveReceiverInvalid")
+        .build()),
     }
 }
 
@@ -969,7 +981,11 @@ async fn circle_area_method(obj: Value) -> crate::BuiltinResult<Value> {
             };
             Ok(Value::Num(std::f64::consts::PI * r * r))
         }
-        other => Err((format!("Circle.area requires object receiver, got {other:?}")).into()),
+        other => Err(build_runtime_error(format!(
+            "Circle.area requires object receiver, got {other:?}"
+        ))
+        .with_identifier("RunMat:CircleAreaReceiverInvalid")
+        .build()),
     }
 }
 
@@ -2501,6 +2517,34 @@ mod tests {
         ))
         .expect_err("missing subsasgn protocol should fail");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+    }
+
+    #[test]
+    fn get_p_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(get_p_builtin(Value::Num(1.0)))
+            .expect_err("get.p should reject non-object receiver");
+        assert_eq!(err.identifier(), Some("RunMat:GetPReceiverInvalid"));
+    }
+
+    #[test]
+    fn set_p_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(set_p_builtin(Value::Num(1.0), Value::Num(2.0)))
+            .expect_err("set.p should reject non-object receiver");
+        assert_eq!(err.identifier(), Some("RunMat:SetPReceiverInvalid"));
+    }
+
+    #[test]
+    fn point_move_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(point_move_method(Value::Num(1.0), 2.0, 3.0))
+            .expect_err("Point.move should reject non-object receiver");
+        assert_eq!(err.identifier(), Some("RunMat:PointMoveReceiverInvalid"));
+    }
+
+    #[test]
+    fn circle_area_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(circle_area_method(Value::Num(1.0)))
+            .expect_err("Circle.area should reject non-object receiver");
+        assert_eq!(err.identifier(), Some("RunMat:CircleAreaReceiverInvalid"));
     }
 
     #[test]
