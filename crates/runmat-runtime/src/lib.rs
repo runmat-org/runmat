@@ -667,6 +667,14 @@ async fn notify_builtin(
                 a.extend(args.into_iter());
                 let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
             }
+            Value::CharArray(ca) if ca.rows == 1 => {
+                let text: String = ca.data.iter().collect();
+                if text.starts_with('@') {
+                    let mut a = vec![Value::CharArray(ca.clone())];
+                    a.extend(args.into_iter());
+                    let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
+                }
+            }
             Value::FunctionHandle(name) => {
                 let mut a = vec![Value::FunctionHandle(name.clone())];
                 a.extend(args.into_iter());
@@ -2830,6 +2838,24 @@ mod tests {
         block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
             .expect("notify succeeds");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn notify_char_handle_callback_surfaces_unresolved_identifier() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        block_on(addlistener_builtin(
+            target.clone(),
+            "Changed".to_string(),
+            Value::CharArray(runmat_builtins::CharArray::new_row(
+                "@definitely_missing_callback",
+            )),
+        ))
+        .expect("listener registered");
+        let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
+            .expect_err("unresolved char callback should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
     #[test]

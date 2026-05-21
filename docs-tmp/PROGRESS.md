@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime notify char-handle callback dispatch normalization
+  - `scope: in-scope`
+  - `blocker: notify callback dispatch ignored row `CharArray` `@name` callbacks unless they had already been canonicalized to semantic handles, leaving unresolved char-handle callbacks silently dropped instead of flowing through callable resolution/error contracts.`
+  - Tightened notify callback dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `notify_builtin(...)` now routes row `Value::CharArray` callbacks starting with `@` through `feval` (same path as string handles), preserving callable resolution/error semantics.
+  - Added ratchet:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `notify_char_handle_callback_surfaces_unresolved_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime notify_char_handle_callback_surfaces_unresolved_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime notify_semantic_function_handle_uses_semantic_identity -- --nocapture`
+    - `cargo test -p runmat-runtime addlistener_char_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime event-listener closure callback prebinding to semantic identity
   - `scope: in-scope`
   - `blocker: listener callback prebinding still left closure callbacks without embedded semantic ids (`Closure.semantic_function == None`) on notify-time name-resolution paths even when resolver identity was known at registration.`
