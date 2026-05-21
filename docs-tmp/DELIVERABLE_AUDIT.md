@@ -121,6 +121,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirMethodCallCalleeInvalid` for internal method-call static-callee invariants.
     - `RunMat:MirCallTargetNameInvalid` for malformed static non-builtin callable identity name-shape invariants at compile boundaries.
     - `RunMat:MirIndexContextInvalid` for malformed multi-assign indexed output-target context invariants at compile boundaries.
+    - `RunMat:MirIndexContextInvalid` for malformed direct indexed assignment-place context invariants at compile boundaries.
     - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads.
     - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants.
     - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable external/imported function-handle targets at VM compile boundaries.
@@ -152,6 +153,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - malformed indexed output-target contexts now fail with `RunMat:MirIndexContextInvalid`.
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`
+  - VM direct indexed assignment lowering now enforces assignment-context invariants for non-delete indexed assignment places in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `compile_mir_assign(...)` now requires non-delete `MirPlace::Index` assignment targets to carry `IndexResultContext::AssignmentTarget`.
+    - malformed direct indexed assignment contexts now fail with `RunMat:MirIndexContextInvalid`.
+    - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+      - `primary_compile_rejects_index_assignment_with_read_context_identifier`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).

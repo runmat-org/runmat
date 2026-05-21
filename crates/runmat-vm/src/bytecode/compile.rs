@@ -2934,6 +2934,41 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_index_assignment_with_read_context_identifier() {
+        let ast = runmat_parser::parse("x=[1,2,3]; x(1)=4;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Index(_, indexing),
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.result_context = IndexResultContext::ReadSingle;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected indexed assignment place in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirIndexContextInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier() {
         let ast = runmat_parser::parse("c = {1,2;3,4}; [a,b] = c{:,2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

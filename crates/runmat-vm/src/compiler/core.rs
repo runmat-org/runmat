@@ -1349,6 +1349,13 @@ impl Compiler {
                         )
                         .with_identifier(IDENT_MIR_DELETION_CONTEXT_WITHOUT_DELETE_INVALID));
                 }
+                if indexing.result_context != IndexResultContext::AssignmentTarget {
+                    return Err(self
+                        .compile_error(
+                            "MIR assignment invariant violated: indexed assignment target requires AssignmentTarget context",
+                        )
+                        .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+                }
             }
         }
         if delete {
