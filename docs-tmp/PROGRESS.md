@@ -23,9 +23,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
       - compiles through dynamic call dispatch (`CallFevalExpandMultiOutput`) and fails at runtime with `RunMat:UndefinedFunction` for unresolved externals.
     - HIR lowering now routes binding-call syntax with expansion or multi-output through `HirExprKind::Call` (`DynamicExpr`) instead of read-index lowering, closing the prior call/index context leak.
   - Added VM contract ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `unresolved_qualified_external_handle_zero_output_feval_uses_typed_instruction`
     - `unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction`
+    - `unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instruction`
     - `unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction`
+    - `unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction`
     - `unresolved_qualified_external_handle_expand_direct_call_uses_typed_instruction`
+    - `unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction`
     - `unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction`
     - `unresolved_qualified_external_handle_expand_feval_uses_typed_instruction`
   - Added HIR semantic-lowering ratchets in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):

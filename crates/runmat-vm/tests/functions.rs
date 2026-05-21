@@ -87,6 +87,26 @@ fn unresolved_qualified_external_function_handle_uses_external_handle_instructio
 }
 
 #[test]
+fn unresolved_qualified_external_handle_zero_output_feval_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; feval(h, 1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle zero-output feval source should compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
+    ));
+    let err = interpret(&bytecode).expect_err("unresolved qualified zero-output feval should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; [a,b] = feval(h, 1);";
     let bytecode = compile_semantic_source(source)
@@ -99,6 +119,29 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
     ));
     let err =
         interpret(&bytecode).expect_err("unresolved qualified multi-output feval should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; C = deal(1,2); feval(h, C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle expanded zero-output feval source should compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 0 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err =
+        interpret(&bytecode).expect_err("unresolved qualified expanded zero-output feval should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -171,6 +214,27 @@ fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruc
 }
 
 #[test]
+fn unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; h(1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle zero-output direct call compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
+    ));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved qualified zero-output direct handle call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; [a,b] = h(1);";
     let bytecode = compile_semantic_source(source)
@@ -180,6 +244,29 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
     ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified multi-output direct handle call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; C = deal(1,2); h(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle expanded zero-output direct call compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 0 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved qualified expanded zero-output direct handle call should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
