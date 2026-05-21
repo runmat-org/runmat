@@ -1022,6 +1022,22 @@ fn semantic_member_read_write_executes() {
 }
 
 #[test]
+fn semantic_dynamic_member_read_executes() {
+    let vars = execute_semantic_source("s = struct('x', 9); f = 'x'; y = s.(f);");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+}
+
+#[test]
+fn semantic_indexed_dynamic_member_read_executes() {
+    let vars = execute_semantic_source("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
+}
+
+#[test]
 fn semantic_indexed_member_store_back_executes() {
     let bytecode = compile_semantic_source("s.a = [1 2 3]; s.a(2) = 9; y = s.a(2);").unwrap();
     let vars = interpret(&bytecode).expect("semantic indexed member store-back should succeed");

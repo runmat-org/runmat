@@ -75,12 +75,10 @@ fn imports_and_nested_metaclass_on_one_line() {
 }
 
 #[test]
-fn stress_dynamic_member_with_surrounding_tokens_errors() {
-    // This should not be accepted; dynamic member in middle of token stream
-    let res1 = parse("foo 'a' s.(1)");
-    assert!(res1.is_err());
-    let res2 = parse("before s.(x) after");
-    assert!(res2.is_err());
-    let res3 = parse("cmd ...\n s.(x)");
-    assert!(res3.is_err());
+fn stress_dynamic_member_with_surrounding_tokens_parses() {
+    // Dynamic member expressions are valid in expression position.
+    assert!(parse("foo 'a' s.(1)").is_ok());
+    // These token streams remain invalid in command-form position.
+    assert!(parse("before s.(x) after").is_err());
+    assert!(parse("cmd ...\n s.(x)").is_err());
 }

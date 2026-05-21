@@ -1171,3 +1171,54 @@ fn dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context() 
         IndexResultContext::AssignmentTarget
     ));
 }
+
+#[test]
+fn dynamic_member_expression_lowers_to_member_dynamic_expr() {
+    let assembly = lower_semantic("s = struct('x', 1); f = 'x'; y = s.(f);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let stmt = function
+        .body
+        .statements
+        .iter()
+        .rev()
+        .find(|stmt| matches!(stmt.kind, HirStmtKind::Assign(_, _, _)))
+        .expect("expected assignment statement");
+
+    let HirStmtKind::Assign(_, value, _) = &stmt.kind else {
+        panic!("expected assignment statement");
+    };
+    assert!(matches!(value.kind, HirExprKind::MemberDynamic(_, _)));
+}
+
+#[test]
+fn indexed_dynamic_member_expression_lowers_to_indexcell_over_member_dynamic_expr() {
+    let assembly = lower_semantic("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let stmt = function
+        .body
+        .statements
+        .iter()
+        .rev()
+        .find(|stmt| matches!(stmt.kind, HirStmtKind::Assign(_, _, _)))
+        .expect("expected assignment statement");
+
+    let HirStmtKind::Assign(_, value, _) = &stmt.kind else {
+        panic!("expected assignment statement");
+    };
+    assert!(matches!(
+        value.kind,
+        HirExprKind::Index(ref base, ref indexing)
+            if matches!(base.kind, HirExprKind::MemberDynamic(_, _))
+                && matches!(indexing.kind, IndexKind::Brace)
+    ));
+}

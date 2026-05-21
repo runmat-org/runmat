@@ -4396,6 +4396,29 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Dynamic-member expression read-path closure (parser -> HIR -> VM)
+  - Enabled expression-form dynamic member parsing in [expr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/src/parser/expr.rs) for postfix `.(expr)` so `s.(f)` lowers as `Expr::MemberDynamic(...)` in expression context (not only assignment-target context).
+  - Added parser coverage in [cells_and_indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/tests/cells_and_indexing.rs):
+    - `dynamic_member_expression_and_indexing_parse` for:
+      - `y = s.(f)`
+      - `z = s.(f){2}`
+  - Updated command-edge parser ratchet in [fuzz_command_edges.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/tests/fuzz_command_edges.rs):
+    - `foo 'a' s.(1)` now asserted valid.
+    - existing invalid command-form token-stream boundaries remain asserted invalid.
+  - Added HIR semantic-lowering contracts in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `dynamic_member_expression_lowers_to_member_dynamic_expr`
+    - `indexed_dynamic_member_expression_lowers_to_indexcell_over_member_dynamic_expr`
+  - Added VM semantic execution contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_dynamic_member_read_executes`
+    - `semantic_indexed_dynamic_member_read_executes`
+  - Validation:
+    - `cargo test -p runmat-parser --test cells_and_indexing -- --nocapture`
+    - `cargo test -p runmat-parser --test fuzz_command_dynamic -- --nocapture`
+    - `cargo test -p runmat-parser --test fuzz_command_edges -- --nocapture`
+    - `cargo test -p runmat-hir --test semantic_lowering -- --nocapture`
+    - `cargo test -p runmat-vm --test functions semantic_dynamic_member_read_executes -- --nocapture`
+    - `cargo test -p runmat-vm --test functions semantic_indexed_dynamic_member_read_executes -- --nocapture`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

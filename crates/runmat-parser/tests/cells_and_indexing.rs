@@ -48,3 +48,26 @@ fn indexing_with_end_and_member_method() {
         _ => panic!("expected dotted invoke expression"),
     }
 }
+
+#[test]
+fn dynamic_member_expression_and_indexing_parse() {
+    let program = parse("f = 'x'; y = s.(f); z = s.(f){2};").unwrap();
+    assert_eq!(program.body.len(), 3);
+    match &program.body[1] {
+        Stmt::Assign(name, Expr::MemberDynamic(base, dyn_name, _), true, _) => {
+            assert_eq!(name, "y");
+            assert!(matches!(**base, Expr::Ident(ref n, _) if n == "s"));
+            assert!(matches!(**dyn_name, Expr::Ident(ref n, _) if n == "f"));
+        }
+        other => panic!("expected dynamic member expression assignment, got {other:?}"),
+    }
+    match &program.body[2] {
+        Stmt::Assign(name, Expr::IndexCell(base, idxs, _), true, _) => {
+            assert_eq!(name, "z");
+            assert_eq!(idxs.len(), 1);
+            assert!(matches!(idxs[0], Expr::Number(ref n, _) if n == "2"));
+            assert!(matches!(&**base, Expr::MemberDynamic(_, _, _)));
+        }
+        other => panic!("expected indexed dynamic member expression assignment, got {other:?}"),
+    }
+}

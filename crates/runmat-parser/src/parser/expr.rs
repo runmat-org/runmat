@@ -245,6 +245,16 @@ impl Parser {
                     break;
                 }
                 self.pos += 1;
+                if self.consume(&Token::LParen) {
+                    let name_expr = self.parse_expr()?;
+                    if !self.consume(&Token::RParen) {
+                        return Err("expected ')' after dynamic member expression".into());
+                    }
+                    let end = self.last_token_end();
+                    let span = self.span_from(expr.span().start, end);
+                    expr = Expr::MemberDynamic(Box::new(expr), Box::new(name_expr), span);
+                    continue;
+                }
                 let name_token = match self.next() {
                     Some(TokenInfo {
                         token: Token::Ident,
