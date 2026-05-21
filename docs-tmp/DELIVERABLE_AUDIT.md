@@ -306,6 +306,12 @@ This audit maps the active objective to concrete repository evidence and marks e
   - runtime callback builtin boundaries now also ratchet malformed qualified external-handle identifiers (`pkg..callback`) for both cell and array callback lanes:
     - `cellfun_malformed_external_handle_errors_as_undefined_when_unresolved` -> `RunMat:UndefinedFunction`
     - `arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved` -> `RunMat:UndefinedFunction`
+  - `feval` callable-descriptor normalization for `Value::ExternalFunctionHandle` now shares the same typed target classifier path (`resolve_named_target(...)`) used by other handle/text forms in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - well-formed qualified names preserve `ExternalBoundary` behavior.
+    - malformed and single-segment names now stay on runtime-name resolution semantics instead of forced external-boundary fallback.
+    - direct ratchets:
+      - `malformed_qualified_external_function_handle_remains_dynamic_name`
+      - `single_segment_external_function_handle_uses_runtime_name_resolution`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

@@ -12,6 +12,24 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- External-function-handle descriptor classification now shares strict typed target resolution
+  - `scope: in-scope`
+  - `blocker: `CallableDescriptor::from_feval_value(...)` still special-cased `Value::ExternalFunctionHandle` into external-boundary identity even for malformed/single-segment names, leaving a callable-ABI seam where non-qualified handle names could bypass shared runtime-name resolution semantics.`
+  - Tightened `feval` descriptor normalization in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `Value::ExternalFunctionHandle(name)` now routes through shared `resolve_named_target(...)` classification instead of bespoke external-boundary forcing.
+    - well-formed qualified names keep external-boundary classification; malformed/single-segment names now remain dynamic runtime-name identities unless resolver/registry binds them semantically.
+  - Added ratchets:
+    - `malformed_qualified_external_function_handle_remains_dynamic_name`
+    - `single_segment_external_function_handle_uses_runtime_name_resolution`
+  - Validation:
+    - `cargo test -p runmat-vm malformed_qualified_external_function_handle_remains_dynamic_name -- --nocapture`
+    - `cargo test -p runmat-vm single_segment_external_function_handle_uses_runtime_name_resolution -- --nocapture`
+    - `cargo test -p runmat-vm feval_external_function_handle_can_use_semantic_resolver -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM feval descriptor now resolves scalar `StringArray` `@handle` callbacks through typed callable targets
   - `scope: in-scope`
   - `blocker: `CallableDescriptor::from_feval_value(...)` resolved `Value::String("@name")` and row `Value::CharArray('@name')` handles into typed callable identities, but scalar `Value::StringArray(["@name"])` handles still bypassed descriptor resolution and stayed on generic feval-forward path.`

@@ -291,24 +291,9 @@ impl CallableDescriptor {
                 Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
             Value::ExternalFunctionHandle(name) => {
-                if Self::is_well_formed_qualified_name(&name) {
-                    if let Some(function) = semantic_registry.resolve_name(&name) {
-                        return Self::feval_semantic(
-                            function.0,
-                            name,
-                            CallableFallbackPolicy::None,
-                            args,
-                            requested_outputs,
-                        );
-                    }
-                }
-                Self::feval_resolved_name(
-                    Self::qualified_identity_from_name(&name),
-                    name,
-                    CallableFallbackPolicy::ExternalBoundary,
-                    args,
-                    requested_outputs,
-                )
+                let (identity, fallback_policy) =
+                    Self::resolve_named_target(&name, semantic_registry);
+                Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
@@ -973,6 +958,56 @@ mod tests {
         assert!(matches!(
             identity,
             CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
+        ));
+        assert_eq!(
+            *fallback_policy,
+            CallableFallbackPolicy::RuntimeNameResolution
+        );
+    }
+
+    #[test]
+    fn malformed_qualified_external_function_handle_remains_dynamic_name() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::ExternalFunctionHandle("pkg..remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(
+            identity,
+            CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
+        ));
+        assert_eq!(
+            *fallback_policy,
+            CallableFallbackPolicy::RuntimeNameResolution
+        );
+    }
+
+    #[test]
+    fn single_segment_external_function_handle_uses_runtime_name_resolution() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::ExternalFunctionHandle("origin".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(
+            identity,
+            CallableIdentity::DynamicName(SymbolName(name)) if name == "origin"
         ));
         assert_eq!(
             *fallback_policy,
