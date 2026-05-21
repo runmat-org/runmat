@@ -4939,6 +4939,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: extend unresolved external-handle `feval` execution identifier contracts
+  - Added source-level runtime contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) for unresolved external function-handle `feval` execution across additional output/arg-shape lanes:
+    - `unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fallback`
+    - `unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback`
+  - These tests pin stable `RunMat:UndefinedFunction` failures for zero-output fixed-arg `feval(h, ...)` and expanded-arg `feval(h, C{:})`, complementing existing single-output unresolved-handle `feval` failure coverage.
+  - This reduces remaining execution-surface callable ABI drift by ensuring unresolved external-handle `feval` failure identifiers stay typed/stable beyond one output-policy lane.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

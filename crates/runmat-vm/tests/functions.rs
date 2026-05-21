@@ -71,6 +71,32 @@ fn unresolved_external_function_handle_fails_without_legacy_fallback() {
 }
 
 #[test]
+fn unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result("h = @definitely_missing_callback; feval(h, 1);")
+        .expect_err("unresolved external callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result(
+        "h = @definitely_missing_callback; C = deal(1,2); y = feval(h, C{:});",
+    )
+    .expect_err("unresolved external expanded callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_qualified_external_function_handle_uses_external_handle_instruction() {
     let bytecode = compile_semantic_source("h = @pkg.remote_inc; y = feval(h, 1);")
         .expect("qualified handle source should compile");
