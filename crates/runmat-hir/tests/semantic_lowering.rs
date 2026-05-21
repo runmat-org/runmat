@@ -1010,6 +1010,34 @@ fn empty_array_indexed_cell_content_assignment_records_deletion_target() {
 }
 
 #[test]
+fn empty_array_indexed_dynamic_member_assignment_records_deletion_target() {
+    let result = lower_result("s.a = {1, 2, 3}; f = 'a'; s.(f)(2) = [];");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| {
+            matches!(mutation.kind, PlaceMutationKind::Delete)
+                && matches!(mutation.place, HirPlace::Index(_, _))
+        })
+        .expect("expected indexed delete mutation");
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::Delete));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::ExistingOnly
+    ));
+    let HirPlace::Index(base, indexing) = &mutation.place else {
+        panic!("expected indexed place");
+    };
+    assert!(matches!(&base.kind, HirExprKind::MemberDynamic(_, _)));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::DeletionTarget
+    ));
+}
+
+#[test]
 fn empty_array_member_assignment_is_not_marked_as_delete() {
     let result = lower_result("s = struct('x', {1, 2}); s(2).x = [];");
     let mutation = result

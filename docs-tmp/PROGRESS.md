@@ -195,6 +195,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Dynamic-member nested delete store-back now has explicit semantic contracts
+  - `scope: in-scope`
+  - `blocker: assignment-place closure for dynamic member chains lacked a direct nested delete contract, leaving `s(1).(f)(2) = []` behavior uncovered even after member/brace/paren helper-path context ratchets.`
+  - Added HIR semantic-lowering coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `empty_array_indexed_dynamic_member_assignment_records_deletion_target`
+  - Added MIR shape coverage in [lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/tests/lowering.rs):
+    - `indexed_dynamic_member_delete_lowers_to_index_place_over_dynamic_member_base`
+  - Added VM compile+execute coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_interprets_dynamic_member_nested_index_delete_store_back`
+  - Clarified parser boundary in the VM contract source form:
+    - dynamic member syntax remains assignment-target supported (`s(1).(f)(2) = []`) while general expression form `s.(f)` is not used as a readback expression in this ratchet; readback is performed via `getfield(s(1), f)`.
+  - Validation:
+    - `cargo test -p runmat-hir --test semantic_lowering empty_array_indexed_dynamic_member_assignment_records_deletion_target -- --nocapture`
+    - `cargo test -p runmat-mir --test lowering indexed_dynamic_member_delete_lowers_to_index_place_over_dynamic_member_base -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_interprets_dynamic_member_nested_index_delete_store_back -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`
