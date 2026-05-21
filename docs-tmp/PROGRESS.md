@@ -4784,6 +4784,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: add nested qualified external-handle direct-call opcode contracts
+  - Added nested qualified external-handle coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) for unresolved `h = @pkg.sub.remote` direct-call lanes:
+    - `unresolved_nested_qualified_external_handle_direct_call_uses_external_handle_instruction`
+    - `unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typed_instruction`
+    - `unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_instruction`
+  - These tests pin:
+    - nested qualified handle materialization via `CreateExternalFunctionHandle("pkg.sub.remote")`
+    - single-output direct handle invocation through `Index(1)`
+    - multi-output direct handle invocation through `CallFevalMulti(1,2)`
+    - expanded direct handle invocation through `CallFevalExpandMultiOutput(..., 1)`
+    - stable unresolved failure identifier `RunMat:UndefinedFunction`.
+  - This closes a callable ABI variant gap where nested qualified direct-call opcode coverage existed for non-handle callee shapes but not for equivalent external-handle invocation shapes.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_nested_qualified_external_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

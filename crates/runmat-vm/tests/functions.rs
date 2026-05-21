@@ -332,6 +332,76 @@ fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typ
 }
 
 #[test]
+fn unresolved_nested_qualified_external_handle_direct_call_uses_external_handle_instruction() {
+    let source = "h = @pkg.sub.remote; y = h(1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified external handle direct call compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+    ));
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::Index(1))),
+        "single-output direct handle call should lower through Index(1)"
+    );
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified external handle direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typed_instruction() {
+    let source = "h = @pkg.sub.remote; [a,b] = h(1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified external handle multi-output direct call compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
+    ));
+    let err = interpret(&bytecode).expect_err(
+        "unresolved nested qualified external handle multi-output direct call should fail",
+    );
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
+    let source = "h = @pkg.sub.remote; C = deal(1,2); y = h(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified external handle expanded direct call compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified external handle expanded direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_external_direct_call_fails_without_runtime_name_fallback() {
     let err = execute_semantic_source_result("y = definitely_missing_callback(1);")
         .expect_err("unresolved external direct call should fail");
