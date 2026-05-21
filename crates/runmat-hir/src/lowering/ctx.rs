@@ -1982,7 +1982,9 @@ fn ast_end_relative_offset(expr: &AstExpr) -> Option<isize> {
                 None
             }
         }
-        AstExpr::Binary(left, BinOp::Sub, right, _) if matches!(&**left, AstExpr::EndKeyword(_)) => {
+        AstExpr::Binary(left, BinOp::Sub, right, _)
+            if matches!(&**left, AstExpr::EndKeyword(_)) =>
+        {
             ast_integer_offset_literal(right).and_then(|offset| offset.checked_neg())
         }
         _ => None,

@@ -1,5 +1,5 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, StructValue, Value};
+use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
 const CELL_END_PLUS_TAG_MASK: u64 = 0x7ff8_0000_0000_0000;
@@ -17,6 +17,16 @@ fn allocate_cell_handle(value: Value) -> Result<runmat_gc::GcPtr<Value>, Runtime
             &format!("failed to allocate cell element handle: {e}"),
         )
     })
+}
+
+fn empty_numeric_cell_value() -> Result<Value, RuntimeError> {
+    Tensor::new(Vec::new(), vec![0, 0])
+        .map(Value::Tensor)
+        .map_err(|e| map_cell_shape_error("cell growth empty filler", e))
+}
+
+fn allocate_empty_cell_handle() -> Result<runmat_gc::GcPtr<Value>, RuntimeError> {
+    allocate_cell_handle(empty_numeric_cell_value()?)
 }
 
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
@@ -309,11 +319,38 @@ where
         2 => {
             let i = indices[0];
             let j = indices[1];
-            if i == 0 || i > ca.rows || j == 0 || j > ca.cols {
+            if i == 0 || j == 0 {
                 return Err(mex(
                     "CellSubscriptOutOfBounds",
                     "Cell subscript out of bounds",
                 ));
+            }
+            if i > ca.rows || j > ca.cols {
+                let old_rows = ca.rows;
+                let old_cols = ca.cols;
+                let new_rows = old_rows.max(i);
+                let new_cols = old_cols.max(j);
+                let total = new_rows.checked_mul(new_cols).ok_or_else(|| {
+                    mex(
+                        "CellSubscriptOutOfBounds",
+                        "Cell array expansion exceeds supported size",
+                    )
+                })?;
+                let mut grown = Vec::with_capacity(total);
+                for _ in 0..total {
+                    grown.push(allocate_empty_cell_handle()?);
+                }
+                for row in 0..old_rows {
+                    for col in 0..old_cols {
+                        let old_lin = row * old_cols + col;
+                        let new_lin = row * new_cols + col;
+                        grown[new_lin] = ca.data[old_lin].clone();
+                    }
+                }
+                ca.data = grown;
+                ca.rows = new_rows;
+                ca.cols = new_cols;
+                ca.shape = vec![new_rows, new_cols];
             }
             let lin = (i - 1) * ca.cols + (j - 1);
             if let Some(oldv) = ca.data.get(lin) {

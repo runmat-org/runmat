@@ -132,8 +132,7 @@ fn apply_cell_end_offsets_for_base(
             ca.cols
         };
         let resolved = (len as isize) + *offset;
-        let can_grow =
-            allow_end_plus_one_growth && adjusted.len() == 1 && resolved == (len as isize + 1);
+        let can_grow = allow_end_plus_one_growth && resolved == (len as isize + 1);
         if resolved < 1 || ((resolved as usize) > len && !can_grow) {
             return Err(crate::interpreter::errors::mex(
                 "CellIndexOutOfBounds",
@@ -174,9 +173,7 @@ async fn apply_cell_end_exprs_for_base(
             ca.cols
         };
         let resolved = resolve_range_end_index(dim_len, end_expr, vars).await?;
-        let can_grow = allow_end_plus_one_growth
-            && adjusted.len() == 1
-            && resolved == (dim_len as i64 + 1);
+        let can_grow = allow_end_plus_one_growth && resolved == (dim_len as i64 + 1);
         if resolved < 1 || ((resolved as usize) > dim_len && !can_grow) {
             return Err(crate::interpreter::errors::mex(
                 "CellIndexOutOfBounds",
@@ -361,22 +358,20 @@ async fn execute_brace_operation_from_stack(
     let raw_indices = pop_index_values(stack, num_indices)?;
     let base = pop_index_base(stack)?;
     let allow_end_plus_one_growth = matches!(operation, BraceIndexOperation::Store { .. });
-    let adjusted_end_exprs =
-        apply_cell_end_exprs_for_base(
-            &base,
-            &raw_indices,
-            end_exprs,
-            vars,
-            allow_end_plus_one_growth,
-        )
-        .await?;
-    let adjusted_indices =
-        apply_cell_end_offsets_for_base(
-            &base,
-            &adjusted_end_exprs,
-            end_offsets,
-            allow_end_plus_one_growth,
-        )?;
+    let adjusted_end_exprs = apply_cell_end_exprs_for_base(
+        &base,
+        &raw_indices,
+        end_exprs,
+        vars,
+        allow_end_plus_one_growth,
+    )
+    .await?;
+    let adjusted_indices = apply_cell_end_offsets_for_base(
+        &base,
+        &adjusted_end_exprs,
+        end_offsets,
+        allow_end_plus_one_growth,
+    )?;
     let outcome = execute_brace_operation(base, &adjusted_indices, operation).await?;
     match (outcome, expectation) {
         (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
