@@ -187,6 +187,42 @@ fn str2func_qualified_external_direct_call_errors_without_legacy_fallback() {
 }
 
 #[test]
+fn str2func_qualified_external_direct_call_zero_output_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); f(1);")
+        .expect_err("unresolved qualified str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_direct_call_multi_output_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); [a,b] = f(1);")
+        .expect_err("unresolved qualified str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_direct_call_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); C = {1,2}; y = f(C{:});")
+        .expect_err("unresolved qualified str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_direct_call_zero_output_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); C = {1,2}; f(C{:});")
+        .expect_err("unresolved qualified str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_direct_call_multi_output_errors_without_legacy_fallback() {
+    let err =
+        execute_semantic_source("f = str2func('pkg.remote_inc'); C = {1,2}; [a,b] = f(C{:});")
+            .expect_err("unresolved qualified str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn str2func_empty_name_errors_with_identifier_contract() {
     let err = execute_semantic_source("f = str2func('');")
         .expect_err("empty str2func function name should fail");

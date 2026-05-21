@@ -5001,6 +5001,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete unresolved qualified `str2func` direct-call failure matrix
+  - Extended unresolved qualified `str2func('pkg.remote_inc')` direct-invocation contracts in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
+    - fixed-arg lanes:
+      - `str2func_qualified_external_direct_call_zero_output_errors_without_legacy_fallback`
+      - `str2func_qualified_external_direct_call_multi_output_errors_without_legacy_fallback`
+    - expanded-arg lanes:
+      - `str2func_qualified_external_expand_direct_call_errors_without_legacy_fallback`
+      - `str2func_qualified_external_expand_direct_call_zero_output_errors_without_legacy_fallback`
+      - `str2func_qualified_external_expand_direct_call_multi_output_errors_without_legacy_fallback`
+  - Together with existing single-output direct-call coverage, unresolved qualified `str2func` direct callback execution now has fixed+expanded output-count `0/1/2` failure identifier coverage.
+  - All lanes are pinned to stable `RunMat:UndefinedFunction`, tightening callable ABI execution contracts for unresolved text-handle direct invocation forms in addition to `feval(...)`.
+  - Validation:
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_direct_call_ -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_expand_direct_call_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
