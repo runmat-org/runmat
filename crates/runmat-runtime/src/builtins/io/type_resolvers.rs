@@ -41,6 +41,11 @@ pub fn feof_type(args: &[Type], ctx: &ResolveContext) -> Type {
     bool_type(args, ctx)
 }
 
+pub fn fgetl_type(args: &[Type], _ctx: &ResolveContext) -> Type {
+    let _ = args;
+    Type::Union(vec![Type::String, Type::Num])
+}
+
 pub fn fgets_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num])
@@ -337,6 +342,12 @@ mod tests {
 
     assert_resolver!(fclose_type_resolver, fclose_type, &[], Type::Num);
     assert_resolver!(feof_type_resolver, feof_type, &[], Type::Bool);
+    assert_resolver!(
+        fgetl_type_resolver,
+        fgetl_type,
+        &[],
+        Type::Union(vec![Type::String, Type::Num])
+    );
     assert_resolver!(
         fgets_type_resolver,
         fgets_type,

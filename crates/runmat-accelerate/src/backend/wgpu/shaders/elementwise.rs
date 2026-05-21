@@ -428,6 +428,18 @@ fn factorial_real(a: f64) -> f64 {
     return acc;
 }
 
+fn sinc_real(a: f64) -> f64 {
+    if (a == 0.0) {
+        return 1.0;
+    }
+    let abs_a = abs(a);
+    if (!is_nan64(a) && !is_inf64(a) && floor(abs_a) == abs_a) {
+        return 0.0;
+    }
+    let scaled = PI * a;
+    return sin(scaled) / scaled;
+}
+
 fn apply(a: f64) -> f64 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -486,6 +498,7 @@ fn apply(a: f64) -> f64 {
             }
             return ceil(log2(aa));
         }
+        case 33u: { return sinc_real(a); }
         default: { return a; }
     }
 }
@@ -665,6 +678,18 @@ fn factorial_real(a: f32) -> f32 {
     return acc;
 }
 
+fn sinc_real(a: f32) -> f32 {
+    if (a == 0.0) {
+        return 1.0;
+    }
+    let abs_a = abs(a);
+    if (!is_nan32(a) && !is_inf32(a) && floor(abs_a) == abs_a) {
+        return 0.0;
+    }
+    let scaled = PI * a;
+    return sin(scaled) / scaled;
+}
+
 fn apply(a: f32) -> f32 {
     switch params.op {
         case 0u: { return sin(a); }
@@ -723,6 +748,7 @@ fn apply(a: f32) -> f32 {
             }
             return ceil(log2(aa));
         }
+        case 33u: { return sinc_real(a); }
         default: { return a; }
     }
 }

@@ -51,6 +51,7 @@ export type BuiltinDoc = {
   references?: string[];
   description?: string;
   behaviors?: string[];
+  extended_capabilities?: string[];
   examples?: BuiltinDocExample[];
   faqs?: BuiltinDocFAQ[];
   links?: BuiltinDocLink[];
