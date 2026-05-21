@@ -2032,6 +2032,25 @@ fn semantic_function_handle_index_call_executes() {
 }
 
 #[test]
+fn semantic_function_handle_index_zero_output_executes() {
+    let bytecode =
+        compile_semantic_source("h = @inc; h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+        )),
+        "semantic function handle zero-output index calls should carry semantic identity"
+    );
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0
+    )));
+
+    interpret(&bytecode).expect("semantic handle zero-output index call should execute");
+}
+
+#[test]
 fn semantic_function_handle_index_multi_output_executes() {
     let source =
         "h = @pair; [a,b] = h(2); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
@@ -2066,6 +2085,24 @@ fn semantic_function_handle_expand_single_output_executes() {
 
     let vars = interpret(&bytecode).expect("execute semantic handle expanded single-output");
     assert!(has_num(&vars, 3.0));
+}
+
+#[test]
+fn semantic_function_handle_expand_zero_output_executes() {
+    let source = "h = @inc; C = {2}; h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic handle expanded zero-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 0 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    interpret(&bytecode).expect("execute semantic handle expanded zero-output");
 }
 
 #[test]
@@ -2115,6 +2152,30 @@ fn unresolved_external_function_handle_index_call_errors_with_identifier() {
 }
 
 #[test]
+fn unresolved_external_function_handle_index_zero_output_errors_with_identifier() {
+    let source = "h = @pkg.remote_inc; h(1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("compile unresolved external handle zero-output index call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0
+    )));
+
+    let err = interpret(&bytecode)
+        .expect_err("unresolved external handle zero-output index call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_external_function_handle_index_multi_output_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; [a,b] = h(1);";
     let bytecode = compile_semantic_source(source)
@@ -2155,6 +2216,31 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
 
     let err = interpret(&bytecode)
         .expect_err("unresolved external expanded-handle index call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_function_handle_expand_index_zero_output_errors_with_identifier() {
+    let source = "h = @pkg.remote_inc; C = {1,2}; h(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("compile unresolved external expanded-handle zero-output index call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 0 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let err = interpret(&bytecode)
+        .expect_err("unresolved external expanded-handle zero-output index call should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),

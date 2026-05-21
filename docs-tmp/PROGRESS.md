@@ -4857,6 +4857,24 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete direct-handle execution matrix zero-output lanes
+  - Extended direct-handle execution coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to close missing zero-output lane contracts for both semantic and unresolved external handles:
+    - `semantic_function_handle_index_zero_output_executes`
+    - `semantic_function_handle_expand_zero_output_executes`
+    - `unresolved_external_function_handle_index_zero_output_errors_with_identifier`
+    - `unresolved_external_function_handle_expand_index_zero_output_errors_with_identifier`
+  - These tests ratchet zero-output direct/expanded handle invocation boundaries:
+    - semantic handles lower through typed `CallFevalMulti(1,0)` / `CallFevalExpandMultiOutput(...,0)` and execute successfully.
+    - unresolved external handles lower through the same typed opcodes and preserve stable `RunMat:UndefinedFunction` failures.
+  - This aligns zero-output coverage with existing single/multi-output direct-handle contracts and closes a remaining callable ABI matrix gap in the execution-oriented handle test surface.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions semantic_function_handle_index_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions semantic_function_handle_expand_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_index_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_expand_index_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
