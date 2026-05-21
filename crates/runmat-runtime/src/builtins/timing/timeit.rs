@@ -198,17 +198,12 @@ struct TimeitCallable {
 
 impl TimeitCallable {
     async fn invoke(&self) -> Result<Value, crate::RuntimeError> {
-        // The runtime currently treats all builtin invocations as returning a single `Value`.
-        // The optional `num_outputs` flag is stored so future multi-output support can
-        // request the correct number of outputs when dispatching through `feval`.
-        // For now, we invoke the handle normally and drop whatever value is produced.
-        if let Some(0) = self.num_outputs {
-            let value = crate::call_feval_async_with_outputs(self.handle.clone(), &[], 0).await?;
-            drop(value);
-            Ok(Value::Num(0.0))
-        } else {
-            Ok(crate::call_feval_async_with_outputs(self.handle.clone(), &[], 1).await?)
-        }
+        let requested_outputs = self.num_outputs.unwrap_or(1);
+        let value =
+            crate::call_feval_async_with_outputs(self.handle.clone(), &[], requested_outputs)
+                .await?;
+        drop(value);
+        Ok(Value::Num(0.0))
     }
 }
 
@@ -456,6 +451,36 @@ pub(crate) mod tests {
                 function: 188,
             }
         );
+    }
+
+    #[test]
+    fn timeit_callable_invoke_honors_multi_requested_outputs() {
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 612);
+                assert!(args.is_empty());
+                assert_eq!(requested_outputs, 3);
+                Box::pin(async {
+                    Ok(Value::OutputList(vec![
+                        Value::Num(1.0),
+                        Value::Num(2.0),
+                        Value::Num(3.0),
+                    ]))
+                })
+            }),
+        ));
+
+        let callable = prepare_callable(
+            Value::SemanticFunctionHandle {
+                name: "semantic_target".to_string(),
+                function: 612,
+            },
+            Some(3),
+        )
+        .expect("timeit should accept semantic callback handles");
+
+        let invoked = block_on(callable.invoke()).expect("timeit callable invoke should succeed");
+        assert_eq!(invoked, Value::Num(0.0));
     }
 
     #[test]

@@ -122,6 +122,11 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `timeit_rejects_empty_function_handle_name_value`
       - `timeit_rejects_empty_external_function_handle_name_value`
       - `timeit_trims_function_handle_name_for_semantic_resolution`
+  - runtime `timeit` invocation now preserves requested callback output arity at dispatch in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+    - `TimeitCallable::invoke(...)` now calls `call_feval_async_with_outputs(...)` with `numOutputs` (default `1`) rather than forcing single-output callback dispatch for all nonzero requests.
+    - direct ratchet:
+      - `timeit_callable_invoke_honors_multi_requested_outputs`
+    - builtin contract docs in [timeit.json](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/builtins-json/timeit.json) now match runtime behavior (`numOutputs` is honored and callback outputs are discarded).
   - VM source-level `isfield` string-array semantics now have direct contract coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) (`struct_isfield_string_array_names`), asserting matrix-shaped logical result semantics (`shape [2,2]`, column-major logical data `[1,0,0,1]`) instead of a placeholder scalar proxy.
   - VM cell aggregate member-assignment now carries stable identifier coverage for RHS shape mismatch in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): `RunMat:CellMemberRhsShapeMismatch` (`assign_cell_member_rejects_shape_mismatch_cell_rhs`).
   - VM static-property missing-name semantic coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now asserts stable `RunMat:UndefinedVariable` identifier (`unqualified_static_property_without_imports_errors`) instead of message-text proxy checks.

@@ -5301,6 +5301,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: honor timeit requested output arity
+  - Runtime `timeit` callback invocation in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs) now dispatches callbacks through `call_feval_async_with_outputs(...)` using the requested output count (`numOutputs`, default `1`) instead of forcing single-output invocation for all nonzero requests.
+  - This closes a remaining callable ABI seam where `timeit(f, N)` (`N > 1`) did not preserve requested-output semantics already enforced on shared `feval` call paths.
+  - Added ratchet:
+    - `timeit_callable_invoke_honors_multi_requested_outputs`
+  - Updated builtin docs contract:
+    - [timeit.json](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/builtins-json/timeit.json) now states `numOutputs` is dispatched as requested output count (including `0`) with returned values discarded.
+  - Validation:
+    - `cargo test -p runmat-runtime timeit_callable_invoke_honors_multi_requested_outputs -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_supports_zero_outputs -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_accepts_num_outputs_argument -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
