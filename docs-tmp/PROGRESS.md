@@ -25,6 +25,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added VM contract ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction`
     - `unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction`
+    - `unresolved_qualified_external_handle_expand_direct_call_uses_typed_instruction`
     - `unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction`
   - Added HIR semantic-lowering ratchets in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
     - `binding_call_with_expansion_lowers_to_dynamic_call_dispatch`
