@@ -12,6 +12,27 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `feval` closure dispatch now fast-paths internal `call_method` closure shape
+  - `scope: in-scope`
+  - `blocker: `getmethod`-produced closures (`function_name == "call_method"`) still executed through generic name-shaped closure dispatch in `feval` (`call_by_name(...)`), leaving an avoidable internal dynamic-name service seam on object method-handle invocation paths.`
+  - Tightened runtime closure dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - added shared `CALL_METHOD_BUILTIN_NAME` constant.
+    - `feval_builtin(...)` now directly fast-paths closures with `function_name == CALL_METHOD_BUILTIN_NAME` and typed captures (`base`, method name text) into `call_method_builtin(...)`, avoiding generic dynamic-name routing.
+    - malformed call-method closure captures now fail with stable identifier `RunMat:CallMethodNameInvalid`.
+    - `getmethod_builtin(...)` now uses `CALL_METHOD_BUILTIN_NAME` for closure construction.
+  - Added ratchets:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `feval_call_method_closure_fast_path_preserves_requested_outputs`
+      - `feval_call_method_closure_rejects_nontext_method_capture_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime feval_call_method_closure_fast_path_preserves_requested_outputs -- --nocapture`
+    - `cargo test -p runmat-runtime feval_call_method_closure_rejects_nontext_method_capture_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm object_getmethod_instance_method_handle_direct_call_executes -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `timeit` callback invocation now uses typed `feval` helper boundary
   - `scope: in-scope`
   - `blocker: `timeit` callback execution still invoked `feval` via internal builtin-name dispatch (`call_builtin_async_with_outputs("feval", ...)`) instead of the shared typed callback helper path used by other runtime/VM callback sites.`

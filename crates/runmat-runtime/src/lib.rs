@@ -47,6 +47,7 @@ pub type BuiltinResult<T> = Result<T, RuntimeError>;
 pub const OBJECT_INDEX_PAREN: &str = "()";
 pub const OBJECT_INDEX_BRACE: &str = "{}";
 pub const OBJECT_INDEX_MEMBER: &str = ".";
+pub const CALL_METHOD_BUILTIN_NAME: &str = "call_method";
 pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
 pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 
@@ -1429,9 +1430,9 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             .build())
         }
         Value::Closure(c) => {
-            let mut args = c.captures.clone();
-            args.extend(rest);
             if let Some(function) = c.semantic_function {
+                let mut args = c.captures.clone();
+                args.extend(rest);
                 let request = crate::user_functions::SemanticCallableRequest::semantic(
                     function,
                     args.clone(),
@@ -1449,6 +1450,27 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 .with_identifier("RunMat:SemanticFunctionUnavailable")
                 .build());
             }
+
+            if c.function_name == CALL_METHOD_BUILTIN_NAME && c.captures.len() >= 2 {
+                let base = c.captures[0].clone();
+                let method = match &c.captures[1] {
+                    Value::String(name) => name.clone(),
+                    Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
+                    _ => {
+                        return Err(build_runtime_error(
+                            "call_method closure captures must include method name text",
+                        )
+                        .with_identifier("RunMat:CallMethodNameInvalid")
+                        .build())
+                    }
+                };
+                let mut method_args = c.captures.iter().skip(2).cloned().collect::<Vec<_>>();
+                method_args.extend(rest);
+                return call_method_builtin(base, method, method_args).await;
+            }
+
+            let mut args = c.captures.clone();
+            args.extend(rest);
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
@@ -1819,7 +1841,7 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
         Value::Object(o) => {
             // Return a closure capturing the receiver; feval will call runtime builtin call_method
             Ok(Value::Closure(runmat_builtins::Closure {
-                function_name: "call_method".to_string(),
+                function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
                 semantic_function: None,
                 captures: vec![Value::Object(o), Value::String(method_name.to_string())],
             }))
@@ -2530,6 +2552,52 @@ mod tests {
                 panic!("expected output list from multi-output call_method fallback, got {other:?}")
             }
         }
+    }
+
+    #[test]
+    fn feval_call_method_closure_fast_path_preserves_requested_outputs() {
+        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+            "NoSuchMethodClass".to_string(),
+        ));
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
+            semantic_function: None,
+            captures: vec![
+                base.clone(),
+                Value::String("deal".to_string()),
+                Value::Num(9.0),
+            ],
+        });
+        let result = block_on(feval_builtin(closure, vec![Value::Num(10.0)]))
+            .expect("feval call_method closure should succeed");
+        match result {
+            Value::OutputList(values) => {
+                assert!(values.len() >= 2);
+                assert_eq!(values[0], base);
+                assert_eq!(values[1], Value::Num(9.0));
+            }
+            other => {
+                panic!(
+                    "expected output list from feval call_method closure fast path, got {other:?}"
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
+            semantic_function: None,
+            captures: vec![
+                Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+                Value::Num(1.0),
+            ],
+        });
+        let err = block_on(feval_builtin(closure, Vec::new()))
+            .expect_err("feval call_method closure should reject nontext method capture");
+        assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
     }
 
     #[test]
