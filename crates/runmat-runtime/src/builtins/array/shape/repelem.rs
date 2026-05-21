@@ -311,13 +311,20 @@ fn coerce_count(value: f64, position: usize) -> crate::BuiltinResult<usize> {
 /// a single replication argument. Errors if `shape` is not a vector. Returns
 /// the axis (0-based) along which `n` is applied; the other axis stays at 1.
 fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
-    let total: usize = shape.iter().product();
-    let non_singleton = shape.iter().filter(|&&d| d > 1).count();
-    if non_singleton > 1 {
+    let mut non_singleton_axes = shape
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, &dim)| (dim > 1).then_some(idx));
+    let first_axis = non_singleton_axes.next();
+    if non_singleton_axes.next().is_some() {
         return Err(repelem_error(
             "repelem: when called with a single replication count the input must be a vector",
         ));
     }
+    if let Some(axis) = first_axis {
+        return Ok(axis);
+    }
+    let total: usize = shape.iter().product();
     // Empty column vectors have no non-singleton dimension, but MATLAB still
     // preserves their 0x1 orientation for the single-factor vector form.
     if total == 0 && shape.first().copied().unwrap_or(1) != 1 {
@@ -327,11 +334,6 @@ fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
     if total <= 1 {
         return Ok(1);
     }
-    // Column vector: shape[0] > 1 and others == 1.
-    if shape.first().copied().unwrap_or(1) > 1 {
-        return Ok(0);
-    }
-    // Row vector or anything else with a single non-singleton axis -> columns.
     Ok(1)
 }
 
@@ -938,6 +940,37 @@ pub(crate) mod tests {
         let err = repelem_builtin(Value::Tensor(m), vec![Value::Int(IntValue::I32(2))])
             .expect_err("expected err");
         assert!(err.to_string().contains("vector"));
+    }
+
+    #[test]
+    fn single_arg_uses_unique_nd_non_singleton_axis() {
+        let page_vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 1, 3]).unwrap();
+        let result = repelem_builtin(
+            Value::Tensor(page_vector),
+            vec![Value::Int(IntValue::I32(2))],
+        )
+        .expect("repelem");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 1, 6]);
+                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_arg_allows_trailing_singleton_dimension() {
+        let v = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3, 1]).unwrap();
+        let result =
+            repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(2))]).expect("repelem");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 6, 1]);
+                assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
     }
 
     #[test]
