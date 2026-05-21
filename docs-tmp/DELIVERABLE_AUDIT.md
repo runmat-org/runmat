@@ -212,6 +212,11 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` (unsupported `Struct` payload)
       - end-to-end semantic VM contract: `object_range_end_indexing_accepts_mixed_string_selector_payload`
       - end-to-end semantic VM assignment contract: `object_range_end_assignment_accepts_mixed_string_selector_payload`
+  - non-object expr-slice end-selector metadata normalization now rejects malformed selector-position metadata early in runtime plan materialization:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `apply_end_offsets_to_numeric(...)` now validates `end_numeric_exprs` selector positions against numeric selector arity and fails duplicates/out-of-bounds with stable identifier `RunMat:InvalidEndSelectorPlan` instead of silently ignoring or overwriting malformed metadata.
+    - interpreter ratchets:
+      - `apply_end_offsets_rejects_out_of_bounds_positions`
+      - `apply_end_offsets_rejects_duplicate_positions`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

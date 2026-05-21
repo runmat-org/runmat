@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM expr-slice end-selector metadata invariant ratchet
+  - `scope: in-scope`
+  - Closed a remaining selector-plan normalization hole in non-object expr-slice execution:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `apply_end_offsets_to_numeric(...)` now rejects malformed `end_numeric_exprs` metadata (duplicate or out-of-bounds selector positions) with stable identifier `RunMat:InvalidEndSelectorPlan`.
+    - this removes prior silent ignore/overwrite behavior for malformed end-selector metadata on tensor/cell/string expr-slice paths.
+  - Added interpreter invariant ratchets in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `apply_end_offsets_rejects_out_of_bounds_positions`
+    - `apply_end_offsets_rejects_duplicate_positions`
+  - Validation:
+    - `cargo test -p runmat-vm --lib apply_end_offsets_rejects_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM object expr-slice numeric-end selector-plan invariant ratchet
   - `scope: in-scope`
   - Closed remaining non-tensor selector-plan normalization holes in object expr-slice descriptor serialization:

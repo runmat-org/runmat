@@ -454,6 +454,22 @@ async fn apply_end_offsets_to_numeric(
     end_offsets: &[(usize, EndExpr)],
     vars: &mut [Value],
 ) -> Result<Vec<Value>, RuntimeError> {
+    let mut seen = vec![false; numeric.len()];
+    for (position, _) in end_offsets {
+        if *position >= numeric.len() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "end-selector position is out of bounds",
+            ));
+        }
+        if std::mem::replace(&mut seen[*position], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "end-selector position appears more than once",
+            ));
+        }
+    }
+
     let mut adjusted = numeric.to_vec();
     for (position, end_expr) in end_offsets {
         if let Some(value) = adjusted.get_mut(*position) {
@@ -1833,7 +1849,10 @@ pub async fn dispatch_indexing(
 
 #[cfg(test)]
 mod tests {
-    use super::map_slice_plan_error;
+    use super::{apply_end_offsets_to_numeric, map_slice_plan_error, IndexContext};
+    use crate::bytecode::EndExpr;
+    use futures::executor::block_on;
+    use runmat_builtins::Value;
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
@@ -1849,5 +1868,31 @@ mod tests {
         let mapped = map_slice_plan_error("slice assign", err);
         assert_eq!(mapped.identifier(), None);
         assert_eq!(mapped.message(), "slice assign: plain error");
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_out_of_bounds_positions() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(1, 0, 0, &[], &[5]),
+            &[(1, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("out-of-bounds end-selector position should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_duplicate_positions() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(1, 0, 0, &[], &[5]),
+            &[(0, EndExpr::End), (0, EndExpr::Const(2.0))],
+            &mut vars,
+        ))
+        .expect_err("duplicate end-selector positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
     }
 }
