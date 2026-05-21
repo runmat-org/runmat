@@ -1755,6 +1755,9 @@ fn unresolved_function_single_output_uses_typed_instruction() {
             && *arg_count == 1
             && *out_count == 1
     )));
+
+    let err = interpret(&bytecode).expect_err("unresolved call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
