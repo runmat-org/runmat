@@ -5332,6 +5332,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: normalize cell end expansion
+  - Cell brace-expansion selector decoding in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now resolves `end`/`end-k` with dimension-aware lengths on 2-D expansion paths (`C{end,1}`, `C{1,end}`) and scalar-tensor selector paths.
+  - Added contracts:
+    - `expand_cell_indices_supports_end_selectors_for_2d_cells`
+    - `feval_expand_cell_indices_support_2d_end_selectors`
+  - Kept existing `end` offset contract green:
+    - `feval_expand_cell_indices_support_end_offsets`
+  - Validation:
+    - `cargo fmt --all`
+    - `cargo test -p runmat-vm expand_cell_indices_supports_end_selectors_for_2d_cells -- --nocapture`
+    - `cargo test -p runmat-vm feval_expand_cell_indices_support_2d_end_selectors -- --nocapture`
+    - `cargo test -p runmat-vm feval_expand_cell_indices_support_end_offsets -- --nocapture`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
