@@ -4,7 +4,7 @@ import {
   isSafeDownloadUrl,
   resolveChannelFromHost,
   resolvePlatformFromInputs,
-} from "./route";
+} from "./resolver";
 
 describe("download latest route helpers", () => {
   describe("resolvePlatformFromInputs", () => {
