@@ -4491,6 +4491,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: fix linear cell selector semantics (`9ac3c65b`)
+  - Resolved remaining indexing-property regressions and stabilized cell selector shape semantics in semantic execution:
+    - [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs): removed unsafe fixed-arity builtin output-expansion inference fallback for non-variadic builtins (prevents mis-lowering calls like `sum(A(:))` into expansion paths).
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs): `__register_test_classes` now registers `NoIdx` so missing `subsref`/`subsasgn` negative contracts execute through the intended protocol boundary.
+    - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs): linear selector output-shape policy now preserves row-vector orientation for non-colon multi-element selectors while keeping `(:)` columnization.
+    - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs): linear `colon_mask` now emits `SliceSelector::Colon` (not materialized indices), keeping downstream `(:)` semantics stable.
+  - Validation:
+    - `cargo test -p runmat-vm --test indexing_properties cell_paren_range_end_and_colon_semantics -- --nocapture`
+    - `cargo test -p runmat-vm --test indexing_properties -- --nocapture`
+    - `cargo check --workspace`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
