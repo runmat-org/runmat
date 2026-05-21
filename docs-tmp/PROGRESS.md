@@ -48,6 +48,27 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime `cellfun`/`arrayfun` external-handle callback prebinding to semantic identity
+  - `scope: in-scope`
+  - `blocker: `cellfun` and `arrayfun` accepted `ExternalFunctionHandle` callbacks but left them name-shaped at parse-time even when the semantic resolver already had stable callback identities, keeping callback callables on repeated name-resolution paths.`
+  - Tightened callback parsing in:
+    - [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs)
+    - [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs)
+  - `Callable::from_function(...)` now resolves `Value::ExternalFunctionHandle(name)` through `resolved_semantic_handle(name)` first and emits semantic closure callables when available, while preserving unresolved external-name behavior.
+  - Added ratchets:
+    - `cellfun_external_handle_prefers_semantic_handle_binding_when_resolved`
+    - `arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime cellfun_external_handle_prefers_semantic_handle_binding_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime cellfun_external_handle_uses_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_external_handle_uses_semantic_resolver -- --nocapture`
+    - `cargo fmt --all`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM expr-slice range-selector scalar/type and metadata arity hardening
   - `scope: in-scope`
   - `blocker: IndexSliceExpr range selector decoding accepted non-numeric start/step operands by silently coercing them to `1.0`, and both expr-slice read/write paths indexed `range_has_step` without explicit arity validation against `range_dims`, leaving malformed metadata to panic instead of failing with typed selector-plan identifiers.`

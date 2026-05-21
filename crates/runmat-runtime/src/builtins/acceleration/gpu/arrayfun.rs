@@ -601,7 +601,13 @@ impl Callable {
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::from_text(&sa.data[0]),
             Value::FunctionHandle(name) => Self::from_text(&name),
-            Value::ExternalFunctionHandle(name) => Ok(Callable::ExternalName { name }),
+            Value::ExternalFunctionHandle(name) => {
+                if let Some(callable) = Self::resolved_semantic_handle(&name) {
+                    Ok(callable)
+                } else {
+                    Ok(Callable::ExternalName { name })
+                }
+            }
             Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
                 function_name: name,
                 semantic_function: Some(function),
@@ -1216,6 +1222,25 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(87)
+            })));
+        let callable =
+            Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".to_string()))
+                .expect("external handle should parse");
+        assert!(matches!(
+            callable,
+            Callable::Closure(Closure {
+                function_name,
+                semantic_function: Some(87),
+                ..
+            }) if function_name == "pkg.callback"
+        ));
     }
 
     #[test]
