@@ -14,21 +14,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
-  - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes:
+  - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:
     - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now rejects empty/whitespace method names with stable identifier `RunMat:CallMethodNameInvalid`.
     - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now reports non-object receivers with stable identifier `RunMat:InvalidObjectDispatch` instead of a raw string-only error.
     - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now reports non-object `subsref` / `subsasgn` receivers with stable identifier `RunMat:InvalidObjectDispatch` instead of raw string-only errors.
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now has explicit identifier ratchets for missing object protocol methods through global dispatch:
+      - missing `subsref` implementation -> `RunMat:MissingSubsref`
+      - missing `subsasgn` implementation -> `RunMat:MissingSubsasgn`
   - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
     - `call_method_rejects_non_object_receiver_with_identifier`
     - `call_method_rejects_empty_method_name_with_identifier`
     - `subsref_rejects_non_object_receiver_with_identifier`
     - `subsasgn_rejects_non_object_receiver_with_identifier`
+    - `subsref_missing_protocol_errors_with_identifier`
+    - `subsasgn_missing_protocol_errors_with_identifier`
   - Added VM end-to-end ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `object_getmethod_instance_method_handle_direct_call_executes`
     - `call_method_empty_name_errors_with_identifier_contract`
     - `call_method_nonobject_receiver_errors_with_identifier_contract`
     - `subsref_nonobject_receiver_errors_with_identifier_contract`
     - `subsasgn_nonobject_receiver_errors_with_identifier_contract`
+    - `subsref_missing_protocol_errors_with_identifier_contract`
+    - `subsasgn_missing_protocol_errors_with_identifier_contract`
   - Validation:
     - `cargo test -p runmat-runtime call_method_ -- --nocapture`
     - `cargo test -p runmat-runtime subsref_rejects_non_object_receiver_with_identifier -- --nocapture`
@@ -38,6 +45,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm call_method_nonobject_receiver_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm subsref_nonobject_receiver_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm subsasgn_nonobject_receiver_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-runtime subsref_missing_protocol_errors_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime subsasgn_missing_protocol_errors_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm subsref_missing_protocol_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm subsasgn_missing_protocol_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm unresolved_qualified_direct_call_ -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo fmt --all --check`

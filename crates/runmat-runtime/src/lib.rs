@@ -2383,6 +2383,33 @@ mod tests {
     }
 
     #[test]
+    fn subsref_missing_protocol_errors_with_identifier() {
+        let err = block_on(subsref_dispatch(
+            Value::Object(runmat_builtins::ObjectInstance::new(
+                "NoSubsrefProtocolClass".to_string(),
+            )),
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+        ))
+        .expect_err("missing subsref protocol should fail");
+        assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+    }
+
+    #[test]
+    fn subsasgn_missing_protocol_errors_with_identifier() {
+        let err = block_on(subsasgn_dispatch(
+            Value::Object(runmat_builtins::ObjectInstance::new(
+                "NoSubsasgnProtocolClass".to_string(),
+            )),
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+            Value::Num(3.0),
+        ))
+        .expect_err("missing subsasgn protocol should fail");
+        assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+    }
+
+    #[test]
     fn notify_semantic_function_handle_uses_semantic_identity() {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen_calls = Arc::clone(&calls);

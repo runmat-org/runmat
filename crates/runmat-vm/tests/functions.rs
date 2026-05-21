@@ -1548,6 +1548,24 @@ fn subsasgn_nonobject_receiver_errors_with_identifier_contract() {
 }
 
 #[test]
+fn subsref_missing_protocol_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); subsref(p, '()', {1});",
+    )
+    .expect_err("object without subsref protocol should fail");
+    assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+}
+
+#[test]
+fn subsasgn_missing_protocol_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); subsasgn(p, '()', {1}, 2);",
+    )
+    .expect_err("object without subsasgn protocol should fail");
+    assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+}
+
+#[test]
 fn import_precedence_specific_over_wildcard_and_locals() {
     // Specific imports should take precedence over wildcard imports; locals should shadow both
     let program = r#"
