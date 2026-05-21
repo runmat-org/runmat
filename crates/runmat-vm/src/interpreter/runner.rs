@@ -2321,7 +2321,7 @@ mod tests {
     }
 
     #[test]
-    fn await_rejects_spawn_task_handle_after_scope_exit_retires_id() {
+    fn await_succeeds_after_scope_exit_when_var_alias_keeps_spawn_task_id_live() {
         let mut task = runmat_builtins::StructValue::new();
         task.fields.insert(
             "__runmat_spawn_kind".to_string(),
@@ -2351,8 +2351,11 @@ mod tests {
         state.vars = seed_vars.clone();
 
         let mut result_vars = seed_vars.clone();
-        let err = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect_err("await should reject stale task handle after scope-retired id");
-        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("await should succeed when var alias keeps the spawn task id live");
+        assert!(
+            matches!(result_vars[0], Value::Struct(_)),
+            "await in this sequence does not overwrite var0"
+        );
     }
 }
