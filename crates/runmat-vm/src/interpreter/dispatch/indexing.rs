@@ -892,6 +892,31 @@ pub async fn dispatch_indexing(
                 Value::ComplexTensor(t) => stack.push(
                     idx_write_linear::assign_complex_scalar(t, &indices, &rhs, delete).await?,
                 ),
+                Value::Num(n) => {
+                    let scalar = runmat_builtins::Tensor::new(vec![n], vec![1, 1])
+                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    stack.push(
+                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
+                            .await?,
+                    );
+                }
+                Value::Int(i) => {
+                    let scalar = runmat_builtins::Tensor::new(vec![i.to_f64()], vec![1, 1])
+                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    stack.push(
+                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
+                            .await?,
+                    );
+                }
+                Value::Bool(b) => {
+                    let scalar =
+                        runmat_builtins::Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+                            .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    stack.push(
+                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
+                            .await?,
+                    );
+                }
                 Value::Cell(ca) => stack.push(crate::ops::cells::assign_cell_paren_with_policy(
                     ca, &indices, &rhs, delete,
                 )?),

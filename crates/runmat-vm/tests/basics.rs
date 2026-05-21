@@ -186,6 +186,21 @@ fn semantic_scalar_call_result_index_assignment_executes() {
 }
 
 #[test]
+fn semantic_scalar_value_index_assignment_executes() {
+    let bytecode = compile_semantic_source("x = 1; x(1) = 2; y = x;").unwrap();
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+    let updated = vars.last().expect("expected final variable");
+    match updated {
+        Value::Num(n) => assert!((*n - 2.0).abs() < 1e-9),
+        Value::Tensor(t) => {
+            assert_eq!(t.shape, vec![1, 1]);
+            assert_eq!(t.data, vec![2.0]);
+        }
+        other => panic!("expected scalar numeric assignment result, got {other:?}"),
+    }
+}
+
+#[test]
 fn complex_literal_matrix_executes() {
     let input = "A = [1+2i 3-4j];";
     let vars = execute_semantic_source(input);

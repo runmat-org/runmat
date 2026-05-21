@@ -12,6 +12,19 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM scalar-value paren assignment normalization ratchet
+  - `scope: in-scope`
+  - Closed an assignment-place execution gap where scalar value bases (`Value::Num`, `Value::Int`, `Value::Bool`) hit `RunMat:IndexAssignmentUnsupportedBase` on paren-store paths:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `Instr::StoreIndex` now normalizes scalar value bases to singleton tensors before typed linear assignment, so `x = 1; x(1)=2;` executes through the same semantic assignment machinery as tensor bases.
+  - Added VM end-to-end ratchet in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+    - `semantic_scalar_value_index_assignment_executes`
+  - Validation:
+    - `cargo test -p runmat-vm semantic_scalar_value_index_assignment_executes -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - Callable method-identity semantic-resolution vs VM-fallback policy split
   - `scope: in-scope`
   - Closed a remaining callable ABI seam where method identities under runtime-name policy could fall through to builtin-name fallback:
