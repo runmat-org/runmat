@@ -3664,6 +3664,40 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_single_segment_external_function_handle_name_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value =
+                        MirRvalue::Use(MirOperand::FunctionHandle(CallableIdentity::ExternalName(
+                            QualifiedName(vec![SymbolName("pkg".to_string())]),
+                        )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirFunctionHandleNameMissing")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

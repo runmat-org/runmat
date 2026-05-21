@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM function-handle compile boundary external-name shape ratchet
+  - `scope: in-scope`
+  - `blocker: function-handle compile-name strictness still accepted single-segment `CallableIdentity::ExternalName` identities, which should remain unresolved/dynamic or fail as malformed external handles at compile boundaries.`
+  - Hardened compile-time external-name shape gating in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `mir_runtime_name_callee(...)` now rejects `CallableIdentity::ExternalName` when segment count is `<= 1`.
+    - malformed single-segment external handle targets now fail with `RunMat:MirFunctionHandleNameMissing`.
+  - Added compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_single_segment_external_function_handle_name_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_single_segment_external_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_empty_method_function_handle_name_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM function-handle compile boundary method/imported empty-name ratchet
   - `scope: in-scope`
   - `blocker: strict function-handle compile-name gating was ratcheted for malformed external and empty builtin/dynamic identities, but empty method/imported module-path identities were not explicitly pinned, leaving a regression seam on textual handle identity normalization.`

@@ -2003,7 +2003,14 @@ impl Compiler {
     }
 
     fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {
-        strict_callable_display_name(callee)
+        match callee {
+            CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+                if segments.len() <= 1 =>
+            {
+                None
+            }
+            _ => strict_callable_display_name(callee),
+        }
     }
 
     fn compile_mir_method_call(
