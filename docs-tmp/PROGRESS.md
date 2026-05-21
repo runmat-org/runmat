@@ -91,6 +91,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- VM builtin-dispatch identifier-preservation normalization ratchet
+  - `scope: in-scope`
+  - `blocker: builtin-call dispatch still had identifier loss on imported-builtin ambiguity and `rethrow` paths, leaving callable exception contracts message-shaped instead of typed.`
+  - Closed identifier-preservation gaps:
+    - [builtins.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/builtins.rs) imported-builtin ambiguity now carries typed `RuntimeError` via `RunMat:AmbiguousBuiltinImport` instead of string-only `Ambiguous(String)` transport.
+    - [builtins.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/builtins.rs) `rethrow` now preserves prior exception identifier/message as a typed runtime error (no `"{id}: {msg}"` string flattening).
+    - [calls.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/calls.rs) builtin outcome handling now propagates typed ambiguity errors directly (`ImportedBuiltinResolution::Ambiguous(RuntimeError)`).
+  - Added VM unit ratchets:
+    - [builtins.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/builtins.rs):
+      - `rethrow_preserves_last_exception_identifier`
+    - [calls.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/calls.rs):
+      - `handle_builtin_outcome_preserves_ambiguous_import_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib rethrow_preserves_last_exception_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib handle_builtin_outcome_preserves_ambiguous_import_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::builtins::tests:: -- --nocapture`
+    - `cargo test -p runmat-vm --lib interpreter::dispatch::calls::tests:: -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:

@@ -135,7 +135,7 @@ pub fn handle_builtin_outcome(
                 stack.push(normalize_requested_outputs(value, output_hint));
                 Ok(BuiltinHandling::Completed)
             }
-            ImportedBuiltinResolution::Ambiguous(message) => Err(message.into()),
+            ImportedBuiltinResolution::Ambiguous(err) => Err(err),
             ImportedBuiltinResolution::NotFound => Ok(
                 match redirect_exception_to_catch(
                     err,
@@ -370,7 +370,9 @@ pub fn handle_create_semantic_closure(
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_requested_outputs;
+    use super::{handle_builtin_outcome, normalize_requested_outputs, ExceptionRouteContext};
+    use crate::call::builtins::ImportedBuiltinResolution;
+    use crate::interpreter::errors::mex;
     use runmat_builtins::Value;
 
     #[test]
@@ -383,6 +385,38 @@ mod tests {
     fn normalize_requested_outputs_preserves_value_for_zero_request() {
         let value = normalize_requested_outputs(Value::Num(7.0), 0);
         assert_eq!(value, Value::Num(7.0));
+    }
+
+    #[test]
+    fn handle_builtin_outcome_preserves_ambiguous_import_identifier() {
+        let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut vars: Vec<Value> = Vec::new();
+        let mut last_exception = None;
+        let mut pc = 0usize;
+        let mut stack: Vec<Value> = Vec::new();
+
+        let outcome = handle_builtin_outcome(
+            Err("primary builtin failure".into()),
+            ImportedBuiltinResolution::Ambiguous(mex(
+                "AmbiguousBuiltinImport",
+                "ambiguous builtin via imports",
+            )),
+            1,
+            &mut stack,
+            ExceptionRouteContext {
+                try_stack: &mut try_stack,
+                vars: &mut vars,
+                last_exception: &mut last_exception,
+                pc: &mut pc,
+            },
+            |_| {},
+        );
+        let err = match outcome {
+            Err(err) => err,
+            Ok(_) => panic!("ambiguous imported builtin must surface explicit identifier"),
+        };
+        assert_eq!(err.identifier(), Some("RunMat:AmbiguousBuiltinImport"));
+        assert!(err.message().contains("ambiguous builtin via imports"));
     }
 }
 
