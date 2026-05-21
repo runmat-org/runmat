@@ -159,10 +159,12 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier`
   - VM static-call lowering now enforces strict non-builtin callee identity name-shape invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `compile_mir_call(...)` and `compile_mir_call_for_multi_assign(...)` now require a valid runtime name shape (`mir_runtime_name_callee(...)`) before emitting `CallFunction*` instructions.
+    - static-call runtime-name derivation is now explicit to static-call identity categories (`Builtin`, `DynamicName`, well-formed multi-segment `ExternalName`, valid `Imported`) and rejects method identity shapes on this ABI boundary.
     - malformed static identities now fail with `RunMat:MirCallTargetNameInvalid`.
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
       - `primary_compile_rejects_static_call_with_single_segment_external_identity`
+      - `primary_compile_rejects_static_call_with_method_identity_name_shape`
       - `primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape`
   - VM multi-assign output target lowering now enforces assignment-context invariants for top-level indexed output places in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `compile_mir_output_target_store(...)` now requires `MirPlace::Index` targets to carry `IndexResultContext::AssignmentTarget`.

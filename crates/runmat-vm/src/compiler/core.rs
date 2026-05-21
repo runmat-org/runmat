@@ -1,5 +1,4 @@
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
-use crate::call::shared::strict_callable_display_name;
 use crate::compiler::CompileError;
 use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
@@ -2100,13 +2099,25 @@ impl Compiler {
 
     fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {
         match callee {
+            CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) => {
+                (!name.is_empty()).then_some(name.clone())
+            }
+            CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
+                (!name.is_empty()).then_some(name.clone())
+            }
             CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
-                if segments.len() <= 1 =>
+                if segments.len() > 1 && segments.iter().all(|segment| !segment.0.is_empty()) =>
             {
-                None
+                Some(
+                    segments
+                        .iter()
+                        .map(|segment| segment.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                )
             }
             CallableIdentity::Imported(path) => imported_handle_runtime_name(path),
-            _ => strict_callable_display_name(callee),
+            _ => None,
         }
     }
 

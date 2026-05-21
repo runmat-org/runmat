@@ -12,6 +12,20 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Static-call compile boundaries now reject method-identity callees on generic static-call ABI paths
+  - `scope: in-scope`
+  - blocker: VM static-call runtime-name validation accepted `CallableIdentity::Method` through generic name rendering, allowing malformed method-identity callees onto `CallFunction*` static-call paths instead of failing at compile boundaries.
+  - Tightened static-call runtime-name derivation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `mir_runtime_name_callee(...)` now only derives names for explicit static-call identity shapes (`Builtin`, `DynamicName`, well-formed multi-segment `ExternalName`, and valid `Imported`).
+    - unsupported/non-static-call identity shapes (including `Method`) now return `None` and fail with existing compile identifier `RunMat:MirCallTargetNameInvalid`.
+  - Added compile ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_static_call_with_method_identity_name_shape`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_method_identity_name_shape -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_single_segment_external_identity -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - Logical paren-slice assignment now executes for logical bases and preserves slice-assignment RHS contracts
   - `scope: in-scope`
   - `blocker: logical-base paren slice assignment (`x(idx)=...`, `x(:,...)=...`) was rejected early with `RunMat:SliceNonTensor`, bypassing the normal slice assignment product path and masking RHS contract identifiers.`
