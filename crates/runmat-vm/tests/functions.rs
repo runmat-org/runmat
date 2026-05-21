@@ -1216,6 +1216,20 @@ fn import_wildcard_static_method_function_handle_executes() {
 }
 
 #[test]
+fn import_wildcard_static_method_function_handle_direct_call_executes() {
+    let program = "__register_test_classes(); import Point.*; h = @origin; o = h();";
+    let bytecode =
+        compile_semantic_source(program).expect("semantic wildcard import function handle compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
+    ));
+    let vars = execute_semantic_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+}
+
+#[test]
 fn qualified_static_method_function_handle_executes() {
     let program = "__register_test_classes(); h = @Point.origin; o = feval(h);";
     let bytecode = compile_semantic_source(program)

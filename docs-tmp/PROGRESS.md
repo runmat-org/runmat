@@ -86,6 +86,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - this pins semantic runtime behavior for DefPath/external-boundary function-handle targets across direct-call dispatch, not just `feval` fallback paths.
   - Added VM end-to-end ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `import_static_method_function_handle_direct_call_executes`
+    - `import_wildcard_static_method_function_handle_direct_call_executes`
     - `qualified_static_method_function_handle_direct_call_executes`
   - Validation:
     - `cargo test -p runmat-vm static_method_function_handle_direct_call_executes -- --nocapture`
