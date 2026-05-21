@@ -112,6 +112,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Helper store-back assignment paths now reject `DeletionTarget` index contexts in non-delete flows
+  - `scope: in-scope`
+  - `blocker: helper store-back lowering reused assignment-compatible context matching that accepted `DeletionTarget` metadata on non-delete indexed assignment flows, leaving a malformed MIR assignment-context ABI seam in member-chain/indexed store-back paths.`
+  - Tightened compile invariant in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `compile_mir_store_indexed_value_from_temp(...)` now requires `IndexResultContext::AssignmentTarget` exactly.
+    - malformed contexts fail with stable identifier `RunMat:MirIndexContextInvalid`.
+  - Added compile ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_interprets_member_store_back_paren_assignment -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`

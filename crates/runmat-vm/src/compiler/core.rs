@@ -1642,6 +1642,13 @@ impl Compiler {
         tmp: usize,
         delete: bool,
     ) -> Result<(), CompileError> {
+        if indexing.result_context != IndexResultContext::AssignmentTarget {
+            return Err(self
+                .compile_error(
+                    "MIR indexed helper store-back invariant violated: assignment-index context must be AssignmentTarget",
+                )
+                .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+        }
         match indexing.kind {
             IndexKind::Paren => {
                 match indexing.plan {
