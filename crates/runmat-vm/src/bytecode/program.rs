@@ -324,12 +324,18 @@ impl Bytecode {
     #[cfg(feature = "native-accel")]
     pub fn runtime_fusion_groups(&self) -> Vec<FusionGroup> {
         let semantic_metadata_present = self.semantic_fusion_metadata.mir_fusion_signal_count > 0
-            || self.semantic_fusion_metadata.mir_fusion_candidate_group_count > 0
+            || self
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count
+                > 0
             || !self
                 .semantic_fusion_metadata
                 .mir_fusion_candidate_groups
                 .is_empty()
-            || self.semantic_fusion_metadata.semantic_instruction_window_count > 0
+            || self
+                .semantic_fusion_metadata
+                .semantic_instruction_window_count
+                > 0
             || !self
                 .semantic_fusion_metadata
                 .semantic_instruction_windows
@@ -490,7 +496,9 @@ mod tests {
             stack_layout: None,
         }];
         bytecode.semantic_fusion_metadata.mir_fusion_signal_count = 2;
-        bytecode.semantic_fusion_metadata.mir_fusion_candidate_group_count = 0;
+        bytecode
+            .semantic_fusion_metadata
+            .mir_fusion_candidate_group_count = 0;
 
         let groups = bytecode.runtime_fusion_groups();
         assert!(

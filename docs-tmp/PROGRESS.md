@@ -4465,6 +4465,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-hir --test semantic_lowering expr_stmt_output_policy_controls_binding_call_lowering_shape -- --nocapture`
     - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
 
+- RM-378: prefer semantic runtime fusion groups (`29c25c37`)
+  - Tightened runtime fusion-group source-of-truth in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs):
+    - semantic fusion metadata is now authoritative when present
+    - compile-time `fusion_groups` are now used only as a compatibility fallback when semantic metadata is absent
+    - stale compile-time fusion groups are ignored when semantic metadata indicates zero executable candidates
+  - Updated unit ratchets:
+    - `runtime_fusion_groups_use_semantic_windows_when_metadata_is_present`
+    - `runtime_fusion_groups_ignore_stale_compile_groups_when_semantic_candidates_are_empty`
+    - `runtime_fusion_groups_fallback_to_existing_bytecode_groups_without_semantic_metadata` (compatibility fallback retained)
+  - Validation:
+    - `cargo test -p runmat-vm runtime_fusion_groups_ -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
