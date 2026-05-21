@@ -218,7 +218,7 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `apply_end_offsets_rejects_out_of_bounds_positions`
       - `apply_end_offsets_rejects_duplicate_positions`
 - Gap:
-  - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
+  - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
 ### 4) Manifest-driven composition/entrypoints (`met`)
 

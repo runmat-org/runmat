@@ -436,7 +436,7 @@ Accepted resolution (A/A/A/A/A):
 Current state:
 
 - Tensor and cell aggregates lower directly.
-- `MirAggregateKind::Struct` and `ObjectArray` are still bytecode gaps.
+- Parser/HIR/MIR do not currently define a struct/object aggregate-literal source form; active aggregate products are tensor/cell only (`AstExpr::{Tensor,Cell}` -> `HirExprKind::{Tensor,Cell}` -> `MirAggregateKind::{Tensor,Cell}`).
 
 Design options:
 
@@ -455,6 +455,10 @@ Accepted resolution:
 - Handle duplicate-field semantics by explicit compatibility policy decision (documented behavior; no implicit fallback heuristics).
 - Keep syntax-literal construction as compiler-internal typed ABI, while user-authored builtin calls stay on public call-dispatch paths.
 - Surface invalid aggregate forms as semantic/lowering errors whenever determinable before runtime.
+
+Current scope note:
+
+- This is a forward design track, not an active migration blocker for current semantic pipeline closure, because there is no production struct/object aggregate-literal IR surface to lower today.
 
 ### 9. Compatibility Mode Cleanup
 
@@ -492,7 +496,7 @@ Treat current MIR bytecode gap markers as follows:
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
 - `{count} call outputs`: semantic user-function, `feval`, `size`, min/max family, sort/set/index builtins (`sort`, `unique`, `find`, `union`, `ismember`, `sortrows`), and linalg factorization builtins (`chol`, `lu`, `qr`, `svd`, `eig`) are ratcheted through multi-output bytecode/runtime output context; generic rvalue call outputs and broader builtin output splitting remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
-- `aggregate kind`: struct/object aggregate design.
+- `aggregate kind`: forward design track for future struct/object aggregate-literal source form (not an active current MIR bytecode gap).
 - `function handle target`: builtin and anonymous semantic handle `feval` are ratcheted; remaining method/DefPath targets appear to require resolver/DefPath function-handle ABI work.
 - `assignment place`: multi-assign output storage now reuses MIR place assignment for non-local targets; remaining assignment-place gaps should be explicit source reproducers or object/dynamic descriptor plans, not generic slot-only lowering.
 
