@@ -124,9 +124,11 @@ export function resolvePlatformFromInputs({
   if (uaPlatform.includes("windows")) return "windows-x86_64";
   // ARM Linux installers are not published yet; send those users to the chooser.
   if (uaPlatform.includes("linux")) return uaArch.includes("arm") ? null : "linux-x86_64";
-  if (uaPlatform.includes("mac")) return resolveMacPlatform(uaArch);
 
   const userAgent = rawUserAgent?.toLowerCase() ?? "";
+  if (uaPlatform.includes("mac")) {
+    return resolveMacPlatform(uaArch) ?? resolveMacPlatformFromUserAgent(userAgent);
+  }
   if (userAgent.includes("windows")) return "windows-x86_64";
   // ARM Linux installers are not published yet; send those users to the chooser.
   if (userAgent.includes("linux")) {

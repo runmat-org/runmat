@@ -17,6 +17,16 @@ describe("download latest route helpers", () => {
       ).toBe("darwin-aarch64");
     });
 
+    it("defaults Mac Chrome with platform Client Hint but no arch Client Hint to Apple Silicon", () => {
+      expect(
+        resolvePlatformFromInputs({
+          secChUaPlatform: '"macOS"',
+          userAgent:
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        })
+      ).toBe("darwin-aarch64");
+    });
+
     it("resolves Mac Apple Silicon from Client Hints", () => {
       expect(
         resolvePlatformFromInputs({
