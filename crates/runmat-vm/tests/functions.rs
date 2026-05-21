@@ -108,6 +108,28 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
 }
 
 #[test]
+fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; C = deal(1,2); y = feval(h, C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle expanded feval source should compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode).expect_err("unresolved qualified expanded feval should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = feval(h, C{:});";
     let bytecode = compile_semantic_source(source)
