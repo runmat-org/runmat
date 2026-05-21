@@ -676,12 +676,38 @@ fn validate_object_end_numeric_selector_plan(
     Ok(end_expr_by_slot)
 }
 
+fn validate_object_selector_masks(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+) -> Result<(), RuntimeError> {
+    if (colon_mask & end_mask) != 0 {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidSelectorMaskPlan",
+            "object selector masks overlap on the same dimension",
+        ));
+    }
+
+    if dims < u32::BITS as usize {
+        let allowed_mask = if dims == 0 { 0 } else { (1u32 << dims) - 1 };
+        if ((colon_mask | end_mask) & !allowed_mask) != 0 {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidSelectorMaskPlan",
+                "object selector mask dimension is out of bounds",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn build_object_paren_selector_values(
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
+    validate_object_selector_masks(dims, colon_mask, end_mask)?;
     let mut values = Vec::with_capacity(dims);
     let mut numeric_iter = 0usize;
     for d in 0..dims {
@@ -725,6 +751,7 @@ pub(crate) fn build_object_paren_expr_selector_values(
     end_numeric_exprs: &[(usize, EndExpr)],
     numeric: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
+    validate_object_selector_masks(dims, colon_mask, end_mask)?;
     let range_pos_by_dim = validate_object_range_selector_plan(
         dims,
         range_dims,
@@ -1142,6 +1169,20 @@ mod tests {
     }
 
     #[test]
+    fn object_paren_selector_values_reject_out_of_bounds_mask_bits() {
+        let err = build_object_paren_selector_values(1, 0b10, 0, &[Value::Num(1.0)])
+            .expect_err("out-of-bounds selector mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_selector_values_reject_overlapping_colon_end_mask_bits() {
+        let err = build_object_paren_selector_values(1, 0b1, 0b1, &[])
+            .expect_err("overlapping selector mask bits should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
     fn object_paren_expr_selector_values_encode_end_expression_range_descriptors() {
         let selectors = build_object_paren_expr_selector_values(
             2,
@@ -1278,6 +1319,32 @@ mod tests {
         )
         .expect_err("range dimension conflicting with end mask should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_out_of_bounds_mask_bits() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0b10,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[Value::Num(1.0)],
+        )
+        .expect_err("out-of-bounds selector mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_overlapping_colon_end_mask_bits() {
+        let err =
+            build_object_paren_expr_selector_values(1, 0b1, 0b1, &[], &[], &[], &[], &[], &[], &[])
+                .expect_err("overlapping selector mask bits should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
     }
 
     #[test]

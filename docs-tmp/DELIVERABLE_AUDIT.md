@@ -354,6 +354,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - object expr-slice duplicate range-dimension validation now uses the same normalized plan identifier in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
     - duplicate object range dimensions now fail as `RunMat:InvalidRangeSelectorPlan` (instead of `RunMat:DuplicateRangeSelectorDim`).
     - ratchet: `object_paren_expr_selector_values_reject_duplicate_range_dims`.
+  - object selector mask metadata now has explicit shape/overlap invariant checks at the same shared descriptor boundary in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - both plain and expr object selector materialization reject out-of-bounds `colon_mask`/`end_mask` bits for `dims` via `RunMat:InvalidSelectorMaskPlan`.
+    - both paths reject overlapping colon and end mask bits on the same selector dimension via `RunMat:InvalidSelectorMaskPlan`.
+    - ratchets:
+      - `object_paren_selector_values_reject_out_of_bounds_mask_bits`
+      - `object_paren_selector_values_reject_overlapping_colon_end_mask_bits`
+      - `object_paren_expr_selector_values_reject_out_of_bounds_mask_bits`
+      - `object_paren_expr_selector_values_reject_overlapping_colon_end_mask_bits`
   - expr-slice end-offset selector context metadata now has explicit runtime invariant checks in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
     - `apply_end_offsets_to_numeric(...)` now pre-validates context rank/masks/range dims before dimension mapping.
     - malformed context metadata now fails with stable identifiers:
