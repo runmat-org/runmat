@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Multi-assign indexed output targets now enforce assignment-context invariants at compile boundaries
+  - `scope: in-scope`
+  - `blocker: multi-assign output store-back lowering accepted top-level indexed output targets with non-assignment index result contexts, allowing malformed MIR assignment-place metadata to flow into assignment bytecode paths without explicit compile rejection.`
+  - Tightened multi-assign output target validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `compile_mir_output_target_store(...)` now rejects top-level `MirPlace::Index` targets unless `indexing.result_context == AssignmentTarget`.
+    - malformed contexts now fail with stable identifier `RunMat:MirIndexContextInvalid`.
+  - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`

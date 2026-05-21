@@ -1064,6 +1064,15 @@ impl Compiler {
                 Ok(())
             }
             MirOutputTarget::Place(place) => {
+                if let MirPlace::Index(_, indexing) = place {
+                    if indexing.result_context != IndexResultContext::AssignmentTarget {
+                        return Err(self
+                            .compile_error(
+                                "MIR multi-assign output target index lowering expected AssignmentTarget context",
+                            )
+                            .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+                    }
+                }
                 let tmp = self.alloc_temp();
                 self.emit(Instr::StoreVar(tmp));
                 self.compile_mir_assign_from_slot(place, tmp)

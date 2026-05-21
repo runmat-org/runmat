@@ -831,7 +831,7 @@ mod tests {
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
         MirAggregateKind, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan, MirOperand,
-        MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+        MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -3128,6 +3128,66 @@ mod tests {
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:MirMultiAssignOutputCountMismatch")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier() {
+        let ast = runmat_parser::parse("a(1)=0; [x, b] = deal(1, 2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut indexed_place_for_target: Option<MirPlace> = None;
+        for block in &body.blocks {
+            for stmt in &block.statements {
+                if let MirStmtKind::Assign { place, .. } = &stmt.kind {
+                    let mut cloned = place.clone();
+                    if let MirPlace::Index(_, ref mut idx) = cloned {
+                        idx.result_context = IndexResultContext::ReadSingle;
+                        indexed_place_for_target = Some(cloned);
+                    }
+                }
+                if indexed_place_for_target.is_some() {
+                    break;
+                }
+            }
+            if indexed_place_for_target.is_some() {
+                break;
+            }
+        }
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::MultiAssign { targets, .. } = &mut stmt.kind {
+                    let place = indexed_place_for_target
+                        .clone()
+                        .expect("expected indexed place in lowered MIR");
+                    if let Some(target) = targets.targets.first_mut() {
+                        *target = MirOutputTarget::Place(place);
+                        patched = true;
+                    }
+                }
+                if patched {
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected indexed multi-assign output target in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirIndexContextInvalid")
         );
     }
 
