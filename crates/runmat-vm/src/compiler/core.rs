@@ -1,11 +1,12 @@
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
+use crate::call::shared::strict_callable_display_name;
 use crate::compiler::CompileError;
 use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
     BindingId, CallSyntax, CallableIdentity, EntrypointId, FunctionId, HirAssembly, IndexKind,
-    IndexResultContext, OperatorKind, QualifiedName, RequestedOutputCount,
+    IndexResultContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
@@ -2001,30 +2002,8 @@ impl Compiler {
             .map_err(|message| self.compile_error(message))
     }
 
-    fn mir_runtime_name_callee(
-        &self,
-        callee: &CallableIdentity,
-    ) -> Result<Option<String>, CompileError> {
-        match callee {
-            CallableIdentity::ExternalName(QualifiedName(segments)) => {
-                if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
-                    return Ok(None);
-                }
-                Ok(Some(
-                    segments
-                        .iter()
-                        .map(|segment| segment.0.as_str())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                ))
-            }
-            CallableIdentity::DynamicName(name) => {
-                Ok((!name.0.is_empty()).then_some(name.0.clone()))
-            }
-            CallableIdentity::Imported(path) => Ok(path.module.display_name()),
-            CallableIdentity::Method(id) => Ok((!id.0.is_empty()).then_some(id.0.clone())),
-            _ => Ok(None),
-        }
+    fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {
+        strict_callable_display_name(callee)
     }
 
     fn compile_mir_method_call(
@@ -2813,24 +2792,27 @@ impl Compiler {
         target: &CallableIdentity,
     ) -> Result<(), CompileError> {
         match target {
-            CallableIdentity::Builtin(builtin) => {
-                self.emit(Instr::CreateFunctionHandle(builtin.0.clone()));
-                Ok(())
-            }
-            CallableIdentity::DynamicName(name) => {
-                self.emit(Instr::CreateFunctionHandle(name.0.clone()));
-                Ok(())
-            }
-            CallableIdentity::ExternalName(_)
+            CallableIdentity::Builtin(_)
+            | CallableIdentity::DynamicName(_)
+            | CallableIdentity::ExternalName(_)
             | CallableIdentity::Imported(_)
             | CallableIdentity::Method(_) => {
-                let name = self.mir_runtime_name_callee(target)?.ok_or_else(|| {
+                let name = self.mir_runtime_name_callee(target).ok_or_else(|| {
                     self.compile_error(format!(
                         "missing runtime name for function handle target {target:?}"
                     ))
                     .with_identifier(IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING)
                 })?;
-                self.emit(Instr::CreateExternalFunctionHandle(name));
+                if matches!(
+                    target,
+                    CallableIdentity::ExternalName(_)
+                        | CallableIdentity::Imported(_)
+                        | CallableIdentity::Method(_)
+                ) {
+                    self.emit(Instr::CreateExternalFunctionHandle(name));
+                } else {
+                    self.emit(Instr::CreateFunctionHandle(name));
+                }
                 Ok(())
             }
             CallableIdentity::AnonymousFunction(function) => {

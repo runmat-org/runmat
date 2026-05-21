@@ -12,6 +12,27 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM function-handle compile boundary strict-name invariant ratchet
+  - `scope: in-scope`
+  - `blocker: MIR function-handle lowering still accepted empty textual targets for builtin/dynamic callable identities, allowing malformed name-shaped handles past compile boundaries while external/imported/method targets were already strict-gated.`
+  - Normalized function-handle runtime-name derivation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `compile_mir_function_handle(...)` now routes `Builtin`, `DynamicName`, `ExternalName`, `Imported`, and `Method` identities through one strict display-name policy (`strict_callable_display_name(...)`).
+    - empty builtin/dynamic names now fail at compile time with `RunMat:MirFunctionHandleNameMissing` instead of emitting empty runtime handles.
+    - preserved ABI split:
+      - builtin/dynamic handles still lower to `Instr::CreateFunctionHandle`
+      - external/imported/method handles still lower to `Instr::CreateExternalFunctionHandle`.
+  - Added compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier`
+    - `primary_compile_rejects_empty_builtin_function_handle_name_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_empty_builtin_function_handle_name_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Remaining-partials consolidated validation gate refresh (post callable-contract slices)
   - `scope: in-scope`
   - `blocker: deliverable audit still listed a validation-closeout blocker requiring one consolidated end-to-end gate run tied to remaining in-scope partial surfaces.`
