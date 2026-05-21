@@ -203,21 +203,11 @@ impl TimeitCallable {
         // request the correct number of outputs when dispatching through `feval`.
         // For now, we invoke the handle normally and drop whatever value is produced.
         if let Some(0) = self.num_outputs {
-            let value = crate::call_builtin_async_with_outputs(
-                "feval",
-                std::slice::from_ref(&self.handle),
-                0,
-            )
-            .await?;
+            let value = crate::call_feval_async_with_outputs(self.handle.clone(), &[], 0).await?;
             drop(value);
             Ok(Value::Num(0.0))
         } else {
-            Ok(crate::call_builtin_async_with_outputs(
-                "feval",
-                std::slice::from_ref(&self.handle),
-                1,
-            )
-            .await?)
+            Ok(crate::call_feval_async_with_outputs(self.handle.clone(), &[], 1).await?)
         }
     }
 }

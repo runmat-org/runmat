@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `timeit` callback invocation now uses typed `feval` helper boundary
+  - `scope: in-scope`
+  - `blocker: `timeit` callback execution still invoked `feval` via internal builtin-name dispatch (`call_builtin_async_with_outputs("feval", ...)`) instead of the shared typed callback helper path used by other runtime/VM callback sites.`
+  - Tightened callback invocation in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+    - `TimeitCallable::invoke(...)` now routes through `call_feval_async_with_outputs(...)` for both zero-output and single-output branches.
+  - Validation:
+    - `cargo test -p runmat-runtime timeit_supports_zero_outputs -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_external_function_handle_surfaces_undefined_function -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_external_function_handle_prefers_semantic_resolver_identity -- --nocapture`
+    - `cargo fmt --all`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime/VM callback forwarding now routes through typed `feval` helper boundary
   - `scope: in-scope`
   - `blocker: several runtime/VM callback entrypoints still invoked `feval` through internal builtin-name dispatch (`call_builtin_async_with_outputs("feval", ...)`), keeping a name-shaped internal service hook in otherwise typed callable descriptor paths.`
