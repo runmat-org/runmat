@@ -116,6 +116,18 @@ fn apply_cell_end_offsets_for_base(
     let Value::Cell(ca) = base else {
         return Ok(raw_indices.to_vec());
     };
+    let mut seen = vec![false; raw_indices.len()];
+    for (position, _) in end_offsets {
+        if *position >= raw_indices.len() {
+            continue;
+        }
+        if std::mem::replace(&mut seen[*position], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position appears more than once",
+            ));
+        }
+    }
     let mut adjusted = raw_indices.to_vec();
     for (position, offset) in end_offsets {
         if *position >= adjusted.len() {
@@ -156,6 +168,18 @@ async fn apply_cell_end_exprs_for_base(
     let Value::Cell(ca) = base else {
         return Ok(raw_indices.to_vec());
     };
+    let mut seen = vec![false; raw_indices.len()];
+    for (position, _) in end_exprs {
+        if *position >= raw_indices.len() {
+            continue;
+        }
+        if std::mem::replace(&mut seen[*position], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position appears more than once",
+            ));
+        }
+    }
     let mut adjusted = raw_indices.to_vec();
     for (position, end_expr) in end_exprs {
         if *position >= adjusted.len() {
@@ -1849,10 +1873,13 @@ pub async fn dispatch_indexing(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_end_offsets_to_numeric, map_slice_plan_error, IndexContext};
+    use super::{
+        apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
+        apply_end_offsets_to_numeric, map_slice_plan_error, IndexContext,
+    };
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_builtins::{CellArray, Value};
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
@@ -1893,6 +1920,30 @@ mod tests {
             &mut vars,
         ))
         .expect_err("duplicate end-selector positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_offsets_rejects_duplicate_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let err =
+            apply_cell_end_offsets_for_base(&base, &[Value::Num(1.0)], &[(0, 0), (0, 1)], false)
+                .expect_err("duplicate cell end-offset positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_exprs_rejects_duplicate_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let mut vars = vec![];
+        let err = block_on(apply_cell_end_exprs_for_base(
+            &base,
+            &[Value::Num(1.0)],
+            &[(0, EndExpr::End), (0, EndExpr::Const(1.0))],
+            &mut vars,
+            false,
+        ))
+        .expect_err("duplicate cell end-expression positions should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
     }
 }

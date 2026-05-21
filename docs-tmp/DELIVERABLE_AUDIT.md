@@ -217,6 +217,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - interpreter ratchets:
       - `apply_end_offsets_rejects_out_of_bounds_positions`
       - `apply_end_offsets_rejects_duplicate_positions`
+  - cell end-selector helper normalization now rejects duplicate selector-position metadata in both offset and end-expression paths:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `apply_cell_end_offsets_for_base(...)` and `apply_cell_end_exprs_for_base(...)` now fail duplicate selector positions with stable identifier `RunMat:InvalidEndSelectorPlan` instead of silently overriding prior positions.
+    - interpreter ratchets:
+      - `apply_cell_end_offsets_rejects_duplicate_positions`
+      - `apply_cell_end_exprs_rejects_duplicate_positions`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

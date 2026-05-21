@@ -12,6 +12,22 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM cell end-selector metadata duplicate-position invariant ratchet
+  - `scope: in-scope`
+  - Closed remaining non-tensor selector-plan normalization holes in cell end-selector metadata helpers:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now rejects duplicate selector positions in both `apply_cell_end_offsets_for_base(...)` and `apply_cell_end_exprs_for_base(...)`.
+    - duplicate cell end-selector metadata now fails fast with stable identifier `RunMat:InvalidEndSelectorPlan` instead of silently last-write-wins overriding.
+  - Added interpreter invariant ratchets in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `apply_cell_end_offsets_rejects_duplicate_positions`
+    - `apply_cell_end_exprs_rejects_duplicate_positions`
+  - Validation:
+    - `cargo test -p runmat-vm --lib end_offsets_rejects_ -- --nocapture`
+    - `cargo test -p runmat-vm --lib apply_cell_end_exprs_rejects_duplicate_positions -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM expr-slice end-selector metadata invariant ratchet
   - `scope: in-scope`
   - Closed a remaining selector-plan normalization hole in non-object expr-slice execution:
