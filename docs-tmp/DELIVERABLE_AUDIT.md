@@ -128,6 +128,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier`
       - `primary_compile_rejects_empty_builtin_function_handle_name_with_identifier`
+      - `primary_compile_rejects_empty_method_function_handle_name_with_identifier`
+      - `primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).

@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM function-handle compile boundary method/imported empty-name ratchet
+  - `scope: in-scope`
+  - `blocker: strict function-handle compile-name gating was ratcheted for malformed external and empty builtin/dynamic identities, but empty method/imported module-path identities were not explicitly pinned, leaving a regression seam on textual handle identity normalization.`
+  - Added compile-level identifier ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_empty_method_function_handle_name_with_identifier`
+    - `primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier`
+  - Both assert compile-time rejection `RunMat:MirFunctionHandleNameMissing`.
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_empty_method_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM function-handle compile boundary strict-name invariant ratchet
   - `scope: in-scope`
   - `blocker: MIR function-handle lowering still accepted empty textual targets for builtin/dynamic callable identities, allowing malformed name-shaped handles past compile boundaries while external/imported/method targets were already strict-gated.`

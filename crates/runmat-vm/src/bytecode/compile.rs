@@ -825,8 +825,8 @@ mod tests {
     use runmat_builtins::Value;
     use runmat_hir::{
         lower, AssignmentCreationPolicy, BuiltinId, CallableFallbackPolicy, CallableIdentity,
-        FunctionId, IndexResultContext, LoweringContext, MethodId, OperatorKind, QualifiedName,
-        RequestedOutputCount, SymbolName,
+        DefPath, DefPathSegment, FunctionId, IndexResultContext, LoweringContext, MethodId,
+        OperatorKind, PackageName, QualifiedName, RequestedOutputCount, SymbolName,
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
@@ -3712,6 +3712,76 @@ mod tests {
                     *value = MirRvalue::Use(MirOperand::FunctionHandle(CallableIdentity::Builtin(
                         BuiltinId(String::new()),
                     )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirFunctionHandleNameMissing")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_empty_method_function_handle_name_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::FunctionHandle(CallableIdentity::Method(
+                        MethodId(String::new()),
+                    )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirFunctionHandleNameMissing")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::FunctionHandle(
+                        CallableIdentity::Imported(DefPath {
+                            package: PackageName("pkg".to_string()),
+                            module: QualifiedName(vec![]),
+                            item: vec![DefPathSegment::Function(SymbolName("target".to_string()))],
+                        }),
+                    ));
                     patched = true;
                     break;
                 }
