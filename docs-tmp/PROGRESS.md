@@ -4875,6 +4875,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete semantic handle `feval` output-policy opcode matrix
+  - Extended semantic user-function handle `feval` coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to close missing fixed/expanded output-policy lanes:
+    - `semantic_feval_zero_output_uses_typed_instruction`
+    - `semantic_feval_single_output_uses_typed_instruction`
+    - `semantic_feval_expand_zero_output_uses_typed_instruction`
+    - `semantic_feval_expand_single_output_uses_typed_instruction`
+  - These tests ratchet typed `feval` opcode boundaries for semantic handles:
+    - fixed args via `CallFevalMulti(argc=1, out_count=0/1)` with execution checks
+    - expanded args via `CallFevalExpandMultiOutput(..., out_count=0/1)` with execution checks
+    - existing multi-output contracts remain via `semantic_feval_multi_assign_uses_typed_instruction` and `semantic_feval_expand_multi_assign_uses_typed_instruction` (`out_count=2`).
+  - This closes the remaining semantic-handle `feval` output-policy matrix gap and aligns semantic-handle `feval` coverage with direct-handle and unresolved-handle call ABI ratchets.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions semantic_feval_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

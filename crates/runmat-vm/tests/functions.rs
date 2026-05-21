@@ -1345,6 +1345,43 @@ fn semantic_feval_multi_assign_uses_typed_instruction() {
 }
 
 #[test]
+fn semantic_feval_zero_output_uses_typed_instruction() {
+    let source = r#"
+        function y = inc(x)
+            y = x + 1;
+        end
+        h = @inc;
+        feval(h, 2);
+    "#;
+    let bytecode = compile_semantic_source(source).expect("compile semantic feval zero-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0
+    )));
+    interpret(&bytecode).expect("execute semantic feval zero-output");
+}
+
+#[test]
+fn semantic_feval_single_output_uses_typed_instruction() {
+    let source = r#"
+        function y = inc(x)
+            y = x + 1;
+        end
+        h = @inc;
+        z = feval(h, 2);
+    "#;
+    let bytecode = compile_semantic_source(source).expect("compile semantic feval single-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1
+    )));
+    let vars = interpret(&bytecode).expect("execute semantic feval single-output");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
 fn semantic_feval_expand_multi_assign_uses_typed_instruction() {
     let source = r#"
         function [a,b] = pair(x,y)
@@ -1368,6 +1405,51 @@ fn semantic_feval_expand_multi_assign_uses_typed_instruction() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
+}
+
+#[test]
+fn semantic_feval_expand_zero_output_uses_typed_instruction() {
+    let source = r#"
+        function [a,b] = pair(x,y)
+            a = x;
+            b = y;
+        end
+        C = deal(7,8);
+        h = @pair;
+        feval(h, C{:});
+    "#;
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic feval expanded zero-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 0 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    interpret(&bytecode).expect("execute semantic feval expanded zero-output");
+}
+
+#[test]
+fn semantic_feval_expand_single_output_uses_typed_instruction() {
+    let source = r#"
+        function [a,b] = pair(x,y)
+            a = x;
+            b = y;
+        end
+        C = deal(7,8);
+        h = @pair;
+        u = feval(h, C{:});
+    "#;
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic feval expanded single-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let vars = interpret(&bytecode).expect("execute semantic feval expanded single-output");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
 }
 
 #[test]
