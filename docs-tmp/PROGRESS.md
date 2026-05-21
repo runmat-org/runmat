@@ -3857,6 +3857,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 3/7 Turbine builtin expanded-call host bridge
+  - Added a typed Turbine host callback path for expanded builtin multi-output execution in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/lib.rs):
+    - `runmat_call_builtin_expanded_values(...)` now decodes builtin name + `TurbineValue` args payload, expands args via `TurbineArgSpec`, and executes through `runmat_runtime::call_builtin_async_with_outputs(...)`.
+  - Wired the callback through Turbine JIT engine symbol registration/import declarations and compiler plumbing.
+  - JIT compile now handles `Instr::CallBuiltinExpandMultiOutput` in [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), including explicit multi-output `Unpack` shape validation and typed marshalling.
+  - Expanded-call blocker remains explicit for method/member expanded opcodes pending object/descriptor ABI completion.
+  - Validation:
+    - `cargo test -p runmat-turbine --lib -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
