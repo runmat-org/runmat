@@ -2534,6 +2534,13 @@ fn feval_expand_cell_indices_end_plus_offset_errors() {
 }
 
 #[test]
+fn feval_expand_cell_fractional_index_errors() {
+    let program = "C = {10, 20}; r = feval(@max, C{1.5}, 0);";
+    let err = execute_semantic_source_result(program).err().unwrap();
+    assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+}
+
+#[test]
 fn varargout_expand_into_outer_call() {
     // h returns varargout with three numbers; max(h()) should consume two (max takes two args)
     let program = r#"

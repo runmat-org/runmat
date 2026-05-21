@@ -29,6 +29,43 @@ fn allocate_empty_cell_handle() -> Result<runmat_gc::GcPtr<Value>, RuntimeError>
     allocate_cell_handle(empty_numeric_cell_value()?)
 }
 
+fn exact_index_from_f64(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+        return None;
+    }
+    Some(rounded as i64)
+}
+
+fn parse_positive_cell_index(index: i64) -> Result<usize, RuntimeError> {
+    if index < 1 {
+        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+    }
+    usize::try_from(index).map_err(|_| mex("CellIndexOutOfBounds", "Cell index out of bounds"))
+}
+
+fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
+    let index = match value {
+        Value::Num(n) => exact_index_from_f64(*n)
+            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
+        Value::Int(i) => i.to_i64(),
+        other => {
+            let n: f64 = other
+                .try_into()
+                .map_err(|_| mex("CellIndexType", "Unsupported cell index type"))?;
+            exact_index_from_f64(n)
+                .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+        }
+    };
+    parse_positive_cell_index(index)
+}
+
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
     if !value.is_nan() {
         return None;
@@ -52,8 +89,10 @@ fn resolve_cell_end_relative_index(value: f64, len: usize) -> Result<Option<usiz
         return Ok(Some(len));
     }
     if value < 0.0 {
-        let idx = len as isize + value as isize;
-        if idx < 1 || idx as usize > len {
+        let offset = exact_index_from_f64(value)
+            .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
+        let idx = len as i64 + offset;
+        if idx < 1 || idx > len as i64 {
             return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
         }
         return Ok(Some(idx as usize));
@@ -219,17 +258,6 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
             || matches!(value, Value::CharArray(chars) if chars.to_string() == ":")
     }
 
-    fn scalar_index(value: &Value) -> Result<usize, RuntimeError> {
-        match value {
-            Value::Num(n) => Ok(*n as usize),
-            Value::Int(i) => Ok(i.to_i64() as usize),
-            _ => {
-                let n: f64 = value.try_into()?;
-                Ok(n as usize)
-            }
-        }
-    }
-
     match indices.len() {
         1 => match &indices[0] {
             value if is_colon_selector(value) => expand_all_cell_values(ca),
@@ -237,13 +265,25 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data.len())? {
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
-                Ok(vec![index_cell_value(ca, &[*n as usize])?])
+                if n.is_nan() {
+                    return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+                }
+                let idx = parse_cell_index_value(&indices[0])?;
+                Ok(vec![index_cell_value(ca, &[idx])?])
             }
-            Value::Int(i) => Ok(vec![index_cell_value(ca, &[i.to_i64() as usize])?]),
+            Value::Int(_) => {
+                let idx = parse_cell_index_value(&indices[0])?;
+                Ok(vec![index_cell_value(ca, &[idx])?])
+            }
             Value::Tensor(t) => t
                 .data
                 .iter()
-                .map(|&val| index_cell_value(ca, &[val as usize]))
+                .map(|&val| {
+                    let idx = exact_index_from_f64(val)
+                        .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
+                    let idx = parse_positive_cell_index(idx)?;
+                    index_cell_value(ca, &[idx])
+                })
                 .collect(),
             _ => Err(mex("CellIndexType", "Unsupported cell index type")),
         },
@@ -254,7 +294,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 return expand_all_cell_values(ca);
             }
             if row_colon {
-                let c = scalar_index(&indices[1])?;
+                let c = parse_cell_index_value(&indices[1])?;
                 let mut values = Vec::with_capacity(ca.rows);
                 for r in 1..=ca.rows {
                     values.push(index_cell_value(ca, &[r, c])?);
@@ -262,15 +302,15 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 return Ok(values);
             }
             if col_colon {
-                let r = scalar_index(&indices[0])?;
+                let r = parse_cell_index_value(&indices[0])?;
                 let mut values = Vec::with_capacity(ca.cols);
                 for c in 1..=ca.cols {
                     values.push(index_cell_value(ca, &[r, c])?);
                 }
                 return Ok(values);
             }
-            let r = scalar_index(&indices[0])?;
-            let c = scalar_index(&indices[1])?;
+            let r = parse_cell_index_value(&indices[0])?;
+            let c = parse_cell_index_value(&indices[1])?;
             Ok(vec![index_cell_value(ca, &[r, c])?])
         }
         _ => Err(mex("CellIndexType", "Unsupported cell index type")),
@@ -541,7 +581,7 @@ fn assign_cell_paren_from_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::{assign_cell_member, map_cell_shape_error};
+    use super::{assign_cell_member, expand_cell_indices, map_cell_shape_error};
     use runmat_builtins::{CellArray, StructValue, Value};
 
     #[test]
@@ -565,5 +605,22 @@ mod tests {
     fn cell_shape_error_mapping_reports_identifier() {
         let err = map_cell_shape_error("cell creation", "invalid shape");
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn expand_cell_indices_rejects_fractional_linear_index() {
+        let cell = CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).expect("cell");
+        let err = expand_cell_indices(&cell, &[Value::Num(1.5)])
+            .expect_err("fractional index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+    }
+
+    #[test]
+    fn expand_cell_indices_rejects_fractional_tensor_indices() {
+        let cell = CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).expect("cell");
+        let tensor = runmat_builtins::Tensor::new(vec![1.0, 1.25], vec![1, 2]).expect("tensor");
+        let err = expand_cell_indices(&cell, &[Value::Tensor(tensor)])
+            .expect_err("fractional tensor index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
     }
 }

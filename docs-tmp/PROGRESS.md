@@ -12,6 +12,31 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM cell-expansion index normalization ratchet (brace expansion call ABI)
+  - `scope: in-scope`
+  - `blocker: cell brace-expansion index materialization still used lossy numeric casts (`as usize`) for scalar/tensor index values, allowing silent fractional truncation in expansion call paths (`C{...}` in expanded argument lowering) instead of explicit typed selector failures.`
+  - Tightened cell expansion index parsing in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
+    - added exact integer parsing (`exact_index_from_f64`) and strict positive-index normalization for scalar/tensor cell expansion indices.
+    - non-integer expansion indices now fail with `RunMat:CellIndexType` instead of truncating.
+    - preserved existing end-relative expansion behavior and identifier contracts (`end`, `end-1`, `end+1` surfaces).
+    - preserved existing out-of-bounds behavior for unresolved `NaN` selectors in expansion paths (`RunMat:CellIndexOutOfBounds`) to keep end-offset error contracts stable.
+  - Added ratchets:
+    - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
+      - `expand_cell_indices_rejects_fractional_linear_index`
+      - `expand_cell_indices_rejects_fractional_tensor_indices`
+    - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+      - `feval_expand_cell_fractional_index_errors`
+  - Validation:
+    - `cargo test -p runmat-vm feval_expand_cell_indices_end_plus_offset_errors -- --nocapture`
+    - `cargo test -p runmat-vm feval_expand_cell_indices_support_end_offsets -- --nocapture`
+    - `cargo test -p runmat-vm feval_expand_cell_fractional_index_errors -- --nocapture`
+    - `cargo test -p runmat-vm --lib expand_cell_indices_rejects_ -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime optimizer/ODE callback-handle canonicalization to semantic identity
   - `scope: in-scope`
   - `blocker: optimizer/ODE callback entrypoints still forwarded name-shaped handles into `feval` even when semantic identity was already resolvable, leaving avoidable name-resolution seams in iterative callback paths.`
