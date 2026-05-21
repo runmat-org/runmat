@@ -1534,6 +1534,20 @@ fn call_method_nonobject_receiver_errors_with_identifier_contract() {
 }
 
 #[test]
+fn subsref_nonobject_receiver_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("subsref(1, '()', {1});")
+        .expect_err("non-object subsref receiver should fail");
+    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+}
+
+#[test]
+fn subsasgn_nonobject_receiver_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("subsasgn(1, '()', {1}, 2);")
+        .expect_err("non-object subsasgn receiver should fail");
+    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+}
+
+#[test]
 fn import_precedence_specific_over_wildcard_and_locals() {
     // Specific imports should take precedence over wildcard imports; locals should shadow both
     let program = r#"

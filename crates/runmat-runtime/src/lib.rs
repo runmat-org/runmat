@@ -451,7 +451,11 @@ async fn subsasgn_dispatch(
                 }
             })
         }
-        other => Err((format!("subsasgn: receiver must be object, got {other:?}")).into()),
+        other => Err(build_runtime_error(format!(
+            "subsasgn: receiver must be object, got {other:?}"
+        ))
+        .with_identifier("RunMat:InvalidObjectDispatch")
+        .build()),
     }
 }
 
@@ -481,7 +485,11 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
                 }
             })
         }
-        other => Err((format!("subsref: receiver must be object, got {other:?}")).into()),
+        other => Err(build_runtime_error(format!(
+            "subsref: receiver must be object, got {other:?}"
+        ))
+        .with_identifier("RunMat:InvalidObjectDispatch")
+        .build()),
     }
 }
 
@@ -2349,6 +2357,29 @@ mod tests {
         ))
         .expect_err("empty method name should fail");
         assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
+    }
+
+    #[test]
+    fn subsref_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(subsref_dispatch(
+            Value::Num(1.0),
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::Num(2.0),
+        ))
+        .expect_err("non-object subsref receiver should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+    }
+
+    #[test]
+    fn subsasgn_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(subsasgn_dispatch(
+            Value::Num(1.0),
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ))
+        .expect_err("non-object subsasgn receiver should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
     }
 
     #[test]
