@@ -51,9 +51,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
       - `getmethod_rejects_empty_method_name`
     - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
       - `classref_getmethod_static_method_handle_executes`
+      - `classref_getmethod_static_method_handle_direct_call_executes`
   - Validation:
     - `cargo test -p runmat-runtime getmethod_ -- --nocapture`
-    - `cargo test -p runmat-vm classref_getmethod_static_method_handle_executes -- --nocapture`
+    - `cargo test -p runmat-vm classref_getmethod_static_method_handle_ -- --nocapture`
 
 - VM unresolved expanded dynamic-call single-output error-surface ratchet
   - `scope: in-scope`
