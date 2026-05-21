@@ -125,6 +125,7 @@ fn repelem_type(args: &[Type], _ctx: &ResolveContext) -> Type {
             element_type: element_type.clone(),
             length: None,
         },
+        Type::String => Type::cell_of(Type::String),
         Type::Unknown => Type::Unknown,
         _ => Type::Unknown,
     }
@@ -317,7 +318,12 @@ fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
             "repelem: when called with a single replication count the input must be a vector",
         ));
     }
-    // Scalar / empty input -> default to columns (matches MATLAB row-vector semantics).
+    // Empty column vectors have no non-singleton dimension, but MATLAB still
+    // preserves their 0x1 orientation for the single-factor vector form.
+    if total == 0 && shape.first().copied().unwrap_or(1) != 1 {
+        return Ok(0);
+    }
+    // Scalar / other empty input -> default to columns (matches MATLAB row-vector semantics).
     if total <= 1 {
         return Ok(1);
     }
@@ -384,24 +390,82 @@ fn repelem_cell_array(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<CellArray> {
-    let (new_rows, new_cols, plan) = build_2d_plan(cell.rows, cell.cols, factors, single_arg)?;
-    let total = new_rows
-        .checked_mul(new_cols)
-        .ok_or_else(|| repelem_error("repelem: requested output exceeds maximum size"))?;
-    if total == 0 {
-        return CellArray::new(Vec::new(), new_rows, new_cols)
-            .map_err(|e| repelem_error(format!("repelem: {e}")));
+    let (values, shape) = repelem_cell_row_major(cell, factors, single_arg)?;
+    CellArray::new_with_shape(values, shape).map_err(|e| repelem_error(format!("repelem: {e}")))
+}
+
+fn repelem_cell_row_major(
+    cell: &CellArray,
+    factors: &[RepFactor],
+    single_arg: bool,
+) -> crate::BuiltinResult<(Vec<Value>, Vec<usize>)> {
+    let mut input_shape = if cell.shape.is_empty() {
+        vec![cell.rows, cell.cols]
+    } else {
+        cell.shape.clone()
+    };
+    while input_shape.len() < 2 {
+        input_shape.push(1);
     }
-    let mut values = Vec::with_capacity(total);
-    for r in 0..new_rows {
-        let src_row = plan.row_table[r];
-        for c in 0..new_cols {
-            let src_col = plan.col_table[c];
-            let idx = src_row * cell.cols + src_col;
-            values.push((unsafe { &*cell.data[idx].as_raw() }).clone());
+
+    let orig_total = checked_total(&input_shape)?;
+    if !(orig_total == cell.data.len() || (orig_total == 0 && cell.data.is_empty())) {
+        return Err(repelem_error(format!(
+            "repelem: internal cell shape mismatch (expected {orig_total} elements, found {})",
+            cell.data.len()
+        )));
+    }
+
+    let mut axis_factors: Vec<RepFactor> = Vec::new();
+    let rank;
+    if single_arg {
+        let axis = vector_replication_axis(&input_shape)?;
+        rank = input_shape.len();
+        for k in 0..rank {
+            if k == axis {
+                axis_factors.push(factors[0].clone());
+            } else {
+                axis_factors.push(RepFactor::Scalar(1));
+            }
+        }
+    } else {
+        rank = input_shape.len().max(factors.len()).max(2);
+        while input_shape.len() < rank {
+            input_shape.push(1);
+        }
+        for k in 0..rank {
+            axis_factors.push(factors.get(k).cloned().unwrap_or(RepFactor::Scalar(1)));
         }
     }
-    CellArray::new(values, new_rows, new_cols).map_err(|e| repelem_error(format!("repelem: {e}")))
+
+    let mut idx_tables: Vec<Vec<usize>> = Vec::with_capacity(rank);
+    let mut output_shape = Vec::with_capacity(rank);
+    for (k, factor) in axis_factors.iter().enumerate() {
+        let table = expand_axis(input_shape[k], factor, k + 1)?;
+        output_shape.push(table.len());
+        idx_tables.push(table);
+    }
+
+    let total = checked_total(&output_shape)?;
+    if total == 0 {
+        return Ok((Vec::new(), output_shape));
+    }
+
+    let src_strides = row_major_strides(&input_shape);
+    let mut values = Vec::with_capacity(total);
+    for idx in 0..total {
+        let mut rem = idx;
+        let mut src_index = 0usize;
+        for k in (0..rank).rev() {
+            let dim_size = output_shape[k];
+            let coord = rem % dim_size;
+            rem /= dim_size;
+            let src_coord = idx_tables[k][coord];
+            src_index += src_coord * src_strides[k];
+        }
+        values.push((unsafe { &*cell.data[src_index].as_raw() }).clone());
+    }
+    Ok((values, output_shape))
 }
 
 #[derive(Debug)]
@@ -632,6 +696,16 @@ fn column_major_strides(dims: &[usize]) -> Vec<usize> {
     strides
 }
 
+fn row_major_strides(dims: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1usize; dims.len()];
+    let mut stride = 1usize;
+    for idx in (0..dims.len()).rev() {
+        strides[idx] = stride;
+        stride = stride.saturating_mul(dims[idx].max(1));
+    }
+    strides
+}
+
 fn checked_total(shape: &[usize]) -> crate::BuiltinResult<usize> {
     shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim)
@@ -686,6 +760,12 @@ pub(crate) mod tests {
                 shape: Some(vec![None, None])
             }
         );
+    }
+
+    #[test]
+    fn repelem_type_maps_string_to_string_array_model() {
+        let out = repelem_type(&[Type::String, Type::Num], &ResolveContext::new(Vec::new()));
+        assert_eq!(out, Type::cell_of(Type::String));
     }
 
     #[test]
@@ -912,6 +992,35 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn empty_column_vector_preserves_orientation() {
+        let v = Tensor::new(Vec::new(), vec![0, 1]).unwrap();
+        let result =
+            repelem_builtin(Value::Tensor(v), vec![Value::Int(IntValue::I32(3))]).expect("repelem");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![0, 1]);
+                assert!(t.data.is_empty());
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_column_count_vector_preserves_orientation() {
+        let v = Tensor::new(Vec::new(), vec![0, 1]).unwrap();
+        let counts = Tensor::new(Vec::new(), vec![0, 1]).unwrap();
+        let result =
+            repelem_builtin(Value::Tensor(v), vec![Value::Tensor(counts)]).expect("repelem");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![0, 1]);
+                assert!(t.data.is_empty());
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn per_element_vector_with_zero_entries_skips_elements() {
         // Documented MATLAB example: repelem([1 2 3 4 5], [0 1 0 2 1])
         // yields a 1x4 row vector [2 4 4 5].
@@ -1016,6 +1125,36 @@ pub(crate) mod tests {
                         }
                     }
                 }
+            }
+            other => panic!("expected cell array, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cell_array_replication_nd_preserves_shape() {
+        let cell = CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
+            .unwrap();
+        let result = repelem_builtin(
+            Value::Cell(cell),
+            vec![
+                Value::Int(IntValue::I32(1)),
+                Value::Int(IntValue::I32(1)),
+                Value::Int(IntValue::I32(2)),
+            ],
+        )
+        .expect("repelem");
+        match result {
+            Value::Cell(out) => {
+                assert_eq!(out.shape, vec![1, 1, 4]);
+                let values: Vec<f64> = out
+                    .data
+                    .iter()
+                    .map(|ptr| match unsafe { &*ptr.as_raw() } {
+                        Value::Num(n) => *n,
+                        other => panic!("expected numeric cell element, got {other:?}"),
+                    })
+                    .collect();
+                assert_eq!(values, vec![1.0, 1.0, 2.0, 2.0]);
             }
             other => panic!("expected cell array, got {other:?}"),
         }
