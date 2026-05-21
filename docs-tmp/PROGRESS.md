@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM object descriptor cell-build error normalization to typed identifier
+  - `scope: in-scope`
+  - `blocker: object descriptor helper paths in VM call sharing still converted cell-build failures to string-shaped runtime errors (`map_err(|e| format!(...))`), which can erase typed identifier contracts at descriptor boundaries.`
+  - Tightened object descriptor shared helpers in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - added shared `build_cell_array_with_shape(...)` mapper for descriptor cell construction and bound these failures to `RunMat:ShapeMismatch`.
+    - replaced string-shaped wrappers in protocol cell building, `getfield` index payload cell construction, end-expression cell encoding, object end-range descriptor encoding, and output-list expansion materialization.
+  - Added ratchet:
+    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+      - `cell_builder_maps_shape_errors_to_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm cell_builder_maps_shape_errors_to_identifier -- --nocapture`
+    - `cargo test -p runmat-vm object_index_descriptor_serializes_protocol_args_once -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime listener string-array callback + `feval` handle-shape normalization
   - `scope: in-scope`
   - `blocker: listener callback dispatch and canonicalization still skipped scalar `StringArray` `@name` callback handles, and `feval` rejected scalar string-array handle values, leaving inconsistent callable ABI shape handling vs string/char/function-handle forms.`

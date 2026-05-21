@@ -2,7 +2,7 @@ use crate::bytecode::ArgSpec;
 use crate::bytecode::EndExpr;
 use runmat_builtins::Value;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 
 const OBJECT_PROTOCOL_SUBSREF: &str = runmat_runtime::OBJECT_SUBSREF_METHOD;
@@ -361,8 +361,7 @@ impl ObjectIndexDescriptor {
 
 fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> {
     let cols = values.len();
-    let cell = runmat_builtins::CellArray::new(values, 1, cols)
-        .map_err(|e| format!("object index descriptor build error: {e}"))?;
+    let cell = build_cell_array_with_shape(values, 1, cols, "object index descriptor build")?;
     Ok(Value::Cell(cell))
 }
 
@@ -377,8 +376,7 @@ pub(crate) async fn call_getfield_with_indices(
     getfield_args.push(Value::String(field));
     if !indices.is_empty() {
         let idx_count = indices.len();
-        let idx_cell = runmat_builtins::CellArray::new(indices, 1, idx_count)
-            .map_err(|e| format!("getfield idx build: {e}"))?;
+        let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
         getfield_args.push(Value::Cell(idx_cell));
     }
     runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, requested_outputs)
@@ -501,8 +499,7 @@ pub(crate) async fn call_object_index_descriptor_method_with_outputs(
 fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
     fn mk_cell(items: Vec<Value>) -> Result<Value, RuntimeError> {
         let cols = items.len();
-        let cell = runmat_builtins::CellArray::new(items, 1, cols)
-            .map_err(|e| format!("end expression encoding: {e}"))?;
+        let cell = build_cell_array_with_shape(items, 1, cols, "end expression encoding")?;
         Ok(Value::Cell(cell))
     }
 
@@ -586,7 +583,7 @@ fn build_end_range_descriptor(
     end_expr: &EndExpr,
 ) -> Result<Value, RuntimeError> {
     let encoded_end = encode_end_expr_value(end_expr)?;
-    let cell = runmat_builtins::CellArray::new(
+    let cell = build_cell_array_with_shape(
         vec![
             start,
             step,
@@ -595,8 +592,8 @@ fn build_end_range_descriptor(
         ],
         1,
         4,
-    )
-    .map_err(|e| format!("obj range: {e}"))?;
+        "obj range",
+    )?;
     Ok(Value::Cell(cell))
 }
 
@@ -858,8 +855,8 @@ where
                     }
                     (Value::OutputList(outputs), 1) | (Value::OutputList(outputs), 2) => {
                         let cols = outputs.len();
-                        let cell = runmat_builtins::CellArray::new(outputs, 1, cols)
-                            .map_err(|e| format!("output-list expansion: {e}"))?;
+                        let cell =
+                            build_cell_array_with_shape(outputs, 1, cols, "output-list expansion")?;
                         expand_cell_indices(&cell, &indices)?
                     }
                     (other @ Value::Object(_), _) | (other @ Value::HandleObject(_), _) => {
@@ -882,6 +879,19 @@ where
     }
     temp.reverse();
     Ok(temp)
+}
+
+fn build_cell_array_with_shape(
+    values: Vec<Value>,
+    rows: usize,
+    cols: usize,
+    context: &str,
+) -> Result<runmat_builtins::CellArray, RuntimeError> {
+    runmat_builtins::CellArray::new(values, rows, cols).map_err(|e| {
+        build_runtime_error(format!("{context}: {e}"))
+            .with_identifier("RunMat:ShapeMismatch")
+            .build()
+    })
 }
 
 #[cfg(test)]
@@ -984,6 +994,13 @@ mod tests {
                 SymbolName("origin".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn cell_builder_maps_shape_errors_to_identifier() {
+        let err = super::build_cell_array_with_shape(vec![Value::Num(1.0)], 2, 2, "test")
+            .expect_err("expected shape mismatch");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
