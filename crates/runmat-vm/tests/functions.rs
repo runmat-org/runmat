@@ -1569,6 +1569,77 @@ fn semantic_function_handle_index_call_executes() {
 }
 
 #[test]
+fn semantic_function_handle_index_multi_output_executes() {
+    let source =
+        "h = @pair; [a,b] = h(2); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
+    let vars = execute_semantic_source(source);
+    assert!(has_num(&vars, 5.0));
+}
+
+#[test]
+fn semantic_function_handle_expand_single_output_executes() {
+    let source = "h = @inc; C = {2}; y = h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
+    let vars = execute_semantic_source(source);
+    assert!(has_num(&vars, 3.0));
+}
+
+#[test]
+fn semantic_function_handle_expand_multi_output_executes() {
+    let source =
+        "h = @pair; C = {2}; [a,b] = h(C{:}); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
+    let vars = execute_semantic_source(source);
+    assert!(has_num(&vars, 5.0));
+}
+
+#[test]
+fn unresolved_external_function_handle_index_call_errors_with_identifier() {
+    let err = execute_semantic_source_result("h = @pkg.remote_inc; y = h(1);")
+        .expect_err("unresolved external handle index call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_function_handle_index_multi_output_errors_with_identifier() {
+    let err = execute_semantic_source_result("h = @pkg.remote_inc; [a,b] = h(1);")
+        .expect_err("unresolved external handle multi-output index call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_function_handle_expand_index_call_errors_with_identifier() {
+    let err = execute_semantic_source_result("h = @pkg.remote_inc; C = {1,2}; y = h(C{:});")
+        .expect_err("unresolved external expanded-handle index call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_function_handle_expand_index_multi_output_errors_with_identifier() {
+    let err = execute_semantic_source_result("h = @pkg.remote_inc; C = {1,2}; [a,b] = h(C{:});")
+        .expect_err("unresolved external expanded-handle multi-output index call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn method_syntax_with_semantic_function_callee_executes_directly() {
     let source = "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n  out = receiver + value;\nend";
     let bytecode = compile_semantic_source(source).expect("semantic method-style call compiles");

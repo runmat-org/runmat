@@ -4710,6 +4710,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: ratchet function-handle direct-call shapes and unresolved external identifier contracts
+  - Added direct function-handle call-shape execution coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_function_handle_index_multi_output_executes` for `[a,b] = h(2)`
+    - `semantic_function_handle_expand_single_output_executes` for `h(C{:})`
+    - `semantic_function_handle_expand_multi_output_executes` for `[a,b] = h(C{:})`
+  - Added unresolved external-handle identifier contracts for those same direct call shapes:
+    - `unresolved_external_function_handle_index_call_errors_with_identifier`
+    - `unresolved_external_function_handle_index_multi_output_errors_with_identifier`
+    - `unresolved_external_function_handle_expand_index_call_errors_with_identifier`
+    - `unresolved_external_function_handle_expand_index_multi_output_errors_with_identifier`
+  - These ratchets close a remaining callable ABI test-coverage hole around direct handle invocation forms (single/multi output + expanded args) and pin unresolved external-handle behavior to stable `RunMat:UndefinedFunction` identifiers.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions semantic_function_handle_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
