@@ -3123,6 +3123,21 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier() {
+        let ast = runmat_parser::parse("c = {10, 20, 30, 40}; x = feval(@max, c{end/2}, 0);")
+            .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCellExpandPlanInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

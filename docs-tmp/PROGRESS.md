@@ -5355,6 +5355,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm feval_expand_cell_indices_2d_end_plus_offset_errors -- --nocapture`
     - `cargo fmt --all --check`
 
+- RM-378: reject non-offset end expressions in call-arg cell expansion
+  - VM compile now rejects call-argument cell-expansion selectors that use non-offset `end` expressions (e.g. `C{end/2}`) in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) with stable compile identifier `RunMat:MirCellExpandPlanInvalid`, preventing silent mis-evaluation through generic operand lowering.
+  - Added contracts:
+    - `primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier`
+    - `feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

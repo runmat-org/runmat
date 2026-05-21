@@ -2206,6 +2206,12 @@ impl Compiler {
                 for index in indices {
                     if let Some(offset) = self.mir_operand_cell_end_offset(index) {
                         self.emit(Instr::LoadConst(encode_cell_end_offset(offset)));
+                    } else if self.mir_operand_end_expr(index).is_some() {
+                        return Err(self
+                            .compile_error(
+                                "MIR call-arg cell expansion only supports offset-style end selectors",
+                            )
+                            .with_identifier(IDENT_MIR_CELL_EXPAND_PLAN_INVALID));
                     } else {
                         self.compile_mir_operand(index)?;
                     }

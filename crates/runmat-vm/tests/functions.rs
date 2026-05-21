@@ -3781,6 +3781,13 @@ fn feval_expand_cell_indices_2d_end_plus_offset_errors() {
 }
 
 #[test]
+fn feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier() {
+    let program = "C = {10, 20, 30, 40}; r = feval(@max, C{end/2}, 0);";
+    let err = compile_semantic_source(program).expect_err("compile should fail");
+    assert_eq!(err.identifier(), Some("RunMat:MirCellExpandPlanInvalid"));
+}
+
+#[test]
 fn feval_expand_cell_fractional_index_errors() {
     let program = "C = {10, 20}; r = feval(@max, C{1.5}, 0);";
     let err = execute_semantic_source_result(program).err().unwrap();

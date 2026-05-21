@@ -240,11 +240,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM cell operation helpers in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now normalize cell-construction/indexing/deletion shape failures to stable `RunMat:ShapeMismatch` identifiers (replacing message-only wrappers), with direct unit coverage for the mapping helper contract.
   - VM cell brace-expansion selector decoding in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now resolves `end`/`end-k` with dimension-aware lengths across 2-D expansion lanes (including scalar tensor selector payloads), keeping expansion semantics aligned with direct brace indexing on row/column selectors.
   - Length-aware cell selector parsing now also maps unresolved NaN-shaped selector payloads to `RunMat:CellIndexOutOfBounds` on 2-D expansion lanes, aligning `C{end+1,...}` failure semantics with existing 1-D brace-expansion contracts.
+  - Call-argument cell-expansion lowering now rejects non-offset `end` expressions at compile boundaries (`C{end/2}` in expansion args) with stable identifier `RunMat:MirCellExpandPlanInvalid`, preventing silent runtime mis-evaluation on expansion selector operands that require full end-expression context.
   - Direct contracts:
     - `expand_cell_indices_supports_end_selectors_for_2d_cells`
     - `feval_expand_cell_indices_support_2d_end_selectors`
     - `feval_expand_cell_indices_support_end_offsets`
     - `feval_expand_cell_indices_2d_end_plus_offset_errors`
+    - `primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier`
+    - `feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier`
   - Cell selector semantics now avoid post-read alias mutation in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): assignment paths replace per-cell handles via fresh GC allocations instead of mutating shared `GcPtr<Value>` payloads in place. Regression coverage in [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs) (`cell_paren_range_end_and_colon_semantics`, `cell_brace_assignment_preserves_copied_cell_values`) ratchets both `C(2:end-1)` read stability across subsequent paren assignment and copy-on-write behavior for brace assignments (`B = C; C{2} = ...`) plus `C(:)` shape behavior.
   - VM deletion runtime behavior now has explicit semantic contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `cell_paren_delete_executes_with_semantic_store_back` (cell paren deletion positive behavior)
