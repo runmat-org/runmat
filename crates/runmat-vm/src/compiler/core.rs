@@ -1612,8 +1612,10 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) = self
-                    .compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
+                let (end_offsets, end_exprs) = self.compile_mir_cell_index_components(
+                    indexing,
+                    IndexResultContext::AssignmentTarget,
+                )?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
                     end_offsets,
