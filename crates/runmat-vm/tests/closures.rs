@@ -89,6 +89,43 @@ fn integral_accepts_named_function_handle() {
 }
 
 #[test]
+fn fminbnd_accepts_anonymous_function() {
+    let ast = parse("x = fminbnd(@(x) (x-2).^2, 0, 5);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-3)));
+}
+
+#[test]
+fn fminbnd_returns_optional_function_value() {
+    let ast = parse("[x, fval] = fminbnd(@(x) (x-3).^2 + 1, 0, 5);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let x_ok = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-3));
+    let fval_ok = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-5));
+    assert!(x_ok, "expected x ≈ 3 in {vars:?}");
+    assert!(fval_ok, "expected fval ≈ 1 in {vars:?}");
+}
+
+#[test]
+fn fminbnd_accepts_optimset_options() {
+    let ast =
+        parse("opts = optimset('TolX', 1e-10, 'Display', 'off'); x = fminbnd(@cos, 0, pi, opts);")
+            .unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(
+        |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI).abs() < 1e-3)
+    ));
+}
+
+#[test]
 fn fsolve_accepts_anonymous_vector_function() {
     let ast =
         parse("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);").unwrap();
