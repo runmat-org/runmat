@@ -12,6 +12,28 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime event-listener callback prebinding to semantic identity
+  - `scope: in-scope`
+  - `blocker: event listener registration (`addlistener`) stored raw name-shaped function handles even when semantic identity was resolvable, leaving repeated name-resolution churn at `notify` call boundaries.`
+  - Tightened listener callback canonicalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - added `canonicalize_listener_callback(...)` at registration boundary.
+    - resolver-known `FunctionHandle(name)` now prebinds to `Value::SemanticFunctionHandle`.
+    - resolver-known well-formed qualified `ExternalFunctionHandle(name)` now prebinds to `Value::SemanticFunctionHandle`.
+    - unresolved or malformed external names remain name-shaped.
+  - Added ratchets:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `addlistener_function_handle_prefers_semantic_identity_when_resolved`
+      - `addlistener_external_function_handle_prefers_semantic_identity_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime addlistener_function_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime addlistener_external_function_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime notify_semantic_function_handle_uses_semantic_identity -- --nocapture`
+    - `cargo test -p runmat-runtime notify_rejects_non_object_target_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM cell-expansion index normalization ratchet (brace expansion call ABI)
   - `scope: in-scope`
   - `blocker: cell brace-expansion index materialization still used lossy numeric casts (`as usize`) for scalar/tensor index values, allowing silent fractional truncation in expansion call paths (`C{...}` in expanded argument lowering) instead of explicit typed selector failures.`

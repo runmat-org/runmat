@@ -530,6 +530,30 @@ fn events() -> &'static Mutex<EventRegistry> {
     EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default()))
 }
 
+fn canonicalize_listener_callback(callback: Value) -> Value {
+    match callback {
+        Value::FunctionHandle(name) => {
+            if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
+            {
+                Value::SemanticFunctionHandle { name, function }
+            } else {
+                Value::FunctionHandle(name)
+            }
+        }
+        Value::ExternalFunctionHandle(name) => {
+            if is_well_formed_qualified_name(&name) {
+                if let Some(function) =
+                    crate::user_functions::resolve_semantic_function_by_name(&name)
+                {
+                    return Value::SemanticFunctionHandle { name, function };
+                }
+            }
+            Value::ExternalFunctionHandle(name)
+        }
+        other => other,
+    }
+}
+
 #[runmat_macros::runtime_builtin(name = "addlistener", builtin_path = "crate")]
 async fn addlistener_builtin(
     target: Value,
@@ -559,6 +583,7 @@ async fn addlistener_builtin(
         }
         _ => unreachable!(),
     };
+    let callback = canonicalize_listener_callback(callback);
     let cb_gc = runmat_gc::gc_allocate(callback).map_err(|e| format!("gc: {e}"))?;
     let listener = runmat_builtins::Listener {
         id,
@@ -2622,6 +2647,54 @@ mod tests {
         ))
         .expect_err("notify should reject non-object target");
         assert_eq!(err.identifier(), Some("RunMat:NotifyTargetInvalid"));
+    }
+
+    #[test]
+    fn addlistener_function_handle_prefers_semantic_identity_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "event_callback").then_some(61)
+            })));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let listener = block_on(addlistener_builtin(
+            target,
+            "Changed".to_string(),
+            Value::FunctionHandle("event_callback".to_string()),
+        ))
+        .expect("listener registered");
+        let Value::Listener(listener) = listener else {
+            panic!("expected listener value");
+        };
+        assert!(matches!(
+            &*listener.callback,
+            Value::SemanticFunctionHandle { name, function }
+                if name == "event_callback" && *function == 61
+        ));
+    }
+
+    #[test]
+    fn addlistener_external_function_handle_prefers_semantic_identity_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.event_callback").then_some(62)
+            })));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let listener = block_on(addlistener_builtin(
+            target,
+            "Changed".to_string(),
+            Value::ExternalFunctionHandle("pkg.event_callback".to_string()),
+        ))
+        .expect("listener registered");
+        let Value::Listener(listener) = listener else {
+            panic!("expected listener value");
+        };
+        assert!(matches!(
+            &*listener.callback,
+            Value::SemanticFunctionHandle { name, function }
+                if name == "pkg.event_callback" && *function == 62
+        ));
     }
 
     #[test]
