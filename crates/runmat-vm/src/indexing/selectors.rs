@@ -7,6 +7,13 @@ use runmat_runtime::{
 
 pub type VmResult<T> = Result<T, RuntimeError>;
 
+fn map_index_gather_error(err: impl std::fmt::Display) -> RuntimeError {
+    mex(
+        "AccelerationOperationFailed",
+        &format!("index gather: {err}"),
+    )
+}
+
 #[derive(Clone, Debug)]
 pub enum SliceSelector {
     Colon,
@@ -59,7 +66,7 @@ pub async fn materialize_index_value(value: &Value) -> VmResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
         return gather_if_needed_async(value)
             .await
-            .map_err(|e| mex("IndexGather", &format!("Failed to gather index value: {e}")));
+            .map_err(map_index_gather_error);
     }
     Ok(value.clone())
 }
@@ -319,5 +326,13 @@ mod tests {
         let err = futures::executor::block_on(build_cell_scalar_selectors(&[Value::Num(-2.0)]))
             .expect_err("negative cell scalar index should fail");
         assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+    }
+
+    #[test]
+    fn index_gather_error_maps_to_acceleration_identifier() {
+        let err = super::map_index_gather_error("boom");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
+        assert!(err.message().contains("index gather"));
+        assert!(err.message().contains("boom"));
     }
 }

@@ -12,6 +12,19 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Selector GPU index materialization now reports typed acceleration identifiers
+  - `scope: in-scope`
+  - blocker: selector GPU gather failures in `materialize_index_value(...)` were mapped to ad hoc `RunMat:IndexGather` errors instead of the normalized acceleration error surface used across VM indexing paths.
+  - Updated selector gather mapping in [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs):
+    - `materialize_index_value(...)` now maps GPU gather failures through `RunMat:AccelerationOperationFailed` with indexed context text.
+  - Added unit ratchet:
+    - `index_gather_error_maps_to_acceleration_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm index_gather_error_maps_to_acceleration_identifier -- --nocapture`
+    - `cargo test -p runmat-vm selector_from_value_dim_rejects_fractional_numeric_indices -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - Static-call compile boundaries now reject method-identity callees on generic static-call ABI paths
   - `scope: in-scope`
   - blocker: VM static-call runtime-name validation accepted `CallableIdentity::Method` through generic name rendering, allowing malformed method-identity callees onto `CallFunction*` static-call paths instead of failing at compile boundaries.
