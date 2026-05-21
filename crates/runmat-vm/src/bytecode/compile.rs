@@ -4733,6 +4733,44 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape() {
+        let ast = runmat_parser::parse("[a, b] = max([1,2]);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::MultiAssign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } = &mut stmt.kind
+                {
+                    call.callee = MirCallee::Static(CallableIdentity::Method(MethodId(
+                        "remote_pair".to_string(),
+                    )));
+                    call.fallback_policy = CallableFallbackPolicy::RuntimeNameResolution;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected multi-assign call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCallTargetNameInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

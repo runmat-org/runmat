@@ -20,8 +20,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - unsupported/non-static-call identity shapes (including `Method`) now return `None` and fail with existing compile identifier `RunMat:MirCallTargetNameInvalid`.
   - Added compile ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_static_call_with_method_identity_name_shape`
+    - `primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape`
   - Validation:
     - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_method_identity_name_shape -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape -- --nocapture`
     - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_single_segment_external_identity -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
