@@ -1611,11 +1611,13 @@ impl SemanticCtx {
                 .map(|expr| {
                     Ok(match expr {
                         AstExpr::Colon(_) => IndexComponent::Colon,
-                        AstExpr::EndKeyword(_) => IndexComponent::End {
-                            dim: None,
-                            offset: 0,
-                        },
-                        _ => IndexComponent::Expr(self.lower_expr_semantic(expr)?),
+                        _ => {
+                            if let Some(offset) = ast_end_relative_offset(expr) {
+                                IndexComponent::End { dim: None, offset }
+                            } else {
+                                IndexComponent::Expr(self.lower_expr_semantic(expr)?)
+                            }
+                        }
                     })
                 })
                 .collect::<Result<_, SemanticError>>()?,
@@ -1966,6 +1968,36 @@ fn static_numeric_literal(expr: &AstExpr) -> Option<f64> {
         AstExpr::Number(value, _) => value.parse().ok(),
         _ => None,
     }
+}
+
+fn ast_end_relative_offset(expr: &AstExpr) -> Option<isize> {
+    match expr {
+        AstExpr::EndKeyword(_) => Some(0),
+        AstExpr::Binary(left, BinOp::Add, right, _) => {
+            if matches!(&**left, AstExpr::EndKeyword(_)) {
+                ast_integer_offset_literal(right)
+            } else if matches!(&**right, AstExpr::EndKeyword(_)) {
+                ast_integer_offset_literal(left)
+            } else {
+                None
+            }
+        }
+        AstExpr::Binary(left, BinOp::Sub, right, _) if matches!(&**left, AstExpr::EndKeyword(_)) => {
+            ast_integer_offset_literal(right).and_then(|offset| offset.checked_neg())
+        }
+        _ => None,
+    }
+}
+
+fn ast_integer_offset_literal(expr: &AstExpr) -> Option<isize> {
+    let value = static_numeric_literal(expr)?;
+    if !value.is_finite() || value.fract() != 0.0 {
+        return None;
+    }
+    if value < isize::MIN as f64 || value > isize::MAX as f64 {
+        return None;
+    }
+    Some(value as isize)
 }
 
 fn static_range_count(start: f64, step: f64, end: f64) -> Option<usize> {

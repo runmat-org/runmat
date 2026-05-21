@@ -4074,6 +4074,101 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_carries_cell_end_offset_selector_metadata_in_semantic_function_reads() {
+        let ast = runmat_parser::parse(
+            "function y = tail_cell(c); y = c{end-1}; end; c = {1, 2, 3}; x = tail_cell(c);",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let function_id = bytecode
+            .semantic_function_registry
+            .resolve_name("tail_cell")
+            .expect("tail_cell semantic function id");
+        let function = bytecode
+            .semantic_function_registry
+            .get(function_id)
+            .expect("tail_cell semantic bytecode");
+        let read_offsets: Vec<Vec<(usize, isize)>> = function
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::IndexCell {
+                    num_indices: 1,
+                    end_offsets,
+                }
+                | Instr::IndexCellList {
+                    num_indices: 1,
+                    end_offsets,
+                } => Some(end_offsets.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            read_offsets.iter().any(|offsets| offsets == &vec![(0, -1)]),
+            "expected semantic function end-1 metadata offset; actual offsets: {read_offsets:?}; instructions: {:?}",
+            function.instructions
+        );
+
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[x_export.slot.0], Value::Num(2.0));
+    }
+
+    #[test]
+    fn primary_compile_carries_cell_end_offset_selector_metadata_in_semantic_function_stores() {
+        let ast = runmat_parser::parse(
+            "function y = patch_cell(c, v); c{end-1} = v; y = c{2}; end; c = {1, 2, 3}; x = patch_cell(c, 9);",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let function_id = bytecode
+            .semantic_function_registry
+            .resolve_name("patch_cell")
+            .expect("patch_cell semantic function id");
+        let function = bytecode
+            .semantic_function_registry
+            .get(function_id)
+            .expect("patch_cell semantic bytecode");
+        let store_offsets: Vec<Vec<(usize, isize)>> = function
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreIndexCell {
+                    num_indices: 1,
+                    end_offsets,
+                } => Some(end_offsets.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            store_offsets.iter().any(|offsets| offsets == &vec![(0, -1)]),
+            "expected semantic function end-1 metadata offset; actual offsets: {store_offsets:?}"
+        );
+
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[x_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
     fn primary_compile_supports_mixed_cell_colon_expansion() {
         let ast = runmat_parser::parse("c = {1,2;3,4}; [a,b] = c{:,2}; z = a + b;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
