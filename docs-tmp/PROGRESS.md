@@ -4478,9 +4478,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm runtime_fusion_groups_ -- --nocapture`
     - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
 
+- Fusion snapshot planning now preserves semantic group source-of-truth in core/session paths
+  - `scope: in-scope`
+  - `blocker: compile/runtime fusion snapshots still re-derived runtime groups through accel-graph annotation (`runtime_fusion_groups_for_graph`) after semantic groups were already selected, keeping non-execution planning tied to graph-shape postprocessing instead of semantic products.`
+  - Updated core/session snapshot paths:
+    - [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs): `compile_fusion_plan(...)` now keeps `runtime_fusion_groups()` as the snapshot-group source and uses accel graph materialization only for planner metadata.
+    - [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs): runtime outcome fusion snapshot now follows the same semantic-group source-of-truth path.
+  - Validation:
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
-- Plan 5 and Plan 7 evidence audit has been captured in `docs-tmp/DELIVERABLE_AUDIT.md`; follow-up is implementation closeout, not status ambiguity.
-- Finish core/session project composition wiring so resolver ownership is composition-graph-driven end-to-end (Plan 5 closeout path); CLI manifest entrypoint resolution now delegates to `runmat-config`.
-- Shift fusion candidate planning source-of-truth from bytecode accel graph to semantic/MIR/analysis products (Plan 7 closeout path).
+- Plan 5 and Plan 7 evidence audit has been captured in `docs-tmp/DELIVERABLE_AUDIT.md`; follow-up remains Objective 3 semantic gap closure, not plan-level status ambiguity.
+- Remaining closeout focus is non-builtin semantic product completeness (selector-plan edge normalization and callable/assignment ABI closure) tracked in `docs-tmp/NEXT_STEPS.md`.

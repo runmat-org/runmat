@@ -210,11 +210,6 @@ impl RunMatSession {
         let (runtime_graph, runtime_graph_source) = prepared
             .bytecode
             .runtime_accel_graph_for_fusion_with_source(&runtime_groups);
-        let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
-            prepared.bytecode.runtime_fusion_groups_for_graph(graph)
-        } else {
-            runtime_groups
-        };
         Ok(build_fusion_snapshot(
             &runtime_groups,
             &prepared
