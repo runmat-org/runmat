@@ -151,7 +151,7 @@ impl FminbndOptions {
         };
         let max_fun_evals = match options.and_then(|o| lookup(o, "MaxFunEvals")) {
             Some(value) => option_positive_usize("MaxFunEvals", value)?,
-            None => DEFAULT_MAX_FUN_EVALS.max(max_iter),
+            None => DEFAULT_MAX_FUN_EVALS,
         };
         Ok(Self {
             tol_x,
@@ -660,6 +660,15 @@ mod tests {
             V::Num(x) => assert!((x - 2.0).abs() < 1.0e-6, "x = {x}"),
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn max_fun_evals_default_is_independent_of_max_iter() {
+        let mut opts = StructValue::new();
+        opts.insert("MaxIter", Value::Num(1000.0));
+        let parsed = FminbndOptions::from_struct(Some(&opts)).unwrap();
+        assert_eq!(parsed.max_iter, 1000);
+        assert_eq!(parsed.max_fun_evals, DEFAULT_MAX_FUN_EVALS);
     }
 
     #[test]
