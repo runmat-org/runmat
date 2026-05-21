@@ -5230,6 +5230,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: harden high-dimension selector masks across compile and indexing
+  - Selector-mask probing now uses safe high-dimension checks in:
+    - [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs)
+    - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs)
+    - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs)
+  - VM compile slice lowering now rejects unencodable selector dimensions (`dim >= 32`) with stable compile identifier `RunMat:MirSliceIndexPlanInvalid` instead of relying on raw `1u32 << dim` shifts.
+  - Expr and plain slice planning now safely treat mask bits outside mask width as absent, closing additional high-dimension panic seams in non-object selector materialization paths.
+  - Added ratchets:
+    - `primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
+    - `build_slice_selectors_supports_dims_beyond_mask_width`
+    - `expr_plan_supports_dims_beyond_mask_width`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width -- --nocapture`
+    - `cargo test -p runmat-vm build_slice_selectors_supports_dims_beyond_mask_width -- --nocapture`
+    - `cargo test -p runmat-vm expr_plan_supports_dims_beyond_mask_width -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

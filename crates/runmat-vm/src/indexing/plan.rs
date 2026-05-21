@@ -284,6 +284,10 @@ pub struct ExprPlanSpec<'a> {
     pub shape: &'a [usize],
 }
 
+fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
+    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
+}
+
 fn validate_expr_range_selector_plan(
     spec: &ExprPlanSpec<'_>,
 ) -> Result<Vec<Option<usize>>, RuntimeError> {
@@ -307,8 +311,8 @@ fn validate_expr_range_selector_plan(
                 "range selector dimension is out of bounds",
             ));
         }
-        let conflicts_with_colon = (spec.colon_mask & (1u32 << dim)) != 0;
-        let conflicts_with_end = (spec.end_mask & (1u32 << dim)) != 0;
+        let conflicts_with_colon = selector_mask_has_dim(spec.colon_mask, dim);
+        let conflicts_with_end = selector_mask_has_dim(spec.end_mask, dim);
         if conflicts_with_colon || conflicts_with_end {
             return Err(mex(
                 "InvalidRangeSelectorPlan",
@@ -349,8 +353,8 @@ where
     let mut linear_output_shape: Option<Vec<usize>> = None;
     let mut num_iter = 0usize;
     for d in 0..spec.dims {
-        let is_colon = (spec.colon_mask & (1u32 << d)) != 0;
-        let is_end = (spec.end_mask & (1u32 << d)) != 0;
+        let is_colon = selector_mask_has_dim(spec.colon_mask, d);
+        let is_end = selector_mask_has_dim(spec.end_mask, d);
         if is_colon {
             selectors.push(ExprSel::Colon);
         } else if is_end {
@@ -851,6 +855,33 @@ mod tests {
             .await
             .expect_err("inconsistent range metadata should fail");
             assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+        })
+    }
+
+    #[test]
+    fn expr_plan_supports_dims_beyond_mask_width() {
+        futures::executor::block_on(async {
+            let numeric = vec![Value::Num(1.0); 31];
+            let shape = vec![1usize; 33];
+            let plan = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 33,
+                    colon_mask: 0b1,
+                    end_mask: 0b10,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .expect("expr plan for dims beyond mask width");
+            assert_eq!(plan.dims, 33);
+            assert!(!plan.indices.is_empty());
         })
     }
 

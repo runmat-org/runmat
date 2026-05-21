@@ -2467,8 +2467,19 @@ impl Compiler {
 
         for (dim, component) in indexing.components.iter().enumerate() {
             match component {
-                MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
-                MirIndexComponent::End { offset, .. } if *offset == 0 => end_mask |= 1u32 << dim,
+                MirIndexComponent::Colon => self.set_selector_mask_bit(
+                    &mut colon_mask,
+                    dim,
+                    IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
+                    "MIR slice lowering invariant violated: selector dimension exceeds mask width",
+                )?,
+                MirIndexComponent::End { offset, .. } if *offset == 0 => self
+                    .set_selector_mask_bit(
+                        &mut end_mask,
+                        dim,
+                        IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
+                        "MIR slice lowering invariant violated: selector dimension exceeds mask width",
+                    )?,
                 MirIndexComponent::Expr(operand)
                     if self.mir_operand_range_needs_slice_expr(operand)
                         || self.mir_operand_end_expr(operand).is_some() =>
@@ -2515,7 +2526,12 @@ impl Compiler {
 
         for (dim, component) in indexing.components.iter().enumerate() {
             match component {
-                MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
+                MirIndexComponent::Colon => self.set_selector_mask_bit(
+                    &mut colon_mask,
+                    dim,
+                    IDENT_MIR_SLICE_INDEX_PLAN_INVALID,
+                    "MIR slice expr lowering invariant violated: selector dimension exceeds mask width",
+                )?,
                 MirIndexComponent::End { offset, .. } => {
                     numeric_operands.push(None);
                     if *offset == 0 {
@@ -2576,6 +2592,20 @@ impl Compiler {
             range_end_exprs,
             end_numeric_exprs,
         })
+    }
+
+    fn set_selector_mask_bit(
+        &self,
+        mask: &mut u32,
+        dim: usize,
+        identifier: &'static str,
+        message: &str,
+    ) -> Result<(), CompileError> {
+        if dim >= u32::BITS as usize {
+            return Err(self.compile_error(message).with_identifier(identifier));
+        }
+        *mask |= 1u32 << dim;
+        Ok(())
     }
 
     fn emit_mir_slice_numeric_operands(

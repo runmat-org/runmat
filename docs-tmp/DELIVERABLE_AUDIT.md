@@ -365,6 +365,14 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `object_paren_expr_selector_values_reject_overlapping_colon_end_mask_bits`
       - `object_paren_selector_values_support_dims_beyond_mask_width`
       - `object_paren_expr_selector_values_support_dims_beyond_mask_width`
+  - high-dimension selector-mask safety is now normalized across non-object selector compilation/planning surfaces as well:
+    - [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) slice lowering now rejects selector dimensions beyond mask width at compile boundary with `RunMat:MirSliceIndexPlanInvalid` (instead of raw shift overflow).
+    - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs) expr-plan range/mask conflict checks now use high-dimension-safe mask probing.
+    - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) plain slice selector materialization now uses the same high-dimension-safe mask probing.
+    - ratchets:
+      - `primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
+      - `build_slice_selectors_supports_dims_beyond_mask_width`
+      - `expr_plan_supports_dims_beyond_mask_width`
   - expr-slice end-offset selector context metadata now has explicit runtime invariant checks in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
     - `apply_end_offsets_to_numeric(...)` now pre-validates context rank/masks/range dims before dimension mapping.
     - malformed context metadata now fails with stable identifiers:

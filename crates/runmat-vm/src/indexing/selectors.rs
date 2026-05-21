@@ -14,6 +14,10 @@ fn map_index_gather_error(err: impl std::fmt::Display) -> RuntimeError {
     )
 }
 
+fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
+    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
+}
+
 #[derive(Clone, Debug)]
 pub enum SliceSelector {
     Colon,
@@ -254,13 +258,13 @@ pub async fn build_slice_selectors(
 
     let mut numeric_iter = 0usize;
     for d in 0..dims {
-        let is_colon = (colon_mask & (1u32 << d)) != 0;
+        let is_colon = selector_mask_has_dim(colon_mask, d);
         if is_colon {
             selectors.push(SliceSelector::Colon);
             continue;
         }
         let dim_len = base_shape.get(d).copied().unwrap_or(1);
-        let is_end = (end_mask & (1u32 << d)) != 0;
+        let is_end = selector_mask_has_dim(end_mask, d);
         if is_end {
             selectors.push(SliceSelector::Scalar(dim_len));
             continue;
@@ -295,7 +299,10 @@ pub async fn build_cell_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<
 
 #[cfg(test)]
 mod tests {
-    use super::{build_cell_scalar_selectors, indices_from_value_linear, selector_from_value_dim};
+    use super::{
+        build_cell_scalar_selectors, build_slice_selectors, indices_from_value_linear,
+        selector_from_value_dim, SliceSelector,
+    };
     use runmat_builtins::{Tensor, Value};
 
     #[test]
@@ -334,5 +341,23 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
         assert!(err.message().contains("index gather"));
         assert!(err.message().contains("boom"));
+    }
+
+    #[test]
+    fn build_slice_selectors_supports_dims_beyond_mask_width() {
+        let numeric: Vec<Value> = (0..31).map(|v| Value::Num((v + 1) as f64)).collect();
+        let base_shape = vec![40usize; 33];
+        let selectors = futures::executor::block_on(build_slice_selectors(
+            33,
+            0b1,
+            0b10,
+            &numeric,
+            &base_shape,
+        ))
+        .expect("slice selectors for dims beyond mask width");
+        assert_eq!(selectors.len(), 33);
+        assert!(matches!(selectors[0], SliceSelector::Colon));
+        assert!(matches!(selectors[1], SliceSelector::Scalar(40)));
+        assert!(matches!(selectors[32], SliceSelector::Scalar(31)));
     }
 }
