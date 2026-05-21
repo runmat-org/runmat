@@ -95,6 +95,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Dynamic member assignment over brace-indexed bases now has explicit assignment-context and compile/runtime contracts
+  - `scope: in-scope`
+  - `blocker: brace-indexed dynamic member lvalue paths (`c{1}.(f) = ...`) were still uncovered by the new indexed-member assignment ABI ratchets, leaving one helper-path variant without explicit compile/runtime contract evidence.`
+  - Added HIR semantic-lowering coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context`
+  - Added VM compile/runtime coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier`
+    - `primary_compile_interprets_dynamic_member_store_back_brace_assignment`
+  - Validation:
+    - `cargo test -p runmat-hir dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_interprets_dynamic_member_store_back_brace_assignment -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`

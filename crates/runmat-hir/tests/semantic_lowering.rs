@@ -1004,3 +1004,26 @@ fn dynamic_member_assignment_indexed_base_uses_assignment_target_context() {
         IndexResultContext::AssignmentTarget
     ));
 }
+
+#[test]
+fn dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context() {
+    let result = lower_result("c = {struct('x', 1)}; f = 'x'; c{1}.(f) = 9;");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::MemberDynamic(_, _)))
+        .expect("expected dynamic member mutation");
+
+    let HirPlace::MemberDynamic(base, _) = &mutation.place else {
+        panic!("expected dynamic member place");
+    };
+    let HirExprKind::Index(_, indexing) = &base.kind else {
+        panic!("expected indexed assignment base");
+    };
+    assert!(matches!(indexing.kind, IndexKind::Brace));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::AssignmentTarget
+    ));
+}
