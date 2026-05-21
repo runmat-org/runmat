@@ -1186,6 +1186,56 @@ fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
 }
 
 #[test]
+fn semantic_indexed_base_member_vector_store_back_uses_slice_and_errors_with_stable_identifier() {
+    let source =
+        "s = struct('a', {[10 20 30 40], [1 2 3 4]}); idx = [2 4]; s(2).a(idx) = 99; y = s(2).a(4);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile indexed-base member vector store");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "indexed-base member vector assignment should lower through StoreSlice*"
+    );
+    let err = interpret(&bytecode).expect_err("indexed-base member vector store should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:IndexOutOfBounds"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn semantic_indexed_base_member_logical_store_back_uses_slice_and_errors_with_stable_identifier() {
+    let source =
+        "s = struct('a', {[1 2 3 4], [5 6 7 8]}); mask = logical([1 0 1 0]); s(2).a(mask) = 0; y = s(2).a(3);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile indexed-base member logical store");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "indexed-base member logical assignment should lower through StoreSlice*"
+    );
+    let err = interpret(&bytecode).expect_err("indexed-base member logical store should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:IndexShape"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn semantic_indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; f = 'a'; idx = [2 4]; s.(f)(idx) = 99; y = s.(f)(4);";
     let bytecode =
