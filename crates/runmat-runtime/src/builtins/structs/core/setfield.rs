@@ -81,7 +81,6 @@ fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError 
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
     err.identifier() == Some("RunMat:UndefinedFunction")
-        || err.message().contains("RunMat:UndefinedFunction")
 }
 
 #[runtime_builtin(
@@ -1603,5 +1602,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected struct result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setfield_undefined_detection_requires_identifier() {
+        let with_identifier = build_runtime_error("missing")
+            .with_identifier("RunMat:UndefinedFunction")
+            .build();
+        assert!(is_undefined_function(&with_identifier));
+
+        let message_only = build_runtime_error("RunMat:UndefinedFunction message only").build();
+        assert!(
+            !is_undefined_function(&message_only),
+            "message-only undefined markers should not trigger setter fallback"
+        );
     }
 }

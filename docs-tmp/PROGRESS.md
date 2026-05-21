@@ -5166,6 +5166,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: tighten dependent property fallback undefined-function detection to identifier contracts
+  - `getfield` and `setfield` dependent property getter/setter fallback guards now recognize unresolved callback failures only via `RuntimeError.identifier() == RunMat:UndefinedFunction` (not by message-substring matching) in:
+    - [getfield.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/getfield.rs)
+    - [setfield.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/setfield.rs)
+  - Added ratchets:
+    - `getfield_undefined_detection_requires_identifier`
+    - `setfield_undefined_detection_requires_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime getfield_undefined_detection_requires_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime setfield_undefined_detection_requires_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

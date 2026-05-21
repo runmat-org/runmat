@@ -77,7 +77,6 @@ fn remap_getfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError 
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
     err.identifier() == Some("RunMat:UndefinedFunction")
-        || err.message().contains("RunMat:UndefinedFunction")
 }
 
 #[runtime_builtin(
@@ -1207,5 +1206,20 @@ pub(crate) mod tests {
             Value::Num(v) => assert_eq!(v, 3.0),
             other => panic!("expected numeric scalar, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn getfield_undefined_detection_requires_identifier() {
+        let with_identifier = build_runtime_error("missing")
+            .with_identifier("RunMat:UndefinedFunction")
+            .build();
+        assert!(is_undefined_function(&with_identifier));
+
+        let message_only = build_runtime_error("RunMat:UndefinedFunction message only").build();
+        assert!(
+            !is_undefined_function(&message_only),
+            "message-only undefined markers should not trigger getter fallback"
+        );
     }
 }
