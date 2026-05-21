@@ -12,6 +12,22 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM cell-index integer normalization ratchet
+  - `scope: in-scope`
+  - Closed a remaining non-tensor selector normalization seam in cell index conversion:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `resolve_cell_indices(...)` now enforces positive-integer cell indices instead of lossy numeric casts.
+    - fractional selector values now fail with `RunMat:CellIndexType` and zero/negative selectors fail with `RunMat:CellIndexOutOfBounds`, preventing silent truncation/saturation behavior in cell selector conversion.
+  - Added interpreter ratchets in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `resolve_cell_indices_rejects_fractional_values`
+    - `resolve_cell_indices_rejects_zero_values`
+  - Validation:
+    - `cargo test -p runmat-vm --lib resolve_cell_indices_rejects_ -- --nocapture`
+    - `cargo test -p runmat-vm --lib apply_cell_end_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM scalar-value paren assignment normalization ratchet
   - `scope: in-scope`
   - Closed an assignment-place execution gap where scalar value bases (`Value::Num`, `Value::Int`, `Value::Bool`) hit `RunMat:IndexAssignmentUnsupportedBase` on paren-store paths:

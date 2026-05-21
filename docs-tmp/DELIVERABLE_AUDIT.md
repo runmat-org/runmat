@@ -232,6 +232,11 @@ This audit maps the active objective to concrete repository evidence and marks e
   - scalar value paren-store assignment now executes through typed assignment machinery instead of unsupported-base fallback:
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `Instr::StoreIndex` now normalizes `Value::Num`/`Value::Int`/`Value::Bool` bases to singleton tensors before linear scalar assignment.
     - VM semantic end-to-end ratchet: `semantic_scalar_value_index_assignment_executes` in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs).
+  - cell selector conversion now enforces positive-integer index semantics instead of lossy casts:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `resolve_cell_indices(...)` now rejects fractional numeric selectors with `RunMat:CellIndexType` and zero/negative selectors with `RunMat:CellIndexOutOfBounds`.
+    - interpreter ratchets:
+      - `resolve_cell_indices_rejects_fractional_values`
+      - `resolve_cell_indices_rejects_zero_values`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
