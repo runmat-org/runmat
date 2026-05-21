@@ -745,6 +745,10 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `mixed_range_end_assign_shape_mismatch_error` now asserts `RunMat:ShapeMismatch`.
   - Purpose: reduce display-message coupling and keep runtime behavior tests pinned to stable identifier contracts.
   - VM scalar-slice selector contract in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) is now ratcheted to a single stable identifier (`RunMat:UnsupportedIndexType`) for nonnumeric scalar selector misuse (`scalar_slice_with_nonnumeric_selector_errors`) rather than permitting mixed fallback identifiers.
+  - VM assignment-shape coverage in [lvalue_assign.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/lvalue_assign.rs) now explicitly ratchets non-scalar selector assignments to slice ABI instructions:
+    - `vector_index_assignment_lowers_to_store_slice`
+    - `logical_mask_assignment_lowers_to_store_slice`
+  - These contracts assert vector/logical paren assignment lowers through `StoreSlice*` (not `StoreIndex*`) and preserve expected runtime mutation semantics, reducing remaining runtime selector-classification dependence in assignment paths.
   - Core entrypoint-resolution error coverage in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now also asserts runtime identifier contract (`RunMat:EntrypointResolveFailed`) instead of matching rendered error text.
   - Manifest/composition tests in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs) now assert typed error variants/fields (`ProjectManifestLoadError`, `ProjectSourceIndexError`, `ProjectEntrypointResolveError`, `DiscoverProjectEntrypointError`, `ProjectCompositionError`) rather than formatted error strings.
   - Semicolon suppression matrix-path coverage in [semicolon_suppression.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/semicolon_suppression.rs) now asserts typed tensor contracts (`shape`/`data`) instead of display substring checks.

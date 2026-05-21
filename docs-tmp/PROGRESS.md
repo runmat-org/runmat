@@ -4635,6 +4635,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm scalar_slice_with_nonnumeric_selector_errors -- --nocapture`
     - `git diff --check`
 
+- RM-378: ratchet vector/logical assignment lowering to slice ABI
+  - Added assignment-shape compile/execution ratchets in [lvalue_assign.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/lvalue_assign.rs):
+    - `vector_index_assignment_lowers_to_store_slice`
+    - `logical_mask_assignment_lowers_to_store_slice`
+  - Both tests now assert vector/logical paren-assignment lowers through `StoreSlice*` instructions and does not lower through `StoreIndex*`, while also validating runtime mutation semantics.
+  - This tightens Objective 3 callable/assignment ABI closure by locking non-scalar selector assignment to explicit slice-assignment VM products instead of scalar-assignment fallback classification.
+  - Validation:
+    - `cargo test -p runmat-vm --test lvalue_assign vector_index_assignment_lowers_to_store_slice -- --nocapture`
+    - `cargo test -p runmat-vm --test lvalue_assign logical_mask_assignment_lowers_to_store_slice -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use runmat_builtins::Value;
-use test_helpers::execute_semantic_source;
+use test_helpers::{compile_semantic_source, execute_semantic_source};
 
 #[test]
 fn chained_member_and_index_assignments() {
@@ -103,4 +103,64 @@ fn assign_full_row() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, Value::Tensor(t) if t.data == vec![7.0, 3.0, 6.0, 4.0])));
+}
+
+#[test]
+fn vector_index_assignment_lowers_to_store_slice() {
+    let bytecode = compile_semantic_source("A=[10,20,30,40]; idx=[2,4]; A(idx)=99; B=A;")
+        .expect("compile vector index assignment");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "vector index assignment should lower through StoreSlice* instructions"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreIndex(_) | runmat_vm::Instr::StoreIndexDelete(_)
+        )),
+        "vector index assignment should not lower through StoreIndex* instructions"
+    );
+    let vars = execute_semantic_source("A=[10,20,30,40]; idx=[2,4]; A(idx)=99; B=A;")
+        .expect("execute vector index assignment");
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, Value::Tensor(t) if t.data == vec![10.0, 99.0, 30.0, 99.0])),
+        "vector index assignment should mutate selected linear indices"
+    );
+}
+
+#[test]
+fn logical_mask_assignment_lowers_to_store_slice() {
+    let bytecode = compile_semantic_source("A=[1,2,3,4]; mask=logical([1,0,1,0]); A(mask)=0; B=A;")
+        .expect("compile logical mask assignment");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "logical mask assignment should lower through StoreSlice* instructions"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreIndex(_) | runmat_vm::Instr::StoreIndexDelete(_)
+        )),
+        "logical mask assignment should not lower through StoreIndex* instructions"
+    );
+    let vars = execute_semantic_source("A=[1,2,3,4]; mask=logical([1,0,1,0]); A(mask)=0; B=A;")
+        .expect("execute logical mask assignment");
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, Value::Tensor(t) if t.data == vec![0.0, 2.0, 0.0, 4.0])),
+        "logical mask assignment should mutate true mask positions"
+    );
 }
