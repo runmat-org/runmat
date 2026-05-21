@@ -171,7 +171,7 @@ async fn apply_cell_end_exprs_for_base(
         } else {
             ca.cols
         };
-        let resolved = resolve_range_end_index(dim_len, end_expr, vars).await?;
+        let resolved = resolve_end_expr_index(dim_len, end_expr, vars).await?;
         if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > dim_len) {
             return Err(crate::interpreter::errors::mex(
                 "CellIndexOutOfBounds",
@@ -458,18 +458,32 @@ async fn apply_end_offsets_to_numeric(
     for (position, end_expr) in end_offsets {
         if let Some(value) = adjusted.get_mut(*position) {
             let dim_len = ctx.dim_len_for_numeric_position(*position);
-            let idx_val = resolve_range_end_index(dim_len, end_expr, vars).await?;
-            *value = Value::Num(idx_val as f64);
+            let idx_val = resolve_end_expr_value(dim_len, end_expr, vars).await?;
+            *value = Value::Num(idx_val);
         }
     }
     Ok(adjusted)
 }
 
-async fn resolve_range_end_index(
+fn exact_index_from_f64(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+        return None;
+    }
+    Some(rounded as i64)
+}
+
+async fn resolve_end_expr_value(
     dim_len: usize,
     end_expr: &EndExpr,
     vars: &[Value],
-) -> Result<i64, RuntimeError> {
+) -> Result<f64, RuntimeError> {
     fn eval_end_expr_value<'a>(
         expr: &'a EndExpr,
         end_value: f64,
@@ -561,7 +575,29 @@ async fn resolve_range_end_index(
         })
     }
 
-    Ok(eval_end_expr_value(end_expr, dim_len as f64, vars)
+    eval_end_expr_value(end_expr, dim_len as f64, vars).await
+}
+
+async fn resolve_end_expr_index(
+    dim_len: usize,
+    end_expr: &EndExpr,
+    vars: &[Value],
+) -> Result<i64, RuntimeError> {
+    let value = resolve_end_expr_value(dim_len, end_expr, vars).await?;
+    exact_index_from_f64(value).ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "UnsupportedIndexType",
+            "Index values must be positive integers or logical values",
+        )
+    })
+}
+
+async fn resolve_range_end_index(
+    dim_len: usize,
+    end_expr: &EndExpr,
+    vars: &[Value],
+) -> Result<i64, RuntimeError> {
+    Ok(resolve_end_expr_value(dim_len, end_expr, vars)
         .await?
         .floor() as i64)
 }

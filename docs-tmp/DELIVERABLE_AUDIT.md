@@ -183,6 +183,15 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`
       - `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
       - `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
+  - selector numeric-integrality semantics now ratchet MATLAB-style index validity:
+    - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) now rejects fractional numeric indices (scalar and tensor selector values) with `RunMat:UnsupportedIndexType` instead of truncating to integer.
+    - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs) now enforces the same integer-selector contract for expr-plan tensor selector materialization.
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now preserves non-integer scalar `end` expression results for selector validation (instead of floor-before-validation), while retaining range-end flooring for range expansion semantics.
+    - added ratchets:
+      - `selector_from_value_dim_rejects_fractional_numeric_indices`
+      - `linear_indices_reject_fractional_tensor_indices`
+      - `scalar_end_div_indexing_rejects_fractional_result`
+      - `primary_compile_rejects_fractional_cell_end_expression_read_index`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

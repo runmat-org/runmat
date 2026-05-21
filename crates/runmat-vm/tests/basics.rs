@@ -444,6 +444,22 @@ fn fft_output_supports_scalar_end_div_indexing() {
 }
 
 #[test]
+fn scalar_end_div_indexing_rejects_fractional_result() {
+    let input = r#"
+        x = [10 20 30 40 50];
+        y = x(end/2);
+    "#;
+    let bytecode = compile_semantic_source(input).expect("compile semantic end-div script");
+    let err = interpret(&bytecode).expect_err("fractional end/2 scalar index must fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedIndexType"),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
+    );
+}
+
+#[test]
 fn fft_output_supports_complex_range_assignment_with_end_div() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];

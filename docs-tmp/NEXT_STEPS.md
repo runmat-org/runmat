@@ -486,7 +486,7 @@ Treat current MIR bytecode gap markers as follows:
 
 - `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
 - `varargout expansion`: parser/HIR does not currently construct this shape; keep as future ABI design work rather than a live bytecode gap.
-- `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization in non-tensor contexts.
+- `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; fractional numeric selector truncation is now closed (non-integer selector values reject with typed errors), and remaining gaps are selector-plan normalization in non-tensor/object protocol contexts.
 - `dot assignment` / `dot indexing`: resolved at indexing-plan level; semantic products no longer carry `IndexKind::Dot` and member semantics lower through explicit member MIR shapes.
 - `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains, with MIR coverage now pinning `s.a(2)=...` to `MirPlace::Index(MirPlace::Member(...), ...)`.
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.

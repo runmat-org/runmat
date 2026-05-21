@@ -4228,6 +4228,19 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_fractional_cell_end_expression_read_index() {
+        let ast = runmat_parser::parse("c = {10, 20, 30, 40, 50}; x = c{end/2};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let err = block_on(crate::interpret(&bytecode))
+            .expect_err("fractional cell end expression selector should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
     fn primary_compile_supports_general_cell_end_expression_stores() {
         let ast = runmat_parser::parse("c = {1, 2, 3, 4}; c{floor(end/2)} = 9; x = c{2};")
             .expect("parse");

@@ -7,7 +7,7 @@ use runmat_runtime::{
 
 pub type VmResult<T> = Result<T, RuntimeError>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SliceSelector {
     Colon,
     Scalar(usize),
@@ -18,12 +18,26 @@ pub enum SliceSelector {
     },
 }
 
+fn exact_index_from_f64(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+        return None;
+    }
+    Some(rounded as i64)
+}
+
 fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     match value {
-        Value::Num(n) => Some(*n as i64),
+        Value::Num(n) => exact_index_from_f64(*n),
         Value::Int(int_val) => Some(int_val.to_i64()),
         Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => {
-            Some(t.data[0] as i64)
+            exact_index_from_f64(t.data[0])
         }
         _ => None,
     }
@@ -77,7 +91,12 @@ pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmRes
             let len = idx_t.shape.iter().product::<usize>();
             let mut indices = Vec::with_capacity(len);
             for &val in &idx_t.data {
-                let idx = val as isize;
+                let idx = exact_index_from_f64(val).ok_or_else(|| {
+                    mex(
+                        "UnsupportedIndexType",
+                        "Index values must be positive integers or logical values",
+                    )
+                })?;
                 if idx < 1 || (idx as usize) > total_len {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
@@ -140,7 +159,12 @@ pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<
             let len = idx_t.shape.iter().product::<usize>();
             let mut indices = Vec::with_capacity(len);
             for &val in &idx_t.data {
-                let idx = val as isize;
+                let idx = exact_index_from_f64(val).ok_or_else(|| {
+                    mex(
+                        "UnsupportedIndexType",
+                        "Index values must be positive integers or logical values",
+                    )
+                })?;
                 if idx < 1 || (idx as usize) > dim_len {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
@@ -199,7 +223,12 @@ pub async fn build_slice_selectors(
             let len = idx_t.shape.iter().product::<usize>();
             let mut indices = Vec::with_capacity(len);
             for &val in &idx_t.data {
-                let idx = val as isize;
+                let idx = exact_index_from_f64(val).ok_or_else(|| {
+                    mex(
+                        "UnsupportedIndexType",
+                        "Index values must be positive integers or logical values",
+                    )
+                })?;
                 if idx < 1 || (idx as usize) > total_len {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
@@ -254,4 +283,26 @@ pub async fn build_cell_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<
         }));
     }
     Ok(selectors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{indices_from_value_linear, selector_from_value_dim};
+    use runmat_builtins::{Tensor, Value};
+
+    #[test]
+    fn selector_from_value_dim_rejects_fractional_numeric_indices() {
+        let err =
+            futures::executor::block_on(selector_from_value_dim(&Value::Num(2.5), 8)).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
+    fn linear_indices_reject_fractional_tensor_indices() {
+        let value = Value::Tensor(
+            Tensor::new(vec![1.0, 2.5], vec![1, 2]).expect("fractional index tensor"),
+        );
+        let err = futures::executor::block_on(indices_from_value_linear(&value, 8)).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
 }

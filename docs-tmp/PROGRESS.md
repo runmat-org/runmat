@@ -12,6 +12,30 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM end-expression index integrality semantics ratchet
+  - `scope: in-scope`
+  - Closed a selector-plan normalization gap where numeric selectors were truncating fractional values instead of enforcing MATLAB-style integer indexing contracts:
+    - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) now rejects fractional scalar/tensor numeric indices (`2.5`) with `RunMat:UnsupportedIndexType` instead of casting/truncating to integer.
+    - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs) now enforces the same integer-index contract for expr-plan tensor selector materialization.
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now preserves non-integer `end` expression numeric results for scalar selector validation (instead of floor-before-validation), while keeping range-end flooring behavior scoped to range expansion.
+  - Added ratchets:
+    - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs):
+      - `selector_from_value_dim_rejects_fractional_numeric_indices`
+      - `linear_indices_reject_fractional_tensor_indices`
+    - [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+      - `scalar_end_div_indexing_rejects_fractional_result`
+    - [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+      - `primary_compile_rejects_fractional_cell_end_expression_read_index`
+  - Validation:
+    - `cargo test -p runmat-vm selector_from_value_dim_rejects_fractional_numeric_indices -- --nocapture`
+    - `cargo test -p runmat-vm linear_indices_reject_fractional_tensor_indices -- --nocapture`
+    - `cargo test -p runmat-vm scalar_end_div_indexing_rejects_fractional_result -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_fractional_cell_end_expression_read_index -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM linear brace-growth semantics generalization ratchet
   - `scope: in-scope`
   - Closed remaining linear brace-growth edge contracts for cell content assignment:

@@ -140,6 +140,20 @@ fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> V
     }
 }
 
+fn exact_index_from_f64(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+        return None;
+    }
+    Some(rounded as i64)
+}
+
 pub fn build_index_plan(
     selectors: &[SliceSelector],
     dims: usize,
@@ -376,7 +390,12 @@ where
                         } else {
                             let mut vv = Vec::with_capacity(len);
                             for &val in &idx_t.data {
-                                let idx = val as isize;
+                                let idx = exact_index_from_f64(val).ok_or_else(|| {
+                                    mex(
+                                        "UnsupportedIndexType",
+                                        "Index values must be positive integers or logical values",
+                                    )
+                                })?;
                                 if idx < 1 {
                                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                                 }
