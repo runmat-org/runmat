@@ -121,6 +121,12 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry, allSiblings: { name: strin
     if (behaviorList) blocks.push(behaviorList);
   }
 
+  if (doc.extended_capabilities && doc.extended_capabilities.length > 0) {
+    blocks.push(createHeading(2, parseInline('Extended capabilities')));
+    const capabilitiesList = renderListBlock(doc.extended_capabilities);
+    if (capabilitiesList) blocks.push(capabilitiesList);
+  }
+
   if (doc.options && doc.options.length > 0) {
     blocks.push(createHeading(2, parseInline(toSentenceCase('options'))));
     const optionsList = renderListBlock(doc.options);
