@@ -5018,6 +5018,24 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete unresolved non-qualified `str2func` direct-call failure matrix
+  - Extended unresolved non-qualified `str2func('definitely_missing_callback')` direct-invocation contracts in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
+    - fixed-arg lanes:
+      - `str2func_unresolved_external_direct_call_errors_without_legacy_fallback`
+      - `str2func_unresolved_external_direct_call_zero_output_errors_without_legacy_fallback`
+      - `str2func_unresolved_external_direct_call_multi_output_errors_without_legacy_fallback`
+    - expanded-arg lanes:
+      - `str2func_unresolved_external_expand_direct_call_errors_without_legacy_fallback`
+      - `str2func_unresolved_external_expand_direct_call_zero_output_errors_without_legacy_fallback`
+      - `str2func_unresolved_external_expand_direct_call_multi_output_errors_without_legacy_fallback`
+  - This closes remaining direct-call output-policy coverage for unresolved non-qualified text-handle callbacks and aligns the unresolved non-qualified `str2func` direct-call matrix with the unresolved qualified matrix.
+  - All lanes are pinned to stable `RunMat:UndefinedFunction`.
+  - Validation:
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_direct_call_ -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_expand_direct_call_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
