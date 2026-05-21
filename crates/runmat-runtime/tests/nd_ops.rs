@@ -101,6 +101,118 @@ fn repmat_nd_vector_form() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn repelem_row_vector_scalar_form() {
+    let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+    let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(2.0)]).unwrap();
+    if let Value::Tensor(t) = v {
+        assert_eq!(t.shape, vec![1, 6]);
+        assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+    } else {
+        panic!("expected tensor")
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn repelem_row_vector_count_form() {
+    let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+    let counts = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+    let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Tensor(counts)]).unwrap();
+    if let Value::Tensor(t) = v {
+        assert_eq!(t.shape, vec![1, 6]);
+        assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
+    } else {
+        panic!("expected tensor")
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn repelem_matrix_block_form() {
+    let magic = runmat_builtins::Tensor::new(
+        vec![8.0, 3.0, 4.0, 1.0, 5.0, 9.0, 6.0, 7.0, 2.0],
+        vec![3, 3],
+    )
+    .unwrap();
+    let v = rt::call_builtin(
+        "repelem",
+        &[Value::Tensor(magic), Value::Num(2.0), Value::Num(3.0)],
+    )
+    .unwrap();
+    if let Value::Tensor(t) = v {
+        assert_eq!(t.shape, vec![6, 9]);
+        assert_eq!(t.data[0], 8.0);
+        assert_eq!(t.data[1], 8.0);
+        assert_eq!(t.data[6], 8.0);
+        assert_eq!(t.data[7], 8.0);
+        assert_eq!(t.data[8], 3.0);
+    } else {
+        panic!("expected tensor")
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn repelem_empty_column_preserves_orientation() {
+    let a = runmat_builtins::Tensor::new(Vec::new(), vec![0, 1]).unwrap();
+    let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(3.0)]).unwrap();
+    if let Value::Tensor(t) = v {
+        assert_eq!(t.shape, vec![0, 1]);
+        assert!(t.data.is_empty());
+    } else {
+        panic!("expected tensor")
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn repelem_single_factor_uses_unique_nd_non_singleton_axis() {
+    let a = runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 1, 3]).unwrap();
+    let v = rt::call_builtin("repelem", &[Value::Tensor(a), Value::Num(2.0)]).unwrap();
+    if let Value::Tensor(t) = v {
+        assert_eq!(t.shape, vec![1, 1, 6]);
+        assert_eq!(t.data, vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0]);
+    } else {
+        panic!("expected tensor")
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn repelem_cell_array_nd() {
+    let cell = runmat_builtins::CellArray::new_with_shape(
+        vec![Value::Num(1.0), Value::Num(2.0)],
+        vec![1, 1, 2],
+    )
+    .unwrap();
+    let v = rt::call_builtin(
+        "repelem",
+        &[
+            Value::Cell(cell),
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ],
+    )
+    .unwrap();
+    if let Value::Cell(out) = v {
+        assert_eq!(out.shape, vec![1, 1, 4]);
+        let values: Vec<f64> = out
+            .data
+            .iter()
+            .map(|ptr| match unsafe { &*ptr.as_raw() } {
+                Value::Num(n) => *n,
+                other => panic!("expected numeric cell element, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(values, vec![1.0, 1.0, 2.0, 2.0]);
+    } else {
+        panic!("expected cell")
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn linspace_basic() {
     let v = rt::call_builtin(
         "linspace",
