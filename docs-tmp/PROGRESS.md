@@ -5216,6 +5216,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: make object selector masks safe beyond u32 mask width
+  - Object selector materialization in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now uses a safe mask-bit helper (`object_selector_mask_has_dim`) instead of raw `1u32 << d` shifts inside `for d in 0..dims`.
+  - This closes a high-dimension selector-plan seam where `dims >= 33` could panic during selector serialization for object paren and expr-paren paths.
+  - Added ratchets:
+    - `object_paren_selector_values_support_dims_beyond_mask_width`
+    - `object_paren_expr_selector_values_support_dims_beyond_mask_width`
+  - Validation:
+    - `cargo test -p runmat-vm object_paren_selector_values_support_dims_beyond_mask_width -- --nocapture`
+    - `cargo test -p runmat-vm object_paren_expr_selector_values_support_dims_beyond_mask_width -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

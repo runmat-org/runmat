@@ -357,11 +357,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - object selector mask metadata now has explicit shape/overlap invariant checks at the same shared descriptor boundary in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
     - both plain and expr object selector materialization reject out-of-bounds `colon_mask`/`end_mask` bits for `dims` via `RunMat:InvalidSelectorMaskPlan`.
     - both paths reject overlapping colon and end mask bits on the same selector dimension via `RunMat:InvalidSelectorMaskPlan`.
+    - both plain and expr object selector materialization now use safe mask-bit probing for `dims > 32` (no raw `1u32 << d` on high dimensions), preventing selector-plan panics for high-rank object indexing metadata.
     - ratchets:
       - `object_paren_selector_values_reject_out_of_bounds_mask_bits`
       - `object_paren_selector_values_reject_overlapping_colon_end_mask_bits`
       - `object_paren_expr_selector_values_reject_out_of_bounds_mask_bits`
       - `object_paren_expr_selector_values_reject_overlapping_colon_end_mask_bits`
+      - `object_paren_selector_values_support_dims_beyond_mask_width`
+      - `object_paren_expr_selector_values_support_dims_beyond_mask_width`
   - expr-slice end-offset selector context metadata now has explicit runtime invariant checks in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
     - `apply_end_offsets_to_numeric(...)` now pre-validates context rank/masks/range dims before dimension mapping.
     - malformed context metadata now fails with stable identifiers:

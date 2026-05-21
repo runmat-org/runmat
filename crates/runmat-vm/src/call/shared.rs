@@ -701,6 +701,10 @@ fn validate_object_selector_masks(
     Ok(())
 }
 
+fn object_selector_mask_has_dim(mask: u32, dim: usize) -> bool {
+    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
+}
+
 pub(crate) fn build_object_paren_selector_values(
     dims: usize,
     colon_mask: u32,
@@ -711,8 +715,8 @@ pub(crate) fn build_object_paren_selector_values(
     let mut values = Vec::with_capacity(dims);
     let mut numeric_iter = 0usize;
     for d in 0..dims {
-        let is_colon = (colon_mask & (1u32 << d)) != 0;
-        let is_end = (end_mask & (1u32 << d)) != 0;
+        let is_colon = object_selector_mask_has_dim(colon_mask, d);
+        let is_end = object_selector_mask_has_dim(end_mask, d);
         if is_colon {
             values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
             continue;
@@ -762,8 +766,8 @@ pub(crate) fn build_object_paren_expr_selector_values(
     )?;
     for d in 0..dims {
         if range_pos_by_dim[d].is_some() {
-            let is_colon = (colon_mask & (1u32 << d)) != 0;
-            let is_end = (end_mask & (1u32 << d)) != 0;
+            let is_colon = object_selector_mask_has_dim(colon_mask, d);
+            let is_end = object_selector_mask_has_dim(end_mask, d);
             if is_colon || is_end {
                 return Err(crate::interpreter::errors::mex(
                     "InvalidRangeSelectorPlan",
@@ -774,8 +778,8 @@ pub(crate) fn build_object_paren_expr_selector_values(
     }
     let slot_count = (0..dims)
         .filter(|&d| {
-            let is_colon = (colon_mask & (1u32 << d)) != 0;
-            let is_end = (end_mask & (1u32 << d)) != 0;
+            let is_colon = object_selector_mask_has_dim(colon_mask, d);
+            let is_end = object_selector_mask_has_dim(end_mask, d);
             !is_colon && !is_end && range_pos_by_dim[d].is_none()
         })
         .count();
@@ -784,8 +788,8 @@ pub(crate) fn build_object_paren_expr_selector_values(
     let mut values = Vec::with_capacity(dims);
     let mut num_iter = 0usize;
     for d in 0..dims {
-        let is_colon = (colon_mask & (1u32 << d)) != 0;
-        let is_end = (end_mask & (1u32 << d)) != 0;
+        let is_colon = object_selector_mask_has_dim(colon_mask, d);
+        let is_end = object_selector_mask_has_dim(end_mask, d);
         if is_colon {
             values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
             continue;
@@ -1183,6 +1187,20 @@ mod tests {
     }
 
     #[test]
+    fn object_paren_selector_values_support_dims_beyond_mask_width() {
+        let numeric: Vec<Value> = (0..31).map(|v| Value::Num((v + 1) as f64)).collect();
+        let selectors = build_object_paren_selector_values(33, 0b1, 0b10, &numeric)
+            .expect("selector values for dims beyond mask width");
+        assert_eq!(selectors.len(), 33);
+        assert_eq!(
+            selectors[0],
+            Value::String(OBJECT_SELECTOR_COLON.to_string())
+        );
+        assert_eq!(selectors[1], Value::String(OBJECT_SELECTOR_END.to_string()));
+        assert_eq!(selectors[32], Value::Num(31.0));
+    }
+
+    #[test]
     fn object_paren_expr_selector_values_encode_end_expression_range_descriptors() {
         let selectors = build_object_paren_expr_selector_values(
             2,
@@ -1345,6 +1363,34 @@ mod tests {
             build_object_paren_expr_selector_values(1, 0b1, 0b1, &[], &[], &[], &[], &[], &[], &[])
                 .expect_err("overlapping selector mask bits should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_support_dims_beyond_mask_width() {
+        let numeric: Vec<Value> = (0..32).map(|v| Value::Num((v + 1) as f64)).collect();
+        let selectors = build_object_paren_expr_selector_values(
+            33,
+            0,
+            0,
+            &[32],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &numeric,
+        )
+        .expect("expr selector values for dims beyond mask width");
+
+        assert_eq!(selectors.len(), 33);
+        assert_eq!(selectors[31], Value::Num(32.0));
+        match &selectors[32] {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 1);
+                assert_eq!(cell.cols, 4);
+            }
+            other => panic!("expected range descriptor cell, got {other:?}"),
+        }
     }
 
     #[test]
