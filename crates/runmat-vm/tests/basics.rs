@@ -696,6 +696,41 @@ fn string_nd_slice_assignment_with_numeric_rhs_reports_invalid_rhs_identifier() 
 }
 
 #[test]
+fn logical_linear_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier() {
+    let input = r#"
+        x = [1 0] > 0;
+        x([1 2]) = "z";
+    "#;
+    let bytecode =
+        compile_semantic_source(input).expect("compile semantic logical linear slice assign");
+    let err =
+        interpret(&bytecode).expect_err("logical linear slice assignment must reject base type");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:SliceNonTensor"),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
+    );
+}
+
+#[test]
+fn logical_nd_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier() {
+    let input = r#"
+        x = [1 0; 0 1] > 0;
+        x(:, 1) = "z";
+    "#;
+    let bytecode =
+        compile_semantic_source(input).expect("compile semantic logical nd slice assign");
+    let err = interpret(&bytecode).expect_err("logical nd slice assignment must reject base type");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:SliceNonTensor"),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
+    );
+}
+
+#[test]
 fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];

@@ -4927,6 +4927,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: ratchet logical slice-assignment base-type identifier boundary
+  - Added source-level runtime contracts in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) for logical-array paren assignment with string RHS:
+    - `logical_linear_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier`
+    - `logical_nd_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier`
+  - These tests pin current typed base-type rejection behavior (`RunMat:SliceNonTensor`) for logical slice-assignment paths, preventing regression to message-only or drifting identifiers.
+  - This documents and ratchets the current semantic boundary (logical paren slice assignment is rejected at base classification before RHS materialization) instead of silently depending on indirect failure shape.
+  - Validation:
+    - `cargo test -p runmat-vm --test basics logical_linear_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --test basics logical_nd_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
