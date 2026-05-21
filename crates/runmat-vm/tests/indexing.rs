@@ -166,3 +166,17 @@ fn cell_brace_scalar_tensor_index_reads_value() {
         panic!("expected numeric cell value from scalar tensor index");
     }
 }
+
+#[test]
+fn fractional_range_start_index_rejects_non_integer_selector() {
+    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(1.5:4);")
+        .expect_err("fractional range start should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+}
+
+#[test]
+fn fractional_range_step_index_rejects_non_integer_selector() {
+    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(1:1.5:5);")
+        .expect_err("fractional range step should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+}

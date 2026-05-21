@@ -362,14 +362,22 @@ where
             } else {
                 raw_sp
             };
+            let start = exact_index_from_f64(st).ok_or_else(|| {
+                mex(
+                    "UnsupportedIndexType",
+                    "Index values must be positive integers or logical values",
+                )
+            })?;
+            let step = exact_index_from_f64(sp).ok_or_else(|| {
+                mex(
+                    "UnsupportedIndexType",
+                    "Index values must be positive integers or logical values",
+                )
+            })?;
             let off = spec.range_end_exprs[pos].clone();
             selectors.push(ExprSel::Range {
-                start: st as i64,
-                step: if sp >= 0.0 {
-                    sp as i64
-                } else {
-                    -(sp.abs() as i64)
-                },
+                start,
+                step,
                 end_off: off,
             });
         } else {

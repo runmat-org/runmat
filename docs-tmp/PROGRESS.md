@@ -20,6 +20,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - added shared `range_selector_scalar_to_f64(...)` conversion that accepts only numeric scalar shapes (`Num`/`Int`/scalar tensor/scalar gathered GPU tensor) and rejects non-numeric range start/step operands as `RunMat:UnsupportedIndexType`.
     - removed read-path fallback coercions that previously converted malformed range start/step operands to `1.0`.
     - unified store-path range start/step conversion on the same typed scalar boundary instead of open `try_into()` string errors.
+    - tightened expr-slice range selector plan materialization in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs) to reject fractional range start/step selector operands (no `as i64` truncation), preserving typed selector failure `RunMat:UnsupportedIndexType` instead of implicit rounding/truncation.
     - removed `StoreIndex` non-positive scalar-index clamping (`<= 0 -> 0`) so scalar store indices now fail directly with `RunMat:IndexOutOfBounds` instead of silently normalizing invalid indices before assignment/object dispatch.
     - migrated brace cell index normalization (`resolve_cell_indices`) to shared scalar index decoding (`index_scalar_from_value`), aligning cell brace scalar-index semantics with tensor/object scalar index paths and enabling scalar tensor/GPU-scalar index handling under the same integer/out-of-bounds rules.
   - Added ratchets:
@@ -33,6 +34,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
       - `scalar_store_index_rejects_zero_index`
       - `resolve_cell_indices_accepts_scalar_tensor_values`
       - `cell_brace_scalar_tensor_index_reads_value`
+      - `fractional_range_start_index_rejects_non_integer_selector`
+      - `fractional_range_step_index_rejects_non_integer_selector`
   - Validation:
     - `cargo test -p runmat-vm range_start_selector_rejects_non_numeric_value -- --nocapture`
     - `cargo test -p runmat-vm range_step_selector_rejects_non_numeric_value -- --nocapture`
@@ -40,6 +43,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm scalar_store_index_rejects_zero_index -- --nocapture`
     - `cargo test -p runmat-vm --lib resolve_cell_indices_accepts_scalar_tensor_values -- --nocapture`
     - `cargo test -p runmat-vm cell_brace_scalar_tensor_index_reads_value -- --nocapture`
+    - `cargo test -p runmat-vm fractional_range_start_index_rejects_non_integer_selector -- --nocapture`
+    - `cargo test -p runmat-vm fractional_range_step_index_rejects_non_integer_selector -- --nocapture`
     - `cargo test -p runmat-vm --lib validate_expr_range_step_metadata_rejects_mismatched_arity -- --nocapture`
     - `cargo test -p runmat-vm --lib range_selector_scalar_to_f64_rejects_non_numeric_scalar -- --nocapture`
     - `cargo fmt --all`
