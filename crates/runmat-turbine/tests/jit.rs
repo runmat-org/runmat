@@ -1151,12 +1151,15 @@ fn test_jit_mixed_execution_patterns() {
     // Test: Mix of JIT-compiled code and function calls
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Define a function
+    // Define a user-defined helper function. The name intentionally avoids any
+    // existing MATLAB builtin (e.g. `square`, which is a real periodic waveform
+    // builtin) so the dispatch path being tested here cannot be intercepted by
+    // the runtime builtin registry.
     let mut functions = HashMap::new();
     functions.insert(
-        "square".to_string(),
+        "my_square".to_string(),
         runmat_vm::UserFunction {
-            name: "square".to_string(),
+            name: "my_square".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
             body: vec![runmat_hir::HirStmt::Assign(
@@ -1202,9 +1205,9 @@ fn test_jit_mixed_execution_patterns() {
                 Instr::LoadConst(3.0),
                 Instr::Add,
                 Instr::StoreVar(1),
-                // Function call: z = square(y) = 64
+                // Function call: z = my_square(y) = 64
                 Instr::LoadVar(1),
-                Instr::CallFunction("square".to_string(), 1),
+                Instr::CallFunction("my_square".to_string(), 1),
                 Instr::StoreVar(2),
                 // JIT-able: result = z + 10 = 74
                 Instr::LoadVar(2),
@@ -1225,7 +1228,7 @@ fn test_jit_mixed_execution_patterns() {
     // Verify results
     assert_eq!(vars[0], Value::Num(5.0), "x should be 5");
     assert_eq!(vars[1], Value::Num(8.0), "y should be 8");
-    assert_eq!(vars[2], Value::Num(64.0), "z should be square(8) = 64");
+    assert_eq!(vars[2], Value::Num(64.0), "z should be my_square(8) = 64");
     assert_eq!(vars[3], Value::Num(74.0), "result should be 64 + 10 = 74");
 }
 
