@@ -2009,6 +2009,7 @@ impl Compiler {
             {
                 None
             }
+            CallableIdentity::Imported(path) if path.item.is_empty() => None,
             _ => strict_callable_display_name(callee),
         }
     }

@@ -3834,6 +3834,46 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_imported_function_handle_missing_item_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::FunctionHandle(
+                        CallableIdentity::Imported(DefPath {
+                            package: PackageName("pkg".to_string()),
+                            module: QualifiedName(vec![
+                                SymbolName("pkg".to_string()),
+                                SymbolName("mod".to_string()),
+                            ]),
+                            item: vec![],
+                        }),
+                    ));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirFunctionHandleNameMissing")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
