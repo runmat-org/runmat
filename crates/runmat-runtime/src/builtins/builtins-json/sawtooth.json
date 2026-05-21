@@ -1,0 +1,100 @@
+{
+  "title": "sawtooth",
+  "category": "math/signal",
+  "keywords": [
+    "sawtooth",
+    "waveform",
+    "signal processing",
+    "triangle",
+    "periodic",
+    "elementwise"
+  ],
+  "summary": "Generate a periodic sawtooth waveform with optional peak position.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-compatible piecewise-linear evaluation at the period boundary."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is intentionally disabled for v1 because the WGSL piecewise expression is non-trivial and brings little benefit relative to the host loop."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::sawtooth::tests",
+    "integration": null
+  },
+  "description": "`y = sawtooth(t)` generates a sawtooth wave with period `2*pi` at the sample times in `t`, ranging in `[-1, 1]`. `y = sawtooth(t, xmax)` controls the peak position with `xmax` in `[0, 1]`: `xmax = 1` (the default) produces a rising sawtooth, `xmax = 0` produces a falling sawtooth, and intermediate values such as `xmax = 0.5` produce a triangle wave whose peak is at the centre of each period.",
+  "behaviors": [
+    "Operates element-wise on scalars, vectors, matrices, and N-D tensors; preserves input shape.",
+    "Reduces input modulo `2*pi` so the waveform is periodic across negative and positive sample times.",
+    "Returns `-1` at the start of each period and approaches `+1` just before the period boundary wraps when `xmax = 1`.",
+    "Returns a piecewise-linear triangle wave when `xmax = 0.5`, peaking at `1` at the centre of each period.",
+    "Returns a pure falling ramp when `xmax = 0` and a pure rising ramp when `xmax = 1`.",
+    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Non-finite sample times (`NaN`, `+Inf`, `-Inf`) propagate as `NaN` element-wise, matching MATLAB.",
+    "Complex and text inputs are rejected with a builtin-scoped error.",
+    "Rejects `xmax` values outside `[0, 1]` and non-scalar `xmax` arguments."
+  ],
+  "examples": [
+    {
+      "description": "Default rising sawtooth over two periods",
+      "input": "t = 0:pi/2:4*pi;\ny = sawtooth(t)",
+      "output": "y = [-1 -0.5 0 0.5 -1 -0.5 0 0.5 -1]"
+    },
+    {
+      "description": "Triangle wave via xmax = 0.5",
+      "input": "t = linspace(0, 2*pi, 5);\ny = sawtooth(t, 0.5)",
+      "output": "y = [-1 0 1 0 -1]"
+    },
+    {
+      "description": "Pure falling sawtooth via xmax = 0",
+      "input": "y = sawtooth([0 pi 2*pi], 0)",
+      "output": "y = [1 0 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `sawtooth(2*pi)` return `-1` instead of `+1`?",
+      "answer": "RunMat reduces the input modulo `2*pi`, so `2*pi` is folded back to the start of the next period. The default rising sawtooth therefore restarts at `-1` exactly on each period boundary, matching MATLAB."
+    },
+    {
+      "question": "How do I produce a triangle wave?",
+      "answer": "Pass `xmax = 0.5` so the peak sits at the centre of each period and the waveform ramps symmetrically up and back down."
+    },
+    {
+      "question": "Can `sawtooth` accept complex inputs?",
+      "answer": "No. `sawtooth` is defined on real samples and rejects complex inputs with a builtin-scoped error to match MATLAB."
+    }
+  ],
+  "links": [
+    {
+      "label": "square",
+      "url": "./square"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "linspace",
+      "url": "./linspace"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/sawtooth.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/sawtooth.rs"
+  }
+}
