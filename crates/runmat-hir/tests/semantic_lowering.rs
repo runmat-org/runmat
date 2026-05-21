@@ -717,6 +717,38 @@ fn binding_call_with_multi_output_lowers_to_dynamic_call_dispatch() {
 }
 
 #[test]
+fn expr_stmt_output_policy_controls_binding_call_lowering_shape() {
+    let assembly = lower_semantic("h = @sin; h(1)\nh(1);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::ExprStmt(expr_unsuppressed, false) = &function.body.statements[1].kind else {
+        panic!("expected unsuppressed expression statement");
+    };
+    let HirExprKind::Index(_, indexing) = &expr_unsuppressed.kind else {
+        panic!("unsuppressed expression statement should lower as paren indexing");
+    };
+    assert!(matches!(indexing.kind, IndexKind::Paren));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::ReadSingle
+    ));
+
+    let HirStmtKind::ExprStmt(expr_suppressed, true) = &function.body.statements[2].kind else {
+        panic!("expected semicolon-suppressed expression statement");
+    };
+    let HirExprKind::Call(call) = &expr_suppressed.kind else {
+        panic!("suppressed expression statement should lower as dynamic call dispatch");
+    };
+    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
+    assert!(matches!(call.requested_outputs, RequestedOutputCount::Zero));
+}
+
+#[test]
 fn await_and_spawn_lower_to_explicit_semantic_forms() {
     let assembly = lower_semantic("f = fetch(); t = spawn(f); y = await(t);");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
