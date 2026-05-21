@@ -667,6 +667,56 @@ fn brace_index_expression_records_comma_list_read_context() {
 }
 
 #[test]
+fn binding_call_with_expansion_lowers_to_dynamic_call_dispatch() {
+    let assembly = lower_semantic("h = @sin; C = {0}; y = h(C{:});");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, expr, _) = &function.body.statements[2].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected dynamic call expression");
+    };
+    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
+    assert_eq!(call.args.len(), 1);
+    let HirExprKind::Index(_, indexing) = &call.args[0].kind else {
+        panic!("expected brace-index expansion argument");
+    };
+    assert!(matches!(indexing.kind, IndexKind::Brace));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::FunctionArgumentExpansion
+    ));
+}
+
+#[test]
+fn binding_call_with_multi_output_lowers_to_dynamic_call_dispatch() {
+    let assembly = lower_semantic("h = @sin; [a, b] = h(1);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::MultiAssign(targets, expr, _) = &function.body.statements[1].kind else {
+        panic!("expected multi-assign");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected dynamic call expression");
+    };
+    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
+    assert_eq!(targets.targets.len(), 2);
+    assert!(matches!(
+        call.requested_outputs,
+        RequestedOutputCount::Exactly(2)
+    ));
+}
+
+#[test]
 fn await_and_spawn_lower_to_explicit_semantic_forms() {
     let assembly = lower_semantic("f = fetch(); t = spawn(f); y = await(t);");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();

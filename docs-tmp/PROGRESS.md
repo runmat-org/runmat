@@ -18,15 +18,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now ratchets direct handle-call unresolved semantics for:
       - single-output direct call: `h = @pkg.remote_inc; y = h(1);` -> `RunMat:UndefinedFunction`
       - multi-output direct call: `h = @pkg.remote_inc; [a,b] = h(1);` -> `RunMat:UndefinedFunction`
-    - Expansion + multi-output direct handle call now has explicit compile-stage contract coverage:
+    - Expansion + multi-output direct handle call now has explicit call-ABI coverage:
       - `h = @pkg.remote_inc; C = deal(1,2); [a,b] = h(C{:});`
-      - currently rejected at compile boundary with `RunMat:MirIndexContextInvalid` (tracked as designed call/index dispatch gap, now explicitly ratcheted instead of silent drift).
+      - compiles through dynamic call dispatch (`CallFevalExpandMultiOutput`) and fails at runtime with `RunMat:UndefinedFunction` for unresolved externals.
+    - HIR lowering now routes binding-call syntax with expansion or multi-output through `HirExprKind::Call` (`DynamicExpr`) instead of read-index lowering, closing the prior call/index context leak.
   - Added VM contract ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction`
     - `unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction`
     - `unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction`
+  - Added HIR semantic-lowering ratchets in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `binding_call_with_expansion_lowers_to_dynamic_call_dispatch`
+    - `binding_call_with_multi_output_lowers_to_dynamic_call_dispatch`
   - Validation:
+    - `cargo test -p runmat-hir binding_call_with_ -- --nocapture`
     - `cargo test -p runmat-vm unresolved_qualified_external_handle_ -- --nocapture`
+    - `cargo test -p runmat-vm semantic_function_handle_index_call_executes -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
     - `cargo fmt --all --check`

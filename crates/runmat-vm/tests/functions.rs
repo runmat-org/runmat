@@ -169,9 +169,24 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = h(C{:});";
-    let err = compile_semantic_source(source)
-        .expect_err("expanded multi-output direct handle call should report compile contract");
-    assert_eq!(err.identifier(), Some("RunMat:MirIndexContextInvalid"));
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle expanded multi-output direct call compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved qualified expanded multi-output direct handle call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]

@@ -1201,14 +1201,35 @@ impl SemanticCtx {
                         kind: HirExprKind::Binding(binding),
                         span,
                     };
-                    HirExprKind::Index(
-                        Box::new(base),
-                        IndexingSemantics {
-                            kind: IndexKind::Paren,
-                            components: args.into_iter().map(IndexComponent::Expr).collect(),
-                            result_context: IndexResultContext::ReadSingle,
-                        },
-                    )
+                    let needs_dynamic_call_dispatch = requested_outputs.fixed_count() != 1
+                        || args.iter().any(|arg| {
+                            matches!(
+                                &arg.kind,
+                                HirExprKind::Index(_, indexing)
+                                    if indexing.kind == IndexKind::Brace
+                                        && matches!(
+                                            indexing.result_context,
+                                            IndexResultContext::FunctionArgumentExpansion
+                                        )
+                            )
+                        });
+                    if needs_dynamic_call_dispatch {
+                        HirExprKind::Call(HirCall {
+                            callee: HirCallableRef::DynamicExpr(Box::new(base)),
+                            args,
+                            syntax: CallSyntax::Plain,
+                            requested_outputs,
+                        })
+                    } else {
+                        HirExprKind::Index(
+                            Box::new(base),
+                            IndexingSemantics {
+                                kind: IndexKind::Paren,
+                                components: args.into_iter().map(IndexComponent::Expr).collect(),
+                                result_context: IndexResultContext::ReadSingle,
+                            },
+                        )
+                    }
                 } else {
                     HirExprKind::Call(self.call_for_name(
                         name,
