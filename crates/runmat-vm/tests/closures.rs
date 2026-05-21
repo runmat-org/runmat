@@ -87,6 +87,20 @@ fn str2func_unresolved_external_callback_errors_without_legacy_fallback() {
 }
 
 #[test]
+fn str2func_qualified_external_callback_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); y = feval(f, 1);")
+        .expect_err("unresolved qualified str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_direct_call_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); y = f(1);")
+        .expect_err("unresolved qualified str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn fzero_accepts_anonymous_function() {
     let vars = execute_semantic_source("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
     assert!(vars
