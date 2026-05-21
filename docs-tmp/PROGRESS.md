@@ -4952,6 +4952,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete unresolved external-handle `feval` failure matrix
+  - Extended unresolved external function-handle `feval` execution coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to close remaining output-policy lanes:
+    - `unresolved_external_function_handle_multi_output_feval_fails_without_legacy_fallback`
+    - `unresolved_external_function_handle_expand_zero_output_feval_fails_without_legacy_fallback`
+    - `unresolved_external_function_handle_expand_multi_output_feval_fails_without_legacy_fallback`
+  - Together with existing unresolved external-handle fixed single-output, fixed zero-output, and expanded single-output contracts, this now ratchets full fixed/expanded output-count `0/1/2` failure identifier coverage for unresolved external-handle `feval`.
+  - All lanes are pinned to stable `RunMat:UndefinedFunction`, reducing remaining execution-surface callable ABI uncertainty in unresolved external callback behavior.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_multi_output_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_expand_zero_output_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_expand_multi_output_feval_fails_without_legacy_fallback -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
