@@ -268,6 +268,20 @@ impl CallableDescriptor {
                 }
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
             }
+            Value::StringArray(sa) if sa.data.len() == 1 => {
+                if let Some(name) = Self::parse_at_handle_name(&sa.data[0]) {
+                    let (identity, fallback_policy) =
+                        Self::resolve_named_target(&name, semantic_registry);
+                    return Self::feval_resolved_name(
+                        identity,
+                        name,
+                        fallback_policy,
+                        args,
+                        requested_outputs,
+                    );
+                }
+                Self::feval_forward(Value::StringArray(sa), args, requested_outputs)
+            }
             Value::Closure(closure) => {
                 Self::from_closure(closure, args, requested_outputs, semantic_registry)
             }
@@ -581,7 +595,7 @@ mod tests {
     };
     use crate::bytecode::SemanticFunctionRegistry;
     use futures::executor::block_on;
-    use runmat_builtins::{Closure, Tensor, Value};
+    use runmat_builtins::{Closure, StringArray, Tensor, Value};
     use runmat_hir::{
         BuiltinId, CallableFallbackPolicy, CallableIdentity, DefPath, DefPathSegment, FunctionId,
         MethodId, PackageName, QualifiedName, SymbolName,
@@ -1007,6 +1021,56 @@ mod tests {
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("@handle literal should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn feval_string_array_at_handle_qualified_name_classifies_as_external_boundary() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::StringArray(
+                StringArray::new(vec!["@pkg.remote_inc".to_string()], vec![1, 1])
+                    .expect("string array handle"),
+            ),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(identity, CallableIdentity::ExternalName(_)));
+        assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+    }
+
+    #[test]
+    fn feval_string_array_at_handle_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(7272))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 7272);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::StringArray(
+                StringArray::new(vec!["@pkg.remote_inc".to_string()], vec![1, 1])
+                    .expect("string array handle"),
+            ),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("string-array @handle should resolve through semantic resolver");
         assert_eq!(value, Value::Num(3.0));
     }
 

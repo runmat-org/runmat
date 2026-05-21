@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM feval descriptor now resolves scalar `StringArray` `@handle` callbacks through typed callable targets
+  - `scope: in-scope`
+  - `blocker: `CallableDescriptor::from_feval_value(...)` resolved `Value::String("@name")` and row `Value::CharArray('@name')` handles into typed callable identities, but scalar `Value::StringArray(["@name"])` handles still bypassed descriptor resolution and stayed on generic feval-forward path.`
+  - Tightened feval descriptor normalization in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - scalar `StringArray` `@name` handles now resolve through `parse_at_handle_name(...)` + `resolve_named_target(...)`.
+    - qualified names classify as `ExternalBoundary` typed identities; resolver-available names dispatch through semantic descriptor path.
+  - Added ratchets:
+    - `feval_string_array_at_handle_qualified_name_classifies_as_external_boundary`
+    - `feval_string_array_at_handle_can_use_semantic_resolver`
+  - Validation:
+    - `cargo test -p runmat-vm feval_string_array_at_handle_qualified_name_classifies_as_external_boundary -- --nocapture`
+    - `cargo test -p runmat-vm feval_string_array_at_handle_can_use_semantic_resolver -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Linear empty-selector shape semantics now preserve empty column-vector contract
   - `scope: in-scope`
   - `blocker: linear selector planning (`dims == 1`) still emitted non-linear-index empty selections as `[1,1]`, which cannot represent empty payloads and diverged from column-vector linear indexing semantics and expr/plain parity on empty logical selections.`
