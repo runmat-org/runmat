@@ -12,6 +12,29 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime listener string-array callback + `feval` handle-shape normalization
+  - `scope: in-scope`
+  - `blocker: listener callback dispatch and canonicalization still skipped scalar `StringArray` `@name` callback handles, and `feval` rejected scalar string-array handle values, leaving inconsistent callable ABI shape handling vs string/char/function-handle forms.`
+  - Tightened callback + `feval` normalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - listener canonicalization now prebinds resolver-known scalar `Value::StringArray(["@name"])` callbacks to `Value::SemanticFunctionHandle`.
+    - `notify_builtin(...)` now routes scalar string-array `@name` callbacks through `feval`.
+    - `feval_builtin(...)` now accepts scalar string-array `@name` handles and rejects non-scalar string-array handles with `RunMat:FevalHandleShapeInvalid`.
+  - Added ratchets:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `addlistener_string_array_handle_prefers_semantic_identity_when_resolved`
+      - `notify_string_array_handle_callback_surfaces_unresolved_identifier`
+      - `feval_accepts_scalar_string_array_handle`
+      - `feval_rejects_nonscalar_string_array_handle_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime addlistener_string_array_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime notify_string_array_handle_callback_surfaces_unresolved_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime feval_accepts_scalar_string_array_handle -- --nocapture`
+    - `cargo test -p runmat-runtime feval_rejects_nonscalar_string_array_handle_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime notify char-handle callback dispatch normalization
   - `scope: in-scope`
   - `blocker: notify callback dispatch ignored row `CharArray` `@name` callbacks unless they had already been canonicalized to semantic handles, leaving unresolved char-handle callbacks silently dropped instead of flowing through callable resolution/error contracts.`

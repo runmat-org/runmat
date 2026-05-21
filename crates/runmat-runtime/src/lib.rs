@@ -545,6 +545,10 @@ fn canonicalize_listener_callback(callback: Value) -> Value {
 
     match callback {
         Value::String(text) => resolve_text_handle(&text).unwrap_or(Value::String(text)),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            let text = &array.data[0];
+            resolve_text_handle(text).unwrap_or(Value::StringArray(array))
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
             let text: String = chars.data.iter().collect();
             resolve_text_handle(&text).unwrap_or(Value::CharArray(chars))
@@ -664,6 +668,11 @@ async fn notify_builtin(
         match &cbv {
             Value::String(s) if s.starts_with('@') => {
                 let mut a = vec![Value::String(s.clone())];
+                a.extend(args.into_iter());
+                let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
+            }
+            Value::StringArray(sa) if sa.data.len() == 1 && sa.data[0].starts_with('@') => {
+                let mut a = vec![Value::StringArray(sa.clone())];
                 a.extend(args.into_iter());
                 let _ = crate::call_builtin_async_with_outputs("feval", &a, 0).await?;
             }
@@ -1377,6 +1386,26 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             } else {
                 Err(
                     build_runtime_error("feval: function handle char array must be a row vector")
+                        .with_identifier("RunMat:FevalHandleShapeInvalid")
+                        .build(),
+                )
+            }
+        }
+        Value::StringArray(sa) => {
+            if sa.data.len() == 1 {
+                let s = &sa.data[0];
+                if let Some(name) = s.strip_prefix('@') {
+                    call_by_name(name, &rest, requested_outputs).await
+                } else {
+                    Err(build_runtime_error(format!(
+                        "feval: expected function handle string starting with '@', got {s}"
+                    ))
+                    .with_identifier("RunMat:FevalHandleStringInvalid")
+                    .build())
+                }
+            } else {
+                Err(
+                    build_runtime_error("feval: function handle string array must be scalar")
                         .with_identifier("RunMat:FevalHandleShapeInvalid")
                         .build(),
                 )
@@ -2663,6 +2692,33 @@ mod tests {
     }
 
     #[test]
+    fn feval_accepts_scalar_string_array_handle() {
+        let handle =
+            runmat_builtins::StringArray::new(vec!["@sin".to_string()], vec![1, 1]).expect("sa");
+        let result = block_on(feval_builtin(
+            Value::StringArray(handle),
+            vec![Value::Num(0.0)],
+        ))
+        .expect("string-array handle feval should succeed");
+        assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn feval_rejects_nonscalar_string_array_handle_with_identifier() {
+        let handle = runmat_builtins::StringArray::new(
+            vec!["@sin".to_string(), "@cos".to_string()],
+            vec![1, 2],
+        )
+        .expect("sa");
+        let err = block_on(feval_builtin(
+            Value::StringArray(handle),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("nonscalar string-array handle should fail");
+        assert_eq!(err.identifier(), Some("RunMat:FevalHandleShapeInvalid"));
+    }
+
+    #[test]
     fn addlistener_rejects_non_object_target_with_identifier() {
         let err = block_on(addlistener_builtin(
             Value::Num(1.0),
@@ -2781,6 +2837,33 @@ mod tests {
     }
 
     #[test]
+    fn addlistener_string_array_handle_prefers_semantic_identity_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "event_callback").then_some(66)
+            })));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let callback =
+            runmat_builtins::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
+                .expect("string array");
+        let listener = block_on(addlistener_builtin(
+            target,
+            "Changed".to_string(),
+            Value::StringArray(callback),
+        ))
+        .expect("listener registered");
+        let Value::Listener(listener) = listener else {
+            panic!("expected listener value");
+        };
+        assert!(matches!(
+            &*listener.callback,
+            Value::SemanticFunctionHandle { name, function }
+                if name == "event_callback" && *function == 66
+        ));
+    }
+
+    #[test]
     fn addlistener_closure_prefers_embedded_semantic_identity_when_resolved() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
@@ -2855,6 +2938,27 @@ mod tests {
         .expect("listener registered");
         let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
             .expect_err("unresolved char callback should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn notify_string_array_handle_callback_surfaces_unresolved_identifier() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let callback = runmat_builtins::StringArray::new(
+            vec!["@definitely_missing_callback".to_string()],
+            vec![1, 1],
+        )
+        .expect("string array");
+        block_on(addlistener_builtin(
+            target.clone(),
+            "Changed".to_string(),
+            Value::StringArray(callback),
+        ))
+        .expect("listener registered");
+        let err = block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
+            .expect_err("unresolved string-array callback should fail");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
