@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 interface TryInBrowserButtonProps extends React.ComponentProps<typeof Button> {
   code?: string;
+  agentPrompt?: string;
   source?: string;
   exampleId?: string;
 }
@@ -24,6 +25,7 @@ export function TryInBrowserButton({
   variant = "outline",
   size = "lg",
   code,
+  agentPrompt,
   source = "try-in-browser",
   exampleId,
   className,
@@ -43,7 +45,14 @@ export function TryInBrowserButton({
           onClick={() =>
               openWorkspace(
                   [{path: "/example.m", content: code || "disp('hello from docs');"}],
-                  {targetPath: "/sandbox", metadata: {source: "example-page"}}
+                  {
+                      targetPath: "/sandbox",
+                      agentPrompt,
+                      metadata: {
+                          source,
+                          ...(resolvedExampleId ? {exampleId: resolvedExampleId} : {}),
+                      },
+                  }
               )
           }
           {...props}
