@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM source-level callable identifier-contract ratchet follow-through
+  - `scope: in-scope`
+  - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
+  - Added VM source-level identifier ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `classref_nonstatic_method_call_errors_with_identifier_contract` -> `RunMat:MethodNotStatic`
+    - `addlistener_invalid_target_errors_with_identifier_contract` -> `RunMat:AddListenerTargetInvalid`
+    - `notify_invalid_target_errors_with_identifier_contract` -> `RunMat:NotifyTargetInvalid`
+  - Validation:
+    - `cargo test -p runmat-vm classref_nonstatic_method_call_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm invalid_target_errors_with_identifier_contract -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime/VM `str2func` identifier-contract normalization ratchet
   - `scope: in-scope`
   - `blocker: callable descriptor and callback ABI closure still had message-only str2func input-validation failures, which left non-semantic error surfaces unratcheted at runtime/source boundaries.`

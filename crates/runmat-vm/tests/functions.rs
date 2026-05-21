@@ -1518,6 +1518,28 @@ fn object_getmethod_instance_method_handle_direct_call_executes() {
 }
 
 #[test]
+fn classref_nonstatic_method_call_errors_with_identifier_contract() {
+    let err =
+        execute_semantic_source_result("__register_test_classes(); classref('Point').move(1, 2);")
+            .expect_err("classref call to non-static method should fail");
+    assert_eq!(err.identifier(), Some("RunMat:MethodNotStatic"));
+}
+
+#[test]
+fn addlistener_invalid_target_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("addlistener(1, 'Changed', @sin);")
+        .expect_err("addlistener should reject non-object target");
+    assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+}
+
+#[test]
+fn notify_invalid_target_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("notify(1, 'Changed');")
+        .expect_err("notify should reject non-object target");
+    assert_eq!(err.identifier(), Some("RunMat:NotifyTargetInvalid"));
+}
+
+#[test]
 fn call_method_empty_name_errors_with_identifier_contract() {
     let err = execute_semantic_source_result(
         "__register_test_classes(); p = new_object('Point'); call_method(p, '   ');",
