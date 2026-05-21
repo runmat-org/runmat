@@ -1,0 +1,135 @@
+{
+  "title": "mode",
+  "category": "stats/summary",
+  "keywords": [
+    "mode",
+    "frequency",
+    "statistics",
+    "reduction",
+    "ties"
+  ],
+  "summary": "Most frequent value along a dimension with MATLAB-compatible tie semantics.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Mode currently executes on the host; GPU tensors are gathered to the CPU before computing the result."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::summary::mode::tests"
+  },
+  "description": "`mode(A)` returns the value that appears most frequently in `A`. When multiple values share the same maximum frequency, the smallest tied value is returned in `M`, matching MATLAB. Requesting `[M, F, C] = mode(A)` additionally yields the frequency of the mode and a cell array `C` whose entries are sorted column vectors of the tied values for each slice.",
+  "behaviors": [
+    "`mode(A)` reduces along the first non-singleton dimension of `A`.",
+    "`mode(A, dim)` reduces along the specified dimension (1-based, `>= 1`).",
+    "`mode(A, 'all')` collapses every element of `A` into a single scalar mode.",
+    "`[M, F, C] = mode(A, ...)` additionally returns the frequency `F` of the mode (as a double) and a cell array `C` of sorted tied values per slice.",
+    "Ties resolve to the smallest tied value in `M`, while `C` contains the full tied set sorted in ascending order.",
+    "NaN entries are ignored. If a slice is entirely `NaN` (or empty), the corresponding `M` value is `NaN`, `F` is `0`, and the cell entry is an empty `0 × 1` column.",
+    "Logical, integer, and boolean inputs are promoted to double precision before counting frequencies.",
+    "Dimensions larger than `ndims(A)` treat the input as having trailing singleton dimensions, so each slice contains a single element."
+  ],
+  "examples": [
+    {
+      "description": "Mode of a vector with a clear majority",
+      "input": "x = [1 2 2 3 3 3 4];\nm = mode(x)",
+      "output": "m = 3"
+    },
+    {
+      "description": "Ties return the smallest value with the full sorted set",
+      "input": "x = [1 1 2 2];\n[m, f, c] = mode(x)",
+      "output": "m = 1\nf = 2\nc = {[1; 2]}"
+    },
+    {
+      "description": "Column-wise mode of a matrix",
+      "input": "A = [1 2 1; 2 2 3; 2 4 3];\nm = mode(A)",
+      "output": "m = [2 2 3]"
+    },
+    {
+      "description": "Mode along the second dimension",
+      "input": "A = [1 2 1; 2 2 3; 2 4 3];\nm = mode(A, 2)",
+      "output": "m = [1; 2; 2]"
+    },
+    {
+      "description": "Mode across every element",
+      "input": "A = [1 2 3; 2 3 2];\nm = mode(A, 'all')",
+      "output": "m = 2"
+    },
+    {
+      "description": "NaN values are ignored unless every element is NaN",
+      "input": "x = [1 NaN 2 2 NaN];\n[m, f] = mode(x)",
+      "output": "m = 2\nf = 2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How are ties resolved?",
+      "answer": "`M` returns the smallest value among the tied set. The third output `C` contains every tied value sorted in ascending order as a column vector."
+    },
+    {
+      "question": "What happens with NaN values?",
+      "answer": "NaN entries are skipped while counting frequencies. If a slice is entirely NaN, RunMat returns `NaN` for the mode, `0` for the frequency, and an empty `0 × 1` column in the cell array."
+    },
+    {
+      "question": "Does mode support logical or integer inputs?",
+      "answer": "Yes. Logical and integer arrays are promoted to double precision before counting, matching MATLAB."
+    },
+    {
+      "question": "Can I reduce across all elements of an array?",
+      "answer": "Use `mode(A, 'all')` to collapse every element of `A` into a single scalar."
+    },
+    {
+      "question": "Does mode execute on the GPU?",
+      "answer": "Not today. GPU tensors are gathered to the host so the result remains bit-for-bit MATLAB compatible; future providers may expose dedicated mode kernels."
+    }
+  ],
+  "links": [
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "median",
+      "url": "./median"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "std",
+      "url": "./std"
+    },
+    {
+      "label": "var",
+      "url": "./var"
+    },
+    {
+      "label": "histcounts",
+      "url": "./histcounts"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/summary/mode.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/summary/mode.rs"
+  }
+}
