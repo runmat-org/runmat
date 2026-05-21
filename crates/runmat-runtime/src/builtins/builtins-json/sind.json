@@ -1,0 +1,98 @@
+{
+  "title": "sind",
+  "category": "math/trigonometry",
+  "keywords": [
+    "sind",
+    "sine",
+    "degrees",
+    "angle",
+    "trigonometry",
+    "elementwise"
+  ],
+  "summary": "Sine of angles expressed in degrees with MATLAB-exact values at canonical multiples.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-exact values at canonical multiples of 30, 90, 150, and 180 degrees."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is intentionally disabled for v1 because the WGSL `sin(x*pi/180)` form would lose MATLAB's exact-value guarantees at canonical angles."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::sind::tests",
+    "integration": null
+  },
+  "description": "`y = sind(x)` evaluates the sine of each angle in `x`, interpreting the values in degrees rather than radians. The implementation reduces the angle modulo 360 and special-cases 0, 30, 90, 150, and 180 (and their negative/wrapped counterparts) so the result matches MATLAB's exact 0, ±0.5, and ±1 values without floating-point noise.",
+  "behaviors": [
+    "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
+    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Returns exactly 0 at multiples of 180 and exactly ±1 at multiples of 90.",
+    "Returns exactly ±0.5 at multiples of 30 and 150.",
+    "Complex inputs delegate to the analytic extension of `sin` after scaling by `pi/180`; exact-value treatment for complex operands is deferred.",
+    "Output shape matches the input shape; non-finite inputs propagate as `NaN`.",
+    "String inputs are unsupported and raise a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Sine of a canonical degree angle",
+      "input": "y = sind(30)",
+      "output": "y = 0.5"
+    },
+    {
+      "description": "Sine of multiples of 180 returns exactly zero",
+      "input": "y = sind([0 180 360])",
+      "output": "y = [0 0 0]"
+    },
+    {
+      "description": "Sine of a vector of common angles",
+      "input": "angles = [0 30 45 60 90];\ny = sind(angles)",
+      "output": "y = [0 0.5 0.7071 0.8660 1]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `sind(180)` return exactly zero?",
+      "answer": "MATLAB guarantees an exact zero at multiples of 180 to avoid floating-point noise from `pi`. RunMat reduces the angle modulo 360 and short-circuits the canonical cases before delegating to `sin`."
+    },
+    {
+      "question": "Is `sind(x)` equivalent to `sin(x*pi/180)`?",
+      "answer": "Mathematically yes, but the floating-point result differs at canonical angles because `pi/180` is not exact in binary floating point. `sind` returns the exact MATLAB values at multiples of 30, 90, 150, and 180."
+    },
+    {
+      "question": "Does `sind` support arrays?",
+      "answer": "Yes. Scalars, vectors, matrices, and N-D tensors are all handled element-wise; the shape of the input is preserved."
+    }
+  ],
+  "links": [
+    {
+      "label": "cosd",
+      "url": "./cosd"
+    },
+    {
+      "label": "tand",
+      "url": "./tand"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "deg2rad",
+      "url": "./deg2rad"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/sind.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/sind.rs"
+  }
+}

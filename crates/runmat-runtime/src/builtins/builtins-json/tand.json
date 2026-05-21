@@ -1,0 +1,98 @@
+{
+  "title": "tand",
+  "category": "math/trigonometry",
+  "keywords": [
+    "tand",
+    "tangent",
+    "degrees",
+    "angle",
+    "trigonometry",
+    "elementwise"
+  ],
+  "summary": "Tangent of angles expressed in degrees with MATLAB-exact poles at +/-90 and exact zeros at multiples of 180.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "elementwise",
+    "notes": "GPU inputs are gathered to the host so the reference implementation can guarantee MATLAB-exact values at canonical multiples of 45, 90, and 180 degrees, including the +/-Inf poles at +/-90."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline",
+    "notes": "Fusion is intentionally disabled for v1 because the WGSL `tan(x*pi/180)` form would replace MATLAB's +/-Inf poles with very large but finite values."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::tand::tests",
+    "integration": null
+  },
+  "description": "`y = tand(x)` evaluates the tangent of each angle in `x`, interpreting the values in degrees rather than radians. The implementation reduces the angle modulo 360 and special-cases 0, 45, 90, 135, and 180 (and their negative/wrapped counterparts) so multiples of 180 return an exact 0, multiples of 45 return ±1, and the poles at +90 and -90 return +Inf and -Inf respectively.",
+  "behaviors": [
+    "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
+    "Integer and logical inputs are promoted to double precision before evaluation.",
+    "Returns exactly 0 at multiples of 180 and exactly ±1 at multiples of 45.",
+    "Returns +Inf at +90 (and angles equivalent under modulo 360) and -Inf at -90 (and equivalent angles).",
+    "Complex inputs delegate to the analytic extension of `tan` after scaling by `pi/180`; exact-value treatment for complex operands is deferred.",
+    "Output shape matches the input shape; non-finite inputs propagate as `NaN`.",
+    "String inputs are unsupported and raise a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Tangent of a canonical degree angle",
+      "input": "y = tand(45)",
+      "output": "y = 1"
+    },
+    {
+      "description": "Tangent at the +/-90 poles returns +/-Inf",
+      "input": "y = tand([90 -90])",
+      "output": "y = [Inf -Inf]"
+    },
+    {
+      "description": "Tangent of a multiple of 180 returns exactly zero",
+      "input": "y = tand(180)",
+      "output": "y = 0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `tand(90)` return Inf instead of a very large finite number?",
+      "answer": "MATLAB defines `tand(90) = Inf` and `tand(-90) = -Inf` at the poles. Naively evaluating `tan(90*pi/180)` would return a huge finite number because `pi/180` is not exact in floating point, so RunMat short-circuits the poles to match MATLAB."
+    },
+    {
+      "question": "Is `tand(x)` equivalent to `tan(x*pi/180)`?",
+      "answer": "Mathematically yes, but the floating-point result differs at canonical angles. `tand` guarantees exact values at multiples of 45 and 180, and infinite values at +/-90."
+    },
+    {
+      "question": "Does `tand` support arrays?",
+      "answer": "Yes. Scalars, vectors, matrices, and N-D tensors are all handled element-wise; the shape of the input is preserved."
+    }
+  ],
+  "links": [
+    {
+      "label": "sind",
+      "url": "./sind"
+    },
+    {
+      "label": "cosd",
+      "url": "./cosd"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    },
+    {
+      "label": "deg2rad",
+      "url": "./deg2rad"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/tand.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/tand.rs"
+  }
+}
