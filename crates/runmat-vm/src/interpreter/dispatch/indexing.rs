@@ -470,8 +470,8 @@ impl<'a> IndexContext<'a> {
         let mut seen_numeric = 0usize;
         let mut dim_for_pos = 0usize;
         for d in 0..self.dims {
-            let is_colon = (self.colon_mask & (1u32 << d)) != 0;
-            let is_end = (self.end_mask & (1u32 << d)) != 0;
+            let is_colon = selector_mask_has_dim(self.colon_mask, d);
+            let is_end = selector_mask_has_dim(self.end_mask, d);
             let is_range = self.range_dims.contains(&d);
             if is_colon || is_end || is_range {
                 continue;
@@ -491,12 +491,48 @@ impl<'a> IndexContext<'a> {
     }
 }
 
+fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
+    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
+}
+
+fn validate_index_context_plan(ctx: IndexContext<'_>) -> Result<(), RuntimeError> {
+    if ctx.dims > u32::BITS as usize {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidRangeSelectorPlan",
+            "selector dimension metadata exceeds mask width",
+        ));
+    }
+    let mut seen = vec![false; ctx.dims];
+    for &dim in ctx.range_dims {
+        if dim >= ctx.dims {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorDim",
+                "range selector dimension is out of bounds",
+            ));
+        }
+        if std::mem::replace(&mut seen[dim], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorPlan",
+                "range selector dimension appears more than once",
+            ));
+        }
+        if selector_mask_has_dim(ctx.colon_mask, dim) || selector_mask_has_dim(ctx.end_mask, dim) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorPlan",
+                "range selector conflicts with colon/end selector masks",
+            ));
+        }
+    }
+    Ok(())
+}
+
 async fn apply_end_offsets_to_numeric(
     numeric: &[Value],
     ctx: IndexContext<'_>,
     end_offsets: &[(usize, EndExpr)],
     vars: &mut [Value],
 ) -> Result<Vec<Value>, RuntimeError> {
+    validate_index_context_plan(ctx)?;
     let mut seen = vec![false; numeric.len()];
     for (position, _) in end_offsets {
         if *position >= numeric.len() {
@@ -1982,6 +2018,71 @@ mod tests {
         ))
         .expect_err("duplicate end-selector positions should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_duplicate_range_dims_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0, 0, &[1, 1], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("duplicate range dims should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_out_of_bounds_range_dims_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0, 0, &[2], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("out-of-bounds range dims should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_range_dim_conflicting_with_colon_mask_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0b01, 0, &[0], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("range/colon conflict should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_range_dim_conflicting_with_end_mask_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0, 0b10, &[1], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("range/end conflict should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_context_rank_exceeding_mask_width() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(33, 0, 0, &[], &[1; 33]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("selector rank beyond mask width should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
     }
 
     #[test]

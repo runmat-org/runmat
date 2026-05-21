@@ -248,6 +248,17 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `expr_plan_rejects_duplicate_range_dims`
       - `expr_plan_rejects_out_of_bounds_range_dim`
       - `expr_plan_rejects_inconsistent_range_metadata_lengths`
+  - expr-slice end-offset selector context metadata now has explicit runtime invariant checks in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `apply_end_offsets_to_numeric(...)` now pre-validates context rank/masks/range dims before dimension mapping.
+    - malformed context metadata now fails with stable identifiers:
+      - `RunMat:InvalidRangeSelectorPlan` (duplicate/conflicting range dims, rank beyond mask width)
+      - `RunMat:InvalidRangeSelectorDim` (out-of-bounds range dim)
+    - direct ratchets:
+      - `apply_end_offsets_rejects_duplicate_range_dims_in_context`
+      - `apply_end_offsets_rejects_out_of_bounds_range_dims_in_context`
+      - `apply_end_offsets_rejects_range_dim_conflicting_with_colon_mask_in_context`
+      - `apply_end_offsets_rejects_range_dim_conflicting_with_end_mask_in_context`
+      - `apply_end_offsets_rejects_context_rank_exceeding_mask_width`
   - VM source-level callable identifier contracts now explicitly cover classref and event-target boundaries in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - classref non-static call boundary: `classref_nonstatic_method_call_errors_with_identifier_contract` -> `RunMat:MethodNotStatic`
     - classref unknown-static unresolved policy boundary: `classref_unknown_static_method_call_remains_unresolved_with_identifier_contract` -> `RunMat:UndefinedFunction`

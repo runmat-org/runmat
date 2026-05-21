@@ -85,6 +85,30 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Plan 3 selector-context invariant ratchet for expr-slice end-offset application
+  - `scope: in-scope`
+  - `blocker: expr-slice `end`-offset application trusted context metadata (`range_dims`, selector masks, rank) before plan construction, leaving malformed bytecode metadata to reach dimension mapping logic without explicit invariant checks.`
+  - Hardened selector-context validation in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - added `validate_index_context_plan(...)` preflight for `apply_end_offsets_to_numeric(...)`
+    - rejects selector rank beyond mask width (`dims > 32`) with `RunMat:InvalidRangeSelectorPlan`
+    - rejects out-of-bounds `range_dims` entries with `RunMat:InvalidRangeSelectorDim`
+    - rejects duplicate `range_dims` entries with `RunMat:InvalidRangeSelectorPlan`
+    - rejects `range_dims` conflicts against colon/end selector masks with `RunMat:InvalidRangeSelectorPlan`
+    - switched bit checks to a bounded helper (`selector_mask_has_dim`) to avoid shift-width traps under malformed rank metadata.
+  - Added ratchets in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `apply_end_offsets_rejects_duplicate_range_dims_in_context`
+    - `apply_end_offsets_rejects_out_of_bounds_range_dims_in_context`
+    - `apply_end_offsets_rejects_range_dim_conflicting_with_colon_mask_in_context`
+    - `apply_end_offsets_rejects_range_dim_conflicting_with_end_mask_in_context`
+    - `apply_end_offsets_rejects_context_rank_exceeding_mask_width`
+  - Validation:
+    - `cargo test -p runmat-vm --lib apply_end_offsets_rejects_ -- --nocapture`
+    - `cargo test -p runmat-vm --lib interpreter::dispatch::indexing::tests:: -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM source-level callable identifier-contract ratchet follow-through
   - `scope: in-scope`
   - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
