@@ -1374,17 +1374,25 @@ fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
             normalize_handle_name(&text)
         }
         Value::CharArray(_) => {
-            return Err(
-                ("str2func: function name char array must be a row vector".to_string()).into(),
+            return Err(build_runtime_error(
+                "str2func: function name char array must be a row vector",
             )
+            .with_identifier("RunMat:Str2FuncNameShapeInvalid")
+            .build())
         }
         other => {
-            return Err(
-                (format!("str2func: expected string/char function name, got {other:?}")).into(),
-            )
+            return Err(build_runtime_error(format!(
+                "str2func: expected string/char function name, got {other:?}"
+            ))
+            .with_identifier("RunMat:Str2FuncNameTypeInvalid")
+            .build())
         }
     }
-    .ok_or_else(|| "str2func: function name must not be empty".to_string())?;
+    .ok_or_else(|| {
+        build_runtime_error("str2func: function name must not be empty")
+            .with_identifier("RunMat:Str2FuncNameInvalid")
+            .build()
+    })?;
 
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
         Ok(Value::SemanticFunctionHandle { name, function })
@@ -1869,6 +1877,29 @@ mod tests {
         let value = str2func_builtin(Value::String("Point..origin".to_string()))
             .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
+    }
+
+    #[test]
+    fn str2func_rejects_empty_name_with_identifier() {
+        let err = str2func_builtin(Value::String("   ".to_string()))
+            .expect_err("empty function name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
+    }
+
+    #[test]
+    fn str2func_rejects_non_row_char_name_with_identifier() {
+        let chars = runmat_builtins::CharArray::new(vec!['a', 'b'], 2, 1)
+            .expect("char array construction should succeed");
+        let err = str2func_builtin(Value::CharArray(chars))
+            .expect_err("non-row char-array function name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
+    }
+
+    #[test]
+    fn str2func_rejects_non_text_name_with_identifier() {
+        let err =
+            str2func_builtin(Value::Num(1.0)).expect_err("non-text function name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
     }
 
     #[test]

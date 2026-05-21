@@ -12,6 +12,30 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime/VM `str2func` identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: callable descriptor and callback ABI closure still had message-only str2func input-validation failures, which left non-semantic error surfaces unratcheted at runtime/source boundaries.`
+  - Closed remaining `str2func` input-validation identifier gaps:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now emits stable identifiers for all invalid name-shape/type boundaries:
+      - empty/whitespace name -> `RunMat:Str2FuncNameInvalid`
+      - non-row `CharArray` name -> `RunMat:Str2FuncNameShapeInvalid`
+      - non-text callback name type -> `RunMat:Str2FuncNameTypeInvalid`
+  - Added runtime identifier ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `str2func_rejects_empty_name_with_identifier`
+    - `str2func_rejects_non_row_char_name_with_identifier`
+    - `str2func_rejects_non_text_name_with_identifier`
+  - Added VM end-to-end source-level identifier ratchets in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
+    - `str2func_empty_name_errors_with_identifier_contract`
+    - `str2func_nonrow_char_name_errors_with_identifier_contract`
+    - `str2func_nontext_name_type_errors_with_identifier_contract`
+  - Validation:
+    - `cargo test -p runmat-runtime str2func_rejects_ -- --nocapture`
+    - `cargo test -p runmat-vm str2func_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:

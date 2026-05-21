@@ -101,6 +101,27 @@ fn str2func_qualified_external_direct_call_errors_without_legacy_fallback() {
 }
 
 #[test]
+fn str2func_empty_name_errors_with_identifier_contract() {
+    let err = execute_semantic_source("f = str2func('');")
+        .expect_err("empty str2func function name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
+}
+
+#[test]
+fn str2func_nontext_name_type_errors_with_identifier_contract() {
+    let err = execute_semantic_source("f = str2func(1);")
+        .expect_err("non-text str2func function name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
+}
+
+#[test]
+fn str2func_nonrow_char_name_errors_with_identifier_contract() {
+    let err = execute_semantic_source("f = str2func(['a'; 'b']);")
+        .expect_err("non-row char-array str2func function name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
+}
+
+#[test]
 fn fzero_accepts_anonymous_function() {
     let vars = execute_semantic_source("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
     assert!(vars
