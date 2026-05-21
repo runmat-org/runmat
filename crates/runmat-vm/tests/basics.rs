@@ -696,7 +696,7 @@ fn string_nd_slice_assignment_with_numeric_rhs_reports_invalid_rhs_identifier() 
 }
 
 #[test]
-fn logical_linear_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier() {
+fn logical_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() {
     let input = r#"
         x = [1 0] > 0;
         x([1 2]) = "z";
@@ -704,30 +704,43 @@ fn logical_linear_slice_assignment_with_string_rhs_reports_slice_non_tensor_iden
     let bytecode =
         compile_semantic_source(input).expect("compile semantic logical linear slice assign");
     let err =
-        interpret(&bytecode).expect_err("logical linear slice assignment must reject base type");
+        interpret(&bytecode).expect_err("logical linear slice assignment must reject string rhs");
     assert_eq!(
         err.identifier(),
-        Some("RunMat:SliceNonTensor"),
+        Some("RunMat:InvalidSliceAssignmentRhs"),
         "unexpected identifier: {:?} ({err:?})",
         err.identifier()
     );
 }
 
 #[test]
-fn logical_nd_slice_assignment_with_string_rhs_reports_slice_non_tensor_identifier() {
+fn logical_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() {
     let input = r#"
         x = [1 0; 0 1] > 0;
         x(:, 1) = "z";
     "#;
     let bytecode =
         compile_semantic_source(input).expect("compile semantic logical nd slice assign");
-    let err = interpret(&bytecode).expect_err("logical nd slice assignment must reject base type");
+    let err = interpret(&bytecode).expect_err("logical nd slice assignment must reject string rhs");
     assert_eq!(
         err.identifier(),
-        Some("RunMat:SliceNonTensor"),
+        Some("RunMat:InvalidSliceAssignmentRhs"),
         "unexpected identifier: {:?} ({err:?})",
         err.identifier()
     );
+}
+
+#[test]
+fn logical_slice_assignment_executes_and_coerces_numeric_rhs() {
+    let input = r#"
+        x = [1 0] > 0;
+        x([2]) = 2;
+        s = sum(x);
+    "#;
+    let vars = execute_semantic_source(input);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
 }
 
 #[test]

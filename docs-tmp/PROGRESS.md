@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Logical paren-slice assignment now executes for logical bases and preserves slice-assignment RHS contracts
+  - `scope: in-scope`
+  - `blocker: logical-base paren slice assignment (`x(idx)=...`, `x(:,...)=...`) was rejected early with `RunMat:SliceNonTensor`, bypassing the normal slice assignment product path and masking RHS contract identifiers.`
+  - Updated slice store dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `Instr::StoreSlice` now handles `Value::LogicalArray` by round-tripping through tensor slice assign/delete planning and converting the updated tensor back to logical storage (`Value::Bool`/`Value::LogicalArray`).
+    - added logical reconstruction helper to normalize post-assign values into logical representation.
+  - Updated logical slice contracts in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+    - string RHS on logical slice assignment now asserts `RunMat:InvalidSliceAssignmentRhs` instead of base-type rejection.
+    - added positive execution ratchet `logical_slice_assignment_executes_and_coerces_numeric_rhs`.
+  - Validation:
+    - `cargo test -p runmat-vm --test basics logical_ -- --nocapture`
+    - `cargo fmt --all`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - Indexed-base member slice store-back now executes through semantic paths instead of cell-slice failure contracts
   - `scope: in-scope`
   - `blocker: indexed-base member slice assignment paths (for example, \`s(2).a(idx)=...\`, \`s(2).a(mask)=...\`) were lowering through \`StoreSlice*\` but executing against a singleton cell-wrapper member gather, producing runtime failures (\`RunMat:IndexOutOfBounds\`, \`RunMat:IndexShape\`) instead of mutating the selected struct field tensor.`

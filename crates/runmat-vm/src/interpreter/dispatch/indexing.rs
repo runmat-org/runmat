@@ -31,6 +31,21 @@ fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeE
     crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
+fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
+    let logical_data: Vec<u8> = t
+        .data
+        .iter()
+        .map(|&v| if v != 0.0 { 1 } else { 0 })
+        .collect();
+    if logical_data.len() <= 1 {
+        Ok(Value::Bool(logical_data.first().copied().unwrap_or(0) != 0))
+    } else {
+        let logical = runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
+            .map_err(|e| map_slice_shape_error("slice assign", e))?;
+        Ok(Value::LogicalArray(logical))
+    }
+}
+
 fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
     match err.identifier() {
         Some("RunMat:ScalarIndexRequired") => {
@@ -1383,6 +1398,35 @@ pub async fn dispatch_indexing(
                         idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
                     } else {
                         idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
+                    });
+                }
+                Value::LogicalArray(la) => {
+                    let data: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
+                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                        .map_err(|e| map_slice_shape_error("slice assign", e))?;
+                    let selectors = build_slice_selectors(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        &tensor.shape,
+                    )
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, &tensor.shape)?;
+                    let updated = if delete {
+                        idx_write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_tensor_with_plan(tensor, &plan, &rhs).await?
+                    };
+                    stack.push(match updated {
+                        Value::Tensor(t) => logical_value_from_tensor(t)?,
+                        Value::Bool(_) | Value::LogicalArray(_) => updated,
+                        Value::Num(n) => Value::Bool(n != 0.0),
+                        other => other,
                     });
                 }
                 Value::GpuTensor(handle) => stack.push({
