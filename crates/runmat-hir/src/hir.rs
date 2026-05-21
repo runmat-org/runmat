@@ -367,15 +367,27 @@ impl CallableFallbackPolicy {
         name.0.len() > 1 && name.0.iter().all(|segment| !segment.0.is_empty())
     }
 
+    fn is_well_formed_imported_path(path: &DefPath) -> bool {
+        path.module.display_name().is_some()
+            && path
+                .item
+                .last()
+                .map(|item| !item.display_name().is_empty())
+                .unwrap_or(false)
+    }
+
     pub fn allows_runtime_name_resolution(self) -> bool {
         matches!(self, CallableFallbackPolicy::RuntimeNameResolution)
     }
 
     pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
         match identity {
-            CallableIdentity::DynamicName(_)
-            | CallableIdentity::Imported(_)
-            | CallableIdentity::Method(_) => self.allows_runtime_name_resolution(),
+            CallableIdentity::DynamicName(_) | CallableIdentity::Method(_) => {
+                self.allows_runtime_name_resolution()
+            }
+            CallableIdentity::Imported(path) => {
+                self.allows_runtime_name_resolution() && Self::is_well_formed_imported_path(path)
+            }
             CallableIdentity::ExternalName(name) => {
                 matches!(self, CallableFallbackPolicy::ExternalBoundary)
                     && Self::is_well_formed_external_name(name)
@@ -386,8 +398,9 @@ impl CallableFallbackPolicy {
 
     pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
         match identity {
-            CallableIdentity::DynamicName(_) | CallableIdentity::Imported(_) => {
-                self.allows_runtime_name_resolution()
+            CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
+            CallableIdentity::Imported(path) => {
+                self.allows_runtime_name_resolution() && Self::is_well_formed_imported_path(path)
             }
             CallableIdentity::ExternalName(name) => {
                 matches!(self, CallableFallbackPolicy::ExternalBoundary)
@@ -1335,6 +1348,22 @@ mod tests {
             ]),
             item: vec![DefPathSegment::Function(SymbolName("origin".into()))],
         });
+        let imported_missing_item = CallableIdentity::Imported(DefPath {
+            package: PackageName("Point".into()),
+            module: QualifiedName(vec![
+                SymbolName("Point".into()),
+                SymbolName("origin".into()),
+            ]),
+            item: vec![],
+        });
+        let imported_empty_item_name = CallableIdentity::Imported(DefPath {
+            package: PackageName("Point".into()),
+            module: QualifiedName(vec![
+                SymbolName("Point".into()),
+                SymbolName("origin".into()),
+            ]),
+            item: vec![DefPathSegment::Function(SymbolName("".into()))],
+        });
         let method = CallableIdentity::Method(MethodId("deal".into()));
         let single_external =
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".into())]));
@@ -1352,6 +1381,10 @@ mod tests {
             .allows_semantic_name_resolution_for(&dynamic));
         assert!(CallableFallbackPolicy::RuntimeNameResolution
             .allows_semantic_name_resolution_for(&imported));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&imported_missing_item));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&imported_empty_item_name));
         assert!(CallableFallbackPolicy::RuntimeNameResolution
             .allows_semantic_name_resolution_for(&method));
         assert!(
@@ -1373,6 +1406,10 @@ mod tests {
         assert!(
             CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&imported)
         );
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_vm_name_fallback_for(&imported_missing_item));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_vm_name_fallback_for(&imported_empty_item_name));
         assert!(!CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&method));
         assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
         assert!(
@@ -1394,6 +1431,26 @@ mod tests {
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&imported),
             Some("Point.origin".into())
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
+                .vm_fallback_name_for(&imported_missing_item),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
+                .vm_fallback_name_for(&imported_empty_item_name),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
+                .semantic_resolution_name_for(&imported_missing_item),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
+                .semantic_resolution_name_for(&imported_empty_item_name),
+            None
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&method),

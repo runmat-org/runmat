@@ -241,6 +241,10 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `method_identity_never_falls_back_to_builtin_name_resolution`
       - `method_identity_runtime_name_resolution_can_use_semantic_resolver`
       - `method_identity_runtime_name_resolution_policy_uses_semantic_resolver`
+  - callable imported-identity runtime policy now requires well-formed imported function paths before semantic-resolution/fallback eligibility:
+    - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now validates `CallableIdentity::Imported` policy eligibility with `is_well_formed_imported_path(...)` (module display name present plus non-empty imported function item).
+    - malformed imported identities (`item` missing or empty function item name) are now excluded from both `allows_semantic_name_resolution_for(...)` and `allows_vm_name_fallback_for(...)`.
+    - descriptor/runtime ratchet coverage is extended in `callable_name_fallback_policies_require_well_formed_external_names` to assert malformed imported identities return `None` for both `semantic_resolution_name_for(...)` and `vm_fallback_name_for(...)`.
   - scalar value paren-store assignment now executes through typed assignment machinery instead of unsupported-base fallback:
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `Instr::StoreIndex` now normalizes `Value::Num`/`Value::Int`/`Value::Bool` bases to singleton tensors before linear scalar assignment.
     - VM semantic end-to-end ratchet: `semantic_scalar_value_index_assignment_executes` in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs).

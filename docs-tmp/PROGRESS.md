@@ -12,6 +12,25 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- HIR callable fallback-policy imported-identity shape ratchet
+  - `scope: in-scope`
+  - `blocker: fallback-policy gating for `CallableIdentity::Imported` accepted runtime-name resolution and VM name-fallback eligibility without requiring a well-formed imported function path, leaving malformed imported identities policy-eligible even when compile/runtime handle-shape invariants rejected them.`
+  - Hardened policy invariants in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs):
+    - added imported-path well-formedness guard (`module` display-name present and non-empty function item present) to runtime-name policy checks.
+    - `allows_semantic_name_resolution_for(...)` now rejects malformed imported identities.
+    - `allows_vm_name_fallback_for(...)` now rejects malformed imported identities.
+  - Expanded policy ratchets in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) test `callable_name_fallback_policies_require_well_formed_external_names`:
+    - malformed imported identity with missing item now fails semantic-resolution/fallback eligibility.
+    - malformed imported identity with empty function item name now fails semantic-resolution/fallback eligibility.
+    - both malformed imported forms now return `None` for `vm_fallback_name_for(...)` and `semantic_resolution_name_for(...)`.
+  - Validation:
+    - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_imported_function_handle_missing_item_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM function-handle compile boundary imported-identity item invariant ratchet
   - `scope: in-scope`
   - `blocker: imported function-handle compile-name gating validated module-path shape but did not require an imported `DefPath` function item, leaving malformed imported identities representable as runtime handles.`
