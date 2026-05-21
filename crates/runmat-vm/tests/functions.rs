@@ -1250,6 +1250,22 @@ fn qualified_static_method_function_handle_direct_call_executes() {
 }
 
 #[test]
+fn classref_getmethod_static_method_handle_executes() {
+    let program = "__register_test_classes(); h = getmethod(classref('Point'), 'origin'); name = func2str(h); o = feval(h);";
+    let vars = execute_semantic_source(program);
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, runmat_builtins::Value::String(name) if name == "Point.origin")),
+        "expected getmethod(classref(...)) handle to preserve qualified method name"
+    );
+    assert!(
+        vars.iter()
+            .any(|v| matches!(v, runmat_builtins::Value::Object(_))),
+        "expected feval(getmethod(classref(...))) to execute static method"
+    );
+}
+
+#[test]
 fn import_precedence_specific_over_wildcard_and_locals() {
     // Specific imports should take precedence over wildcard imports; locals should shadow both
     let program = r#"

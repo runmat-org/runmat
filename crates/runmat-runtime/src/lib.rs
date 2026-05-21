@@ -1658,16 +1658,22 @@ async fn warning_builtin(fmt: String, rest: Vec<Value>) -> crate::BuiltinResult<
 
 #[runmat_macros::runtime_builtin(name = "getmethod", builtin_path = "crate")]
 async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Value> {
+    let method_name = name.trim();
+    if method_name.is_empty() {
+        return Err(("getmethod: method name must not be empty".to_string()).into());
+    }
     match obj {
         Value::Object(o) => {
             // Return a closure capturing the receiver; feval will call runtime builtin call_method
             Ok(Value::Closure(runmat_builtins::Closure {
                 function_name: "call_method".to_string(),
                 semantic_function: None,
-                captures: vec![Value::Object(o), Value::String(name)],
+                captures: vec![Value::Object(o), Value::String(method_name.to_string())],
             }))
         }
-        Value::ClassRef(cls) => Ok(Value::String(format!("@{cls}.{name}"))),
+        Value::ClassRef(cls) => {
+            str2func_builtin(Value::String(format!("@{cls}.{method_name}")))
+        }
         other => Err((format!("getmethod unsupported on {other:?}")).into()),
     }
 }
@@ -1829,6 +1835,30 @@ mod tests {
         let value = str2func_builtin(Value::String("Point..origin".to_string()))
             .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
+    }
+
+    #[test]
+    fn getmethod_classref_returns_typed_external_function_handle() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = block_on(getmethod_builtin(
+            Value::ClassRef("Point".to_string()),
+            "origin".to_string(),
+        ))
+        .expect("getmethod should resolve classref method handle");
+        assert_eq!(
+            value,
+            Value::ExternalFunctionHandle("Point.origin".to_string())
+        );
+    }
+
+    #[test]
+    fn getmethod_rejects_empty_method_name() {
+        let err = block_on(getmethod_builtin(
+            Value::ClassRef("Point".to_string()),
+            "   ".to_string(),
+        ))
+        .expect_err("empty method name should be rejected");
+        assert!(err.message().contains("method name must not be empty"));
     }
 
     #[test]

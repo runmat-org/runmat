@@ -40,6 +40,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- Runtime/VM classref `getmethod` typed-handle normalization ratchet
+  - `scope: in-scope`
+  - Closed a remaining name-shaped callable seam for classref method-handle construction:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `getmethod(classref(...), name)` now routes through `str2func` normalization and returns typed function-handle values instead of raw `@Class.method` string payloads.
+    - empty/whitespace method names are now rejected at builtin boundary (`getmethod: method name must not be empty`) instead of producing malformed handle strings.
+  - Added runtime/VM ratchets:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `getmethod_classref_returns_typed_external_function_handle`
+      - `getmethod_rejects_empty_method_name`
+    - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+      - `classref_getmethod_static_method_handle_executes`
+  - Validation:
+    - `cargo test -p runmat-runtime getmethod_ -- --nocapture`
+    - `cargo test -p runmat-vm classref_getmethod_static_method_handle_executes -- --nocapture`
+
 - VM DefPath/static-method function-handle direct-call ratchet
   - `scope: in-scope`
   - Closed a callable ABI coverage gap where imported/qualified static-method function handles were ratcheted only through `feval(...)` callsites:
