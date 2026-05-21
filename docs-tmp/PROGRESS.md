@@ -4903,6 +4903,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: extend invalid slice-RHS identifier contracts to complex slice stores
+  - Added source-level runtime contracts in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) for unsupported RHS type assignment into complex slice stores:
+    - `complex_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier`
+    - `complex_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier`
+  - These tests pin `RunMat:InvalidSliceAssignmentRhs` for both linear and N-D complex slice assignment paths when RHS is a string scalar, aligning complex-path source behavior with existing real-path identifier contracts.
+  - This closes a remaining runtime identifier-surface gap in assignment ABI coverage between real and complex slice materialization paths.
+  - Validation:
+    - `cargo test -p runmat-vm --test basics complex_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --test basics complex_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

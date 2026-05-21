@@ -627,6 +627,41 @@ fn numeric_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() 
 }
 
 #[test]
+fn complex_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() {
+    let input = r#"
+        x = [1 + 2i, 3 + 4i];
+        x([1 2]) = "z";
+    "#;
+    let bytecode =
+        compile_semantic_source(input).expect("compile semantic complex linear slice assign");
+    let err =
+        interpret(&bytecode).expect_err("complex linear slice assignment must reject string rhs");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:InvalidSliceAssignmentRhs"),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
+    );
+}
+
+#[test]
+fn complex_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() {
+    let input = r#"
+        x = [1 + 2i, 3 + 4i; 5 + 6i, 7 + 8i];
+        x(:, 1) = "z";
+    "#;
+    let bytecode =
+        compile_semantic_source(input).expect("compile semantic complex nd slice assign");
+    let err = interpret(&bytecode).expect_err("complex nd slice assignment must reject string rhs");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:InvalidSliceAssignmentRhs"),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
+    );
+}
+
+#[test]
 fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];
