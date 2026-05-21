@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Callable-descriptor unresolved diagnostics now stay on typed identity when VM fallback policy disallows named fallback
+  - `scope: in-scope`
+  - blocker: `execute_resolved_callable(...)` still used `strict_callable_display_name(...)` as a secondary unresolved-name path when `vm_fallback_name_for(...)` returned `None`, reintroducing name-shaped diagnostics on policy-denied fallback paths.
+  - Updated descriptor runtime boundary in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - removed the secondary `strict_callable_display_name(...)` unresolved fallback branch from `execute_resolved_callable(...)`.
+    - unresolved policy-denied paths now surface `undefined_identity_error(...)` consistently.
+  - Added/updated ratchets:
+    - `method_identity_error_uses_typed_identity_not_fallback_name`
+    - `method_identity_runtime_name_resolution_without_resolver_errors`
+    - `method_identity_never_falls_back_to_builtin_name_resolution`
+  - Validation:
+    - `cargo test -p runmat-vm method_identity_runtime_name_resolution_without_resolver_errors -- --nocapture`
+    - `cargo test -p runmat-vm method_identity_error_uses_typed_identity_not_fallback_name -- --nocapture`
+    - `cargo test -p runmat-vm method_identity_never_falls_back_to_builtin_name_resolution -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - Object range-selector duplicate-dimension failures now use normalized plan identifier
   - `scope: in-scope`
   - blocker: object expr-slice duplicate range-dimension failures surfaced a distinct identifier (`RunMat:DuplicateRangeSelectorDim`) while the rest of selector-plan invariants use `RunMat:InvalidRangeSelectorPlan`, leaving error-contract inconsistency across selector-plan boundaries.

@@ -371,27 +371,6 @@ fn semantic_unavailable_error(function: usize, metadata: &CallableMetadata) -> R
     )
 }
 
-fn undefined_name_error(name: &str, metadata: &CallableMetadata) -> RuntimeError {
-    let location = match (metadata.source_id, metadata.span) {
-        (Some(source_id), Some(span)) => {
-            format!(
-                " at source {:?} span {}..{}",
-                source_id, span.start, span.end
-            )
-        }
-        (Some(source_id), None) => format!(" at source {:?}", source_id),
-        (None, Some(span)) => format!(" at span {}..{}", span.start, span.end),
-        (None, None) => String::new(),
-    };
-    crate::interpreter::errors::mex(
-        "UndefinedFunction",
-        &format!(
-            "Undefined function in {}: {name}{location}",
-            metadata.call_kind.label()
-        ),
-    )
-}
-
 fn undefined_identity_error(
     identity: &CallableIdentity,
     metadata: &CallableMetadata,
@@ -468,9 +447,6 @@ async fn execute_resolved_callable(
                 return result;
             }
             let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
-                if let Some(name) = strict_callable_display_name(&other) {
-                    return Err(undefined_name_error(&name, &metadata));
-                }
                 return Err(undefined_identity_error(&other, &metadata));
             };
             forward_named_fallback(name, args, requested_outputs).await
@@ -800,6 +776,29 @@ mod tests {
         let err = block_on(execute_callable_descriptor(descriptor))
             .expect_err("unresolved method identity should remain undefined");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn method_identity_error_uses_typed_identity_not_fallback_name() {
+        let descriptor = CallableDescriptor::resolved(
+            method_identity("definitely_missing_method"),
+            vec![Value::Num(5.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("unresolved method identity should remain undefined");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert!(
+            err.message()
+                .contains("Method(MethodId(\"definitely_missing_method\"))")
+                && !err
+                    .message()
+                    .contains("Undefined function in direct call: definitely_missing_method"),
+            "unexpected error: {}",
+            err.message()
+        );
     }
 
     #[test]
