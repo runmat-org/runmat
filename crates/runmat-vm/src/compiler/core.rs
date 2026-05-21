@@ -164,6 +164,16 @@ fn call_name(call: &MirCall) -> Option<&str> {
     }
 }
 
+fn imported_handle_runtime_name(path: &runmat_hir::DefPath) -> Option<String> {
+    let module_name = path.module.display_name()?;
+    let item_name = path.item.last().map(|item| item.display_name())?;
+    if item_name.is_empty() {
+        return None;
+    }
+    let module_leaf = path.module.0.last()?;
+    (module_leaf.0 == item_name).then_some(module_name)
+}
+
 fn randn_assignment(stmt: &MirStmt) -> Option<(runmat_mir::MirLocalId, &MirCall)> {
     let MirStmtKind::Assign {
         place: MirPlace::Local(local),
@@ -2011,7 +2021,7 @@ impl Compiler {
             {
                 None
             }
-            CallableIdentity::Imported(path) if path.item.is_empty() => None,
+            CallableIdentity::Imported(path) => imported_handle_runtime_name(path),
             _ => strict_callable_display_name(callee),
         }
     }

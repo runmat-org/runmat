@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Imported `DefPath` callable identity shape now enforces module/item leaf alignment
+  - `scope: in-scope`
+  - `blocker: imported callable/function-handle identities still allowed malformed `DefPath` shapes where `module` leaf and `item` leaf diverged, permitting name-shaped fallback/handle emission for structurally inconsistent imported targets.`
+  - Tightened imported identity invariants:
+    - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) `CallableFallbackPolicy::is_well_formed_imported_path(...)` now requires non-empty module display name, non-empty item leaf, and exact `module`-leaf == `item`-leaf alignment before semantic resolver lookup or VM fallback eligibility.
+    - [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) imported function-handle runtime-name extraction now enforces the same `DefPath` leaf-alignment invariant before emitting `CreateExternalFunctionHandle(...)`.
+  - Added ratchets:
+    - `callable_name_fallback_policies_require_well_formed_external_names` (extended imported mismatch assertions)
+    - `primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Method function-handle MIR targets now fail fast as unsupported ABI instead of degrading to external-name bytecode
   - `scope: in-scope`
   - `blocker: MIR function-handle lowering still converted `CallableIdentity::Method` into `CreateExternalFunctionHandle(...)`, which leaked under-specified method-handle ABI through runtime name-shaped dispatch instead of an explicit compiler-product contract.`

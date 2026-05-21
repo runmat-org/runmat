@@ -368,12 +368,23 @@ impl CallableFallbackPolicy {
     }
 
     fn is_well_formed_imported_path(path: &DefPath) -> bool {
-        path.module.display_name().is_some()
-            && path
-                .item
-                .last()
-                .map(|item| !item.display_name().is_empty())
-                .unwrap_or(false)
+        let Some(module_name) = path.module.display_name() else {
+            return false;
+        };
+        let Some(last_item) = path.item.last() else {
+            return false;
+        };
+        let item_name = last_item.display_name();
+        if item_name.is_empty() {
+            return false;
+        }
+        let Some(last_module_segment) = path.module.0.last() else {
+            return false;
+        };
+        // Imported callable identities must keep module leaf and item leaf aligned.
+        // This prevents silently routing a mismatched DefPath through name-shaped fallback.
+        let _ = module_name;
+        last_module_segment.0 == item_name
     }
 
     pub fn allows_runtime_name_resolution(self) -> bool {
@@ -1364,6 +1375,14 @@ mod tests {
             ]),
             item: vec![DefPathSegment::Function(SymbolName("".into()))],
         });
+        let imported_mismatched_item = CallableIdentity::Imported(DefPath {
+            package: PackageName("Point".into()),
+            module: QualifiedName(vec![
+                SymbolName("Point".into()),
+                SymbolName("origin".into()),
+            ]),
+            item: vec![DefPathSegment::Function(SymbolName("different".into()))],
+        });
         let method = CallableIdentity::Method(MethodId("deal".into()));
         let single_external =
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".into())]));
@@ -1385,6 +1404,8 @@ mod tests {
             .allows_semantic_name_resolution_for(&imported_missing_item));
         assert!(!CallableFallbackPolicy::RuntimeNameResolution
             .allows_semantic_name_resolution_for(&imported_empty_item_name));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&imported_mismatched_item));
         assert!(CallableFallbackPolicy::RuntimeNameResolution
             .allows_semantic_name_resolution_for(&method));
         assert!(
@@ -1410,6 +1431,8 @@ mod tests {
             .allows_vm_name_fallback_for(&imported_missing_item));
         assert!(!CallableFallbackPolicy::RuntimeNameResolution
             .allows_vm_name_fallback_for(&imported_empty_item_name));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_vm_name_fallback_for(&imported_mismatched_item));
         assert!(!CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&method));
         assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
         assert!(
@@ -1444,12 +1467,22 @@ mod tests {
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution
+                .vm_fallback_name_for(&imported_mismatched_item),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
                 .semantic_resolution_name_for(&imported_missing_item),
             None
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution
                 .semantic_resolution_name_for(&imported_empty_item_name),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
+                .semantic_resolution_name_for(&imported_mismatched_item),
             None
         );
         assert_eq!(
