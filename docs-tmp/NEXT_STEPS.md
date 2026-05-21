@@ -486,7 +486,7 @@ Treat current MIR bytecode gap markers as follows:
 
 - `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
 - `varargout expansion`: parser/HIR does not currently construct this shape; keep as future ABI design work rather than a live bytecode gap.
-- `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization for range/end/colon in non-tensor and cell contexts.
+- `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization in non-tensor contexts plus any remaining linear cell-growth edge contracts.
 - `dot assignment` / `dot indexing`: resolved at indexing-plan level; semantic products no longer carry `IndexKind::Dot` and member semantics lower through explicit member MIR shapes.
 - `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains, with MIR coverage now pinning `s.a(2)=...` to `MirPlace::Index(MirPlace::Member(...), ...)`.
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
@@ -562,6 +562,7 @@ Current ratchet status:
 - VM cell-array, exception, datetime, and closure/callback tests now run semantic bytecode, including captured and nested closure capture coverage.
 - VM control-flow tests now mostly run semantic bytecode, including unknown-builtin catch behavior.
 - VM multidimensional indexing tests now run semantic bytecode for logical row selection, slice assignment, and 3D indexing/slicing coverage; remaining N-D selector work is a semantic lowering/runtime-shape gap, not a legacy-execution gap.
+- VM brace-content assignment now supports MATLAB-style 2-D out-of-bounds subscript growth with empty-cell fillers and `end+1` subscript growth in store context; matrix linear `end+1` growth behavior remains an explicit contract boundary.
 - VM indexing-property tests now run semantic bytecode for scalar/logical/range write broadcasts, end-arithmetic stores, negative-step linear indexing, roundtrip scatter, fastpath broadcasts, simple cell expansion, and advanced N-D empty/vector selector and expansion coverage.
 - VM indexing-property coverage now ratchets empty-`varargout` expansion behavior from a smoke path to an explicit semantic assertion: fixed single-output calls to zero-length `varargout` now assert `RunMat:VarargoutMismatch` instead of silently passing on unchecked runtime errors.
 - Remaining `functions.rs` work is semantic behavior tightening (for example, stricter metaclass/postfix and dependent-property expectations), not legacy-execution migration.
