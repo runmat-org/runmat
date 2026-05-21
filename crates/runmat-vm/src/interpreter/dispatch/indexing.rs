@@ -31,6 +31,18 @@ fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeE
     crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
+fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
+    match err.identifier() {
+        Some("RunMat:ScalarIndexRequired") => {
+            crate::interpreter::errors::mex("CellIndexType", "Unsupported cell index type")
+        }
+        Some("RunMat:IndexOutOfBounds") => {
+            crate::interpreter::errors::mex("CellIndexOutOfBounds", "Cell index out of bounds")
+        }
+        _ => err,
+    }
+}
+
 fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
     let class_name = match base {
         Value::Object(obj) => obj.class_name.as_str(),
@@ -126,28 +138,20 @@ fn assign_scalar_struct_index(
 }
 
 async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
-    let mut indices = Vec::with_capacity(values.len());
-    for value in values {
-        let index = index_scalar_from_value(value)
-            .await?
-            .ok_or_else(|| {
-                crate::interpreter::errors::mex("CellIndexType", "Unsupported cell index type")
-            })
-            .and_then(|index| {
-                if index < 1 {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
-                }
-                usize::try_from(index).map_err(|_| {
-                    crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    )
-                })
-            })?;
-        indices.push(index);
+    let selectors = build_cell_scalar_selectors(values)
+        .await
+        .map_err(map_cell_scalar_selector_error)?;
+    let mut indices = Vec::with_capacity(selectors.len());
+    for selector in selectors {
+        match selector {
+            SliceSelector::Scalar(index) => indices.push(index),
+            _ => {
+                return Err(crate::interpreter::errors::mex(
+                    "CellIndexType",
+                    "Unsupported cell index type",
+                ))
+            }
+        }
     }
     Ok(indices)
 }

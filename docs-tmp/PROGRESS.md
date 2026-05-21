@@ -4419,6 +4419,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --test functions semantic_dynamic_member_read_executes -- --nocapture`
     - `cargo test -p runmat-vm --test functions semantic_indexed_dynamic_member_read_executes -- --nocapture`
 
+- (pending commit) VM cell-index selector normalization via shared selector builder
+  - Collapsed duplicate cell scalar-index conversion paths in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `resolve_cell_indices(...)` now delegates to `build_cell_scalar_selectors(...)` from [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) and converts `SliceSelector::Scalar` values into cell indices.
+    - Added explicit identifier remapping at the dispatch boundary to preserve existing cell-index contracts:
+      - `RunMat:ScalarIndexRequired` -> `RunMat:CellIndexType`
+      - `RunMat:IndexOutOfBounds` -> `RunMat:CellIndexOutOfBounds`
+  - This reduces remaining duplicate cell selector normalization logic between brace-index read/store paths and shared selector-plan utilities while keeping existing source-level identifier surfaces stable.
+  - Validation:
+    - `cargo test -p runmat-vm --lib resolve_cell_indices_ -- --nocapture`
+    - `cargo test -p runmat-vm --lib build_cell_scalar_selectors_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions semantic_indexed_dynamic_member_read_executes -- --nocapture`
+    - `cargo test -p runmat-vm --test functions indexed_cell_content_delete_executes_with_semantic_store_back -- --nocapture`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
