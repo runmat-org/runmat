@@ -604,8 +604,10 @@ impl Callable {
             Value::ExternalFunctionHandle(name) => {
                 if let Some(callable) = Self::resolved_semantic_handle(&name) {
                     Ok(callable)
-                } else {
+                } else if crate::is_well_formed_qualified_name(&name) {
                     Ok(Callable::ExternalName { name })
+                } else {
+                    Ok(Callable::Builtin { name })
                 }
             }
             Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
@@ -1242,6 +1244,39 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 assert_eq!(out.data, vec![31.0, 32.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "callback").then_some(887)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 887);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 40.0)) })
+            }),
+        ));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+
+        let result = call(
+            Value::ExternalFunctionHandle("callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![41.0, 42.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

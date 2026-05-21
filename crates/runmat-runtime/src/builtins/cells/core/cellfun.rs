@@ -458,8 +458,10 @@ impl Callable {
             Value::ExternalFunctionHandle(name) => {
                 if let Some(callable) = Self::resolved_semantic_handle(&name) {
                     Ok(callable)
-                } else {
+                } else if crate::is_well_formed_qualified_name(&name) {
                     Ok(Callable::ExternalName { name })
+                } else {
+                    Ok(Callable::Builtin { name })
                 }
             }
             Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
@@ -942,6 +944,36 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
                 assert_eq!(tensor.data, vec![23.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cellfun_single_segment_external_handle_uses_runtime_name_resolution() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "callback").then_some(886)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 886);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(24.0)) })
+            }),
+        ));
+        let cell = crate::make_cell(vec![Value::Num(2.0)], 1, 1).expect("cell");
+
+        let result = cellfun_builtin(
+            Value::ExternalFunctionHandle("callback".to_string()),
+            vec![cell],
+        )
+        .expect("single-segment external-handle cellfun should resolve via runtime-name policy");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(tensor.data, vec![24.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

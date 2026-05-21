@@ -12,6 +12,27 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- `cellfun`/`arrayfun` external-handle callback parsing now mirrors shared runtime-name classification
+  - `scope: in-scope`
+  - `blocker: `Callable::from_function(Value::ExternalFunctionHandle(name))` in runtime `cellfun` and `arrayfun` still forced callback identity to external-boundary shape for any unresolved name, so single-segment external handles could not use runtime-name semantic resolution despite equivalent `feval`/descriptor policy updates.`
+  - Tightened callback parsing in [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs) and [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs):
+    - unresolved external handles now classify as:
+      - `Callable::ExternalName` only when `name` is well-formed qualified.
+      - `Callable::Builtin` (runtime-name resolution lane) for single-segment or malformed names.
+    - resolver-bound semantic handle fast path remains unchanged.
+  - Added ratchets:
+    - `cellfun_single_segment_external_handle_uses_runtime_name_resolution`
+    - `arrayfun_single_segment_external_handle_uses_runtime_name_resolution`
+  - Validation:
+    - `cargo test -p runmat-runtime cellfun_single_segment_external_handle_uses_runtime_name_resolution -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_single_segment_external_handle_uses_runtime_name_resolution -- --nocapture`
+    - `cargo test -p runmat-runtime cellfun_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `feval` external-handle dispatch now shares strict typed name classification
   - `scope: in-scope`
   - `blocker: runtime `feval_builtin(...)` still forced `Value::ExternalFunctionHandle(name)` through external-boundary dispatch (`call_external_by_name`), so single-segment external handles bypassed shared runtime-name resolution semantics used by typed callable descriptors and could not resolve via semantic runtime-name policy.`
