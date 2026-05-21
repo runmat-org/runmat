@@ -12,6 +12,26 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime optimizer/ODE callback canonicalization now prebinds resolver-known text handles
+  - `scope: in-scope`
+  - `blocker: optimization/ODE callback canonicalization in `optim::common::canonicalize_callback_handle(...)` only prebound `FunctionHandle`/`ExternalFunctionHandle` forms, leaving text handle forms (`"@name"`, scalar string-array, row char) name-shaped even when semantic resolver identity was available.`
+  - Tightened callback canonicalization in [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+    - added text-handle semantic prebinding for `Value::String("@name")`, scalar `Value::StringArray(["@name"])`, and row `Value::CharArray('@name')`.
+    - unresolved/malformed text handles preserve existing shape and behavior.
+    - existing `FunctionHandle`/`ExternalFunctionHandle` canonicalization behavior is preserved.
+  - Added ratchets:
+    - `callback_handle_canonicalizer_binds_text_handle_when_resolved`
+    - `callback_handle_canonicalizer_binds_string_array_text_handle_when_resolved`
+    - `callback_handle_canonicalizer_binds_char_text_handle_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_binds_text_handle_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_binds_string_array_text_handle_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_binds_char_text_handle_when_resolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice selector normalization now aligns tensor-vs-logical semantics with shared selector materialization
   - `scope: in-scope`
   - `blocker: expr-slice selector planning in `build_expr_index_plan(...)` still treated `Value::Tensor` as a logical mask when tensor length matched dimension length, diverging from shared selector normalization where tensor selectors are always numeric indices and logical masks are `Value::LogicalArray`.`
