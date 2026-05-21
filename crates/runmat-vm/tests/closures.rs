@@ -115,6 +115,24 @@ fn str2func_unresolved_external_callback_zero_output_errors_without_legacy_fallb
 }
 
 #[test]
+fn str2func_unresolved_external_callback_multi_output_errors_without_legacy_fallback() {
+    let err = execute_semantic_source(
+        "f = str2func('definitely_missing_callback'); [a,b] = feval(f, 1);",
+    )
+    .expect_err("unresolved str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_callback_errors_without_legacy_fallback() {
+    let err = execute_semantic_source(
+        "f = str2func('definitely_missing_callback'); C = deal(1,2); y = feval(f, C{:});",
+    )
+    .expect_err("unresolved str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn str2func_qualified_external_callback_errors_without_legacy_fallback() {
     let err = execute_semantic_source("f = str2func('pkg.remote_inc'); y = feval(f, 1);")
         .expect_err("unresolved qualified str2func callback should fail");
@@ -129,9 +147,33 @@ fn str2func_qualified_external_callback_zero_output_errors_without_legacy_fallba
 }
 
 #[test]
+fn str2func_qualified_external_callback_multi_output_errors_without_legacy_fallback() {
+    let err = execute_semantic_source("f = str2func('pkg.remote_inc'); [a,b] = feval(f, 1);")
+        .expect_err("unresolved qualified str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn str2func_qualified_external_expand_callback_errors_without_legacy_fallback() {
     let err = execute_semantic_source(
         "f = str2func('pkg.remote_inc'); C = deal(1,2); y = feval(f, C{:});",
+    )
+    .expect_err("unresolved qualified str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_zero_output_callback_errors_without_legacy_fallback() {
+    let err =
+        execute_semantic_source("f = str2func('pkg.remote_inc'); C = deal(1,2); feval(f, C{:});")
+            .expect_err("unresolved qualified str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_multi_output_callback_errors_without_legacy_fallback() {
+    let err = execute_semantic_source(
+        "f = str2func('pkg.remote_inc'); C = deal(1,2); [a,b] = feval(f, C{:});",
     )
     .expect_err("unresolved qualified str2func expanded callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));

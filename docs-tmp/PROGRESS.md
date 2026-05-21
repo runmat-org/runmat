@@ -4983,6 +4983,24 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete unresolved `str2func` external-callback failure matrix
+  - Extended unresolved `str2func` external callback contracts in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs) to close remaining fixed/expanded output-policy lanes:
+    - `str2func_unresolved_external_callback_multi_output_errors_without_legacy_fallback`
+    - `str2func_unresolved_external_expand_callback_errors_without_legacy_fallback`
+    - `str2func_qualified_external_callback_multi_output_errors_without_legacy_fallback`
+    - `str2func_qualified_external_expand_zero_output_callback_errors_without_legacy_fallback`
+    - `str2func_qualified_external_expand_multi_output_callback_errors_without_legacy_fallback`
+  - Together with existing unresolved/qualified fixed single/zero-output and qualified expanded single-output contracts, unresolved external `str2func` callback behavior now has fixed+expanded output-count `0/1/2` failure coverage.
+  - All lanes are pinned to stable `RunMat:UndefinedFunction`, tightening callable ABI execution contracts for unresolved text-handle callback forms.
+  - Validation:
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_callback_multi_output_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_expand_callback_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_callback_multi_output_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_expand_zero_output_callback_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_qualified_external_expand_multi_output_callback_errors_without_legacy_fallback -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
