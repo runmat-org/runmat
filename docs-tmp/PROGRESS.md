@@ -3888,6 +3888,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `git diff --check`
   - Result: all gates green on current `v2-compiler-semantics` head.
 
+- (pending commit) Plan 3/7 Turbine policy-driven semantic lookup for imported/method identities
+  - Turbine named-call semantic target resolution in [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs) now uses shared fallback-policy lookup (`CallableFallbackPolicy::semantic_resolution_name_for(...)`) instead of bespoke DynamicName/ExternalName-only reconstruction.
+  - This enables semantic-registry resolution for well-formed `CallableIdentity::Imported` and `CallableIdentity::Method` identities under runtime-name policy while preserving malformed identity rejection via existing policy gates.
+  - Added JIT regression coverage in [jit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/tests/jit.rs):
+    - `test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_name`
+    - existing negative contract `test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_display_name` remains green.
+  - Validation:
+    - `cargo test -p runmat-turbine --lib --tests -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

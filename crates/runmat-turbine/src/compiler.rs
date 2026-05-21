@@ -1125,41 +1125,8 @@ impl BytecodeCompiler {
         if let runmat_hir::CallableIdentity::SemanticFunction(function) = identity {
             return Some(*function);
         }
-        if !fallback_policy.allows_semantic_name_resolution_for(identity) {
-            return None;
-        }
-        let name = Self::semantic_lookup_name(identity)?;
+        let name = fallback_policy.semantic_resolution_name_for(identity)?;
         semantic_registry.resolve_name(&name)
-    }
-
-    fn semantic_lookup_name(identity: &runmat_hir::CallableIdentity) -> Option<String> {
-        match identity {
-            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
-                if name.is_empty() {
-                    None
-                } else {
-                    Some(name.clone())
-                }
-            }
-            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)) => {
-                Self::well_formed_external_name(segments)
-            }
-            _ => None,
-        }
-    }
-
-    fn well_formed_external_name(segments: &[runmat_hir::SymbolName]) -> Option<String> {
-        if segments.len() <= 1 || segments.iter().any(|segment| segment.0.is_empty()) {
-            return None;
-        }
-
-        Some(
-            segments
-                .iter()
-                .map(|segment| segment.0.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-        )
     }
 
     fn call_semantic_function_jit(
