@@ -75,14 +75,19 @@ async fn call_member_index_on_object_like(
     let post_object_fallback = fallback_policy.post_object_dispatch();
     if let Some((m, _owner)) = lookup_method(class_name, &name) {
         if m.is_static {
-            return Err(format!(
-                "Method '{}' is static; use classref({}).{}",
-                name, class_name, name
-            )
-            .into());
+            return Err(mex(
+                "MethodStaticOnInstance",
+                &format!(
+                    "Method '{}' is static; use classref({}).{}",
+                    name, class_name, name
+                ),
+            ));
         }
         if m.access == Access::Private {
-            return Err(format!("Method '{}' is private", name).into());
+            return Err(mex(
+                "MethodPrivate",
+                &format!("Method '{}' is private", name),
+            ));
         }
         let mut full_args = Vec::with_capacity(1 + args.len());
         full_args.push(receiver.clone());
@@ -210,7 +215,10 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
         Value::ClassRef(cls) => {
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
-                    return Err(format!("Method '{}' is not static", name).into());
+                    return Err(mex(
+                        "MethodNotStatic",
+                        &format!("Method '{}' is not static", name),
+                    ));
                 }
                 return Ok(Value::Closure(Closure {
                     semantic_function:
@@ -232,7 +240,10 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
                     captures: vec![],
                 }))
             } else {
-                Err(format!("Unknown static method '{}' on class {}", name, cls).into())
+                Err(mex(
+                    "UnknownStaticMethod",
+                    &format!("Unknown static method '{}' on class {}", name, cls),
+                ))
             }
         }
         _ => Err(mex("LoadMethod", "LoadMethod requires object or classref")),
@@ -280,7 +291,10 @@ pub async fn call_method_or_member_index_with_outputs(
         Value::ClassRef(cls) => {
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
-                    return Err(format!("Method '{}' is not static", name).into());
+                    return Err(mex(
+                        "MethodNotStatic",
+                        &format!("Method '{}' is not static", name),
+                    ));
                 }
                 return call_identity_with_policy(
                     method_identity(m.function_name.clone()),
@@ -306,10 +320,11 @@ pub async fn call_method_or_member_index_with_outputs(
 
 #[cfg(test)]
 mod tests {
-    use super::call_method_or_member_index_with_outputs;
+    use super::{call_method_or_member_index_with_outputs, load_method_closure};
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_builtins::{register_class, Access, ClassDef, MethodDef, Value};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     #[test]
@@ -361,6 +376,48 @@ mod tests {
         ))
         .expect_err("anonymous identity should not be used for method/member call");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn classref_nonstatic_method_reports_identifier() {
+        let class_name = "ClosureMethodNotStaticTest".to_string();
+        let mut methods = HashMap::new();
+        methods.insert(
+            "inst".to_string(),
+            MethodDef {
+                name: "inst".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "inst".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods,
+        });
+
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef(class_name),
+            CallableIdentity::Method(MethodId("inst".to_string())),
+            vec![],
+            1,
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err("classref call to non-static method should fail");
+        assert_eq!(err.identifier(), Some("RunMat:MethodNotStatic"));
+    }
+
+    #[test]
+    fn load_method_unknown_static_method_reports_identifier() {
+        let err = load_method_closure(
+            Value::ClassRef("Point".to_string()),
+            "definitely_missing_static_method".to_string(),
+        )
+        .expect_err("unknown static method should fail during method-handle load");
+        assert_eq!(err.identifier(), Some("RunMat:UnknownStaticMethod"));
     }
 }
 

@@ -71,6 +71,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- VM object/class method-dispatch identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: method-dispatch closures still emitted message-only runtime errors for static/private/non-static/unknown-static method boundaries, leaving callable ABI edges untyped.`
+  - Closed VM method-dispatch identifier gaps in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs):
+    - static method invoked on object/handle-object now emits `RunMat:MethodStaticOnInstance`
+    - private method access now emits `RunMat:MethodPrivate`
+    - classref call on non-static method now emits `RunMat:MethodNotStatic`
+    - unknown classref static method-handle load now emits `RunMat:UnknownStaticMethod`
+  - Added VM unit ratchets in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs):
+    - `classref_nonstatic_method_reports_identifier`
+    - `load_method_unknown_static_method_reports_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib classref_nonstatic_method_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib load_method_unknown_static_method_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::closures::tests -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:
