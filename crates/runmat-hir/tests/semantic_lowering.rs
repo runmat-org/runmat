@@ -945,6 +945,57 @@ fn empty_array_index_assignment_records_deletion_target() {
 }
 
 #[test]
+fn empty_array_member_assignment_is_not_marked_as_delete() {
+    let result = lower_result("s = struct('x', {1, 2}); s(2).x = [];");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::Member(_, _)))
+        .expect("expected member mutation");
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::MemberAssign));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::CreateStructFieldPath
+    ));
+    let HirPlace::Member(base, _) = &mutation.place else {
+        panic!("expected member place");
+    };
+    let HirExprKind::Index(_, indexing) = &base.kind else {
+        panic!("expected indexed member base");
+    };
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::AssignmentTarget
+    ));
+}
+
+#[test]
+fn empty_array_cell_content_assignment_is_not_marked_as_delete() {
+    let result = lower_result("c = {1}; c{1} = [];");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::IndexCell(_, _)))
+        .expect("expected cell content mutation");
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::CellAssign));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::CreateArrayByIndex
+    ));
+    let HirPlace::IndexCell(_, indexing) = &mutation.place else {
+        panic!("expected cell content place");
+    };
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::AssignmentTarget
+    ));
+}
+
+#[test]
 fn struct_field_path_assignment_records_member_creation_policy() {
     let result = lower_result("s.a.b = 1;");
     let mutation = result

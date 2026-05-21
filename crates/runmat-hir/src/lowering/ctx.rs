@@ -1013,7 +1013,7 @@ impl SemanticCtx {
                 }
             }
             AstStmt::AssignLValue(lvalue, expr, suppressed, _) => {
-                let deletion = is_empty_array_expr(expr);
+                let deletion = lvalue_supports_deletion(lvalue) && is_empty_array_expr(expr);
                 let place = self.lower_lvalue_semantic(lvalue, span, deletion)?;
                 let kind = mutation_kind_for_place(&place, deletion);
                 let creation_policy = creation_policy_for_place(&place, deletion);
@@ -1969,6 +1969,10 @@ fn command_argument(expr: &AstExpr) -> CommandArgument {
 
 fn is_empty_array_expr(expr: &AstExpr) -> bool {
     matches!(expr, AstExpr::Tensor(rows, _) if rows.is_empty() || rows.iter().all(Vec::is_empty))
+}
+
+fn lvalue_supports_deletion(lvalue: &runmat_parser::LValue) -> bool {
+    matches!(lvalue, runmat_parser::LValue::Index(_, _))
 }
 
 fn requested_outputs_for_lvalue_assignment(

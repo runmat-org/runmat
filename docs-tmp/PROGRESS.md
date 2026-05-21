@@ -145,6 +145,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Empty-array deletion classification now applies only to paren-index assignment places
+  - `scope: in-scope`
+  - `blocker: semantic lowering treated any `[]` RHS lvalue assignment as delete intent, which incorrectly marked member and brace-content assignments (`s(2).x = []`, `c{1} = []`) as deletion semantics instead of plain assignment-to-empty value.`
+  - Updated HIR lowering in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - delete intent now requires both `[]` RHS and a deletion-capable lvalue shape (`LValue::Index` paren indexing).
+    - member, dynamic-member, and brace-content assignments with `[]` now lower with assignment context (`AssignmentTarget`) and non-delete mutation kinds.
+  - Added HIR regression coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `empty_array_member_assignment_is_not_marked_as_delete`
+    - `empty_array_cell_content_assignment_is_not_marked_as_delete`
+  - Added VM semantic execution coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `empty_array_member_assignment_assigns_empty_value`
+    - `empty_array_cell_content_assignment_assigns_empty_value`
+  - Validation:
+    - `cargo test -p runmat-hir empty_array_member_assignment_is_not_marked_as_delete -- --nocapture`
+    - `cargo test -p runmat-hir empty_array_cell_content_assignment_is_not_marked_as_delete -- --nocapture`
+    - `cargo test -p runmat-vm empty_array_member_assignment_assigns_empty_value -- --nocapture`
+    - `cargo test -p runmat-vm empty_array_cell_content_assignment_assigns_empty_value -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`

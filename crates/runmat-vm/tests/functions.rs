@@ -1074,6 +1074,35 @@ fn semantic_cell_member_store_back_executes() {
 }
 
 #[test]
+fn empty_array_member_assignment_assigns_empty_value() {
+    let bytecode = compile_semantic_source(
+        "s = struct('x', {1, 2}); s(2).x = []; t = s(2); y = getfield(t, 'x');",
+    )
+    .expect("compile");
+    let vars = interpret(&bytecode).expect("member empty assignment should succeed");
+
+    assert!(vars.iter().any(|v| {
+        matches!(
+            v,
+            runmat_builtins::Value::Tensor(t) if t.data.is_empty()
+        )
+    }));
+}
+
+#[test]
+fn empty_array_cell_content_assignment_assigns_empty_value() {
+    let bytecode = compile_semantic_source("c = {1}; c{1} = []; y = c{1};").expect("compile");
+    let vars = interpret(&bytecode).expect("cell content empty assignment should succeed");
+
+    assert!(vars.iter().any(|v| {
+        matches!(
+            v,
+            runmat_builtins::Value::Tensor(t) if t.data.is_empty()
+        )
+    }));
+}
+
+#[test]
 fn implicit_struct_creation_for_function_output_variable() {
     let input = r#"
         function r = make_result()
