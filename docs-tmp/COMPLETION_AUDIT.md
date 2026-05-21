@@ -50,6 +50,7 @@ Date: 2026-05-20
 - Incremental update: callable-descriptor `feval` closure handling now has direct registry-resolution coverage (`feval_closure_without_embedded_semantic_uses_registry_name_resolution`), pinning the non-embedded-identity closure path to semantic registry lookup before runtime fallback.
 - Incremental update: brace-content cell assignment now supports MATLAB-style subscript growth with empty fillers (`0x0 double`) and `end+1` subscript growth in store context, ratcheted by `primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers` and `primary_compile_supports_cell_brace_end_plus_one_subscript_growth` while preserving matrix linear `end+1` rejection (`RunMat:UnsupportedCellGrowth`).
 - Incremental update: linear brace cell-growth semantics now support non-contiguous vector expansion (`C{5}=...`, `C{end+3}=...`) with empty fillers, and empty-shape linear growth now normalizes `5x0`/`0x5` inputs to `1xN` row-vector expansion, ratcheted by `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`, `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`, and `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`.
+- Incremental update: empty-shape row-normalization coverage now explicitly ratchets both orientations (`5x0` and `0x5`) via `primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector` alongside the existing `5x0` contract.
 
 4. Manifest-driven composition and entrypoints
 - Artifact: `docs-tmp/DELIVERABLE_AUDIT.md` section `### 4` (`met`).

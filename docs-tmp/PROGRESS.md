@@ -22,10 +22,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`
     - `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
     - `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
+    - `primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector`
   - Validation:
     - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_linear_gap_growth_for_vectors -- --nocapture`
     - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
     - `cargo test -p runmat-vm --lib primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector -- --nocapture`
     - `cargo test -p runmat-vm --lib -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
