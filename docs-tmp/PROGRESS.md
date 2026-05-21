@@ -18,11 +18,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Tightened expr-slice selector normalization in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
     - removed shape-based tensor-as-logical heuristic from `Value::Tensor` selector path.
     - tensor selectors now consistently decode as positive-integer numeric indices.
+    - linear expr-slice tensor selectors now preserve selector tensor output shape (for example column-vector index tensors) to match shared linear selector semantics.
     - logical-mask selector semantics remain on `Value::LogicalArray` path.
   - Added ratchets:
+    - `expr_plan_linear_tensor_selector_preserves_tensor_shape`
     - `expr_plan_tensor_selector_length_match_uses_numeric_indices`
     - `expr_plan_logical_selector_remains_logical_mask`
   - Validation:
+    - `cargo test -p runmat-vm expr_plan_linear_tensor_selector_preserves_tensor_shape -- --nocapture`
     - `cargo test -p runmat-vm expr_plan_tensor_selector_length_match_uses_numeric_indices -- --nocapture`
     - `cargo test -p runmat-vm expr_plan_logical_selector_remains_logical_mask -- --nocapture`
     - `cargo fmt --all --check`

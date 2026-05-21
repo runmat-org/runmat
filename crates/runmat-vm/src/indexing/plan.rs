@@ -341,6 +341,7 @@ where
 
     let range_pos_by_dim = validate_expr_range_selector_plan(&spec)?;
     let mut selectors: Vec<ExprSel> = Vec::with_capacity(spec.dims);
+    let mut linear_output_shape: Option<Vec<usize>> = None;
     let mut num_iter = 0usize;
     for d in 0..spec.dims {
         let is_colon = (spec.colon_mask & (1u32 << d)) != 0;
@@ -426,6 +427,9 @@ where
                     }
                     Value::Tensor(idx_t) => {
                         let len = idx_t.shape.iter().product::<usize>();
+                        if spec.dims == 1 {
+                            linear_output_shape = Some(idx_t.shape.clone());
+                        }
                         let mut vv = Vec::with_capacity(len);
                         for &val in &idx_t.data {
                             let idx = exact_index_from_f64(val).ok_or_else(|| {
@@ -505,7 +509,7 @@ where
     let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
     if total_out == 0 {
         let output_shape = if spec.dims == 1 {
-            vec![1, 0]
+            linear_output_shape.clone().unwrap_or_else(|| vec![1, 0])
         } else {
             let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
                 .iter()
@@ -566,7 +570,9 @@ where
     }
 
     let output_shape = if spec.dims == 1 {
-        if total_out <= 1 {
+        if let Some(shape) = linear_output_shape {
+            shape
+        } else if total_out <= 1 {
             vec![1, 1]
         } else {
             vec![1, total_out]
@@ -876,6 +882,40 @@ mod tests {
                 ExprPlanSpec {
                     dims: 2,
                     colon_mask: 0b10,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn expr_plan_linear_tensor_selector_preserves_tensor_shape() {
+        futures::executor::block_on(async {
+            let shape = vec![1, 10];
+            let numeric = vec![Value::Tensor(
+                Tensor::new(vec![2.0, 4.0], vec![2, 1]).expect("selector tensor"),
+            )];
+            let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
                     end_mask: 0,
                     range_dims: &[],
                     range_params: &[],
