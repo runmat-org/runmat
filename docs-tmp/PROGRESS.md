@@ -4729,6 +4729,24 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: ratchet direct handle-call instruction shapes (single-output dynamic vs typed multi-output/expand)
+  - Tightened compiler-product assertions for direct function-handle invocation in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_function_handle_index_call_executes` now asserts single-output handle invocation lowers through dynamic `Index(1)` dispatch while preserving semantic handle identity materialization.
+    - `semantic_function_handle_index_multi_output_executes` now asserts multi-output direct handle invocation lowers through `CallFevalMulti(1, 2)`.
+    - `semantic_function_handle_expand_single_output_executes` now asserts expanded-arg single-output direct handle invocation lowers through `CallFevalExpandMultiOutput(..., 1)`.
+    - `semantic_function_handle_expand_multi_output_executes` now asserts expanded-arg multi-output direct handle invocation lowers through `CallFevalExpandMultiOutput(..., 2)`.
+  - Tightened unresolved external direct-handle call contracts to assert instruction-shape + identifier boundaries:
+    - single-output unresolved `h(1)` path asserts `CreateExternalFunctionHandle("pkg.remote_inc")` + `Index(1)`.
+    - multi-output/expanded unresolved paths assert `CreateExternalFunctionHandle("pkg.remote_inc")` plus typed `CallFevalMulti` / `CallFevalExpandMultiOutput` instruction shapes.
+    - all unresolved paths continue to assert `RunMat:UndefinedFunction`.
+  - This closes a remaining callable ABI coverage gap by explicitly pinning the intentional single-output dynamic dispatch boundary and typed multi-output/expanded-call lowering products.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions semantic_function_handle_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_external_function_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

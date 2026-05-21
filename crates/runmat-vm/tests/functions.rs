@@ -1561,6 +1561,13 @@ fn semantic_function_handle_index_call_executes() {
         )),
         "semantic function handle index calls should carry semantic identity"
     );
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::Index(1))),
+        "single-output handle invocation should stay on dynamic Index(1) dispatch"
+    );
 
     let vars = interpret(&bytecode).expect("semantic handle index call should execute");
     assert!(vars
@@ -1572,14 +1579,36 @@ fn semantic_function_handle_index_call_executes() {
 fn semantic_function_handle_index_multi_output_executes() {
     let source =
         "h = @pair; [a,b] = h(2); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
-    let vars = execute_semantic_source(source);
+    let bytecode = compile_semantic_source(source).expect("compile semantic handle multi-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic handle multi-output");
     assert!(has_num(&vars, 5.0));
 }
 
 #[test]
 fn semantic_function_handle_expand_single_output_executes() {
     let source = "h = @inc; C = {2}; y = h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
-    let vars = execute_semantic_source(source);
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic handle expanded single-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic handle expanded single-output");
     assert!(has_num(&vars, 3.0));
 }
 
@@ -1587,14 +1616,40 @@ fn semantic_function_handle_expand_single_output_executes() {
 fn semantic_function_handle_expand_multi_output_executes() {
     let source =
         "h = @pair; C = {2}; [a,b] = h(C{:}); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
-    let vars = execute_semantic_source(source);
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic handle expanded multi-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic handle expanded multi-output");
     assert!(has_num(&vars, 5.0));
 }
 
 #[test]
 fn unresolved_external_function_handle_index_call_errors_with_identifier() {
-    let err = execute_semantic_source_result("h = @pkg.remote_inc; y = h(1);")
-        .expect_err("unresolved external handle index call should fail");
+    let source = "h = @pkg.remote_inc; y = h(1);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile unresolved external handle index call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+    )));
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::Index(1))),
+        "single-output handle invocation should lower through Index(1) dynamic dispatch"
+    );
+
+    let err = interpret(&bytecode).expect_err("unresolved external handle index call should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -1605,7 +1660,19 @@ fn unresolved_external_function_handle_index_call_errors_with_identifier() {
 
 #[test]
 fn unresolved_external_function_handle_index_multi_output_errors_with_identifier() {
-    let err = execute_semantic_source_result("h = @pkg.remote_inc; [a,b] = h(1);")
+    let source = "h = @pkg.remote_inc; [a,b] = h(1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("compile unresolved external handle multi-output index call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2
+    )));
+
+    let err = interpret(&bytecode)
         .expect_err("unresolved external handle multi-output index call should fail");
     assert_eq!(
         err.identifier(),
@@ -1617,7 +1684,20 @@ fn unresolved_external_function_handle_index_multi_output_errors_with_identifier
 
 #[test]
 fn unresolved_external_function_handle_expand_index_call_errors_with_identifier() {
-    let err = execute_semantic_source_result("h = @pkg.remote_inc; C = {1,2}; y = h(C{:});")
+    let source = "h = @pkg.remote_inc; C = {1,2}; y = h(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("compile unresolved external expanded-handle index call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let err = interpret(&bytecode)
         .expect_err("unresolved external expanded-handle index call should fail");
     assert_eq!(
         err.identifier(),
@@ -1629,7 +1709,20 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
 
 #[test]
 fn unresolved_external_function_handle_expand_index_multi_output_errors_with_identifier() {
-    let err = execute_semantic_source_result("h = @pkg.remote_inc; C = {1,2}; [a,b] = h(C{:});")
+    let source = "h = @pkg.remote_inc; C = {1,2}; [a,b] = h(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("compile unresolved external expanded-handle multi-output index call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
+    )));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let err = interpret(&bytecode)
         .expect_err("unresolved external expanded-handle multi-output index call should fail");
     assert_eq!(
         err.identifier(),
