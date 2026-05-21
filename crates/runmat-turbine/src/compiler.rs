@@ -877,8 +877,52 @@ impl BytecodeCompiler {
                             pc += 1;
                         }
                     }
-                    Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => {
-                        return Self::unsupported_expanded_call_jit();
+                    Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                        identity,
+                        fallback_policy,
+                        specs,
+                        out_count,
+                    } => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Method/member expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+
+                        let results = if specs.iter().any(|spec| spec.is_expand) {
+                            let args =
+                                Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                            Self::compile_named_function_expand_multi_call_jit(
+                                builder,
+                                ctx,
+                                identity,
+                                *fallback_policy,
+                                &args,
+                                specs,
+                                *out_count,
+                            )?
+                        } else {
+                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                            Self::compile_named_function_multi_call_jit(
+                                builder,
+                                ctx,
+                                identity,
+                                *fallback_policy,
+                                &args,
+                                *out_count,
+                            )?
+                        };
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
                     }
                     // Not yet supported in JIT; require interpreter
                     Instr::IndexSlice(_, _, _, _)
@@ -2465,13 +2509,13 @@ mod tests {
             source
                 .matches(&["Self::", "compile_named_function_multi_call_jit("].concat())
                 .count(),
-            2
+            3
         );
         assert_eq!(
             source
                 .matches(&["Self::", "compile_named_function_expand_multi_call_jit("].concat())
                 .count(),
-            1
+            2
         );
         assert_eq!(
             source
@@ -2490,7 +2534,7 @@ mod tests {
             source
                 .matches(&["return Self::", "unsupported_expanded_call_jit();"].concat())
                 .count(),
-            2
+            1
         );
         assert_eq!(
             source
