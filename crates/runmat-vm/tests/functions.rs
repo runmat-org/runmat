@@ -1526,6 +1526,15 @@ fn classref_nonstatic_method_call_errors_with_identifier_contract() {
 }
 
 #[test]
+fn classref_unknown_static_method_call_remains_unresolved_with_identifier_contract() {
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); classref('Point').definitely_missing(1);",
+    )
+    .expect_err("classref call to unknown static method should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn addlistener_invalid_target_errors_with_identifier_contract() {
     let err = execute_semantic_source_result("addlistener(1, 'Changed', @sin);")
         .expect_err("addlistener should reject non-object target");

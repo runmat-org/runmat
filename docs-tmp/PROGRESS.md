@@ -17,10 +17,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
   - Added VM source-level identifier ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `classref_nonstatic_method_call_errors_with_identifier_contract` -> `RunMat:MethodNotStatic`
+    - `classref_unknown_static_method_call_remains_unresolved_with_identifier_contract` -> `RunMat:UndefinedFunction` (external-boundary unresolved policy contract)
     - `addlistener_invalid_target_errors_with_identifier_contract` -> `RunMat:AddListenerTargetInvalid`
     - `notify_invalid_target_errors_with_identifier_contract` -> `RunMat:NotifyTargetInvalid`
   - Validation:
     - `cargo test -p runmat-vm classref_nonstatic_method_call_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm classref_unknown_static_method_call_remains_unresolved_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm invalid_target_errors_with_identifier_contract -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
