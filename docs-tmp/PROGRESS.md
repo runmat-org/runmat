@@ -4847,6 +4847,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: tighten qualified external-handle fixed single-output `feval` opcode assertion
+  - Hardened existing qualified unresolved external-handle `feval` coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `unresolved_qualified_external_function_handle_uses_external_handle_instruction` now also asserts fixed single-output lowering through `CallFevalMulti(1,1)`.
+  - This removes a remaining proxy-style gap in the qualified external-handle fixed-arg `feval` matrix by ratcheting the explicit typed opcode boundary for `out_count = 1` alongside existing `out_count = 0/2` and expanded `0/1/2` contracts.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_qualified_external_function_handle_uses_external_handle_instruction -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_qualified_external_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
