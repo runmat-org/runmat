@@ -167,6 +167,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Top-level indexed assignment context-invariant coverage now includes malformed `DeletionTarget` contracts
+  - `scope: in-scope`
+  - `blocker: compile invariant coverage for indexed assignment/output-target assignment contexts previously asserted only read-context mismatch variants, leaving malformed `DeletionTarget` metadata unratcheted on two top-level assignment boundaries.`
+  - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_index_assignment_with_deletion_context_identifier` (expects `RunMat:MirDeletionContextWithoutDeleteInvalid`).
+    - `primary_compile_rejects_multi_assign_index_target_deletion_context_identifier` (expects `RunMat:MirIndexContextInvalid`).
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_index_assignment_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_multi_assign_index_target_deletion_context_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`
