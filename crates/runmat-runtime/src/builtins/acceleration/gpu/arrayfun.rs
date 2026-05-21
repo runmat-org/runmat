@@ -723,6 +723,20 @@ impl Callable {
                         c.function_name
                     )));
                 }
+                if let Some(function) =
+                    user_functions::resolve_semantic_function_by_name(&c.function_name)
+                {
+                    let request = user_functions::SemanticCallableRequest::semantic(
+                        function,
+                        merged.clone(),
+                        1,
+                    );
+                    if let Some(result) =
+                        user_functions::try_call_semantic_descriptor(request).await
+                    {
+                        return result;
+                    }
+                }
                 crate::call_builtin_async(&c.function_name, &merged).await
             }
         }
@@ -1272,6 +1286,29 @@ pub(crate) mod tests {
                 captures
             }) if function_name == "pkg.callback" && captures == vec![Value::Num(5.0)]
         ));
+    }
+
+    #[test]
+    fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(287)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 287);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(5.0), Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(9.0)) })
+            }),
+        ));
+        let callable = Callable::Closure(Closure {
+            function_name: "pkg.callback".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(5.0)],
+        });
+        let value = block_on(callable.call(&[Value::Num(4.0)])).expect("closure call");
+        assert_eq!(value, Value::Num(9.0));
     }
 
     #[test]
