@@ -44,10 +44,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - Brace index context invariants now apply on helper read/store-back lowering paths
   - `scope: in-scope`
-  - `blocker: brace index lowering in helper paths (`compile_mir_index_after_base` and member-chain store-back via `compile_mir_store_indexed_value_from_temp`) bypassed `IndexResultContext` validation (`any_context`), so malformed MIR brace index contexts could flow through assignment/read helper bytecode paths without compile-time rejection.`
+  - `blocker: indexed helper lowering in lvalue-base helper paths (`compile_mir_index_after_base` and member-chain store-back via `compile_mir_store_indexed_value_from_temp`) bypassed assignment/deletion context invariants, so malformed MIR indexed helper contexts could flow through helper bytecode paths without compile-time rejection.`
   - Tightened helper-path brace index validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
-    - `compile_mir_index_after_base(...)` now validates brace index components against the actual MIR result context via `compile_mir_cell_index_components(...)`.
-    - brace index store-back lowering now validates against `IndexResultContext::AssignmentTarget` instead of bypassing context checks.
+    - `compile_mir_index_after_base(...)` now requires `IndexResultContext::AssignmentTarget` compatibility for helper indexed-base lowering.
+    - brace index store-back lowering now enforces the same assignment/deletion-compatible context invariant instead of bypassing context checks.
+    - malformed helper-path indexed contexts now fail with stable identifier `RunMat:MirIndexContextInvalid`.
   - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
   - Validation:

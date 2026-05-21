@@ -159,8 +159,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_index_assignment_with_read_context_identifier`
   - VM brace index helper lowering now enforces index-context invariants on read/store-back helper paths in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
-    - `compile_mir_index_after_base(...)` now validates brace index components against `indexing.result_context` via `compile_mir_cell_index_components(...)` instead of bypassing context checks.
-    - `compile_mir_store_indexed_value_from_temp(...)` now requires brace store-back index components to satisfy `IndexResultContext::AssignmentTarget` invariants.
+    - `compile_mir_index_after_base(...)` now requires `IndexResultContext::AssignmentTarget` compatibility for helper indexed-base lowering instead of bypassing context checks.
+    - `compile_mir_store_indexed_value_from_temp(...)` now requires brace store-back index components to satisfy the same `IndexResultContext::AssignmentTarget` compatibility invariant.
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):

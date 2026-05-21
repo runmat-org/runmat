@@ -1609,6 +1609,16 @@ impl Compiler {
     }
 
     fn compile_mir_index_after_base(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        if !mir_indexing_context_matches(
+            indexing.result_context.clone(),
+            IndexResultContext::AssignmentTarget,
+        ) {
+            return Err(self
+                .compile_error(
+                    "MIR indexed helper-read invariant violated: lvalue base indexing requires AssignmentTarget/DeletionTarget context",
+                )
+                .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+        }
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
