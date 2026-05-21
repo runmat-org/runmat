@@ -4627,6 +4627,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm nested_try_catch_rethrow_unified_exception_ids -- --nocapture`
     - `git diff --check`
 
+- RM-378: ratchet scalar nonnumeric selector identifier
+  - Tightened scalar-slice selector contract in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+    - `scalar_slice_with_nonnumeric_selector_errors` now asserts only `RunMat:UnsupportedIndexType` for `x = 42; idx = "a"; y = x(idx);` instead of allowing mixed fallback identifiers.
+  - This removes a remaining dual-identifier allowance on active selector-plan error coverage.
+  - Validation:
+    - `cargo test -p runmat-vm scalar_slice_with_nonnumeric_selector_errors -- --nocapture`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

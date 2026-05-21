@@ -569,11 +569,9 @@ fn scalar_slice_with_nonnumeric_selector_errors() {
     "#;
     let bytecode = compile_semantic_source(input).expect("compile semantic scalar slice script");
     let err = interpret(&bytecode).expect_err("scalar slice with nonnumeric selector must error");
-    assert!(
-        matches!(
-            err.identifier(),
-            Some("RunMat:UnsupportedIndexType") | Some("RunMat:SliceNonTensor")
-        ),
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedIndexType"),
         "unexpected identifier: {:?} ({err:?})",
         err.identifier()
     );
