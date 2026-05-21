@@ -12,6 +12,22 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM object expr-selector normalization ratchet
+  - `scope: in-scope`
+  - Closed a non-tensor/object-protocol selector-plan normalization gap in object `IndexSliceExpr` descriptor serialization:
+    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now preserves mixed non-numeric selector values (`string`, `char`, `cell`, `logical`) when any selector dimension lowers through range/end expression descriptors.
+    - this removes the prior false rejection path that raised `RunMat:ObjectSelectorTypeUnsupported` for valid mixed selector payloads in object expr-slice contexts.
+  - Added/updated call-layer ratchets in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - `object_paren_expr_selector_values_accept_string_selector_in_mixed_plan`
+    - `object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan`
+    - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` now asserts rejection on truly unsupported selector values (`Struct`) rather than string selectors.
+  - Validation:
+    - `cargo test -p runmat-vm object_paren_expr_selector_values_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM end-expression index integrality semantics ratchet
   - `scope: in-scope`
   - Closed a selector-plan normalization gap where numeric selectors were truncating fractional values instead of enforcing MATLAB-style integer indexing contracts:

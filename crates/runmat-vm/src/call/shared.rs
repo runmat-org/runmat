@@ -572,6 +572,12 @@ fn normalize_object_numeric_selector(selector: &Value) -> Result<Value, RuntimeE
         Value::Num(n) => Ok(Value::Num(*n)),
         Value::Int(i) => Ok(Value::Num(i.to_f64())),
         Value::Tensor(t) => Ok(Value::Tensor(t.clone())),
+        Value::Bool(value) => Ok(Value::Bool(*value)),
+        Value::LogicalArray(array) => Ok(Value::LogicalArray(array.clone())),
+        Value::String(value) => Ok(Value::String(value.clone())),
+        Value::StringArray(array) => Ok(Value::StringArray(array.clone())),
+        Value::CharArray(array) => Ok(Value::CharArray(array.clone())),
+        Value::Cell(cell) => Ok(Value::Cell(cell.clone())),
         _ => Err(crate::interpreter::errors::mex(
             "ObjectSelectorTypeUnsupported",
             "unsupported index type for object selector",
@@ -1156,13 +1162,51 @@ mod tests {
             &[],
             &[],
             &[],
-            &[Value::String("bad".to_string())],
+            &[Value::Struct(runmat_builtins::StructValue::new())],
         )
         .expect_err("unsupported object selector type should fail");
         assert_eq!(
             err.identifier(),
             Some("RunMat:ObjectSelectorTypeUnsupported")
         );
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_accept_string_selector_in_mixed_plan() {
+        let selectors = build_object_paren_expr_selector_values(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[Value::String("key".to_string())],
+        )
+        .expect("mixed string selector should serialize");
+        assert_eq!(selectors.len(), 2);
+        assert_eq!(selectors[1], Value::String("key".to_string()));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan() {
+        let key_cell = runmat_builtins::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
+            .expect("key cell");
+        let selectors = build_object_paren_expr_selector_values(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[Value::Cell(key_cell.clone())],
+        )
+        .expect("mixed cell selector should serialize");
+        assert_eq!(selectors.len(), 2);
+        assert_eq!(selectors[1], Value::Cell(key_cell));
     }
 
     #[test]

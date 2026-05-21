@@ -192,6 +192,12 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `linear_indices_reject_fractional_tensor_indices`
       - `scalar_end_div_indexing_rejects_fractional_result`
       - `primary_compile_rejects_fractional_cell_end_expression_read_index`
+  - object expr-slice selector normalization now preserves mixed selector payload types in object protocol descriptor serialization:
+    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now accepts non-numeric selector payload values (`string`, `char`, `cell`, `logical`) in `build_object_paren_expr_selector_values(...)` for non-range selector dimensions, instead of rejecting mixed selector plans when any dimension uses range/end descriptors.
+    - call-layer ratchets now assert mixed selector preservation and unsupported-type rejection boundaries:
+      - `object_paren_expr_selector_values_accept_string_selector_in_mixed_plan`
+      - `object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan`
+      - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` (unsupported `Struct` payload)
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
