@@ -240,6 +240,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - scalar `StoreIndex` now rejects non-positive indices directly as `RunMat:IndexOutOfBounds` instead of clamping them to zero before assignment dispatch.
     - brace cell scalar index decoding now reuses shared `index_scalar_from_value` normalization (`resolve_cell_indices`), so scalar tensor cell indices follow the same integer/in-bounds contracts as other scalar index paths.
     - expr-slice range plan lowering now rejects fractional range start/step selector operands directly in `build_expr_index_plan(...)` (no implicit `as i64` truncation of selector values), keeping non-integer range selector failures on the typed `RunMat:UnsupportedIndexType` boundary.
+    - expr-slice range selector evaluation now rejects out-of-bounds range elements directly in `build_expr_index_plan(...)` (no silent truncation-at-boundary behavior in positive/negative range traversal), preserving typed `RunMat:IndexOutOfBounds` bounds failure semantics.
     - direct ratchets:
       - `validate_expr_range_step_metadata_rejects_mismatched_arity`
       - `range_selector_scalar_to_f64_rejects_non_numeric_scalar`
@@ -251,6 +252,8 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `cell_brace_scalar_tensor_index_reads_value`
       - `fractional_range_start_index_rejects_non_integer_selector`
       - `fractional_range_step_index_rejects_non_integer_selector`
+      - `positive_range_index_rejects_upper_out_of_bounds_element`
+      - `positive_range_index_rejects_lower_out_of_bounds_element`
   - callable method-identity runtime policy now separates semantic resolver lookup from VM named fallback:
     - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now keeps `Method` identities eligible for semantic name resolution under `RuntimeNameResolution`, while excluding `Method` from VM named fallback eligibility.
     - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) now resolves semantic descriptor names through `semantic_resolution_name_for(...)` instead of `vm_fallback_name_for(...)`.

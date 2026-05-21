@@ -482,7 +482,7 @@ where
                 if stp > 0 {
                     while cur <= end_i {
                         if cur < 1 || cur > dim_len {
-                            break;
+                            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
                         cur += stp;
@@ -490,7 +490,7 @@ where
                 } else {
                     while cur >= end_i {
                         if cur < 1 || cur > dim_len {
-                            break;
+                            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                         }
                         v.push(cur as usize);
                         cur += stp;

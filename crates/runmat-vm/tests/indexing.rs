@@ -180,3 +180,17 @@ fn fractional_range_step_index_rejects_non_integer_selector() {
         .expect_err("fractional range step should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
+
+#[test]
+fn positive_range_index_rejects_upper_out_of_bounds_element() {
+    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(4:6);")
+        .expect_err("range containing upper out-of-bounds index should fail");
+    assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+}
+
+#[test]
+fn positive_range_index_rejects_lower_out_of_bounds_element() {
+    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(0:2);")
+        .expect_err("range containing lower out-of-bounds index should fail");
+    assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+}
