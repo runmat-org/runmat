@@ -17,14 +17,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Closed non-tensor/object-protocol selector-plan normalization gaps across both object paren descriptor paths:
     - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now preserves mixed non-numeric selector values (`string`, `char`, `cell`, `logical`) when any selector dimension lowers through range/end expression descriptors (`build_object_paren_expr_selector_values`).
     - the same selector-type normalization boundary now applies to non-expr object paren selector serialization (`build_object_paren_selector_values`), keeping selector acceptance/rejection consistent between expr and non-expr object slice paths.
+    - object `IndexSliceExpr` runtime dispatch now routes object/handle-object bases through structured object descriptor execution instead of falling through tensor-only slice planning (`RunMat:SliceNonTensor`) for mixed selector payloads.
+    - object expr-slice descriptor serialization now carries `end_numeric_exprs` encoding (not placeholder numeric values) for numeric selector positions tied to end expressions.
   - Added/updated call-layer ratchets in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
     - `object_paren_selector_values_accept_string_selector`
     - `object_paren_selector_values_reject_unsupported_selector_type`
     - `object_paren_expr_selector_values_accept_string_selector_in_mixed_plan`
     - `object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan`
+    - `object_paren_expr_selector_values_encode_numeric_end_expressions`
     - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` now asserts rejection on truly unsupported selector values (`Struct`) rather than string selectors.
+  - Added end-to-end semantic VM coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+    - `object_range_end_indexing_accepts_mixed_string_selector_payload`
   - Validation:
     - `cargo test -p runmat-vm object_paren_expr_selector_values_ -- --nocapture`
+    - `cargo test -p runmat-vm object_paren_selector_values_ -- --nocapture`
+    - `cargo test -p runmat-vm object_range_end_indexing_accepts_mixed_string_selector_payload -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
     - `cargo fmt --all --check`

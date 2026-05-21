@@ -195,12 +195,16 @@ This audit maps the active objective to concrete repository evidence and marks e
   - object paren selector normalization now preserves mixed selector payload types and aligns expr/non-expr selector boundaries in object protocol descriptor serialization:
     - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now accepts non-numeric selector payload values (`string`, `char`, `cell`, `logical`) in `build_object_paren_expr_selector_values(...)` for non-range selector dimensions, instead of rejecting mixed selector plans when any dimension uses range/end descriptors.
     - non-expr object paren selector serialization (`build_object_paren_selector_values`) now uses the same selector-type normalization boundary as expr-slice serialization.
+    - `IndexSliceExpr` runtime dispatch now routes object/handle-object bases through `subsref_paren_from_expr_slice(...)` descriptor execution (instead of tensor-only slice planning), closing mixed selector payload failures that previously surfaced as `RunMat:SliceNonTensor` on object expr-slice reads.
+    - expr-slice descriptor serialization now carries `end_numeric_exprs` as encoded end-expression selector payloads for numeric selector positions tied to `end` arithmetic, rather than placeholder numeric stack values.
     - call-layer ratchets now assert mixed selector preservation and unsupported-type rejection boundaries:
       - `object_paren_selector_values_accept_string_selector`
       - `object_paren_selector_values_reject_unsupported_selector_type`
       - `object_paren_expr_selector_values_accept_string_selector_in_mixed_plan`
       - `object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan`
+      - `object_paren_expr_selector_values_encode_numeric_end_expressions`
       - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` (unsupported `Struct` payload)
+      - end-to-end semantic VM contract: `object_range_end_indexing_accepts_mixed_string_selector_payload`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

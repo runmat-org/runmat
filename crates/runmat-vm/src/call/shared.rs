@@ -267,6 +267,7 @@ impl ObjectIndexDescriptor {
         range_start_exprs: &[Option<EndExpr>],
         range_step_exprs: &[Option<EndExpr>],
         range_end_exprs: &[EndExpr],
+        end_numeric_exprs: &[(usize, EndExpr)],
         numeric: &[Value],
         rhs: Value,
     ) -> Result<Self, RuntimeError> {
@@ -279,12 +280,44 @@ impl ObjectIndexDescriptor {
             range_start_exprs,
             range_step_exprs,
             range_end_exprs,
+            end_numeric_exprs,
             numeric,
         )?;
         Ok(Self::subsasgn_paren(
             base,
             ObjectIndexSelector::IndexValues { values },
             rhs,
+        ))
+    }
+
+    pub(crate) fn subsref_paren_from_expr_slice(
+        base: Value,
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: &[usize],
+        range_params: &[(f64, f64)],
+        range_start_exprs: &[Option<EndExpr>],
+        range_step_exprs: &[Option<EndExpr>],
+        range_end_exprs: &[EndExpr],
+        end_numeric_exprs: &[(usize, EndExpr)],
+        numeric: &[Value],
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_expr_selector_values(
+            dims,
+            colon_mask,
+            end_mask,
+            range_dims,
+            range_params,
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            numeric,
+        )?;
+        Ok(Self::subsref_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
         ))
     }
 
@@ -669,6 +702,7 @@ pub(crate) fn build_object_paren_expr_selector_values(
     range_start_exprs: &[Option<EndExpr>],
     range_step_exprs: &[Option<EndExpr>],
     range_end_exprs: &[EndExpr],
+    end_numeric_exprs: &[(usize, EndExpr)],
     numeric: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
     let range_pos_by_dim = validate_object_range_selector_plan(
@@ -706,6 +740,11 @@ pub(crate) fn build_object_paren_expr_selector_values(
             };
             let off = &range_end_exprs[pos];
             values.push(build_end_range_descriptor(st, sp, off)?);
+            continue;
+        }
+        if let Some((_, expr)) = end_numeric_exprs.iter().find(|(pos, _)| *pos == num_iter) {
+            values.push(encode_end_expr_value(expr)?);
+            num_iter += 1;
             continue;
         }
         let selector = numeric
@@ -1055,6 +1094,7 @@ mod tests {
             ))],
             &[None],
             &[EndExpr::End],
+            &[],
             &[Value::Num(4.0)],
         )
         .expect("expr selector values");
@@ -1093,6 +1133,7 @@ mod tests {
                 args: vec![],
             }],
             &[],
+            &[],
         )
         .expect_err("missing callable name should fail");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -1118,6 +1159,7 @@ mod tests {
                 args: vec![],
             }],
             &[],
+            &[],
         )
         .expect_err("malformed external callable name should fail");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -1133,6 +1175,7 @@ mod tests {
             &[(1.0, 2.0)],
             &[None],
             &[None],
+            &[],
             &[],
             &[Value::Num(4.0)],
         )
@@ -1152,6 +1195,7 @@ mod tests {
             &[None, None],
             &[EndExpr::End, EndExpr::End],
             &[],
+            &[],
         )
         .expect_err("duplicate range dimensions should fail");
         assert_eq!(err.identifier(), Some("RunMat:DuplicateRangeSelectorDim"));
@@ -1169,6 +1213,7 @@ mod tests {
             &[None],
             &[EndExpr::End],
             &[],
+            &[],
         )
         .expect_err("out-of-bounds range dimension should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
@@ -1180,6 +1225,7 @@ mod tests {
             1,
             0,
             0,
+            &[],
             &[],
             &[],
             &[],
@@ -1205,6 +1251,7 @@ mod tests {
             &[None],
             &[None],
             &[EndExpr::End],
+            &[],
             &[Value::String("key".to_string())],
         )
         .expect("mixed string selector should serialize");
@@ -1225,11 +1272,39 @@ mod tests {
             &[None],
             &[None],
             &[EndExpr::End],
+            &[],
             &[Value::Cell(key_cell.clone())],
         )
         .expect("mixed cell selector should serialize");
         assert_eq!(selectors.len(), 2);
         assert_eq!(selectors[1], Value::Cell(key_cell));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_encode_numeric_end_expressions() {
+        let selectors = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[(
+                0,
+                EndExpr::Div(Box::new(EndExpr::End), Box::new(EndExpr::Const(2.0))),
+            )],
+            &[Value::Num(0.0)],
+        )
+        .expect("numeric end expression selector should serialize");
+        assert_eq!(selectors.len(), 1);
+        match &selectors[0] {
+            Value::Cell(cell) => {
+                assert_eq!((*cell.data[0]).clone(), Value::String("/".to_string()));
+            }
+            other => panic!("expected encoded end expression cell, got {other:?}"),
+        }
     }
 
     #[test]

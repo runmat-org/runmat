@@ -1402,6 +1402,50 @@ pub async fn dispatch_indexing(
                 base = Value::Tensor(tensor);
             }
             match base {
+                Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
+                        Value::Object(obj),
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        end_numeric_exprs,
+                        &numeric,
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
+                        Value::HandleObject(handle),
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        end_numeric_exprs,
+                        &numeric,
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
                 Value::ComplexTensor(t) => {
                     let vm_plan = build_expr_slice_plan(
                         *dims,
@@ -1689,6 +1733,7 @@ pub async fn dispatch_indexing(
                         range_start_exprs,
                         range_step_exprs,
                         range_end_exprs,
+                        end_numeric_exprs,
                         &numeric,
                         rhs,
                     )?;
@@ -1711,6 +1756,7 @@ pub async fn dispatch_indexing(
                         range_start_exprs,
                         range_step_exprs,
                         range_end_exprs,
+                        end_numeric_exprs,
                         &numeric,
                         rhs,
                     )?;
