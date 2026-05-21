@@ -119,6 +119,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
     - `RunMat:MirMethodCallReceiverMissing` for method-call receiver arg invariants.
     - `RunMat:MirMethodCallCalleeInvalid` for internal method-call static-callee invariants.
+    - `RunMat:MirCallTargetNameInvalid` for malformed static non-builtin callable identity name-shape invariants at compile boundaries.
     - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads.
     - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants.
     - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable external/imported function-handle targets at VM compile boundaries.
@@ -138,6 +139,12 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `primary_compile_rejects_single_segment_external_function_handle_name_with_identifier`
       - `primary_compile_rejects_imported_function_handle_missing_item_with_identifier`
       - `primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier`
+  - VM static-call lowering now enforces strict non-builtin callee identity name-shape invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `compile_mir_call(...)` and `compile_mir_call_for_multi_assign(...)` now require a valid runtime name shape (`mir_runtime_name_callee(...)`) before emitting `CallFunction*` instructions.
+    - malformed static identities now fail with `RunMat:MirCallTargetNameInvalid`.
+    - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+      - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
+      - `primary_compile_rejects_static_call_with_single_segment_external_identity`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).

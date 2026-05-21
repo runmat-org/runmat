@@ -113,6 +113,7 @@ const IDENT_MIR_CONSTANT_UNKNOWN: &str = "RunMat:MirConstantUnknown";
 const IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING: &str = "RunMat:MirFunctionHandleNameMissing";
 const IDENT_MIR_FUNCTION_HANDLE_TARGET_UNSUPPORTED: &str =
     "RunMat:MirFunctionHandleTargetUnsupported";
+const IDENT_MIR_CALL_TARGET_NAME_INVALID: &str = "RunMat:MirCallTargetNameInvalid";
 const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
@@ -1293,6 +1294,14 @@ impl Compiler {
                         ))
                         .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
                 }
+                if self.mir_runtime_name_callee(identity).is_none() {
+                    return Err(self
+                        .compile_error(format!(
+                            "MIR static call callee identity {:?} is missing a valid runtime name shape",
+                            identity
+                        ))
+                        .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
+                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1973,6 +1982,14 @@ impl Compiler {
                             fallback_policy, identity
                         ))
                         .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
+                }
+                if self.mir_runtime_name_callee(identity).is_none() {
+                    return Err(self
+                        .compile_error(format!(
+                            "MIR static call callee identity {:?} is missing a valid runtime name shape",
+                            identity
+                        ))
+                        .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
                 }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;

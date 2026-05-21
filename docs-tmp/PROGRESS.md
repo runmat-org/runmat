@@ -12,6 +12,22 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Static call callee name-shape invariants now fail at VM compile boundaries
+  - `scope: in-scope`
+  - `blocker: static-call lowering still allowed malformed non-builtin callable identities (for example single-segment external names or mismatched imported `DefPath` shapes) to pass compile and defer failure to runtime, leaving a callable ABI normalization seam.`
+  - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - both `compile_mir_call_for_multi_assign(...)` and `compile_mir_call(...)` now require `mir_runtime_name_callee(...)` to resolve for static non-builtin/non-semantic identities before emitting `CallFunction*` opcodes.
+    - malformed static callee identities now fail with stable identifier `RunMat:MirCallTargetNameInvalid`.
+  - Added ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
+    - `primary_compile_rejects_static_call_with_single_segment_external_identity`
+  - Validation:
+    - `cargo test -p runmat-vm static_call_with_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Imported `DefPath` callable identity shape now enforces module/item leaf alignment
   - `scope: in-scope`
   - `blocker: imported callable/function-handle identities still allowed malformed `DefPath` shapes where `module` leaf and `item` leaf diverged, permitting name-shaped fallback/handle emission for structurally inconsistent imported targets.`
