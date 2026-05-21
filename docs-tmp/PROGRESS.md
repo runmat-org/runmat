@@ -70,9 +70,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) `unresolved_function_expand_single_output_uses_typed_instruction` now asserts `RunMat:UndefinedFunction` at execution boundary.
   - Tightened unresolved fixed-arg dynamic-call contract so single-output path also asserts runtime identifier:
     - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) `unresolved_function_single_output_uses_typed_instruction` now asserts `RunMat:UndefinedFunction` at execution boundary.
+  - Added zero-output dynamic-call opcode+identifier ratchets for both fixed and expanded arg forms:
+    - `unresolved_function_zero_output_uses_typed_instruction_and_errors`
+    - `unresolved_function_expand_zero_output_uses_typed_instruction_and_errors`
   - Validation:
     - `cargo test -p runmat-vm unresolved_function_expand_single_output_uses_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm unresolved_function_single_output_uses_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm unresolved_function_zero_output_uses_typed_instruction_and_errors -- --nocapture`
+    - `cargo test -p runmat-vm unresolved_function_expand_zero_output_uses_typed_instruction_and_errors -- --nocapture`
 
 - Validation cadence checkpoint refresh
   - `scope: in-scope`

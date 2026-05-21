@@ -1878,6 +1878,28 @@ fn unresolved_function_single_output_uses_typed_instruction() {
 }
 
 #[test]
+fn unresolved_function_zero_output_uses_typed_instruction_and_errors() {
+    let source = "definitely_missing_callback(7);";
+    let bytecode = compile_semantic_source(source).expect("compile unresolved zero-output call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti {
+            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
+            fallback_policy,
+            arg_count,
+            out_count,
+            ..
+        } if name == "definitely_missing_callback"
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+            && *arg_count == 1
+            && *out_count == 0
+    )));
+
+    let err = interpret(&bytecode).expect_err("unresolved zero-output call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn unresolved_function_multi_output_uses_typed_instruction_and_errors() {
     let source = "[a,b] = definitely_missing_callback(7);";
     let bytecode = compile_semantic_source(source).expect("compile unresolved multi-output call");
@@ -1920,6 +1942,32 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
     )));
 
     let err = interpret(&bytecode).expect_err("unresolved expanded call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
+    let source = "C = deal(7,3); definitely_missing_callback(C{:});";
+    let bytecode =
+        compile_semantic_source(source).expect("compile unresolved expanded zero-output call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionExpandMultiOutput {
+            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
+            fallback_policy,
+            specs,
+            out_count,
+            ..
+        } if name == "definitely_missing_callback"
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+            && *out_count == 0
+            && specs.len() == 1
+            && specs[0].is_expand
+            && specs[0].expand_all
+    )));
+
+    let err =
+        interpret(&bytecode).expect_err("unresolved expanded zero-output call should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
