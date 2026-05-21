@@ -1351,7 +1351,11 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             );
             subsref_dispatch(receiver, OBJECT_INDEX_PAREN.to_string(), payload).await
         }
-        other => Err((format!("feval: unsupported function value {other:?}")).into()),
+        other => Err(
+            build_runtime_error(format!("feval: unsupported function value {other:?}"))
+                .with_identifier("RunMat:FevalFunctionValueUnsupported")
+                .build(),
+        ),
     }
 }
 
@@ -2426,6 +2430,16 @@ mod tests {
         ))
         .expect_err("feval(object, ...) should route through subsref dispatch");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
+    }
+
+    #[test]
+    fn feval_unsupported_callable_value_errors_with_identifier() {
+        let err = block_on(feval_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
+            .expect_err("numeric callable value should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:FevalFunctionValueUnsupported")
+        );
     }
 
     #[test]

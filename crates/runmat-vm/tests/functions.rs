@@ -1579,6 +1579,18 @@ fn object_paren_index_missing_subsref_errors_with_identifier_contract() {
 }
 
 #[test]
+fn feval_unsupported_callable_value_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("x = 1; y = feval(x, 2);")
+        .expect_err("feval on non-callable value should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:FevalFunctionValueUnsupported"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn object_paren_assign_missing_subsasgn_errors_with_identifier_contract() {
     let err = execute_semantic_source_result(
         "__register_test_classes(); p = new_object('Point'); p(1) = 2;",
