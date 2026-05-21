@@ -269,8 +269,17 @@ fn prepare_callable(
             handle: Value::SemanticFunctionHandle { name, function },
             num_outputs,
         }),
-        Value::Closure(closure) => Ok(TimeitCallable {
-            handle: Value::Closure(closure),
+        Value::Closure(mut closure) => Ok(TimeitCallable {
+            handle: {
+                if closure.semantic_function.is_none() {
+                    if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(
+                        &closure.function_name,
+                    ) {
+                        closure.semantic_function = Some(function);
+                    }
+                }
+                Value::Closure(closure)
+            },
             num_outputs,
         }),
         other => Err(timeit_error(format!(
@@ -306,7 +315,7 @@ fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
 pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::IntValue;
+    use runmat_builtins::{Closure, IntValue};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -475,6 +484,52 @@ pub(crate) mod tests {
             }
         );
         assert_eq!(callable.num_outputs, Some(1));
+    }
+
+    #[test]
+    fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "__timeit_helper_counter_default").then_some(89)
+            })));
+        let callable = prepare_callable(
+            Value::Closure(Closure {
+                function_name: "__timeit_helper_counter_default".to_string(),
+                semantic_function: None,
+                captures: vec![Value::Num(9.0)],
+            }),
+            None,
+        )
+        .expect("timeit should accept closure callback");
+        assert_eq!(
+            callable.handle,
+            Value::Closure(Closure {
+                function_name: "__timeit_helper_counter_default".to_string(),
+                semantic_function: Some(89),
+                captures: vec![Value::Num(9.0)],
+            })
+        );
+    }
+
+    #[test]
+    fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
+        let callable = prepare_callable(
+            Value::Closure(Closure {
+                function_name: "__timeit_helper_counter_default".to_string(),
+                semantic_function: None,
+                captures: vec![Value::Num(9.0)],
+            }),
+            None,
+        )
+        .expect("timeit should accept closure callback");
+        assert_eq!(
+            callable.handle,
+            Value::Closure(Closure {
+                function_name: "__timeit_helper_counter_default".to_string(),
+                semantic_function: None,
+                captures: vec![Value::Num(9.0)],
+            })
+        );
     }
 
     #[test]

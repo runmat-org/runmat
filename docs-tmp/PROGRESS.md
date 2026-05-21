@@ -4502,6 +4502,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --test indexing_properties -- --nocapture`
     - `cargo check --workspace`
 
+- RM-378: prebind timeit closure semantic identity
+  - Reduced remaining name-shaped callback behavior in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+    - `prepare_callable(...)` now upgrades `Value::Closure` callbacks with `semantic_function: None` to `semantic_function: Some(id)` when the semantic resolver can resolve `closure.function_name`.
+    - Closure captures are preserved, so this is descriptor/identity tightening only (no callback argument-shape behavior change).
+  - Added runtime contracts:
+    - `timeit_name_only_closure_prefers_semantic_resolver_identity`
+    - `timeit_name_only_closure_without_resolver_keeps_name_shaped_identity`
+  - Validation:
+    - `cargo test -p runmat-runtime timeit_name_only_closure_ -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
