@@ -645,7 +645,7 @@ fn validate_object_range_selector_plan(
         }
         if range_pos_by_dim[dim].replace(pos).is_some() {
             return Err(crate::interpreter::errors::mex(
-                "DuplicateRangeSelectorDim",
+                "InvalidRangeSelectorPlan",
                 "object range selector dimension appears more than once",
             ));
         }
@@ -1295,7 +1295,7 @@ mod tests {
             &[],
         )
         .expect_err("duplicate range dimensions should fail");
-        assert_eq!(err.identifier(), Some("RunMat:DuplicateRangeSelectorDim"));
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
     }
 
     #[test]

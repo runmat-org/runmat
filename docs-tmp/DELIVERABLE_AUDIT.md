@@ -343,6 +343,9 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `expr_plan_rejects_duplicate_range_dims`
       - `expr_plan_rejects_out_of_bounds_range_dim`
       - `expr_plan_rejects_inconsistent_range_metadata_lengths`
+  - object expr-slice duplicate range-dimension validation now uses the same normalized plan identifier in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - duplicate object range dimensions now fail as `RunMat:InvalidRangeSelectorPlan` (instead of `RunMat:DuplicateRangeSelectorDim`).
+    - ratchet: `object_paren_expr_selector_values_reject_duplicate_range_dims`.
   - expr-slice end-offset selector context metadata now has explicit runtime invariant checks in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
     - `apply_end_offsets_to_numeric(...)` now pre-validates context rank/masks/range dims before dimension mapping.
     - malformed context metadata now fails with stable identifiers:

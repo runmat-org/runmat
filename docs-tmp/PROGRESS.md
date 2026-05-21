@@ -12,6 +12,19 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Object range-selector duplicate-dimension failures now use normalized plan identifier
+  - `scope: in-scope`
+  - blocker: object expr-slice duplicate range-dimension failures surfaced a distinct identifier (`RunMat:DuplicateRangeSelectorDim`) while the rest of selector-plan invariants use `RunMat:InvalidRangeSelectorPlan`, leaving error-contract inconsistency across selector-plan boundaries.
+  - Updated object range plan validation in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - duplicate object range dimensions now fail as `RunMat:InvalidRangeSelectorPlan`.
+  - Updated unit ratchet:
+    - `object_paren_expr_selector_values_reject_duplicate_range_dims`
+  - Validation:
+    - `cargo test -p runmat-vm object_paren_expr_selector_values_reject_duplicate_range_dims -- --nocapture`
+    - `cargo test -p runmat-vm object_paren_expr_selector_values_reject_out_of_bounds_range_dim -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - Selector GPU index materialization now reports typed acceleration identifiers
   - `scope: in-scope`
   - blocker: selector GPU gather failures in `materialize_index_value(...)` were mapped to ad hoc `RunMat:IndexGather` errors instead of the normalized acceleration error surface used across VM indexing paths.
