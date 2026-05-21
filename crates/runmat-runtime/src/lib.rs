@@ -1037,7 +1037,9 @@ async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::Bui
                 Ok(Value::Num(77.0))
             }
         }
-        _ => Err(("subsref: unsupported payload".to_string()).into()),
+        _ => Err(build_runtime_error("subsref: unsupported payload")
+            .with_identifier("RunMat:OverIdxSubsrefPayloadUnsupported")
+            .build()),
     }
 }
 
@@ -1067,17 +1069,30 @@ async fn overidx_subsasgn(
             o.properties.insert(field, rhs);
             Ok(Value::Object(o.clone()))
         }
-        _ => Err(("subsasgn: unsupported payload".to_string()).into()),
+        _ => Err(build_runtime_error("subsasgn: unsupported payload")
+            .with_identifier("RunMat:OverIdxSubsasgnPayloadUnsupported")
+            .build()),
+    }
+}
+
+fn overidx_expect_object(
+    obj: Value,
+    method: &str,
+) -> crate::BuiltinResult<runmat_builtins::ObjectInstance> {
+    match obj {
+        Value::Object(o) => Ok(o),
+        other => Err(build_runtime_error(format!(
+            "{method}: receiver must be object, got {other:?}"
+        ))
+        .with_identifier("RunMat:OverIdxReceiverInvalid")
+        .build()),
     }
 }
 
 // --- Operator overloading methods for OverIdx (test scaffolding) ---
 #[runmat_macros::runtime_builtin(name = "OverIdx.plus", builtin_path = "crate")]
 async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.plus: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.plus")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1089,10 +1104,7 @@ async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.times", builtin_path = "crate")]
 async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.times: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.times")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1104,10 +1116,7 @@ async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.mtimes", builtin_path = "crate")]
 async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.mtimes: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.mtimes")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1119,10 +1128,7 @@ async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.lt", builtin_path = "crate")]
 async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.lt: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.lt")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1134,10 +1140,7 @@ async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.gt", builtin_path = "crate")]
 async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.gt: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.gt")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1149,10 +1152,7 @@ async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.eq", builtin_path = "crate")]
 async fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.eq: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.eq")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1170,10 +1170,7 @@ async fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.rdivide", builtin_path = "crate")]
 async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.rdivide: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.rdivide")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1190,10 +1187,7 @@ async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value>
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.ldivide", builtin_path = "crate")]
 async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.ldivide: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.ldivide")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1210,10 +1204,7 @@ async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value>
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.and", builtin_path = "crate")]
 async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.and: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.and")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1225,10 +1216,7 @@ async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.or", builtin_path = "crate")]
 async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.or: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.or")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -1240,10 +1228,7 @@ async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.xor", builtin_path = "crate")]
 async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = match obj {
-        Value::Object(o) => o,
-        _ => return Err(("OverIdx.xor: receiver must be object".to_string()).into()),
-    };
+    let o = overidx_expect_object(obj, "OverIdx.xor")?;
     let k = if let Some(Value::Num(v)) = o.properties.get("k") {
         *v
     } else {
@@ -2545,6 +2530,42 @@ mod tests {
         let err = block_on(circle_area_method(Value::Num(1.0)))
             .expect_err("Circle.area should reject non-object receiver");
         assert_eq!(err.identifier(), Some("RunMat:CircleAreaReceiverInvalid"));
+    }
+
+    #[test]
+    fn overidx_plus_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(overidx_plus(Value::Num(1.0), Value::Num(2.0)))
+            .expect_err("OverIdx.plus should reject non-object receiver");
+        assert_eq!(err.identifier(), Some("RunMat:OverIdxReceiverInvalid"));
+    }
+
+    #[test]
+    fn overidx_subsref_unsupported_payload_errors_with_identifier() {
+        let err = block_on(overidx_subsref(
+            Value::Object(runmat_builtins::ObjectInstance::new("OverIdx".to_string())),
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::Num(1.0),
+        ))
+        .expect_err("OverIdx.subsref unsupported payload should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:OverIdxSubsrefPayloadUnsupported")
+        );
+    }
+
+    #[test]
+    fn overidx_subsasgn_unsupported_payload_errors_with_identifier() {
+        let err = block_on(overidx_subsasgn(
+            Value::Object(runmat_builtins::ObjectInstance::new("OverIdx".to_string())),
+            OBJECT_INDEX_PAREN.to_string(),
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ))
+        .expect_err("OverIdx.subsasgn unsupported payload should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:OverIdxSubsasgnPayloadUnsupported")
+        );
     }
 
     #[test]

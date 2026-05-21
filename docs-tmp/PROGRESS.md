@@ -136,6 +136,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime OverIdx receiver/payload identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: OverIdx object protocol/operator helper builtins still had message-only receiver/payload failures, leaving object-dispatch ABI edges untyped.`
+  - Closed OverIdx identifier gaps in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - OverIdx protocol payload mismatch now emits:
+      - `RunMat:OverIdxSubsrefPayloadUnsupported`
+      - `RunMat:OverIdxSubsasgnPayloadUnsupported`
+    - OverIdx operator receiver mismatch (`plus`, `times`, `mtimes`, `lt`, `gt`, `eq`, `rdivide`, `ldivide`, `and`, `or`, `xor`) now emits:
+      - `RunMat:OverIdxReceiverInvalid`
+  - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `overidx_plus_rejects_non_object_receiver_with_identifier`
+    - `overidx_subsref_unsupported_payload_errors_with_identifier`
+    - `overidx_subsasgn_unsupported_payload_errors_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime overidx_plus_rejects_non_object_receiver_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime overidx_subsref_unsupported_payload_errors_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime overidx_subsasgn_unsupported_payload_errors_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:
