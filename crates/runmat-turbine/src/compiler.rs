@@ -21,6 +21,7 @@ struct CompileContext<'a> {
     runmat_call_semantic_function_outputs_id: FuncId,
     runmat_call_semantic_function_values_id: FuncId,
     runmat_call_semantic_function_expanded_values_id: FuncId,
+    runmat_call_feval_expanded_values_id: FuncId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -238,6 +239,7 @@ impl BytecodeCompiler {
         runmat_call_semantic_function_values_id: FuncId,
         _runmat_call_semantic_function_expanded_value_id: FuncId,
         runmat_call_semantic_function_expanded_values_id: FuncId,
+        runmat_call_feval_expanded_values_id: FuncId,
     ) -> Result<()> {
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
@@ -274,6 +276,7 @@ impl BytecodeCompiler {
             runmat_call_semantic_function_outputs_id,
             runmat_call_semantic_function_values_id,
             runmat_call_semantic_function_expanded_values_id,
+            runmat_call_feval_expanded_values_id,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -766,9 +769,38 @@ impl BytecodeCompiler {
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
                     }
+                    Instr::CallFevalExpandMultiOutput(specs, out_count) => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Expanded feval multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+                        let mut call_entries =
+                            Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                        let func = local_stack.pop_entry()?;
+                        call_entries.insert(0, func);
+                        let results = Self::call_feval_expanded_values_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_feval_expanded_values_id,
+                            &call_entries,
+                            specs,
+                            *out_count,
+                        )?;
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
                     Instr::CallBuiltinExpandMultiOutput(_, _, _)
                     | Instr::CallFunctionExpandMultiOutput { .. }
-                    | Instr::CallFevalExpandMultiOutput(_, _)
                     | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => {
                         return Self::unsupported_expanded_call_jit();
                     }
@@ -1363,6 +1395,44 @@ impl BytecodeCompiler {
             runtime_fn,
             &[
                 function_id,
+                args_ptr,
+                arg_count,
+                specs_ptr,
+                spec_count,
+                out_count_value,
+                result_ptr,
+            ],
+        );
+        let status = builder.inst_results(call)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
+    }
+
+    fn call_feval_expanded_values_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_feval_expanded_values_id: FuncId,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
+            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_feval_expanded_values_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 16) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
+        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
+        let call = builder.ins().call(
+            runtime_fn,
+            &[
                 args_ptr,
                 arg_count,
                 specs_ptr,
@@ -2247,7 +2317,7 @@ mod tests {
             source
                 .matches(&["return Self::", "unsupported_expanded_call_jit();"].concat())
                 .count(),
-            1
+            2
         );
         assert_eq!(
             source
@@ -2260,6 +2330,11 @@ mod tests {
                 )
                 .count(),
             1
+        );
+        assert!(
+            source.contains("Instr::CallFevalExpandMultiOutput(specs, out_count) => {")
+                && source.contains("let results = Self::call_feval_expanded_values_jit("),
+            "feval expanded calls should use the typed host bridge, not the generic expanded-call blocker",
         );
     }
 }

@@ -210,6 +210,22 @@ fn declare_host_semantic_expanded_value_outputs_in_module(module: &mut JITModule
         .expect("Failed to declare runmat_call_semantic_function_expanded_values")
 }
 
+fn declare_host_feval_expanded_value_outputs_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr: TurbineValue[] (func + raw args)
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // specs_ptr: TurbineArgSpec[]
+    sig.params.push(AbiParam::new(types::I32)); // specs_len
+    sig.params.push(AbiParam::new(types::I32)); // out_count
+    sig.params.push(AbiParam::new(pointer_type)); // results_ptr: TurbineValue[]
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function("runmat_call_feval_expanded_values", Linkage::Import, &sig)
+        .expect("Failed to declare runmat_call_feval_expanded_values")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -224,6 +240,7 @@ pub struct TurbineEngine {
     runmat_call_semantic_function_values_id: FuncId,
     runmat_call_semantic_function_expanded_value_id: FuncId,
     runmat_call_semantic_function_expanded_values_id: FuncId,
+    runmat_call_feval_expanded_values_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -361,6 +378,10 @@ impl TurbineEngine {
             "runmat_call_semantic_function_expanded_values",
             runmat_call_semantic_function_expanded_values as *const u8,
         );
+        builder.symbol(
+            "runmat_call_feval_expanded_values",
+            runmat_call_feval_expanded_values as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
@@ -377,6 +398,8 @@ impl TurbineEngine {
             declare_host_semantic_expanded_value_call_in_module(&mut module);
         let runmat_call_semantic_function_expanded_values_id =
             declare_host_semantic_expanded_value_outputs_in_module(&mut module);
+        let runmat_call_feval_expanded_values_id =
+            declare_host_feval_expanded_value_outputs_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -393,6 +416,7 @@ impl TurbineEngine {
             runmat_call_semantic_function_values_id,
             runmat_call_semantic_function_expanded_value_id,
             runmat_call_semantic_function_expanded_values_id,
+            runmat_call_feval_expanded_values_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -468,6 +492,7 @@ impl TurbineEngine {
             self.runmat_call_semantic_function_values_id,
             self.runmat_call_semantic_function_expanded_value_id,
             self.runmat_call_semantic_function_expanded_values_id,
+            self.runmat_call_feval_expanded_values_id,
         )?;
 
         // Compile to machine code
@@ -1431,6 +1456,63 @@ pub extern "C" fn runmat_call_semantic_function_expanded_values(
         let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
         if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
             error!("Expanded TurbineValue semantic output write failed: {err}");
+            return 1;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_feval_expanded_values(
+    args_ptr: *const TurbineValue,
+    args_len: i32,
+    specs_ptr: *const TurbineArgSpec,
+    specs_len: i32,
+    out_count: i32,
+    results_ptr: *mut TurbineValue,
+) -> i32 {
+    let requested_out_count = out_count;
+    let output = (|| -> Result<Vec<Value>> {
+        if out_count < 0 {
+            return Err(execution_error("negative TurbineValue output count"));
+        }
+        if out_count > 0 && results_ptr.is_null() {
+            return Err(execution_error("null TurbineValue results pointer"));
+        }
+
+        let mut args = read_turbine_value_args(args_ptr, args_len)?;
+        if args.is_empty() {
+            return Err(execution_error(
+                "expanded Turbine feval call requires callable argument",
+            ));
+        }
+        let callable = args.remove(0);
+        let specs = read_turbine_arg_specs(specs_ptr, specs_len)?;
+        let expanded_args = expand_turbine_args(args, &specs)?;
+        let output = run_immediate(Box::pin(runmat_runtime::call_feval_async_with_outputs(
+            callable,
+            &expanded_args,
+            out_count as usize,
+        )))?
+        .map_err(TurbineError::ExecutionError)?;
+        Ok(match output {
+            Value::OutputList(values) => values,
+            value => vec![value],
+        })
+    })();
+
+    let outputs = match output {
+        Ok(outputs) => outputs,
+        Err(err) => {
+            error!("Expanded Turbine feval outputs call failed: {err}");
+            return 1;
+        }
+    };
+
+    for index in 0..requested_out_count as usize {
+        let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
+        if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
+            error!("Expanded Turbine feval output write failed: {err}");
             return 1;
         }
     }

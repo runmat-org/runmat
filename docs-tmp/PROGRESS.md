@@ -3835,6 +3835,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3/7 Turbine expanded-feval host bridge
+  - Added a typed Turbine host callback path for expanded `feval` execution in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/lib.rs):
+    - `runmat_call_feval_expanded_values(...)` now decodes `TurbineValue` function+argument payloads, expands arguments via `TurbineArgSpec`, and calls `runmat_runtime::call_feval_async_with_outputs(...)`.
+  - Wired the new host callback into Turbine JIT initialization/import signatures and engine compile plumbing (`declare_host_feval_expanded_value_outputs_in_module`, symbol registration, engine `FuncId` field threading).
+  - JIT compile now handles `Instr::CallFevalExpandMultiOutput` via typed host bridge execution in [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), including multi-output `Unpack` shape validation and `TurbineValue` argument/spec marshalling.
+  - The expanded-call blocker remains explicit for non-feval expanded opcodes (`CallBuiltinExpandMultiOutput`, `CallFunctionExpandMultiOutput`, `CallMethodOrMemberIndexExpandMultiOutput`), but feval-expanded is no longer forced through that blocker path.
+  - Validation:
+    - `cargo test -p runmat-turbine --lib -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
