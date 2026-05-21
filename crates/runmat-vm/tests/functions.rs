@@ -196,6 +196,71 @@ fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_ins
 }
 
 #[test]
+fn unresolved_nested_qualified_external_handle_feval_uses_external_handle_instruction() {
+    let source = "h = @pkg.sub.remote; y = feval(h, 1);";
+    let bytecode =
+        compile_semantic_source(source).expect("nested qualified external handle feval compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1)
+    ));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified feval handle call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_instruction() {
+    let source = "h = @pkg.sub.remote; [a,b] = feval(h, 1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified external handle multi-output feval compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
+    ));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified multi-output feval handle call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instruction() {
+    let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = feval(h, C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified external handle expanded feval compiles");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified expanded feval handle call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction() {
     let source = "h = @pkg.remote_inc; y = h(1);";
     let bytecode =

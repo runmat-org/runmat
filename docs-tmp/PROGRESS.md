@@ -4816,6 +4816,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: ratchet nested qualified external-handle `feval(...)` opcode boundaries
+  - Added nested qualified unresolved external-handle `feval` callable contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `unresolved_nested_qualified_external_handle_feval_uses_external_handle_instruction`
+    - `unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_instruction`
+    - `unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instruction`
+  - These ratchet `h = @pkg.sub.remote` `feval` lanes across fixed and expanded argument shapes with explicit opcode boundaries:
+    - `CreateExternalFunctionHandle("pkg.sub.remote")`
+    - fixed-arg `CallFevalMulti(1,1)` and `CallFevalMulti(1,2)`
+    - expanded multi-output `CallFevalExpandMultiOutput(..., 2)`
+    - unresolved runtime identifier remains stable: `RunMat:UndefinedFunction`.
+  - This closes the remaining nested qualified external-handle callable ABI gap where direct-handle invocation (`h(...)`) was fully ratcheted but equivalent `feval(h, ...)` nested coverage was not yet explicit.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_nested_qualified_external_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
