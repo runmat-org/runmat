@@ -257,11 +257,17 @@ fn prepare_callable(
             }
         }
         Value::FunctionHandle(name) => Ok(TimeitCallable {
-            handle: Value::String(format!("@{name}")),
+            handle: semantic_handle_for_name(&name)
+                .unwrap_or_else(|| Value::String(format!("@{name}"))),
             num_outputs,
         }),
         Value::ExternalFunctionHandle(name) => Ok(TimeitCallable {
-            handle: Value::ExternalFunctionHandle(name),
+            handle: if crate::is_well_formed_qualified_name(&name) {
+                semantic_handle_for_name(&name)
+                    .unwrap_or_else(|| Value::ExternalFunctionHandle(name))
+            } else {
+                Value::ExternalFunctionHandle(name)
+            },
             num_outputs,
         }),
         Value::SemanticFunctionHandle { name, function } => Ok(TimeitCallable {
@@ -276,6 +282,14 @@ fn prepare_callable(
             "timeit: first argument must be a function handle, got {other:?}"
         ))),
     }
+}
+
+fn semantic_handle_for_name(name: &str) -> Option<Value> {
+    let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
+    Some(Value::SemanticFunctionHandle {
+        name: name.to_string(),
+        function,
+    })
 }
 
 fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
@@ -299,6 +313,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::IntValue;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     static COUNTER_DEFAULT: AtomicUsize = AtomicUsize::new(0);
     static COUNTER_NUM_OUTPUTS: AtomicUsize = AtomicUsize::new(0);
@@ -380,6 +395,27 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::ExternalFunctionHandle("pkg.callback".to_string())
+        );
+        assert_eq!(callable.num_outputs, Some(2));
+    }
+
+    #[test]
+    fn timeit_external_function_handle_prefers_semantic_resolver_identity() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(86)
+            })));
+        let callable = prepare_callable(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            Some(2),
+        )
+        .expect("timeit should accept external function handle");
+        assert_eq!(
+            callable.handle,
+            Value::SemanticFunctionHandle {
+                name: "pkg.callback".to_string(),
+                function: 86,
+            }
         );
         assert_eq!(callable.num_outputs, Some(2));
     }

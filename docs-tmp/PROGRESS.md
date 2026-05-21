@@ -29,6 +29,25 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime `timeit` callback handle prebinding to semantic identity
+  - `scope: in-scope`
+  - `blocker: `timeit` accepted `FunctionHandle`/qualified `ExternalFunctionHandle` callback values but preserved them as name-shaped handles even when the active semantic resolver already had a stable function identity, keeping avoidable name-resolution churn in repeated callback timing loops.`
+  - Tightened callback preparation in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+    - added `semantic_handle_for_name(...)` and now prebind resolver-known callback names to `Value::SemanticFunctionHandle` during `prepare_callable(...)`.
+    - `FunctionHandle(name)` now prefers semantic identity when available; otherwise preserves existing `@name` string-handle behavior.
+    - well-formed qualified `ExternalFunctionHandle(name)` now prefers semantic identity when available; otherwise preserves existing external-boundary handle behavior.
+  - Added ratchet:
+    - [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+      - `timeit_external_function_handle_prefers_semantic_resolver_identity`
+  - Validation:
+    - `cargo test -p runmat-runtime timeit_accepts_external_function_handle -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_external_function_handle_prefers_semantic_resolver_identity -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_external_function_handle_surfaces_undefined_function -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM expr-slice range-selector scalar/type and metadata arity hardening
   - `scope: in-scope`
   - `blocker: IndexSliceExpr range selector decoding accepted non-numeric start/step operands by silently coercing them to `1.0`, and both expr-slice read/write paths indexed `range_has_step` without explicit arity validation against `range_dims`, leaving malformed metadata to panic instead of failing with typed selector-plan identifiers.`
