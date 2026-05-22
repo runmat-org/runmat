@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+if (typeof window !== "undefined") {
+  import("@/lib/instrumentation-client").catch(() => {
+    // ignore
+  });
+}
 
 export default function AnalyticsBootstrapClient() {
-  useEffect(() => {
-    import("@/lib/instrumentation-client").catch(() => {
-      // ignore
-    });
-  }, []);
-
   return null;
 }

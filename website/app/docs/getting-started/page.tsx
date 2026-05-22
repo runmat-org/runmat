@@ -115,7 +115,7 @@ export default function GettingStartedPage() {
           </h1>
           <p className="text-base text-foreground leading-relaxed mb-6">
             Get up and running in minutes. Try RunMat in your browser with no installation, or install the CLI for the terminal and local scripts.
-            Have existing <code className="rounded bg-muted px-1 py-0.5">.m</code> files? Paste them in the sandbox and run them. The built-in agent can suggest fixes for unsupported functions.
+            Have existing <code className="rounded bg-muted px-1 py-0.5">.m</code> files? Paste them in the sandbox and run them. The built-in agent can suggest fixes for unsupported functions. For a product overview, see the <Link href="/matlab-ai-agent" className="text-primary underline underline-offset-4">RunMat agent</Link>.
           </p>
           {/* Try RunMat Now — primary CTA */}
           <Button

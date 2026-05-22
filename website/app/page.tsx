@@ -176,7 +176,7 @@ const features = [
         in real time as they run, allowing you to complete weeks of permutations
         in days.{" "}
         <Link href="/matlab-ai-agent" className="underline underline-offset-4">
-          Learn more.
+          See how the RunMat agent works.
         </Link>
       </>
     ),

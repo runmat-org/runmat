@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SandboxCta } from "@/components/SandboxCta";
 import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
-import LazyVideo from "@/components/LazyVideo";
+import { TryInBrowserButton } from "@/components/TryInBrowserButton";
 import {
   Cpu,
   FlaskConical,
@@ -27,11 +27,9 @@ import {
   Monitor,
 } from "lucide-react";
 
-const heroVideoSrc = "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4";
-const heroPosterSrc = "https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp";
-
-const agentVideoSrc = "https://web.runmatstatic.com/video/runmat-agent-demo-speaker.mp4";
-const agentPosterSrc = "https://web.runmatstatic.com/video/posters/runmat-agent-demo-speaker.webp";
+const heroVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.mp4";
+const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surface-runmat.webp";
+const agentDiffImageSrc = "https://web.runmatstatic.com/runmat-agent-diff-rain.webp";
 
 // Open question per plan: /sandbox does not yet handle a `?prompt=` query.
 // Cards link to plain /sandbox and display the prompt so users can copy it.
@@ -412,7 +410,7 @@ export default function AgentPage() {
                   playsInline
                   preload="none"
                   poster={heroPosterSrc}
-                  aria-label="RunMat agent extending a clamped plate vibration simulation"
+                  aria-label="RunMat 3D wave surface simulation"
                 >
                   <source src={heroVideoSrc} type="video/mp4" />
                 </video>
@@ -439,8 +437,22 @@ export default function AgentPage() {
                 Describe the system. The agent can draft the script, run it, and help refine the figure. Sandbox sessions are full of wave propagation, electric fields, and thermal diffusion plots.
               </p>
               <div className="rounded-md border border-border/60 bg-foreground/5 px-4 py-3 font-mono text-[0.8125rem] text-foreground/80 leading-relaxed">
-                <span className="select-none text-foreground/40 mr-2">›</span>
-                Visualize the propagation of two interfering waves on a 1m × 1m membrane over 5 seconds.
+                <p>
+                  <span className="select-none text-foreground/40 mr-2">›</span>
+                  Visualize the propagation of two interfering waves on a 1m × 1m membrane over 5 seconds.
+                </p>
+                <div className="mt-3">
+                  <TryInBrowserButton
+                    code="% Visualize the propagation of two interfering waves on a 1m × 1m membrane over 5 seconds."
+                    agentPrompt="Visualize the propagation of two interfering waves on a 1m × 1m membrane over 5 seconds."
+                    source="agent-page-use-case-wave"
+                    exampleId="wave-interference"
+                    size="sm"
+                    className="font-sans"
+                  >
+                    Run prompt
+                  </TryInBrowserButton>
+                </div>
               </div>
             </div>
             <div className="rounded-lg border border-border bg-muted/40 p-8 flex flex-col">
@@ -451,8 +463,22 @@ export default function AgentPage() {
                 Name the parameter and the range. The agent can run the sweep and overlay the traces, so the transition point becomes visible.
               </p>
               <div className="rounded-md border border-border/60 bg-foreground/5 px-4 py-3 font-mono text-[0.8125rem] text-foreground/80 leading-relaxed">
-                <span className="select-none text-foreground/40 mr-2">›</span>
-                Sweep the damping coefficient from 0.01 to 1.0 in 20 steps and overlay the step responses.
+                <p>
+                  <span className="select-none text-foreground/40 mr-2">›</span>
+                  Sweep the damping coefficient from 0.01 to 1.0 in 20 steps and overlay the step responses.
+                </p>
+                <div className="mt-3">
+                  <TryInBrowserButton
+                    code="% Sweep the damping coefficient from 0.01 to 1.0 in 20 steps and overlay the step responses."
+                    agentPrompt="Sweep the damping coefficient from 0.01 to 1.0 in 20 steps and overlay the step responses."
+                    source="agent-page-use-case-damping"
+                    exampleId="damping-sweep"
+                    size="sm"
+                    className="font-sans"
+                  >
+                    Run prompt
+                  </TryInBrowserButton>
+                </div>
               </div>
             </div>
             <div className="rounded-lg border border-border bg-muted/40 p-8 flex flex-col">
@@ -463,8 +489,22 @@ export default function AgentPage() {
                 Describe both designs and choose the metric. The agent can run the comparison and show the tradeoff.
               </p>
               <div className="rounded-md border border-border/60 bg-foreground/5 px-4 py-3 font-mono text-[0.8125rem] text-foreground/80 leading-relaxed">
-                <span className="select-none text-foreground/40 mr-2">›</span>
-                Compare a 2nd-order Butterworth and a 4th-order Bessel filter at the same cutoff. Which has less phase distortion?
+                <p>
+                  <span className="select-none text-foreground/40 mr-2">›</span>
+                  Compare a 2nd-order Butterworth and a 4th-order Bessel filter at the same cutoff. Which has less phase distortion?
+                </p>
+                <div className="mt-3">
+                  <TryInBrowserButton
+                    code="% Compare a 2nd-order Butterworth and a 4th-order Bessel filter at the same cutoff. Which has less phase distortion?"
+                    agentPrompt="Compare a 2nd-order Butterworth and a 4th-order Bessel filter at the same cutoff. Which has less phase distortion?"
+                    source="agent-page-use-case-filter"
+                    exampleId="filter-comparison"
+                    size="sm"
+                    className="font-sans"
+                  >
+                    Run prompt
+                  </TryInBrowserButton>
+                </div>
               </div>
             </div>
             <div className="rounded-lg border border-border bg-muted/40 p-8 flex flex-col">
@@ -475,8 +515,22 @@ export default function AgentPage() {
                 List the constraints and the metric that matters. The agent can test parameter sets, compare the results, and return the code behind the strongest candidate.
               </p>
               <div className="rounded-md border border-border/60 bg-foreground/5 px-4 py-3 font-mono text-[0.8125rem] text-foreground/80 leading-relaxed">
-                <span className="select-none text-foreground/40 mr-2">›</span>
-                Use a simple beam-stress formula to compare steel beam thicknesses for a 1 kN/m load over a 2 m span. Plot stress versus weight and return the code behind the best option.
+                <p>
+                  <span className="select-none text-foreground/40 mr-2">›</span>
+                  Use a simple beam-stress formula to compare steel beam thicknesses for a 1 kN/m load over a 2 m span. Plot stress versus weight and return the code behind the best option.
+                </p>
+                <div className="mt-3">
+                  <TryInBrowserButton
+                    code="% Use a simple beam-stress formula to compare steel beam thicknesses for a 1 kN/m load over a 2 m span. Plot stress versus weight and return the code behind the best option."
+                    agentPrompt="Use a simple beam-stress formula to compare steel beam thicknesses for a 1 kN/m load over a 2 m span. Plot stress versus weight and return the code behind the best option."
+                    source="agent-page-use-case-beam"
+                    exampleId="beam-stress"
+                    size="sm"
+                    className="font-sans"
+                  >
+                    Run prompt
+                  </TryInBrowserButton>
+                </div>
               </div>
             </div>
           </div>
@@ -685,31 +739,30 @@ export default function AgentPage() {
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto max-w-[58rem] text-center mb-12">
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
-              A session, end to end
+              Designed for agent-in-the-loop engineering
             </h2>
             <p className="mx-auto mt-6 max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Ask for a damped vibration model. The agent writes the first script, runs it, reads the response, sweeps the damping range, compares the plots, and returns the code diff that produced the result.
+              Ask RunMat to change a simulation and the agent works inside the runtime: it edits MATLAB-syntax code, runs it, reads plots and variables, then returns the exact diff behind the result. Keep the change, revert it, or continue iterating without losing the path that got you there.
             </p>
           </div>
-          <div className="mx-auto max-w-3xl">
-            <div className="rounded-lg border border-border overflow-hidden elevated-panel">
+          <div className="mx-auto max-w-5xl">
+            <div className="overflow-hidden rounded-lg border border-border elevated-panel">
               <Link
                 href="/sandbox"
                 className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden"
                 data-ph-capture-attribute-destination="sandbox"
-                data-ph-capture-attribute-source="agent-page-agent-video"
+                data-ph-capture-attribute-source="agent-page-agent-diff"
                 data-ph-capture-attribute-cta="try-runmat-agent"
+                aria-label="Open the RunMat sandbox"
               >
-                <LazyVideo
-                  className="w-full h-auto"
-                  muted
-                  loop
-                  playsInline
-                  poster={agentPosterSrc}
-                  aria-label="RunMat agent exploring a speaker interference pattern in 3D — opens the sandbox"
-                >
-                  <source src={agentVideoSrc} type="video/mp4" />
-                </LazyVideo>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={agentDiffImageSrc}
+                  alt="RunMat agent showing a reviewable code diff beside runtime context"
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full"
+                />
               </Link>
             </div>
           </div>
@@ -724,7 +777,7 @@ export default function AgentPage() {
               Runnable prompts for the sandbox
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              These are small, current examples: paste one into the sandbox and watch the agent create, run, inspect, and revise.
+              These are small, current examples: open one in the sandbox and watch the agent create, run, inspect, and revise.
             </p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -737,15 +790,16 @@ export default function AgentPage() {
                 <p className="text-[0.875rem] text-foreground mt-2 font-mono leading-relaxed flex-1">
                   {p.prompt}
                 </p>
-                <Link
-                  href="/sandbox"
-                  className="text-sm text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 mt-4 inline-flex items-center gap-1"
-                  data-ph-capture-attribute-destination="sandbox"
-                  data-ph-capture-attribute-source={`agent-page-prompt-${p.id}`}
-                  data-ph-capture-attribute-cta="open-sandbox-with-prompt"
+                <TryInBrowserButton
+                  code={`% ${p.prompt}`}
+                  agentPrompt={p.prompt}
+                  source={`agent-page-prompt-${p.id}`}
+                  exampleId={p.id}
+                  size="sm"
+                  className="mt-4 w-fit"
                 >
-                  Open in sandbox <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
+                  Run prompt
+                </TryInBrowserButton>
               </div>
             ))}
           </div>
@@ -769,8 +823,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">MATLAB Copilot</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Best at: MATLAB-aware chat, code generation, and explanations inside MATLAB.</p>
-                  <p className="text-red-600 dark:text-red-400">Missing: RunMat&apos;s reviewable project diffs, open runtime, and no-license workflow.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-emerald-300/80">Best at:</span> MATLAB-aware chat, code generation, and explanations inside MATLAB.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-rose-300/80">Missing:</span> RunMat&apos;s reviewable project diffs, open runtime, and no-license workflow.</p>
                 </div>
               </CardContent>
             </Card>
@@ -778,8 +832,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">ChatGPT, Claude, Gemini</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Best at: strong reasoning and useful MATLAB-syntax code suggestions.</p>
-                  <p className="text-red-600 dark:text-red-400">Missing: running the code, seeing variables and plots, and keeping edits tied to the project.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-emerald-300/80">Best at:</span> strong reasoning and useful MATLAB-syntax code suggestions.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-rose-300/80">Missing:</span> running the code, seeing variables and plots, and keeping edits tied to the project.</p>
                 </div>
               </CardContent>
             </Card>
@@ -787,8 +841,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">Cursor and other AI IDEs</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Best at: editing files, refactoring code, and working through software projects.</p>
-                  <p className="text-red-600 dark:text-red-400">Missing: treating MATLAB-syntax execution, tensors, figures, and runtime output as first-class context.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-emerald-300/80">Best at:</span> editing files, refactoring code, and working through software projects.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-rose-300/80">Missing:</span> treating MATLAB-syntax execution, tensors, figures, and runtime output as first-class context.</p>
                 </div>
               </CardContent>
             </Card>
@@ -796,8 +850,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">Spreadsheet + ChatGPT stitching</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Best at: quick models with familiar tools you already have open.</p>
-                  <p className="text-red-600 dark:text-red-400">Missing: a continuous loop between data, code, plots, runtime output, and reviewable history.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-emerald-300/80">Best at:</span> quick models with familiar tools you already have open.</p>
+                  <p className="text-muted-foreground"><span className="font-medium text-rose-300/80">Missing:</span> a continuous loop between data, code, plots, runtime output, and reviewable history.</p>
                 </div>
               </CardContent>
             </Card>
