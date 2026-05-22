@@ -232,9 +232,9 @@ const surfaces = [
 ] as const;
 
 const mediaToneClasses = {
-  muted: "border-border bg-muted text-foreground",
-  brand: "border-brand/30 bg-brand/15 text-foreground",
-  surface: "border-border bg-card text-card-foreground",
+  muted: "bg-muted text-foreground",
+  brand: "bg-brand/15 text-foreground",
+  surface: "bg-card text-card-foreground",
 } as const;
 
 function SurfaceIcon({ type }: { type: "desktop" | "browser" | "cli" }) {
@@ -322,7 +322,7 @@ export default function HomePage() {
                     role="img"
                     aria-label={feature.mediaLabel}
                     className={cn(
-                      "relative aspect-[16/9] w-full overflow-hidden rounded-2xl border 2xl:aspect-auto 2xl:min-h-[430px]",
+                      "relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border 2xl:aspect-auto 2xl:min-h-[430px]",
                       mediaToneClasses[feature.tone],
                     )}
                   >
