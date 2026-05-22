@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import LazyVideo from "@/components/LazyVideo";
 import { Button } from "@/components/ui/button";
-import Media, { type MediaTone } from "@/components/Media";
+import { cn } from "@/lib/utils";
 
 interface HeroLink {
   label: ReactNode;
@@ -21,9 +22,18 @@ interface HeroProps {
   media: {
     label: string;
     note?: string;
-    tone?: MediaTone;
+    tone?: "muted" | "brand" | "surface";
+    image?: string;
+    poster?: string;
+    video?: string;
   };
 }
+
+const mediaToneClasses = {
+  muted: "border-border bg-muted text-foreground",
+  brand: "border-brand/30 bg-brand/15 text-foreground",
+  surface: "border-border bg-card text-card-foreground",
+} as const;
 
 export default function Hero({
   title,
@@ -79,12 +89,35 @@ export default function Hero({
         </div>
 
         <div className="mx-auto mt-24 max-w-5xl pb-20 md:mt-32">
-          <Media
-            label={media.label}
-            note={media.note}
-            tone={media.tone}
-            className="min-h-[360px] rounded-3xl shadow-2xl shadow-foreground/10"
-          />
+          <div
+            role="img"
+            aria-label={media.label}
+            className={cn(
+              "relative aspect-video w-full overflow-hidden rounded-3xl border",
+              mediaToneClasses[media.tone ?? "muted"],
+            )}
+          >
+            {media.video ? (
+              <LazyVideo
+                className="absolute inset-0 h-full w-full object-cover"
+                muted
+                loop
+                playsInline
+                initialPosterVariant="poster"
+                poster={media.poster}
+                aria-label={media.label}
+              >
+                <source src={media.video} type="video/mp4" />
+              </LazyVideo>
+            ) : media.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={media.image}
+                alt={media.label}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            ) : null}
+          </div>
         </div>
       </div>
     </section>

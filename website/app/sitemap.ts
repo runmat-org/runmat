@@ -27,28 +27,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
       videos: [
         {
-          title: 'RunMat wave interference simulation',
-          thumbnail_loc: `${videoPosters}/runmat-wave-simulation.png`,
-          content_loc: `${videoBase}/runmat-wave-simulation.mp4`,
-          description: 'GPU-accelerated wave interference simulation rendered in real time using RunMat surf().',
-        },
-        {
-          title: 'RunMat 3D interactive plotting',
-          thumbnail_loc: `${videoPosters}/3d-interactive-plotting-runmat.png`,
-          content_loc: `${videoBase}/3d-interactive-plotting-runmat.mp4`,
-          description: 'GPU-accelerated 3D surface plots running in the browser with no install or license required.',
-        },
-        {
-          title: 'RunMat shape tracking and type system',
-          thumbnail_loc: `${videoPosters}/runmat-shape-tracking.png`,
-          content_loc: `${videoBase}/runmat-shape-tracking.mp4`,
-          description: 'Variable explorer showing real-time shape, type, and value inspection while running MATLAB code.',
-        },
-        {
-          title: 'RunMat automatic versioning',
-          thumbnail_loc: `${videoPosters}/runmat-versioning.png`,
-          content_loc: `${videoBase}/runmat-versioning.mp4`,
-          description: 'Automatic file history and project snapshots with no git setup required.',
+          title: 'RunMat 3D wave surface simulation',
+          thumbnail_loc: `${videoPosters}/3D-wave-surface-runmat.webp`,
+          content_loc: `${videoBase}/3D-wave-surface-runmat.mp4`,
+          description: 'RunMat renders and iterates on a 3D wave surface simulation with runtime-aware engineering feedback.',
         },
       ],
     },
