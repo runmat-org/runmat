@@ -119,6 +119,7 @@ impl PatchPlot {
 
     pub fn set_force_3d(&mut self, force_3d: bool) {
         self.force_3d = force_3d;
+        self.mark_dirty();
     }
 
     pub fn set_vertices(&mut self, vertices: Vec<Vec3>) -> Result<(), String> {

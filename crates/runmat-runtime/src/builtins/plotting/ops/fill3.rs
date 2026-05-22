@@ -165,13 +165,17 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
 fn find_trailing_property_start(args: &[Value]) -> usize {
     let mut idx = args.len();
     while idx >= 2 {
-        if super::patch::is_property_name(&args[idx - 2]) {
+        if is_string_like(&args[idx - 2]) || super::patch::is_property_name(&args[idx - 2]) {
             idx -= 2;
         } else {
             break;
         }
     }
     idx
+}
+
+fn is_string_like(value: &Value) -> bool {
+    matches!(value, Value::CharArray(_) | Value::String(_))
 }
 
 fn handles_value(handles: Vec<f64>) -> Value {
@@ -302,5 +306,21 @@ mod tests {
         assert_eq!(patch.edge_color_mode(), PatchEdgeColorMode::None);
         assert_eq!(patch.face_color_mode(), PatchFaceColorMode::Color);
         assert_eq!(patch.face_alpha(), 0.5);
+    }
+
+    #[test]
+    fn fill3_unknown_trailing_string_keys_are_property_pairs() {
+        let args = vec![
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+            tensor(3, 1, &[0.25, 0.5, 0.75]),
+            tensor(1, 3, &[0.25, 0.5, 0.75]),
+            Value::String("FuturePatchProperty".into()),
+            Value::Num(1.0),
+            Value::CharArray(runmat_builtins::CharArray::new_row("AnotherFutureProperty")),
+            Value::String("value".into()),
+        ];
+
+        assert_eq!(find_trailing_property_start(&args), 4);
     }
 }
