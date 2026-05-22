@@ -20,7 +20,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [COMPLETION_AUDIT.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/COMPLETION_AUDIT.md) now marks Objective Item 3 achieved and includes prompt-to-artifact checklist rows for queue items.
     - [NEXT_STEPS.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/NEXT_STEPS.md) gap classification language now marks remaining notes as post-closeout design work rather than active Objective Item 3 blockers.
   - Targeted queue evidence rerun on 2026-05-21:
-    - `cargo test -p runmat-vm primary_compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm --test basics struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates -- --nocapture`
     - `cargo test -p runmat-vm --test basics object_aggregate_literal_uses_typed_instruction_and_sets_properties -- --nocapture`
     - `cargo test -p runmat-vm --test spawn_semantic_lifecycle semantic_async_spawn_varargout_ -- --nocapture`
@@ -50,7 +50,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - parser: `parse_struct_aggregate_literal`, `parse_object_aggregate_literal`
     - HIR: `struct_aggregate_literal_lowers_with_field_order_and_duplicates`, `object_aggregate_literal_lowers_to_typed_object_literal`
     - MIR: `struct_aggregate_literal_lowers_to_mir_struct_literal`, `object_aggregate_literal_lowers_to_mir_object_literal`
-    - VM compile: `primary_compile_lowers_struct_aggregate_literal_to_typed_instruction`, `primary_compile_lowers_object_aggregate_literal_to_typed_instruction`
+    - VM compile: `compile_lowers_struct_aggregate_literal_to_typed_instruction`, `compile_lowers_object_aggregate_literal_to_typed_instruction`
     - VM runtime: `struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates`, `object_aggregate_literal_uses_typed_instruction_and_sets_properties`
   - Validation:
     - `cargo fmt --all --check`
@@ -108,12 +108,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `mir_runtime_name_callee(...)` now only derives names for explicit static-call identity shapes (`Builtin`, `DynamicName`, well-formed multi-segment `ExternalName`, and valid `Imported`).
     - unsupported/non-static-call identity shapes (including `Method`) now return `None` and fail with existing compile identifier `RunMat:MirCallTargetNameInvalid`.
   - Added compile ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_static_call_with_method_identity_name_shape`
-    - `primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape`
+    - `compile_rejects_static_call_with_method_identity_name_shape`
+    - `compile_rejects_multi_assign_static_call_with_method_identity_name_shape`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_method_identity_name_shape -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_single_segment_external_identity -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_static_call_with_method_identity_name_shape -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_multi_assign_static_call_with_method_identity_name_shape -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_static_call_with_single_segment_external_identity -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
 
@@ -158,9 +158,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `compile_mir_output_target_store(...)` now rejects top-level `MirPlace::Index` targets unless `indexing.result_context == AssignmentTarget`.
     - malformed contexts now fail with stable identifier `RunMat:MirIndexContextInvalid`.
   - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`
+    - `compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_multi_assign_index_target_context_mismatch_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -173,9 +173,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `compile_mir_assign(...)` now rejects non-delete `MirPlace::Index` assignment targets unless `indexing.result_context == AssignmentTarget`.
     - malformed contexts now fail with stable identifier `RunMat:MirIndexContextInvalid`.
   - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_index_assignment_with_read_context_identifier`
+    - `compile_rejects_index_assignment_with_read_context_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_index_assignment_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_index_assignment_with_read_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -189,11 +189,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - brace index store-back lowering now enforces the same assignment/deletion-compatible context invariant instead of bypassing context checks.
     - malformed helper-path indexed contexts now fail with stable identifier `RunMat:MirIndexContextInvalid`.
   - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
-    - `primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier`
+    - `compile_rejects_member_store_back_brace_index_with_read_context_identifier`
+    - `compile_rejects_member_store_back_paren_index_with_read_context_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -207,11 +207,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - recursive assignment-base lowering for member/member-dynamic/indexed bases now threads the same context through nested base expressions.
   - Added regression coverage:
     - HIR semantic-lowering contract in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs): `member_assignment_indexed_base_uses_assignment_target_context`.
-    - VM compile+execute contract in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs): `primary_compile_interprets_member_store_back_paren_assignment`.
+    - VM compile+execute contract in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs): `compile_interprets_member_store_back_paren_assignment`.
   - Validation:
     - `cargo test -p runmat-hir member_assignment_indexed_base_uses_assignment_target_context -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_interprets_member_store_back_paren_assignment -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_interprets_member_store_back_paren_assignment -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -223,12 +223,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added HIR semantic-lowering coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
     - `dynamic_member_assignment_indexed_base_uses_assignment_target_context`
   - Added VM compile/runtime coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier`
-    - `primary_compile_interprets_dynamic_member_store_back_paren_assignment`
+    - `compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier`
+    - `compile_interprets_dynamic_member_store_back_paren_assignment`
   - Validation:
     - `cargo test -p runmat-hir dynamic_member_assignment_indexed_base_uses_assignment_target_context -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_interprets_dynamic_member_store_back_paren_assignment -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_interprets_dynamic_member_store_back_paren_assignment -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -240,12 +240,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added HIR semantic-lowering coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
     - `dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context`
   - Added VM compile/runtime coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier`
-    - `primary_compile_interprets_dynamic_member_store_back_brace_assignment`
+    - `compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier`
+    - `compile_interprets_dynamic_member_store_back_brace_assignment`
   - Validation:
     - `cargo test -p runmat-hir dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_interprets_dynamic_member_store_back_brace_assignment -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_interprets_dynamic_member_store_back_brace_assignment -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -262,20 +262,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - MIR: `indexed_member_delete_lowers_to_index_place_over_member_base`
     - VM: `indexed_member_delete_executes_with_semantic_store_back`, `indexed_cell_content_delete_executes_with_semantic_store_back`
   - Preserved non-delete malformed-context ratchets:
-    - `primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier`
-    - `primary_compile_rejects_member_store_back_brace_index_with_deletion_context_identifier`
-    - `primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier`
-    - `primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier`
+    - `compile_rejects_member_store_back_paren_index_with_deletion_context_identifier`
+    - `compile_rejects_member_store_back_brace_index_with_deletion_context_identifier`
+    - `compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier`
+    - `compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier`
   - Validation:
     - `cargo test -p runmat-hir --test semantic_lowering empty_array_indexed_member_assignment_records_deletion_target -- --nocapture`
     - `cargo test -p runmat-hir --test semantic_lowering empty_array_indexed_cell_content_assignment_records_deletion_target -- --nocapture`
     - `cargo test -p runmat-mir --test lowering indexed_member_delete_lowers_to_index_place_over_member_base -- --nocapture`
     - `cargo test -p runmat-vm --test functions indexed_member_delete_executes_with_semantic_store_back -- --nocapture`
     - `cargo test -p runmat-vm --test functions indexed_cell_content_delete_executes_with_semantic_store_back -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -285,9 +285,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `scope: in-scope`
   - `blocker: after tightening helper store-back assignment context invariants, compile ratchet coverage only asserted one member-over-paren malformed `DeletionTarget` case, leaving sibling member/dynamic-member brace/paren helper paths without explicit malformed-context contracts.`
   - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_member_store_back_brace_index_with_deletion_context_identifier`
-    - `primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier`
-    - `primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier`
+    - `compile_rejects_member_store_back_brace_index_with_deletion_context_identifier`
+    - `compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier`
+    - `compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier`
   - These malformed helper-path contexts now all fail with stable identifier `RunMat:MirIndexContextInvalid`.
   - Validation:
     - `cargo test -p runmat-vm member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
@@ -324,11 +324,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `scope: in-scope`
   - `blocker: compile invariant coverage for indexed assignment/output-target assignment contexts previously asserted only read-context mismatch variants, leaving malformed `DeletionTarget` metadata unratcheted on two top-level assignment boundaries.`
   - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_index_assignment_with_deletion_context_identifier` (expects `RunMat:MirDeletionContextWithoutDeleteInvalid`).
-    - `primary_compile_rejects_multi_assign_index_target_deletion_context_identifier` (expects `RunMat:MirIndexContextInvalid`).
+    - `compile_rejects_index_assignment_with_deletion_context_identifier` (expects `RunMat:MirDeletionContextWithoutDeleteInvalid`).
+    - `compile_rejects_multi_assign_index_target_deletion_context_identifier` (expects `RunMat:MirIndexContextInvalid`).
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_index_assignment_with_deletion_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_multi_assign_index_target_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_index_assignment_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_multi_assign_index_target_deletion_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -342,15 +342,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added MIR shape coverage in [lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/tests/lowering.rs):
     - `indexed_dynamic_member_delete_lowers_to_index_place_over_dynamic_member_base`
   - Added VM compile+execute coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_interprets_dynamic_member_nested_index_delete_store_back`
+    - `compile_interprets_dynamic_member_nested_index_delete_store_back`
   - Clarified parser boundary in the VM contract source form:
     - dynamic member syntax remains assignment-target supported (`s(1).(f)(2) = []`) while general expression form `s.(f)` is not used as a readback expression in this ratchet; readback is performed via `getfield(s(1), f)`.
   - Validation:
     - `cargo test -p runmat-hir --test semantic_lowering empty_array_indexed_dynamic_member_assignment_records_deletion_target -- --nocapture`
     - `cargo test -p runmat-mir --test lowering indexed_dynamic_member_delete_lowers_to_index_place_over_dynamic_member_base -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_interprets_dynamic_member_nested_index_delete_store_back -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_interprets_dynamic_member_nested_index_delete_store_back -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -379,9 +379,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - both `compile_mir_call_for_multi_assign(...)` and `compile_mir_call(...)` now require `mir_runtime_name_callee(...)` to resolve for static non-builtin/non-semantic identities before emitting `CallFunction*` opcodes.
     - malformed static callee identities now fail with stable identifier `RunMat:MirCallTargetNameInvalid`.
   - Added ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
-    - `primary_compile_rejects_static_call_with_single_segment_external_identity`
-    - `primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape`
+    - `compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
+    - `compile_rejects_static_call_with_single_segment_external_identity`
+    - `compile_rejects_multi_assign_static_call_with_invalid_name_shape`
   - Validation:
     - `cargo test -p runmat-vm static_call_with_ -- --nocapture`
     - `cargo fmt --all --check`
@@ -397,10 +397,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) imported function-handle runtime-name extraction now enforces the same `DefPath` leaf-alignment invariant before emitting `CreateExternalFunctionHandle(...)`.
   - Added ratchets:
     - `callable_name_fallback_policies_require_well_formed_external_names` (extended imported mismatch assertions)
-    - `primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier`
+    - `compile_rejects_imported_function_handle_mismatched_item_with_identifier`
   - Validation:
     - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_imported_function_handle_mismatched_item_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -413,9 +413,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - method function-handle targets now fail at compile boundaries with `RunMat:MirFunctionHandleTargetUnsupported`.
     - textual runtime-name derivation remains only for builtin/dynamic/external/imported handle targets.
   - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_method_function_handle_target_with_identifier`
+    - `compile_rejects_method_function_handle_target_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_method_function_handle_target_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_method_function_handle_target_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -863,7 +863,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm feval_expand_cell_indices_support_end_offsets -- --nocapture`
     - `cargo test -p runmat-vm feval_expand_cell_fractional_index_errors -- --nocapture`
     - `cargo test -p runmat-vm --lib expand_cell_indices_rejects_ -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
+    - `cargo test -p runmat-vm compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1009,7 +1009,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - both malformed imported forms now return `None` for `vm_fallback_name_for(...)` and `semantic_resolution_name_for(...)`.
   - Validation:
     - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_imported_function_handle_missing_item_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_imported_function_handle_missing_item_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1022,11 +1022,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `mir_runtime_name_callee(...)` now rejects `CallableIdentity::Imported` targets when `DefPath.item` is empty.
     - malformed imported handle targets now fail with `RunMat:MirFunctionHandleNameMissing`.
   - Added compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_imported_function_handle_missing_item_with_identifier`
+    - `compile_rejects_imported_function_handle_missing_item_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_imported_function_handle_missing_item_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_single_segment_external_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_imported_function_handle_missing_item_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_imported_module_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_single_segment_external_function_handle_name_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1039,11 +1039,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `mir_runtime_name_callee(...)` now rejects `CallableIdentity::ExternalName` when segment count is `<= 1`.
     - malformed single-segment external handle targets now fail with `RunMat:MirFunctionHandleNameMissing`.
   - Added compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_single_segment_external_function_handle_name_with_identifier`
+    - `compile_rejects_single_segment_external_function_handle_name_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_single_segment_external_function_handle_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_method_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_single_segment_external_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_method_function_handle_name_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1053,12 +1053,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `scope: in-scope`
   - `blocker: strict function-handle compile-name gating was ratcheted for malformed external and empty builtin/dynamic identities, but empty method/imported module-path identities were not explicitly pinned, leaving a regression seam on textual handle identity normalization.`
   - Added compile-level identifier ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_empty_method_function_handle_name_with_identifier`
-    - `primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier`
+    - `compile_rejects_empty_method_function_handle_name_with_identifier`
+    - `compile_rejects_empty_imported_module_function_handle_name_with_identifier`
   - Both assert compile-time rejection `RunMat:MirFunctionHandleNameMissing`.
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_method_function_handle_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_method_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_imported_module_function_handle_name_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1074,12 +1074,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
       - builtin/dynamic handles still lower to `Instr::CreateFunctionHandle`
       - external/imported/method handles still lower to `Instr::CreateExternalFunctionHandle`.
   - Added compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier`
-    - `primary_compile_rejects_empty_builtin_function_handle_name_with_identifier`
+    - `compile_rejects_empty_dynamic_function_handle_name_with_identifier`
+    - `compile_rejects_empty_builtin_function_handle_name_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_builtin_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_dynamic_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_builtin_function_handle_name_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1704,12 +1704,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
       - `scalar_end_div_indexing_rejects_fractional_result`
     - [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_rejects_fractional_cell_end_expression_read_index`
+      - `compile_rejects_fractional_cell_end_expression_read_index`
   - Validation:
     - `cargo test -p runmat-vm selector_from_value_dim_rejects_fractional_numeric_indices -- --nocapture`
     - `cargo test -p runmat-vm linear_indices_reject_fractional_tensor_indices -- --nocapture`
     - `cargo test -p runmat-vm scalar_end_div_indexing_rejects_fractional_result -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_fractional_cell_end_expression_read_index -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_fractional_cell_end_expression_read_index -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
     - `cargo fmt --all --check`
@@ -1722,15 +1722,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - Empty-shape linear growth now normalizes to row-vector expansion for `5x0` and `0x5` inputs (`C{3}=...` -> `1x3`), matching MATLAB R2019a behavior for curly-brace expansion consistency.
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows store-context end-expression/end-offset selectors to resolve beyond current extent for growth paths, while read paths remain bounds-checked.
   - Added compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`
-    - `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
-    - `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
-    - `primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector`
+    - `compile_supports_cell_brace_linear_gap_growth_for_vectors`
+    - `compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
+    - `compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
+    - `compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_linear_gap_growth_for_vectors -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_supports_cell_brace_linear_gap_growth_for_vectors -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector -- --nocapture`
     - `cargo test -p runmat-vm --lib -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
@@ -1743,11 +1743,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now expands 2-D cell arrays for brace assignments outside current bounds (`C{r,c}=...`) and fills intervening cells with `0x0 double` values.
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows `end+1` growth in brace-store paths for subscript dimensions (not only linear vector selectors).
     - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers`
-      - `primary_compile_supports_cell_brace_end_plus_one_subscript_growth`
+      - `compile_supports_cell_brace_subscript_growth_with_empty_fillers`
+      - `compile_supports_cell_brace_end_plus_one_subscript_growth`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_end_plus_one_subscript_growth -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_supports_cell_brace_subscript_growth_with_empty_fillers -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_supports_cell_brace_end_plus_one_subscript_growth -- --nocapture`
     - `cargo test -p runmat-vm --lib -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
@@ -1928,9 +1928,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added stable VM compile identifier for malformed/unnamable external/imported/method function-handle targets in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `RunMat:MirFunctionHandleNameMissing`
   - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
+    - `compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1959,11 +1959,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads
     - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants
   - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_mir_number_literal_with_identifier`
-    - `primary_compile_rejects_unknown_mir_constant_with_identifier`
+    - `compile_rejects_invalid_mir_number_literal_with_identifier`
+    - `compile_rejects_unknown_mir_constant_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_number_literal_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_unknown_mir_constant_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_mir_number_literal_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_unknown_mir_constant_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -1993,9 +1993,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `scope: in-scope`
   - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so `MirIndexPlan::Scalar` now rejects selector operands that encode range/end expression semantics; these selectors must lower through `IndexSliceExpr`.
   - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
+    - `compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_scalar_plan_with_range_expr_component_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -2005,11 +2005,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `scope: in-scope`
   - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so MIR method-syntax calls (`Method`/`DottedInvoke`) now reject non-static or semantic-function callees with stable identifier `RunMat:MirMethodCallCalleeInvalid` instead of falling through dynamic-call lowering.
   - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_mir_method_call_callee_with_identifier`
-    - `primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
+    - `compile_rejects_invalid_mir_method_call_callee_with_identifier`
+    - `compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_method_call_callee_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -2019,9 +2019,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `scope: in-scope`
   - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so `MirIndexPlan::Slice` now rejects range/end expression selector operands that must lower through `IndexSliceExpr`, with stable identifier `RunMat:MirSliceIndexPlanInvalid`.
   - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier`
+    - `compile_rejects_slice_plan_with_range_expr_component_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_slice_plan_with_range_expr_component_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -2073,12 +2073,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirSliceIndexPlanInvalid`
   - Compiler now emits these identifiers when MIR selector-plan invariants are violated (for example scalar plan carrying non-expression selector components, or slice plan carrying nonzero `end` offsets that should lower through slice-expr paths).
   - Added compile-level ratchet coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_scalar_index_plan_with_identifier`
-    - `primary_compile_rejects_invalid_slice_index_plan_with_identifier`
+    - `compile_rejects_invalid_scalar_index_plan_with_identifier`
+    - `compile_rejects_invalid_slice_index_plan_with_identifier`
     using controlled MIR mutation to verify explicit invariant rejection identifiers.
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_scalar_index_plan_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_slice_index_plan_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_scalar_index_plan_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_slice_index_plan_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -2103,12 +2103,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - MIR cell-selector invariant coverage completion ratchet
   - `scope: in-scope`
   - Added compile-level invariant coverage for the remaining MIR cell selector-plan identifier contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_paren_cell_plan_with_identifier` -> `RunMat:MirParenCellPlanInvalid`
-    - `primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier` -> `RunMat:MirCellExpandPlanInvalid`
+    - `compile_rejects_invalid_paren_cell_plan_with_identifier` -> `RunMat:MirParenCellPlanInvalid`
+    - `compile_rejects_invalid_cell_expand_all_shape_with_identifier` -> `RunMat:MirCellExpandPlanInvalid`
   - These tests intentionally mutate lowered MIR to invalid cell selector-plan states to verify compiler-side invariant rejection with stable identifiers.
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_paren_cell_plan_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_paren_cell_plan_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_cell_expand_all_shape_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -2402,10 +2402,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 3/4 async expansion-call future-descriptor lowering ratchet
   - Added VM compile/interpret coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_lowers_async_expansion_call_to_future_expand_instruction`
+    - `compile_lowers_async_expansion_call_to_future_expand_instruction`
   - Contract: async direct calls with comma-list expansion (`args{:}`) lower to lazy future-descriptor instruction form (`CreateSemanticFutureExpandMultiOutput`) rather than eager semantic call execution.
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_lowers_async_expansion_call_to_future_expand_instruction -- --nocapture`
+    - `cargo test -p runmat-vm compile_lowers_async_expansion_call_to_future_expand_instruction -- --nocapture`
 
 - (pending commit) Plan 7 fusion planner metadata now records runtime graph source
   - Fusion planner metadata in [types.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/fusion/types.rs) now carries `accel_graph_source` alongside `accel_graph_state`.
@@ -2449,10 +2449,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 7 compile fusion ratchet for multi-window node-assignment boundary
   - Added VM compile regression coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation`
+    - `compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation`
   - Contract: compile-time semantic fusion groups remain node-empty even across multiple semantic instruction windows split by non-accelerable operations; accel node reconciliation is runtime-owned (`prepare_fusion_plan`), not compile-owned.
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation -- --nocapture`
+    - `cargo test -p runmat-vm compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation -- --nocapture`
 
 - (pending commit) Plan 7 core error-namespace ratchet now requires identifier prefix
   - Tightened namespace compatibility coverage in [error_namespace_compat.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/error_namespace_compat.rs) to require namespace prefixing on the error identifier itself, removing the transitional message-fragment fallback (`identifier_ok || message_ok`).
@@ -2495,8 +2495,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --test fusion_gpu direct_execution_of_safe_followup_group_returns_gpu_tensor -- --nocapture`
     - `cargo test -p runmat-vm --test fusion_gpu explained_variance_matches_cpu -- --nocapture`
     - `cargo test -p runmat-vm --test matrix_division -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`
+    - `cargo test -p runmat-vm compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`
+    - `cargo test -p runmat-vm compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`
     - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
   - Follow-up status:
     - `fused_safe_followup_builtins_remain_resident` regression is now green on branch after scalar-only fusion bypass and scalar-shaped plan-support guards.
@@ -2504,7 +2504,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 7 test-surface decoupling from compile accel-graph artifacts
   - VM compile-unit fusion tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now assert runtime graph materialization/reconciliation (`runtime_accel_graph_for_fusion`, `prepare_fusion_plan`) instead of asserting compile-populated `bytecode.accel_graph` presence.
   - Matrix-division semantic coverage in [matrix_division.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/matrix_division.rs) now asserts observable division behavior contracts (operator parity vs `mrdivide`/`mldivide` and scalar `/` vs `./`) rather than accel-graph node-shape internals.
-  - Validation: `cargo test -p runmat-vm --test matrix_division -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`.
+  - Validation: `cargo test -p runmat-vm --test matrix_division -- --nocapture`, `cargo test -p runmat-vm compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-vm compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`.
 
 - (pending commit) Plan 7 removed compile-graph fallback from runtime fusion planning/snapshots
   - Core fusion snapshot paths now use only runtime-owned graph materialization (`runtime_accel_graph_for_fusion`) in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs), instead of falling back to `bytecode.accel_graph`.
@@ -2558,7 +2558,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Mapped windows still retain accel node lists; unmapped windows now remain as empty-node groups (instead of being dropped unless all windows failed).
   - Added regression coverage:
     - `semantic_windows_preserve_unmapped_windows_alongside_mapped_groups`
-  - Validation: `cargo test -p runmat-vm semantic_windows_preserve_unmapped_windows_alongside_mapped_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm semantic_windows_preserve_unmapped_windows_alongside_mapped_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo test -p runmat-vm compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 lexer error-token boundary ratchet for formatter compatibility
   - Tightened token-format compatibility coverage in [repl.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/repl.rs):
@@ -2631,9 +2631,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `SemanticAsyncMetadata.runtime_model`
   - VM compile now records this runtime model in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and interpreter startup diagnostics now surface the model in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs).
   - Updated async metadata ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_records_semantic_spawn_site_metadata`
-    - `primary_compile_records_semantic_await_site_metadata`
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm primary_compile_records_semantic_await_site_metadata`, `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+    - `compile_records_semantic_spawn_site_metadata`
+    - `compile_records_semantic_await_site_metadata`
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm compile_records_semantic_await_site_metadata`, `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 keep semantic fusion groups when accel-node mapping drops out
   - `runmat-vm` compile path in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now falls back to semantic-window-derived fusion groups (empty node lists + semantic span/kind metadata) when semantic instruction windows exist but accel-node mapping produces zero groups.
@@ -2699,7 +2699,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added mapping regression coverage:
     - `semantic_windows_map_accel_nodes_with_small_disjoint_gap`
     - `semantic_windows_reject_accel_nodes_with_large_disjoint_gap`
-  - Validation: `cargo test -p runmat-vm semantic_windows_map_accel_nodes_with_small_disjoint_gap`, `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm semantic_windows_map_accel_nodes_with_small_disjoint_gap`, `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap`, `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 semantic-invoker async cell-helper release evidence ratchet
   - Extended semantic invoker async lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with cell-nested helper payload release behavior:
@@ -2725,7 +2725,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added mapping regression coverage:
     - `semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap`
     - `semantic_windows_reject_partial_overlap_with_large_boundary_shift`
-  - Validation: `cargo test -p runmat-vm semantic_windows_`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm semantic_windows_`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 semantic async spawn/await lifecycle coverage extension
   - Extended provider-backed semantic lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) to include compiled semantic `async` function flows that execute explicit `spawn` + `await` bytecode boundaries:
@@ -2744,7 +2744,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 7 semantic-window-driven fusion compile gating
   - `runmat-vm` compile-time fusion setup in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now gates accel-graph realization directly on semantic instruction windows (`semantic_instruction_windows.is_empty()`) rather than a second bytecode accel-capability heuristic pass.
   - This removes duplicated bytecode capability gating from the runtime compile path and makes executable fusion-group admission depend on semantic-window artifacts first, with accel graph used for node realization/stack-layout annotation after that gate.
-  - Validation: `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-vm compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 3 private-property access identifier contract ratchet
   - Added stable `RunMat:PropertyPrivateAccess` diagnostics across both VM object resolution and runtime object-field builtins:
@@ -3142,7 +3142,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - VM compile now records semantic fusion instruction windows (instruction span + semantic kind hint) as explicit bytecode metadata in `SemanticFusionMetadata`.
   - Fusion-group realization now consumes that precomputed semantic window metadata instead of re-deriving windows in the accel-graph realization path.
   - Added compile-level ratchet assertions that semantic instruction-window metadata is non-empty for fusible programs and that serialized window count matches window entries.
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidate_instruction_windows_split_on_non_accel_ops`, `cargo test -p runmat-vm semantic_window_kind_is_not_overridden_by_graph_category`.
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidate_instruction_windows_split_on_non_accel_ops`, `cargo test -p runmat-vm semantic_window_kind_is_not_overridden_by_graph_category`.
 
 - (pending commit) Plan 7 make accel pre-gate assertions control-first, not display-proxy-first
   - Split builtin pre-gate rejection coverage so primary negative contract is explicit control/assertion behavior:
@@ -3386,9 +3386,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - `f08b9e0d` `RM-378: cover logical-only candidate pre-gate`
   - Added compile-level `runmat-vm` regression:
-    - `primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`
+    - `compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`
   - The test asserts semantic candidate groups can exist while accel graph and executable fusion groups remain omitted when candidate overlap maps only to non-accelerable logical bytecode operations.
-  - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`, `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
 
 - `06789be1` `RM-378: gate accel graph on accel-capable bytecode`
   - VM compile now adds a semantic-candidate pre-gate that requires candidate-overlapping accel-capable bytecode instructions before building accel graph artifacts.
@@ -3396,7 +3396,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added `runmat-vm` unit ratchets:
     - `semantic_candidate_accel_capability_gate_rejects_logical_ops`
     - `semantic_candidate_accel_capability_gate_accepts_binary_ops`
-  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_logical_ops`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_binary_ops`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_logical_ops`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_binary_ops`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
 
 - `ec74ba1e` `RM-378: harden source-input resolver tests`
   - Expanded `runmat-config` integration coverage for `resolve_project_source_input_from` contracts:
@@ -3460,7 +3460,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - `7ed84fa4` `RM-378: drop accel graph when no executable groups`
   - VM bytecode compile now drops accel-graph artifacts when semantic candidate groups exist but no executable semantic-mapped fusion groups survive filtering.
   - This reduces residual bytecode-graph coupling in transitional semantic-candidate/no-executable-group cases by avoiding retention of unused graph artifacts.
-  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 - `9fd5f027` `RM-378: resolve wildcard imports via dependency aliases`
   - Project composition symbol discovery in `runmat-core` now includes dependency alias-qualified symbols from root `runmat.toml` dependency mapping (`alias -> package`), in addition to package-qualified and raw source-index symbols.
@@ -3494,33 +3494,33 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) alongside spawn-site metadata.
   - VM compile now derives await sites from MIR `Await` terminators scoped to the active entrypoint target, mirroring spawn-site scoping rules.
   - Added regression coverage:
-    - `primary_compile_records_semantic_await_site_metadata`
-    - `primary_compile_scopes_await_site_metadata_to_entrypoint_target`
-    - strengthened `primary_compile_records_semantic_spawn_site_metadata` with await-site absence assertions for spawn-only programs
-  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm primary_compile_records_semantic_await_site_metadata`, `cargo test -p runmat-vm primary_compile_scopes_await_site_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+    - `compile_records_semantic_await_site_metadata`
+    - `compile_scopes_await_site_metadata_to_entrypoint_target`
+    - strengthened `compile_records_semantic_spawn_site_metadata` with await-site absence assertions for spawn-only programs
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm compile_records_semantic_await_site_metadata`, `cargo test -p runmat-vm compile_scopes_await_site_metadata_to_entrypoint_target`, `cargo test -p runmat-vm compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 - `2c12e33d` `RM-378: emit explicit await bytecode boundary`
   - MIR `Await` terminators now lower to an explicit `Instr::Await` bytecode opcode instead of implicitly relying on operand-lane behavior.
   - VM dispatch/runner now handle `Instr::Await` explicitly, and Turbine marks `Instr::Await` as interpreter-only.
-  - Expanded regression coverage in `primary_compile_emits_explicit_spawn_instruction` to assert both explicit `Spawn` and `Await` opcode emission.
-  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+  - Expanded regression coverage in `compile_emits_explicit_spawn_instruction` to assert both explicit `Spawn` and `Await` opcode emission.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 - `7d1478f3` `RM-378: emit explicit spawn bytecode boundary`
   - MIR `Spawn` now lowers to an explicit `Instr::Spawn` bytecode opcode instead of silently aliasing the future operand lane.
   - VM dispatch/runner now handle `Instr::Spawn` explicitly; Turbine marks it interpreter-only.
-  - Added regression coverage: `primary_compile_emits_explicit_spawn_instruction`.
-  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+  - Added regression coverage: `compile_emits_explicit_spawn_instruction`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 - `b44e43bf` `RM-378: remove bytecode fusion fallback from semantic candidates`
   - VM compile no longer falls back to `detect_fusion_groups()` when semantic candidate-derived fusion groups are empty.
   - This tightens executable fusion-group construction to semantic candidate evidence only.
   - Added regression coverage: `semantic_candidates_without_overlap_do_not_build_fusion_groups`.
-  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 - `e3ee0fb6` `RM-378: derive fusion groups from semantic candidates`
   - VM compile now derives executable fusion groups from semantic candidate source spans mapped onto accel-graph nodes (`derive_semantic_fusion_groups_from_candidates`) before semantic span retention.
   - Added regression coverage: `semantic_candidates_build_fusion_groups_from_accel_graph_nodes`.
-  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 ## Plan Status Snapshot
 
@@ -3540,14 +3540,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This removes residual cross-candidate bytecode grouping leakage and tightens executable fusion group retention to single semantic candidate regions.
   - Added `runmat-vm` regression coverage:
     - `fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`
-  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 strict semantic-span coverage filter for executable bytecode fusion groups
   - `runmat-vm` bytecode fusion-group filtering now requires full instruction-span coverage by semantic candidate source spans (not just any-overlap).
   - This further constrains executable bytecode fusion groups to semantic candidate regions and reduces residual bytecode-graph-driven latitude in candidate retention.
   - Added `runmat-vm` regression coverage:
     - `fusion_group_semantic_span_filter_requires_full_group_coverage`
-  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 surface semantic candidate source spans in fusion snapshot diagnostics
   - `runmat-core` fusion snapshot semantic-candidate node labels and decision reasons now include semantic candidate source-span ranges.
@@ -3561,8 +3561,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This tightens executable fusion candidate construction toward semantic evidence rather than bytecode graph shape alone.
   - Added `runmat-vm` regression coverage:
     - `fusion_group_semantic_overlap_uses_source_spans`
-    - strengthened `primary_compile_records_semantic_fusion_metadata` with source-span assertions
-  - Validation: `cargo test -p runmat-vm fusion_group_semantic_overlap_uses_source_spans`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+    - strengthened `compile_records_semantic_fusion_metadata` with source-span assertions
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_overlap_uses_source_spans`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 scope fusion planner MIR local-fact counts to active entrypoint
   - `runmat-core` fusion snapshot planner metadata now counts MIR local facts only for the active entrypoint target function in both:
@@ -3571,28 +3571,28 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This prevents non-entrypoint helper-function local facts from inflating active-entrypoint planner metadata.
   - Added `runmat-core` regression coverage:
     - `compile_fusion_plan_scopes_local_fact_count_to_entrypoint`
-  - Validation: `cargo test -p runmat-core compile_fusion_plan_scopes_local_fact_count_to_entrypoint`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo test -p runmat-vm primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_scopes_spawn_site_metadata_to_entrypoint_target`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-core compile_fusion_plan_scopes_local_fact_count_to_entrypoint`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo test -p runmat-vm compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-vm compile_scopes_spawn_site_metadata_to_entrypoint_target`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 scope semantic spawn-site metadata to compiled entrypoint target
   - `runmat-vm` bytecode compile now derives semantic async/spawn metadata from the selected entrypoint target MIR body instead of aggregating across every MIR body.
   - This prevents helper-function spawn sites from being attributed to active entrypoint bytecode artifacts and keeps async boundary metadata aligned to the active execution path.
   - Added `runmat-vm` regression coverage:
-    - `primary_compile_scopes_spawn_site_metadata_to_entrypoint_target`
-  - Validation: `cargo test -p runmat-vm primary_compile_scopes_spawn_site_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+    - `compile_scopes_spawn_site_metadata_to_entrypoint_target`
+  - Validation: `cargo test -p runmat-vm compile_scopes_spawn_site_metadata_to_entrypoint_target`, `cargo test -p runmat-vm compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 scope semantic fusion metadata to compiled entrypoint target
   - `runmat-vm` bytecode compile now derives semantic fusion signal/candidate metadata from the selected entrypoint target MIR body instead of aggregating across every MIR body in the assembly.
   - This prevents non-entrypoint helper functions from falsely opening fusion gating for the active executable bytecode path.
   - Added `runmat-vm` regression coverage:
-    - `primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`
-  - Validation: `cargo test -p runmat-vm primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+    - `compile_scopes_semantic_fusion_metadata_to_entrypoint_target`
+  - Validation: `cargo test -p runmat-vm compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 candidate-group-gated accel graph construction in VM compile
   - `runmat-vm` bytecode compile now omits accel graph construction unless semantic fusion candidate groups are present (`mir_fusion_candidate_group_count > 0`).
   - This removes the remaining `signals>0 but no semantic candidate groups` path that still built accel graph artifacts, tightening compile-time fusion artifact creation to semantic candidate evidence.
   - Added `runmat-vm` regression coverage:
-    - `primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`
-  - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+    - `compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`
+  - Validation: `cargo test -p runmat-vm compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 semantic-gated fusion snapshot decisions for bytecode-group mismatch
   - `runmat-core` fusion snapshot decisions for bytecode fusion groups are now gated by semantic candidate-group evidence from planner metadata.
@@ -3613,7 +3613,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - `runmat-vm` bytecode compile now derives semantic fusion metadata before accel-graph group detection and gates bytecode `detect_fusion_groups()` behind semantic candidate presence.
   - When `mir_fusion_candidate_group_count == 0`, executable bytecode fusion groups are now forced empty, making semantic MIR products the prerequisite source for bytecode fusion candidate construction.
   - Added native-accel regression coverage asserting semantic-gated behavior (`no semantic candidate groups => no bytecode fusion groups`).
-  - Validation: `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 explicit semantic spawn-site metadata boundary
   - `runmat-vm::Bytecode` now carries `semantic_async_metadata` with MIR-derived spawn-site inventory:
@@ -3622,7 +3622,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - VM bytecode compile now derives spawn-site metadata directly from MIR statement forms (`MirRvalue::Spawn`) using deterministic function-id traversal.
   - Interpreter state setup now emits explicit runtime debug signal when compiled bytecode carries spawn sites, replacing silent transitional behavior with explicit semantic boundary telemetry.
   - Added `runmat-vm` compile regression coverage asserting spawn-site metadata presence and consistency.
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 add MIR-localized semantic fusion candidate metadata
   - `runmat-vm` semantic fusion candidate artifacts now carry MIR location metadata per candidate run:
@@ -3632,26 +3632,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Candidate derivation now iterates MIR bodies in deterministic function-id order and records concrete statement-run spans for each semantic fusion candidate group.
   - `runmat-core` fusion snapshot semantic-candidate node labels now include MIR location metadata, making semantic candidate evidence traceable to specific MIR regions for follow-on planner migration.
   - Added regression checks that candidate groups carry non-empty statement spans and updated snapshot tests to assert mixed bytecode + semantic candidate artifact emission with MIR-localized metadata.
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 thread semantic candidate evidence into fusion plan preparation boundary
   - Extended `runmat-accelerate::prepare_fusion_plan` to accept semantic candidate-group count from VM bytecode semantic metadata.
   - Interpreter state setup now passes `bytecode.semantic_fusion_metadata.mir_fusion_candidate_group_count` into fusion-plan preparation, so the execution setup boundary has explicit semantic-candidate awareness even when executable bytecode groups are empty.
   - Added transition debug telemetry when semantic candidates exist but executable bytecode fusion groups are absent, making semantic-vs-bytecode planning gaps explicit during runtime plan preparation.
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 semantic candidate artifacts always surfaced in fusion snapshots
   - `runmat-core` fusion snapshot generation now appends semantic candidate nodes/decisions even when bytecode accel fusion groups are present, instead of limiting semantic candidate artifacts to the bytecode-empty fallback path.
   - Snapshot decisions now explicitly annotate both semantic signal strength and bytecode-group presence, improving semantic-vs-bytecode planner coverage visibility while runtime fusion execution remains unchanged.
   - Added core unit regression coverage for mixed snapshots (bytecode group + semantic candidate group both present).
-  - Validation: `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 semantic fusion candidate-group artifacts and snapshot nodes
   - `runmat-vm` semantic fusion metadata now carries explicit candidate-group artifacts (`mir_fusion_candidate_groups`) in addition to aggregate counts.
   - Candidate groups are derived from contiguous MIR semantic fusion-signal runs during bytecode compile and recorded on the bytecode artifact boundary.
   - `runmat-core` fusion snapshot generation now consumes semantic candidate groups and emits explicit semantic-candidate nodes/decisions when bytecode accel fusion groups are empty, rather than only emitting count summaries.
   - This moves fusion-candidate construction visibility further toward semantic MIR products and reduces dependence on bytecode accel-group reconstruction for planner diagnostics.
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_without_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_without_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 reuse prepared MIR artifacts for fusion planning metadata
   - `RunMatSession::compile_input` now carries the lowered MIR assembly in `PreparedExecution`, making MIR an explicit prepared artifact instead of a compile-only temporary.
@@ -3670,7 +3670,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - VM bytecode compile now derives those semantic counts directly from MIR and stores them on the bytecode product alongside accel graph/groups.
   - Core fusion snapshot planner metadata now consumes the bytecode-owned semantic fusion metadata in both preview (`compile_fusion_plan`) and runtime fusion snapshot emission paths, instead of recomputing MIR fusion signal/candidate counts in core fusion snapshot plumbing.
   - Added `runmat-vm` compile regression coverage asserting non-zero semantic fusion metadata for representative fusible arithmetic chains.
-  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+  - Validation: `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 semantic-candidate snapshot emission when bytecode groups are empty
   - Fusion snapshot generation now emits a semantic candidate summary snapshot when bytecode fusion groups are empty but MIR semantic fusion signals/candidate groups are present.
@@ -3844,12 +3844,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Validation: `cargo test -p runmat-accelerate prepare_fusion_plan_ -- --nocapture`, `cargo test -p runmat-accelerate sanitize_runtime_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 compile/runtime fusion reconciliation boundary ratchet
-  - Added `primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes` in `crates/runmat-vm/src/bytecode/compile.rs`.
+  - Added `compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes` in `crates/runmat-vm/src/bytecode/compile.rs`.
   - The test locks the intended boundary:
     - compile emits semantic-window fusion scaffolding with `group.nodes` empty (no compile-time accel-node assignment),
     - runtime `prepare_fusion_plan(...)` reconciles executable groups by assigning node IDs from the accel graph.
   - This guards against regressions that re-introduce compile-time node reconciliation or bypass runtime plan preparation as the executable-node boundary.
-  - Validation: `cargo test -p runmat-vm --features native-accel primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`.
+  - Validation: `cargo test -p runmat-vm --features native-accel compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`.
 
 - (pending commit) Plan 5 core entrypoint-resolution identifier-contract ratchet
   - Updated `crates/runmat-core/src/session/run.rs` test `source_input_path_errors_for_invalid_named_entrypoint_target` to assert the stable runtime identifier contract (`RunMat:EntrypointResolveFailed`) instead of message substring matching.
@@ -3909,7 +3909,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 7 preserve accel graph under semantic fusion scaffolds
   - Updated VM compile path in `crates/runmat-vm/src/bytecode/compile.rs` to preserve `bytecode.accel_graph` whenever semantic candidate/window scaffolds exist, even when compile-time executable fusion groups are empty after filtering.
   - Rationale: runtime planning now has a semantic-window fallback path (`Bytecode::runtime_fusion_groups`), so dropping the graph at compile time prematurely can block runtime semantic-fact-driven reconciliation.
-  - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
+  - Validation: `cargo test -p runmat-vm compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-vm compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
 
 - (pending commit) Plan 7 runtime accel-graph on-demand materialization ratchet
   - Added runtime helper `runtime_accel_graph_for_fusion` in `crates/runmat-vm/src/interpreter/state.rs`.
@@ -3924,7 +3924,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added `Bytecode::runtime_fusion_groups_for_graph` in `crates/runmat-vm/src/bytecode/program.rs`, which applies `annotate_fusion_groups_with_stack_layout` to runtime-selected fusion groups when a graph is available.
   - Interpreter runtime planning now uses that graph-aware helper in `crates/runmat-vm/src/interpreter/state.rs` before `prepare_fusion_plan`, so semantic-window fallback groups can carry stack-layout metadata rather than only compile-populated groups.
   - This keeps runtime fallback semantics aligned with stack-layout-sensitive fusion planning behavior and further reduces compile-group dependence.
-  - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
+  - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
 
 - (pending commit) Plan 7 shared runtime graph materialization for core/VM fusion surfaces
   - Moved runtime accel-graph-on-demand helper into shared bytecode API: `Bytecode::runtime_accel_graph_for_fusion` in `crates/runmat-vm/src/bytecode/program.rs`.
@@ -4040,11 +4040,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirOperatorUnsupported` for unsupported MIR unary/binary operator lowering.
     - `RunMat:MirBuiltinUnknown` for unknown MIR builtin ids in compile-time callee resolution.
   - Added compile-level invariant tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`
-    - `primary_compile_rejects_unknown_mir_builtin_id_with_identifier`
+    - `compile_rejects_unsupported_mir_binary_operator_with_identifier`
+    - `compile_rejects_unknown_mir_builtin_id_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_binary_operator_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_unknown_mir_builtin_id_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_unsupported_mir_binary_operator_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_unknown_mir_builtin_id_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4053,9 +4053,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 3 compile-identifier ratchet for MIR aggregate-shape invariant
   - Added compile-time identifier contract `RunMat:MirAggregateShapeInvalid` in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) for MIR aggregate shape/count mismatch (`rows * cols != elements.len()`).
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier`
+    - `compile_rejects_invalid_mir_aggregate_shape_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_mir_aggregate_shape_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4066,11 +4066,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
   - Added compile-level invariant tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
-    - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
+    - `compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
+    - `compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4078,10 +4078,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 3 compile-level unary-operator identifier contract ratchet
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
+    - `compile_rejects_unsupported_mir_unary_operator_with_identifier`
   - This extends `RunMat:MirOperatorUnsupported` coverage to both unsupported unary and binary MIR operator rejection paths.
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_unary_operator_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_unsupported_mir_unary_operator_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4092,9 +4092,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirMethodCallReceiverMissing` for method calls with no base receiver arg.
     - `RunMat:MirMethodCallCalleeInvalid` for internal non-static-callee method-lowering mismatch guard.
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`
+    - `compile_rejects_missing_mir_method_call_receiver_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_missing_mir_method_call_receiver_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_missing_mir_method_call_receiver_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4142,11 +4142,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirCellIndexPlanInvalid` for brace-index selectors that violate expression/end-relative component invariants.
     - `RunMat:MirCellIndexContextInvalid` for mismatched MIR cell-index result contexts at compile boundaries.
   - Added compile-level invariant tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_cell_index_component_with_identifier`
-    - `primary_compile_rejects_mismatched_cell_index_context_with_identifier`
+    - `compile_rejects_invalid_cell_index_component_with_identifier`
+    - `compile_rejects_mismatched_cell_index_context_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_cell_index_component_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_mismatched_cell_index_context_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_cell_index_component_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_mismatched_cell_index_context_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4176,9 +4176,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 3 multi-assign output-count compile invariant identifier ratchet
   - Added compile-time identifier `RunMat:MirMultiAssignOutputCountMismatch` in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) for MIR multi-assign call output-count mismatches.
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier`
+    - `compile_rejects_multi_assign_call_output_count_mismatch_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_multi_assign_call_output_count_mismatch_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4187,9 +4187,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 3 read-index context compile invariant identifier ratchet
   - Added compile-time identifier `RunMat:MirIndexContextInvalid` in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) for MIR read-index result contexts outside `ReadSingle`/`ReadCommaList`.
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_read_index_context_with_identifier`
+    - `compile_rejects_invalid_read_index_context_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_read_index_context_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_invalid_read_index_context_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4215,21 +4215,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirDeleteAssignmentCreationPolicyInvalid` for delete mutations that do not carry `AssignmentCreationPolicy::ExistingOnly`.
   - This tightens deletion semantics to an explicit compiler-product contract (matched delete-marker + explicit empty-literal RHS), instead of relying on runtime empty-RHS checks or silent mutation-target drift.
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_nonempty_delete_rhs_with_identifier`
-    - `primary_compile_rejects_delete_place_mismatch_with_identifier`
-    - `primary_compile_rejects_delete_on_nonindexed_target_with_identifier`
-    - `primary_compile_rejects_delete_on_brace_index_target_with_identifier`
-    - `primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier`
-    - `primary_compile_rejects_deletion_context_without_delete_with_identifier`
-    - `primary_compile_rejects_delete_with_nonexisting_creation_policy_with_identifier`
+    - `compile_rejects_nonempty_delete_rhs_with_identifier`
+    - `compile_rejects_delete_place_mismatch_with_identifier`
+    - `compile_rejects_delete_on_nonindexed_target_with_identifier`
+    - `compile_rejects_delete_on_brace_index_target_with_identifier`
+    - `compile_rejects_delete_with_nondeletion_index_context_with_identifier`
+    - `compile_rejects_deletion_context_without_delete_with_identifier`
+    - `compile_rejects_delete_with_nonexisting_creation_policy_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_nonempty_delete_rhs_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_place_mismatch_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_on_nonindexed_target_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_on_brace_index_target_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_deletion_context_without_delete_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_with_nonexisting_creation_policy_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_nonempty_delete_rhs_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_delete_place_mismatch_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_delete_on_nonindexed_target_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_delete_on_brace_index_target_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_delete_with_nondeletion_index_context_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_deletion_context_without_delete_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_delete_with_nonexisting_creation_policy_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
@@ -4266,12 +4266,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 3 source-level cell selector compile contract ratchet
   - Added VM compile contract test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`
+    - `compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`
   - Added core compile-path identifier surface test in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
     - `compile_input_reports_cell_assignment_colon_selector_identifier`
   - This pins brace assignment with colon selectors (`c{:,2} = ...`) to stable compile identifier `RunMat:MirCellIndexPlanInvalid` on semantic compiler paths.
   - Validation:
-    - `cargo test -p runmat-vm --lib primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib compile_rejects_cell_assignment_colon_selector_from_source_with_identifier -- --nocapture`
     - `cargo test -p runmat-core compile_input_reports_cell_assignment_colon_selector_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
@@ -5284,13 +5284,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - VM compile slice lowering now rejects unencodable selector dimensions (`dim >= 32`) with stable compile identifier `RunMat:MirSliceIndexPlanInvalid` instead of relying on raw `1u32 << dim` shifts.
   - Expr and plain slice planning now safely treat mask bits outside mask width as absent, closing additional high-dimension panic seams in non-object selector materialization paths.
   - Added ratchets:
-    - `primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
-    - `primary_compile_rejects_slice_plan_end_dimension_beyond_mask_width`
+    - `compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
+    - `compile_rejects_slice_plan_end_dimension_beyond_mask_width`
     - `build_slice_selectors_supports_dims_beyond_mask_width`
     - `expr_plan_supports_dims_beyond_mask_width`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_slice_plan_end_dimension_beyond_mask_width -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_slice_plan_selector_dimension_beyond_mask_width -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_slice_plan_end_dimension_beyond_mask_width -- --nocapture`
     - `cargo test -p runmat-vm build_slice_selectors_supports_dims_beyond_mask_width -- --nocapture`
     - `cargo test -p runmat-vm expr_plan_supports_dims_beyond_mask_width -- --nocapture`
     - `cargo fmt --all --check`
@@ -5404,10 +5404,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - RM-378: reject non-offset end expressions in call-arg cell expansion
   - VM compile now rejects call-argument cell-expansion selectors that use non-offset `end` expressions (e.g. `C{end/2}`) in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) with stable compile identifier `RunMat:MirCellExpandPlanInvalid`, preventing silent mis-evaluation through generic operand lowering.
   - Added contracts:
-    - `primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier`
+    - `compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier`
     - `feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier -- --nocapture`
     - `cargo test -p runmat-vm feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier -- --nocapture`
     - `cargo fmt --all --check`
 
@@ -5476,12 +5476,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - VM method/member call lowering in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now validates static callee identity shape before emitting `CallMethodOrMemberIndex*` instructions.
   - Method/member dispatch now accepts only name-carrying callee identities supported by runtime method/member paths (`DynamicName`, `Method`, or single-segment `ExternalName`); malformed/non-member identity shapes are rejected at compile time with `RunMat:MirMethodCallCalleeInvalid` instead of leaking to runtime `"missing callable name"` fallback errors.
   - Added ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_imported_mir_method_call_callee_with_identifier`
-    - `primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`
+    - `compile_rejects_imported_mir_method_call_callee_with_identifier`
+    - `compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_imported_mir_method_call_callee_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_invalid_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_imported_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_invalid_mir_method_call_callee_with_identifier -- --nocapture`
 
 - RM-378: complete method/member invalid-callee shape rejection matrix
   - Extended VM compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) to pin additional malformed method/member static callee identity shapes:
@@ -5489,11 +5489,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - empty method identities (`MethodId("")`) are rejected on method/member call lanes.
   - These contracts close the remaining validator-shape seam for injected MIR method-call identities and keep failures on stable compile identifier `RunMat:MirMethodCallCalleeInvalid`.
   - Added ratchets:
-    - `primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`
-    - `primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`
+    - `compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`
+    - `compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_multisegment_external_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_empty_method_name_mir_method_call_callee_with_identifier -- --nocapture`
 
 - RM-378: harden runtime method/member call identity boundary with typed identifier
   - VM method/member call entrypoint in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs) now rejects non-method-like callable identities with dedicated runtime identifier `RunMat:MethodCallCalleeInvalid` (instead of generic `RunMat:UndefinedFunction`), tightening malformed identity diagnostics for runtime-injected bytecode/API surfaces.
@@ -5522,13 +5522,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - VM compile method/member callee validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now treats whitespace-only `DynamicName`/`Method`/single-segment `ExternalName` identities as malformed and rejects them with stable compile identifier `RunMat:MirMethodCallCalleeInvalid`.
   - VM runtime method/member identity normalization in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs) now trims method/member identity text before dispatch and rejects whitespace-only identities with stable runtime identifier `RunMat:MethodCallCalleeInvalid`.
   - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`
-    - `primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`
+    - `compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`
+    - `compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`
   - Added runtime ratchets in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs):
     - `method_member_call_rejects_whitespace_method_identity_with_identifier`
     - `method_member_call_rejects_whitespace_single_segment_external_identity_with_identifier`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_whitespace_ -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_whitespace_ -- --nocapture`
     - `cargo test -p runmat-vm method_member_call_rejects_whitespace_ -- --nocapture`
 
 - RM-378: tighten shared callable fallback policy against whitespace-only names
@@ -5554,13 +5554,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - function-handle lanes surface `RunMat:MirFunctionHandleNameMissing`
     - static-call lanes surface `RunMat:MirCallTargetNameInvalid`
   - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`
-    - `primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier`
-    - `primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`
+    - `compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`
+    - `compile_rejects_whitespace_builtin_function_handle_name_with_identifier`
+    - `compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier -- --nocapture`
-    - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_whitespace_dynamic_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_whitespace_builtin_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape -- --nocapture`
     - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
@@ -5576,14 +5576,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - interpreter/runtime dispatch: materialized `CreateMethodFunctionHandle` to runtime `Value::MethodFunctionHandle` in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and threaded support through runner + JIT unsupported-instruction list in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs).
     - callable descriptor/runtime execution: `feval` descriptor construction now classifies method-handle values as `CallableIdentity::Method` with `RuntimeNameResolution` policy in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs), and runtime `feval` now executes `Value::MethodFunctionHandle` through typed method identity policy in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs).
   - Ratchets:
-    - `primary_compile_lowers_method_function_handle_target_to_typed_instruction`
-    - `primary_compile_rejects_whitespace_method_function_handle_name_with_identifier`
+    - `compile_lowers_method_function_handle_target_to_typed_instruction`
+    - `compile_rejects_whitespace_method_function_handle_name_with_identifier`
     - `feval_method_function_handle_classifies_as_method_identity`
     - `feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolver`
     - `feval_method_function_handle_uses_semantic_resolver`
     - `feval_method_function_handle_does_not_fallback_to_builtin_name`
   - Validation:
-    - `cargo test -p runmat-vm primary_compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm feval_method_function_handle_ -- --nocapture`
     - `cargo test -p runmat-runtime feval_method_function_handle_ -- --nocapture`
     - `cargo fmt --all --check`

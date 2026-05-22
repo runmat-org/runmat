@@ -66,11 +66,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirScalarIndexPlanInvalid`
     - `RunMat:MirSliceIndexPlanInvalid`
   - compile-level invariant ratchets now assert these selector-plan rejection contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_invalid_scalar_index_plan_with_identifier`
-    - `primary_compile_rejects_invalid_slice_index_plan_with_identifier`
-    - `primary_compile_rejects_invalid_paren_cell_plan_with_identifier`
-    - `primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier`
-    - `primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`
+    - `compile_rejects_invalid_scalar_index_plan_with_identifier`
+    - `compile_rejects_invalid_slice_index_plan_with_identifier`
+    - `compile_rejects_invalid_paren_cell_plan_with_identifier`
+    - `compile_rejects_invalid_cell_expand_all_shape_with_identifier`
+    - `compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`
   - core compile-path coverage now also surfaces this selector contract in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs) (`compile_input_reports_cell_assignment_colon_selector_identifier`), asserting `RunMat:MirCellIndexPlanInvalid` at `compile_input(...)` boundary.
   - VM function-handle selector rejection now also has explicit identifier-contract coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `function_handle_selector_colon_errors_with_identifier_contract` asserts `RunMat:UnsupportedFunctionHandleSelector` for colon-selector misuse on function handles.
@@ -188,40 +188,40 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `Imported` handle targets with empty `DefPath.item` now reject at compile time with `RunMat:MirFunctionHandleNameMissing`.
     - `Imported` handle targets with mismatched `DefPath` module/item leaves now reject at compile time with `RunMat:MirFunctionHandleNameMissing`.
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier`
-      - `primary_compile_rejects_empty_builtin_function_handle_name_with_identifier`
-      - `primary_compile_lowers_method_function_handle_target_to_typed_instruction`
-      - `primary_compile_rejects_whitespace_method_function_handle_name_with_identifier`
-      - `primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier`
-      - `primary_compile_rejects_single_segment_external_function_handle_name_with_identifier`
-      - `primary_compile_rejects_imported_function_handle_missing_item_with_identifier`
-      - `primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier`
+      - `compile_rejects_empty_dynamic_function_handle_name_with_identifier`
+      - `compile_rejects_empty_builtin_function_handle_name_with_identifier`
+      - `compile_lowers_method_function_handle_target_to_typed_instruction`
+      - `compile_rejects_whitespace_method_function_handle_name_with_identifier`
+      - `compile_rejects_empty_imported_module_function_handle_name_with_identifier`
+      - `compile_rejects_single_segment_external_function_handle_name_with_identifier`
+      - `compile_rejects_imported_function_handle_missing_item_with_identifier`
+      - `compile_rejects_imported_function_handle_mismatched_item_with_identifier`
   - VM static-call lowering now enforces strict non-builtin callee identity name-shape invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `compile_mir_call(...)` and `compile_mir_call_for_multi_assign(...)` now require a valid runtime name shape (`mir_runtime_name_callee(...)`) before emitting `CallFunction*` instructions.
     - static-call runtime-name derivation is now explicit to static-call identity categories (`Builtin`, `DynamicName`, well-formed multi-segment `ExternalName`, valid `Imported`) and rejects method identity shapes on this ABI boundary.
     - malformed static identities now fail with `RunMat:MirCallTargetNameInvalid`.
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
-      - `primary_compile_rejects_static_call_with_single_segment_external_identity`
-      - `primary_compile_rejects_static_call_with_method_identity_name_shape`
-      - `primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape`
-      - `primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape`
+      - `compile_rejects_static_call_with_mismatched_imported_identity_name_shape`
+      - `compile_rejects_static_call_with_single_segment_external_identity`
+      - `compile_rejects_static_call_with_method_identity_name_shape`
+      - `compile_rejects_multi_assign_static_call_with_method_identity_name_shape`
+      - `compile_rejects_multi_assign_static_call_with_invalid_name_shape`
   - VM multi-assign output target lowering now enforces assignment-context invariants for top-level indexed output places in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `compile_mir_output_target_store(...)` now requires `MirPlace::Index` targets to carry `IndexResultContext::AssignmentTarget`.
     - malformed indexed output-target contexts now fail with `RunMat:MirIndexContextInvalid`.
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`
+      - `compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`
   - VM direct indexed assignment lowering now enforces assignment-context invariants for non-delete indexed assignment places in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `compile_mir_assign(...)` now requires non-delete `MirPlace::Index` assignment targets to carry `IndexResultContext::AssignmentTarget`.
     - malformed direct indexed assignment contexts now fail with `RunMat:MirIndexContextInvalid`.
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_rejects_index_assignment_with_read_context_identifier`
+      - `compile_rejects_index_assignment_with_read_context_identifier`
   - VM brace index helper lowering now enforces index-context invariants on read/store-back helper paths in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `compile_mir_index_after_base(...)` now requires `IndexResultContext::AssignmentTarget` compatibility for helper indexed-base lowering instead of bypassing context checks.
     - `compile_mir_store_indexed_value_from_temp(...)` now requires brace store-back index components to satisfy the same `IndexResultContext::AssignmentTarget` compatibility invariant.
     - compile-level ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
-      - `primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier`
+      - `compile_rejects_member_store_back_brace_index_with_read_context_identifier`
+      - `compile_rejects_member_store_back_paren_index_with_read_context_identifier`
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).
@@ -247,7 +247,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `feval_expand_cell_indices_support_2d_end_selectors`
     - `feval_expand_cell_indices_support_end_offsets`
     - `feval_expand_cell_indices_2d_end_plus_offset_errors`
-    - `primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier`
+    - `compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier`
     - `feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier`
   - Cell selector semantics now avoid post-read alias mutation in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): assignment paths replace per-cell handles via fresh GC allocations instead of mutating shared `GcPtr<Value>` payloads in place. Regression coverage in [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs) (`cell_paren_range_end_and_colon_semantics`, `cell_brace_assignment_preserves_copied_cell_values`) ratchets both `C(2:end-1)` read stability across subsequent paren assignment and copy-on-write behavior for brace assignments (`B = C; C{2} = ...`) plus `C(:)` shape behavior.
   - VM deletion runtime behavior now has explicit semantic contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
@@ -255,45 +255,45 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `matrix_delete_reports_unsupported_deletion_identifier_contract` (`RunMat:UnsupportedDeletion`)
     - `string_slice_delete_reports_identifier_contract` (`RunMat:UnsupportedSliceDeletion`)
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
-    - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`
-    - `primary_compile_rejects_unknown_mir_builtin_id_with_identifier`
-    - `primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier`
-    - `primary_compile_rejects_invalid_cell_index_component_with_identifier`
-    - `primary_compile_rejects_mismatched_cell_index_context_with_identifier`
-    - `primary_compile_rejects_invalid_read_index_context_with_identifier`
-    - `primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier`
-    - `primary_compile_rejects_nonempty_delete_rhs_with_identifier`
-    - `primary_compile_rejects_delete_place_mismatch_with_identifier`
-    - `primary_compile_rejects_delete_on_nonindexed_target_with_identifier`
-    - `primary_compile_rejects_delete_on_brace_index_target_with_identifier`
-    - `primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier`
-    - `primary_compile_rejects_deletion_context_without_delete_with_identifier`
-    - `primary_compile_rejects_delete_with_nonexisting_creation_policy_with_identifier`
-    - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
-    - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
-    - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`
-    - `primary_compile_rejects_invalid_mir_method_call_callee_with_identifier`
-    - `primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
-    - `primary_compile_rejects_invalid_mir_number_literal_with_identifier`
-    - `primary_compile_rejects_unknown_mir_constant_with_identifier`
-    - `primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
-    - `primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
-    - `primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier`
+    - `compile_rejects_unsupported_mir_unary_operator_with_identifier`
+    - `compile_rejects_unsupported_mir_binary_operator_with_identifier`
+    - `compile_rejects_unknown_mir_builtin_id_with_identifier`
+    - `compile_rejects_invalid_mir_aggregate_shape_with_identifier`
+    - `compile_rejects_invalid_cell_index_component_with_identifier`
+    - `compile_rejects_mismatched_cell_index_context_with_identifier`
+    - `compile_rejects_invalid_read_index_context_with_identifier`
+    - `compile_rejects_multi_assign_call_output_count_mismatch_with_identifier`
+    - `compile_rejects_nonempty_delete_rhs_with_identifier`
+    - `compile_rejects_delete_place_mismatch_with_identifier`
+    - `compile_rejects_delete_on_nonindexed_target_with_identifier`
+    - `compile_rejects_delete_on_brace_index_target_with_identifier`
+    - `compile_rejects_delete_with_nondeletion_index_context_with_identifier`
+    - `compile_rejects_deletion_context_without_delete_with_identifier`
+    - `compile_rejects_delete_with_nonexisting_creation_policy_with_identifier`
+    - `compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
+    - `compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
+    - `compile_rejects_missing_mir_method_call_receiver_with_identifier`
+    - `compile_rejects_invalid_mir_method_call_callee_with_identifier`
+    - `compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
+    - `compile_rejects_invalid_mir_number_literal_with_identifier`
+    - `compile_rejects_unknown_mir_constant_with_identifier`
+    - `compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
+    - `compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
+    - `compile_rejects_slice_plan_with_range_expr_component_with_identifier`
   - brace-content cell assignment now ratchets MATLAB-style subscript growth semantics:
     - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now expands 2-D cell arrays for out-of-bounds brace subscript stores and fills intervening cells with empty numeric arrays (`0x0 double`) instead of rejecting with `CellSubscriptOutOfBounds`.
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows brace-store `end+1` growth for subscript dimensions, not just linear vector selectors.
     - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers`
-      - `primary_compile_supports_cell_brace_end_plus_one_subscript_growth`
+      - `compile_supports_cell_brace_subscript_growth_with_empty_fillers`
+      - `compile_supports_cell_brace_end_plus_one_subscript_growth`
   - linear brace-content growth now ratchets MATLAB-style expansion consistency for vector-shaped/empty cell arrays:
     - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now supports non-contiguous linear growth (`C{5}=...`, `C{end+3}=...`) with empty fillers for intervening cells.
     - empty-shape linear growth now normalizes to row-vector semantics (`5x0`/`0x5` + `C{3}=...` -> `1x3`) instead of preserving ambiguous legacy orientation.
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows store-context end selectors beyond current extent for growth (read contexts remain strict bounds-checked).
     - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-      - `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`
-      - `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
-      - `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
+      - `compile_supports_cell_brace_linear_gap_growth_for_vectors`
+      - `compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
+      - `compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
   - selector numeric-integrality semantics now ratchet MATLAB-style index validity:
     - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) now rejects fractional numeric indices (scalar and tensor selector values) with `RunMat:UnsupportedIndexType` instead of truncating to integer.
     - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs) now enforces the same integer-selector contract for expr-plan tensor selector materialization.
@@ -302,7 +302,7 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `selector_from_value_dim_rejects_fractional_numeric_indices`
       - `linear_indices_reject_fractional_tensor_indices`
       - `scalar_end_div_indexing_rejects_fractional_result`
-      - `primary_compile_rejects_fractional_cell_end_expression_read_index`
+      - `compile_rejects_fractional_cell_end_expression_read_index`
   - object paren selector normalization now preserves mixed selector payload types and aligns expr/non-expr selector boundaries in object protocol descriptor serialization:
     - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now accepts non-numeric selector payload values (`string`, `char`, `cell`, `logical`) in `build_object_paren_expr_selector_values(...)` for non-range selector dimensions, instead of rejecting mixed selector plans when any dimension uses range/end descriptors.
     - non-expr object paren selector serialization (`build_object_paren_selector_values`) now uses the same selector-type normalization boundary as expr-slice serialization.
@@ -411,8 +411,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs) expr-plan range/mask conflict checks now use high-dimension-safe mask probing.
     - [selectors.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/selectors.rs) plain slice selector materialization now uses the same high-dimension-safe mask probing.
     - ratchets:
-      - `primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
-      - `primary_compile_rejects_slice_plan_end_dimension_beyond_mask_width`
+      - `compile_rejects_slice_plan_selector_dimension_beyond_mask_width`
+      - `compile_rejects_slice_plan_end_dimension_beyond_mask_width`
       - `build_slice_selectors_supports_dims_beyond_mask_width`
       - `expr_plan_supports_dims_beyond_mask_width`
   - expr-slice end-offset selector context metadata now has explicit runtime invariant checks in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
@@ -467,20 +467,20 @@ This audit maps the active objective to concrete repository evidence and marks e
     - compile callable-name extraction in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now trims and rejects whitespace-only static-call/function-handle names (`RunMat:MirCallTargetNameInvalid`, `RunMat:MirFunctionHandleNameMissing`).
     - direct ratchets:
       - `callable_name_fallback_policies_require_well_formed_external_names`
-      - `primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`
-      - `primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier`
-      - `primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`
+      - `compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`
+      - `compile_rejects_whitespace_builtin_function_handle_name_with_identifier`
+      - `compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`
   - method/member callable dispatch lanes now enforce typed callee-shape invariants at compile and runtime entrypoints:
     - compile method/member lowering in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now rejects malformed static method/member callee identities before bytecode emission (`RunMat:MirMethodCallCalleeInvalid`).
     - runtime method/member call entrypoint in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs) now emits `RunMat:MethodCallCalleeInvalid` for non-method-like identities instead of generic unresolved-name failures.
     - runtime `call_method` in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now trims method names before typed callable dispatch.
     - direct ratchets:
-      - `primary_compile_rejects_imported_mir_method_call_callee_with_identifier`
-      - `primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`
-      - `primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`
-      - `primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`
-      - `primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`
-      - `primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`
+      - `compile_rejects_imported_mir_method_call_callee_with_identifier`
+      - `compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`
+      - `compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`
+      - `compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`
+      - `compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`
+      - `compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`
       - `method_member_call_rejects_identity_without_method_name`
       - `method_member_call_rejects_imported_identity_with_identifier`
       - `method_member_call_rejects_multisegment_external_identity_with_identifier`
@@ -521,10 +521,10 @@ This audit maps the active objective to concrete repository evidence and marks e
       - parser: `parse_struct_aggregate_literal`, `parse_object_aggregate_literal`
       - HIR: `struct_aggregate_literal_lowers_with_field_order_and_duplicates`, `object_aggregate_literal_lowers_to_typed_object_literal`
       - MIR: `struct_aggregate_literal_lowers_to_mir_struct_literal`, `object_aggregate_literal_lowers_to_mir_object_literal`
-      - VM compile: `primary_compile_lowers_struct_aggregate_literal_to_typed_instruction`, `primary_compile_lowers_object_aggregate_literal_to_typed_instruction`
+      - VM compile: `compile_lowers_struct_aggregate_literal_to_typed_instruction`, `compile_lowers_object_aggregate_literal_to_typed_instruction`
       - VM runtime: `struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates`, `object_aggregate_literal_uses_typed_instruction_and_sets_properties`
 - Objective Item 3 closeout evidence (strict queue):
-  - P0 (assignment/indexing ownership): MIR assignment-place/store-back context invariants and selector-plan compile contracts are ratcheted in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) and [lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/tests/lowering.rs), including `primary_compile_rejects_index_assignment_with_read_context_identifier`, `primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`, and `indexed_member_assignment_lowers_to_index_place_over_member_base`.
+  - P0 (assignment/indexing ownership): MIR assignment-place/store-back context invariants and selector-plan compile contracts are ratcheted in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) and [lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/tests/lowering.rs), including `compile_rejects_index_assignment_with_read_context_identifier`, `compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`, and `indexed_member_assignment_lowers_to_index_place_over_member_base`.
   - P1 (callable ABI/call-shape): typed callable identity/runtime-name policy and unresolved-call contracts are ratcheted in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs), [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs), [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and [jit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/tests/jit.rs), including `method_identity_runtime_name_resolution_can_use_semantic_resolver`, `imported_identity_runtime_name_resolution_can_use_semantic_resolver`, `semantic_expand_multi_output_uses_typed_instruction`, `unresolved_function_expand_multi_output_uses_typed_instruction_and_errors`, and `test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path`.
   - P2 (object/member/output policy): object/member descriptor-first paths and varargout/multi-output contracts are ratcheted in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs), [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs), [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), and [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs), including `StoreIndex requires scalar indices`, `varargout_expand_into_outer_call`, `user_function_consumes_varargout_exact_needed`, and `RunMat:VarargoutMismatch` contracts.
   - P3 in-scope items complete:
@@ -636,7 +636,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - semantic fusion signal/candidate-group extraction is now a VM compile artifact concern in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and both counts and explicit semantic candidate-group artifacts are carried on bytecode products in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs).
   - semantic candidate-group artifacts now include MIR-localized run metadata (`function`, `block`, `stmt_start`, `stmt_end`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived during bytecode compilation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and surfaced in fusion snapshot semantic-candidate node labels in [snapshot.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/fusion/snapshot.rs).
   - VM compile now gates accel-graph realization on semantic instruction-window artifacts (`semantic_instruction_windows.is_empty()`) in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), removing duplicated runtime gating by a second bytecode accel-capability scan and keeping semantic-window metadata as the primary executable-fusion admission signal.
-  - compile-level coverage now includes logical-only candidate overlap omission (`primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`) in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), asserting that semantic candidate presence alone does not force accel graph artifacts when overlapping ops are non-accelerable.
+  - compile-level coverage now includes logical-only candidate overlap omission (`compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`) in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), asserting that semantic candidate presence alone does not force accel graph artifacts when overlapping ops are non-accelerable.
   - semantic fusion-group node filtering in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now also requires semantic candidate containment of node-mapped instruction spans, with partial-overlap rejection ratcheted by `semantic_candidates_with_partial_overlap_do_not_build_fusion_groups`.
   - fusion-group semantic span filtering in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now also requires semantic candidate containment of grouped instruction spans (not overlap), aligning candidate/span filtering contracts across pre-gate, node mapping, and executable-group retention.
   - executable fusion-group span boundaries in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) are now derived from semantic candidate spans plus accel-capable bytecode instruction windows (`derive_semantic_fusion_instruction_windows`), with explicit split behavior at non-accel bytecode boundaries ratcheted by `semantic_candidate_instruction_windows_split_on_non_accel_ops`.
@@ -664,9 +664,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM bytecode now carries explicit semantic async/spawn metadata (`semantic_async_metadata`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR spawn sites in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and surfaced at interpreter setup in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) so spawned-task transition semantics are explicit at runtime boundaries.
   - VM bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR await terminators in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
   - VM bytecode semantic async metadata now also carries an explicit runtime execution model contract (`SemanticAsyncRuntimeModel`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), currently recorded as `LazyFutureDescriptorLane` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) and surfaced at interpreter startup diagnostics in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs).
-  - compile-level async metadata ratchets now assert this runtime-model contract in `primary_compile_records_semantic_spawn_site_metadata` and `primary_compile_records_semantic_await_site_metadata` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
+  - compile-level async metadata ratchets now assert this runtime-model contract in `compile_records_semantic_spawn_site_metadata` and `compile_records_semantic_await_site_metadata` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
   - async expansion-call lowering is now explicitly ratcheted to the lazy future-descriptor lane in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
-    - `primary_compile_lowers_async_expansion_call_to_future_expand_instruction` asserts `CreateSemanticFutureExpandMultiOutput` emission and end-to-end `await` result behavior.
+    - `compile_lowers_async_expansion_call_to_future_expand_instruction` asserts `CreateSemanticFutureExpandMultiOutput` emission and end-to-end `await` result behavior.
   - MIR await boundaries now lower through explicit bytecode `Instr::Await` handling in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs), [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), making async boundary opcodes explicit on both Spawn and Await paths.
   - VM runtime dispatch now also models explicit spawned-task value-lane semantics in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs): `Instr::Spawn` wraps payload values into task-handle records with explicit task IDs; `Instr::Await` pass-throughs non-task values for compatibility while validating spawned-task handle shape/ID and rejecting malformed or stale consumed handles with `RunMat:AwaitOperandInvalid`.
   - VM dispatch drop/overwrite boundaries now retire spawn-task IDs for dropped or replaced task-handle values in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) (including `Instr::Pop`, `Instr::ExitScope`, `Instr::StoreVar`, and `Instr::StoreLocal` replacement), reducing stale task-ID registry growth when handles are dropped without await.
@@ -861,19 +861,19 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-core compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`
   - `cargo test -p runmat-core source_input_path_`
   - `cargo test -p runmat --lib resolve_script_input_`
-  - `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`
-  - `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_future_lane`
+  - `cargo test -p runmat-vm compile_emits_explicit_spawn_instruction`
+  - `cargo test -p runmat-vm compile_interprets_async_call_and_await_via_semantic_future_lane`
   - `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`
   - `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`
   - `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`
   - `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`
-  - `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`
+  - `cargo test -p runmat-vm compile_records_semantic_fusion_metadata`
   - `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`
   - `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`
-  - `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`
-  - `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`
-  - `cargo test -p runmat-vm primary_compile_records_semantic_await_site_metadata`
-  - `cargo test -p runmat-vm primary_compile_scopes_await_site_metadata_to_entrypoint_target`
+  - `cargo test -p runmat-vm compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`
+  - `cargo test -p runmat-vm compile_records_semantic_spawn_site_metadata`
+  - `cargo test -p runmat-vm compile_records_semantic_await_site_metadata`
+  - `cargo test -p runmat-vm compile_scopes_await_site_metadata_to_entrypoint_target`
   - `cargo test -p runmat-core --test fusion_regressions`
   - `cargo test -p runmat-core --test semicolon_suppression`
   - `cargo test -p runmat-vm expansion_on_non_cell_errors -- --nocapture`
@@ -947,7 +947,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Tightened missing-tag compile mapping fallback to category-compatible matching only (instead of unconditional acceptance), with direct regression coverage: `semantic_windows_without_tags_reject_category_mismatch`.
   - Compile now emits fusion-group scaffolding from semantic instruction windows without compile-time node assignment, delegating node reconciliation to runtime plan preparation.
   - Compile-time accel-node mapping helper path used for historical fusion-node assignment is now test-only, removing that path from production compilation.
-  - Added explicit boundary coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs): `primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes` asserts compile-time groups remain node-empty and runtime `prepare_fusion_plan(...)` performs executable node reconciliation.
+  - Added explicit boundary coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs): `compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes` asserts compile-time groups remain node-empty and runtime `prepare_fusion_plan(...)` performs executable node reconciliation.
 
 - Additional Plan 7 runtime sanitization ratchet:
   - Tightened runtime `sanitize_runtime_groups` span recovery in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) from overlap-or-touch (`<=1` disjoint gap) to overlap-only, then to contained-span-only.

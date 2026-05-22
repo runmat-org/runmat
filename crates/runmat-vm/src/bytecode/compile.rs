@@ -839,7 +839,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn primary_compile_attaches_derived_layout() {
+    fn compile_attaches_derived_layout() {
         let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -855,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_simple_assignment_arithmetic() {
+    fn compile_lowers_simple_assignment_arithmetic() {
         let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -872,7 +872,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_records_semantic_fusion_metadata() {
+    fn compile_records_semantic_fusion_metadata() {
         let ast = runmat_parser::parse("x = 1 + 2; y = x * 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -943,7 +943,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes() {
+    fn compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes() {
         let ast = runmat_parser::parse("x = 1 + 2; y = x * 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -992,7 +992,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation() {
+    fn compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation() {
         let ast =
             runmat_parser::parse("a = 1 + 2; b = a * 3; marker = 'x'; c = b - 4; d = c ./ 2;")
                 .expect("parse");
@@ -1039,7 +1039,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_semantically_gates_bytecode_fusion_groups() {
+    fn compile_semantically_gates_bytecode_fusion_groups() {
         let ast = runmat_parser::parse("x = 1;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group() {
+    fn compile_omits_accel_graph_when_signals_exist_but_no_candidate_group() {
         let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -1099,7 +1099,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops() {
+    fn compile_omits_accel_graph_when_candidates_overlap_only_logical_ops() {
         let ast =
             runmat_parser::parse("a = true; b = false; c = a & b; d = c | a;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -1280,7 +1280,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target() {
+    fn compile_scopes_semantic_fusion_metadata_to_entrypoint_target() {
         let source = "x = 1; function z = helper(a); t = a + 1; z = t * 2; end;";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -2430,7 +2430,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_records_semantic_spawn_site_metadata() {
+    fn compile_records_semantic_spawn_site_metadata() {
         let ast = runmat_parser::parse("fut = make(); task = spawn(fut);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2477,7 +2477,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_scopes_spawn_site_metadata_to_entrypoint_target() {
+    fn compile_scopes_spawn_site_metadata_to_entrypoint_target() {
         let source = "x = 1; function z = helper(a); fut = make(); z = spawn(fut); end;";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -2501,7 +2501,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_records_semantic_await_site_metadata() {
+    fn compile_records_semantic_await_site_metadata() {
         let source = "async function y = inc(x); y = x + 1; end; t = inc(2); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -2541,7 +2541,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_scopes_await_site_metadata_to_entrypoint_target() {
+    fn compile_scopes_await_site_metadata_to_entrypoint_target() {
         let source = "x = 1; async function z = helper(a); z = await(a); end;";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -2561,7 +2561,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_visible_assignment() {
+    fn compile_interprets_visible_assignment() {
         let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2578,7 +2578,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_builtin_assignment() {
+    fn compile_interprets_builtin_assignment() {
         let ast = runmat_parser::parse("x = sqrt(9);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2602,7 +2602,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_matrix_literal_assignment() {
+    fn compile_interprets_matrix_literal_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2633,7 +2633,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_simple_matrix_indexing() {
+    fn compile_interprets_simple_matrix_indexing() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; y = x(2, 1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2661,7 +2661,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_simple_colon_slice() {
+    fn compile_interprets_simple_colon_slice() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; y = x(:, 2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2689,7 +2689,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_ambiguous_local_index_to_slice() {
+    fn compile_lowers_ambiguous_local_index_to_slice() {
         let ast =
             runmat_parser::parse("x = [10 20 30 40]; a = find([0 1 1]); idx = a + 1; y = x(idx);")
                 .expect("parse");
@@ -2723,7 +2723,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_ambiguous_local_store_index_to_slice() {
+    fn compile_lowers_ambiguous_local_store_index_to_slice() {
         let ast =
             runmat_parser::parse("x = [10 20 30 40]; idx = [2 4]; x(idx) = [9 8];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -2756,7 +2756,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_scalar_index_plan_with_identifier() {
+    fn compile_rejects_invalid_scalar_index_plan_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2792,7 +2792,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_slice_index_plan_with_identifier() {
+    fn compile_rejects_invalid_slice_index_plan_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(end);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2831,7 +2831,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_slice_plan_selector_dimension_beyond_mask_width() {
+    fn compile_rejects_slice_plan_selector_dimension_beyond_mask_width() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2870,7 +2870,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_slice_plan_end_dimension_beyond_mask_width() {
+    fn compile_rejects_slice_plan_end_dimension_beyond_mask_width() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2912,7 +2912,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier() {
+    fn compile_rejects_scalar_plan_with_range_expr_component_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3 4]; y = x(1:end);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2947,7 +2947,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier() {
+    fn compile_rejects_slice_plan_with_range_expr_component_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3 4]; y = x(1:end);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -2982,7 +2982,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_paren_cell_plan_with_identifier() {
+    fn compile_rejects_invalid_paren_cell_plan_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3017,7 +3017,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_index_assignment_with_read_context_identifier() {
+    fn compile_rejects_index_assignment_with_read_context_identifier() {
         let ast = runmat_parser::parse("x=[1,2,3]; x(1)=4;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3052,7 +3052,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_index_assignment_with_deletion_context_identifier() {
+    fn compile_rejects_index_assignment_with_deletion_context_identifier() {
         let ast = runmat_parser::parse("x=[1,2,3]; x(1)=4;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3087,7 +3087,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier() {
+    fn compile_rejects_invalid_cell_expand_all_shape_with_identifier() {
         let ast = runmat_parser::parse("c = {1,2;3,4}; [a,b] = c{:,2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3125,7 +3125,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier() {
+    fn compile_rejects_non_offset_end_expr_in_call_arg_cell_expansion_with_identifier() {
         let ast = runmat_parser::parse("c = {10, 20, 30, 40}; x = feval(@max, c{end/2}, 0);")
             .expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3140,7 +3140,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier() {
+    fn compile_rejects_invalid_mir_aggregate_shape_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3175,7 +3175,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_cell_index_component_with_identifier() {
+    fn compile_rejects_invalid_cell_index_component_with_identifier() {
         let ast = runmat_parser::parse("c = {1}; c{1} = 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3213,7 +3213,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier() {
+    fn compile_rejects_cell_assignment_colon_selector_from_source_with_identifier() {
         let ast = runmat_parser::parse("c = {1,2;3,4}; c{:,2} = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3227,7 +3227,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_mismatched_cell_index_context_with_identifier() {
+    fn compile_rejects_mismatched_cell_index_context_with_identifier() {
         let ast = runmat_parser::parse("c = {1}; c{1} = 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3265,7 +3265,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier() {
+    fn compile_rejects_member_store_back_brace_index_with_read_context_identifier() {
         let ast = runmat_parser::parse("c = {struct('x', 1)}; c{1}.x = 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3306,7 +3306,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_member_store_back_brace_index_with_deletion_context_identifier() {
+    fn compile_rejects_member_store_back_brace_index_with_deletion_context_identifier() {
         let ast = runmat_parser::parse("c = {struct('x', 1)}; c{1}.x = 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3347,7 +3347,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier() {
+    fn compile_rejects_member_store_back_paren_index_with_read_context_identifier() {
         let ast = runmat_parser::parse("s = struct('x', {1, 2}); s(1).x = 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3388,7 +3388,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_member_store_back_paren_index_with_deletion_context_identifier() {
+    fn compile_rejects_member_store_back_paren_index_with_deletion_context_identifier() {
         let ast = runmat_parser::parse("s = struct('x', {1, 2}); s(1).x = 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3429,7 +3429,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_member_store_back_paren_assignment() {
+    fn compile_interprets_member_store_back_paren_assignment() {
         let ast = runmat_parser::parse(
             "s = struct('x', {1, 2}); s(2).x = 9; t = s(2); y = getfield(t, 'x');",
         )
@@ -3451,8 +3451,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier()
-    {
+    fn compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3494,8 +3493,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier(
-    ) {
+    fn compile_rejects_dynamic_member_store_back_paren_index_with_deletion_context_identifier() {
         let ast =
             runmat_parser::parse("s = struct('x', {1, 2}); f = 'x'; s(1).(f) = 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3537,7 +3535,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_dynamic_member_store_back_paren_assignment() {
+    fn compile_interprets_dynamic_member_store_back_paren_assignment() {
         let ast = runmat_parser::parse(
             "s = struct('x', {1, 2}); f = 'x'; s(2).(f) = 9; t = s(2); y = getfield(t, f);",
         )
@@ -3559,8 +3557,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier()
-    {
+    fn compile_rejects_dynamic_member_store_back_brace_index_with_read_context_identifier() {
         let ast =
             runmat_parser::parse("c = {struct('x', 1)}; f = 'x'; c{1}.(f) = 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3602,8 +3599,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier(
-    ) {
+    fn compile_rejects_dynamic_member_store_back_brace_index_with_deletion_context_identifier() {
         let ast =
             runmat_parser::parse("c = {struct('x', 1)}; f = 'x'; c{1}.(f) = 3;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3645,7 +3641,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_dynamic_member_store_back_brace_assignment() {
+    fn compile_interprets_dynamic_member_store_back_brace_assignment() {
         let ast = runmat_parser::parse(
             "c = {struct('x', 1)}; f = 'x'; c{1}.(f) = 9; t = c{1}; y = getfield(t, f);",
         )
@@ -3667,7 +3663,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_dynamic_member_nested_index_delete_store_back() {
+    fn compile_interprets_dynamic_member_nested_index_delete_store_back() {
         let ast = runmat_parser::parse(
             "s = struct(); s.x = {1, 2, 3}; f = 'x'; s(1).(f)(2) = []; z = getfield(s(1), f); y = z{2};",
         )
@@ -3689,7 +3685,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier() {
+    fn compile_rejects_multi_assign_call_output_count_mismatch_with_identifier() {
         let ast = runmat_parser::parse("[a, b] = deal(1, 2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3724,7 +3720,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier() {
+    fn compile_rejects_multi_assign_index_target_context_mismatch_with_identifier() {
         let ast = runmat_parser::parse("a(1)=0; [x, b] = deal(1, 2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3784,7 +3780,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_multi_assign_index_target_deletion_context_identifier() {
+    fn compile_rejects_multi_assign_index_target_deletion_context_identifier() {
         let ast = runmat_parser::parse("a(1)=0; [x, b] = deal(1, 2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3844,7 +3840,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_nonempty_delete_rhs_with_identifier() {
+    fn compile_rejects_nonempty_delete_rhs_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3884,7 +3880,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_delete_place_mismatch_with_identifier() {
+    fn compile_rejects_delete_place_mismatch_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3917,7 +3913,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_delete_on_nonindexed_target_with_identifier() {
+    fn compile_rejects_delete_on_nonindexed_target_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -3976,7 +3972,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_delete_on_brace_index_target_with_identifier() {
+    fn compile_rejects_delete_on_brace_index_target_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4022,7 +4018,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier() {
+    fn compile_rejects_delete_with_nondeletion_index_context_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4068,7 +4064,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_deletion_context_without_delete_with_identifier() {
+    fn compile_rejects_deletion_context_without_delete_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4104,7 +4100,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_delete_with_nonexisting_creation_policy_with_identifier() {
+    fn compile_rejects_delete_with_nonexisting_creation_policy_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4137,7 +4133,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_read_index_context_with_identifier() {
+    fn compile_rejects_invalid_read_index_context_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4172,7 +4168,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_unsupported_mir_unary_operator_with_identifier() {
+    fn compile_rejects_unsupported_mir_unary_operator_with_identifier() {
         let ast = runmat_parser::parse("x = -1;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4207,7 +4203,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_unsupported_mir_binary_operator_with_identifier() {
+    fn compile_rejects_unsupported_mir_binary_operator_with_identifier() {
         let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4242,7 +4238,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_unknown_mir_builtin_id_with_identifier() {
+    fn compile_rejects_unknown_mir_builtin_id_with_identifier() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4276,7 +4272,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_mir_number_literal_with_identifier() {
+    fn compile_rejects_invalid_mir_number_literal_with_identifier() {
         let ast = runmat_parser::parse("x = 1;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4309,7 +4305,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_unknown_mir_constant_with_identifier() {
+    fn compile_rejects_unknown_mir_constant_with_identifier() {
         let ast = runmat_parser::parse("x = pi;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4339,7 +4335,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier() {
+    fn compile_rejects_missing_mir_function_handle_runtime_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4376,7 +4372,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_single_segment_external_function_handle_name_with_identifier() {
+    fn compile_rejects_single_segment_external_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4410,7 +4406,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier() {
+    fn compile_rejects_empty_dynamic_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4443,7 +4439,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier() {
+    fn compile_rejects_whitespace_dynamic_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4476,7 +4472,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_empty_builtin_function_handle_name_with_identifier() {
+    fn compile_rejects_empty_builtin_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4509,7 +4505,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier() {
+    fn compile_rejects_whitespace_builtin_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4542,7 +4538,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_method_function_handle_target_to_typed_instruction() {
+    fn compile_lowers_method_function_handle_target_to_typed_instruction() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4575,7 +4571,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_struct_aggregate_literal_to_typed_instruction() {
+    fn compile_lowers_struct_aggregate_literal_to_typed_instruction() {
         let ast = runmat_parser::parse("s = struct{a = 1, a = 2, b = 3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4590,7 +4586,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_object_aggregate_literal_to_typed_instruction() {
+    fn compile_lowers_object_aggregate_literal_to_typed_instruction() {
         let ast = runmat_parser::parse("p = ?Point{x = 1, y = 2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4605,7 +4601,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_whitespace_method_function_handle_name_with_identifier() {
+    fn compile_rejects_whitespace_method_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4638,7 +4634,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier() {
+    fn compile_rejects_empty_imported_module_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4675,7 +4671,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_imported_function_handle_missing_item_with_identifier() {
+    fn compile_rejects_imported_function_handle_missing_item_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4715,7 +4711,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_imported_function_handle_mismatched_item_with_identifier() {
+    fn compile_rejects_imported_function_handle_mismatched_item_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4757,7 +4753,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier() {
+    fn compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4793,7 +4789,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_static_call_with_mismatched_imported_identity_name_shape() {
+    fn compile_rejects_static_call_with_mismatched_imported_identity_name_shape() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4838,7 +4834,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_static_call_with_single_segment_external_identity() {
+    fn compile_rejects_static_call_with_single_segment_external_identity() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4877,7 +4873,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_static_call_with_method_identity_name_shape() {
+    fn compile_rejects_static_call_with_method_identity_name_shape() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4915,7 +4911,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape() {
+    fn compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4953,7 +4949,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape() {
+    fn compile_rejects_multi_assign_static_call_with_invalid_name_shape() {
         let ast = runmat_parser::parse("[a, b] = max([1,2]);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4998,7 +4994,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_multi_assign_static_call_with_method_identity_name_shape() {
+    fn compile_rejects_multi_assign_static_call_with_method_identity_name_shape() {
         let ast = runmat_parser::parse("[a, b] = max([1,2]);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5036,7 +5032,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier() {
+    fn compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5080,7 +5076,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_missing_mir_method_call_receiver_with_identifier() {
+    fn compile_rejects_missing_mir_method_call_receiver_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5124,7 +5120,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_mir_method_call_callee_with_identifier() {
+    fn compile_rejects_invalid_mir_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5170,7 +5166,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_imported_mir_method_call_callee_with_identifier() {
+    fn compile_rejects_imported_mir_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5221,7 +5217,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier() {
+    fn compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; [a, b] = obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5263,7 +5259,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier() {
+    fn compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; [a, b] = obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5310,7 +5306,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier() {
+    fn compile_rejects_multisegment_external_mir_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5358,7 +5354,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier() {
+    fn compile_rejects_empty_method_name_mir_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5403,7 +5399,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier() {
+    fn compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5449,8 +5445,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier(
-    ) {
+    fn compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5497,7 +5492,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_statement_semantic_call_to_zero_outputs() {
+    fn compile_lowers_statement_semantic_call_to_zero_outputs() {
         let ast =
             runmat_parser::parse("function y = f(x); y = nargout(); end; f(10);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -5513,7 +5508,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_method_calls_with_explicit_object_dispatch_policy() {
+    fn compile_lowers_method_calls_with_explicit_object_dispatch_policy() {
         let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5530,7 +5525,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_simple_indexed_assignment() {
+    fn compile_interprets_simple_indexed_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; x(1, 2) = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5562,7 +5557,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_simple_slice_assignment() {
+    fn compile_interprets_simple_slice_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; x(:, 2) = [9; 8];").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5590,7 +5585,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_simple_cell_indexing() {
+    fn compile_interprets_simple_cell_indexing() {
         let ast = runmat_parser::parse("c = {1, 2}; x = c{2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5609,7 +5604,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_simple_cell_indexed_assignment() {
+    fn compile_interprets_simple_cell_indexed_assignment() {
         let ast = runmat_parser::parse("c = {1, 2}; c{2} = 9; x = c{2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5633,7 +5628,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_carries_cell_end_selector_metadata_for_reads() {
+    fn compile_carries_cell_end_selector_metadata_for_reads() {
         let ast = runmat_parser::parse("c = {1, 2, 3}; x = c{end};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5670,7 +5665,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_carries_cell_end_selector_metadata_for_stores() {
+    fn compile_carries_cell_end_selector_metadata_for_stores() {
         let ast = runmat_parser::parse("c = {1, 2, 3}; c{end} = 9; x = c{3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5698,7 +5693,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_carries_cell_end_offset_selector_metadata_in_semantic_function_reads() {
+    fn compile_carries_cell_end_offset_selector_metadata_in_semantic_function_reads() {
         let ast = runmat_parser::parse(
             "function y = tail_cell(c); y = c{end-1}; end; c = {1, 2, 3}; x = tail_cell(c);",
         )
@@ -5750,7 +5745,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_carries_cell_end_offset_selector_metadata_in_semantic_function_stores() {
+    fn compile_carries_cell_end_offset_selector_metadata_in_semantic_function_stores() {
         let ast = runmat_parser::parse(
             "function y = patch_cell(c, v); c{end-1} = v; y = c{2}; end; c = {1, 2, 3}; x = patch_cell(c, 9);",
         )
@@ -5798,7 +5793,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_general_cell_end_expression_reads() {
+    fn compile_supports_general_cell_end_expression_reads() {
         let ast = runmat_parser::parse("c = {10, 20, 30, 40}; x = c{end/2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5849,7 +5844,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_fractional_cell_end_expression_read_index() {
+    fn compile_rejects_fractional_cell_end_expression_read_index() {
         let ast = runmat_parser::parse("c = {10, 20, 30, 40, 50}; x = c{end/2};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5862,7 +5857,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_general_cell_end_expression_stores() {
+    fn compile_supports_general_cell_end_expression_stores() {
         let ast = runmat_parser::parse("c = {1, 2, 3, 4}; c{floor(end/2)} = 9; x = c{2};")
             .expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -5897,7 +5892,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_cell_brace_end_plus_one_growth_for_vectors() {
+    fn compile_supports_cell_brace_end_plus_one_growth_for_vectors() {
         let ast = runmat_parser::parse("c = {1, 2}; c{end+1} = 9; x = c{3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -5925,7 +5920,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_cell_brace_linear_gap_growth_for_vectors() {
+    fn compile_supports_cell_brace_linear_gap_growth_for_vectors() {
         let ast = runmat_parser::parse(
             "c = {1, 2}; c{5} = 9; a = isempty(c{3}); b = isempty(c{4}); x = c{5};",
         )
@@ -5970,7 +5965,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors() {
+    fn compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors() {
         let ast = runmat_parser::parse("c = {1, 2}; c{end+3} = 9; a = isempty(c{3}); x = c{5};")
             .expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -6005,7 +6000,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector() {
+    fn compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector() {
         let ast = runmat_parser::parse("c = cell(5,0); c{3} = 2; v = c{3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6034,7 +6029,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector() {
+    fn compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector() {
         let ast = runmat_parser::parse("c = cell(0,5); c{3} = 2; v = c{3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6063,7 +6058,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_cell_brace_end_plus_one_growth_for_matrix_linear_assignment() {
+    fn compile_rejects_cell_brace_end_plus_one_growth_for_matrix_linear_assignment() {
         let ast = runmat_parser::parse("c = {1, 2; 3, 4}; c{end+1} = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6075,7 +6070,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers() {
+    fn compile_supports_cell_brace_subscript_growth_with_empty_fillers() {
         let ast =
             runmat_parser::parse("c = {1, 2; 3, 4}; c{3,3} = 9; a = c{3,3}; b = isempty(c{2,3});")
                 .expect("parse");
@@ -6114,7 +6109,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_cell_brace_end_plus_one_subscript_growth() {
+    fn compile_supports_cell_brace_end_plus_one_subscript_growth() {
         let ast =
             runmat_parser::parse("c = {1, 2; 3, 4}; c{end,end+1} = 8; x = c{2,3};").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -6143,7 +6138,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_supports_mixed_cell_colon_expansion() {
+    fn compile_supports_mixed_cell_colon_expansion() {
         let ast = runmat_parser::parse("c = {1,2;3,4}; [a,b] = c{:,2}; z = a + b;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6171,7 +6166,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_3d_slice_roundtrip_uses_slice_expr_paths() {
+    fn compile_3d_slice_roundtrip_uses_slice_expr_paths() {
         let ast = runmat_parser::parse(
             r#"
             A = reshape([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24], 3, 4, 2);
@@ -6236,7 +6231,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_basic_if_statement() {
+    fn compile_interprets_basic_if_statement() {
         let ast = runmat_parser::parse("if 1; x = 2; else; x = 3; end").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6260,7 +6255,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_basic_switch_statement() {
+    fn compile_interprets_basic_switch_statement() {
         let ast =
             runmat_parser::parse("switch 2; case 1; x = 1; case 2; x = 2; otherwise; x = 3; end")
                 .expect("parse");
@@ -6286,7 +6281,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_unreachable_terminator() {
+    fn compile_lowers_unreachable_terminator() {
         let ast = runmat_parser::parse("x = 1;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -6305,7 +6300,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_external_semantic_function_handle_keeps_identity() {
+    fn compile_external_semantic_function_handle_keeps_identity() {
         let ast = runmat_parser::parse("h = @remote_inc; y = feval(h, 2);").expect("parse");
         let mut semantic_functions = HashMap::new();
         semantic_functions.insert("remote_inc".to_string(), FunctionId(9001));
@@ -6345,7 +6340,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_external_semantic_direct_call_uses_host_invoker() {
+    fn compile_external_semantic_direct_call_uses_host_invoker() {
         let ast = runmat_parser::parse("y = remote_inc(2);").expect("parse");
         let mut semantic_functions = HashMap::new();
         semantic_functions.insert("remote_inc".to_string(), FunctionId(9001));
@@ -6385,7 +6380,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_async_call_and_await_via_semantic_future_lane() {
+    fn compile_interprets_async_call_and_await_via_semantic_future_lane() {
         let source = "async function y = inc(x); y = x + 1; end; t = inc(2); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -6412,7 +6407,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_emits_explicit_spawn_instruction() {
+    fn compile_emits_explicit_spawn_instruction() {
         let source = "async function y = inc(x); y = x + 1; end; t = spawn(inc(2)); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -6446,7 +6441,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_lowers_async_expansion_call_to_future_expand_instruction() {
+    fn compile_lowers_async_expansion_call_to_future_expand_instruction() {
         let source =
             "async function y = inc(x); y = x + 1; end; args = {2}; t = inc(args{:}); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
