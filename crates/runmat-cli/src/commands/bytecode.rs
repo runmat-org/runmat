@@ -108,15 +108,11 @@ fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{compile_bytecode, discover_known_project_symbols};
-    use once_cell::sync::Lazy;
+    use crate::test_support::ScopedCurrentDir;
     use std::fs;
-    use std::sync::Mutex;
-
-    static CWD_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
     fn discover_known_project_symbols_reads_manifest_source_context() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().expect("tempdir");
         fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
         fs::write(
@@ -137,11 +133,9 @@ roots = ["."]
         .expect("write package function");
         fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
 
-        let prev = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let source_name = tmp.path().join("main.m");
         let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
-        std::env::set_current_dir(prev).expect("restore cwd");
 
         assert!(
             symbols.contains("stats.summarize"),
@@ -151,7 +145,6 @@ roots = ["."]
 
     #[test]
     fn emit_bytecode_uses_source_context_project_symbols() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().expect("tempdir");
         fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
         fs::write(
@@ -172,8 +165,7 @@ roots = ["."]
         .expect("write package function");
         fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
 
-        let prev = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let source_name = tmp.path().join("main.m");
         let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
         let compat = runmat_config::RunMatConfig::default().language.compat;
@@ -186,7 +178,6 @@ roots = ["."]
         )
         .expect("lower source");
         let bytecode = compile_bytecode(&lowering).expect("compile bytecode");
-        std::env::set_current_dir(prev).expect("restore cwd");
 
         assert!(
             lowering
@@ -209,7 +200,6 @@ roots = ["."]
 
     #[test]
     fn discover_known_project_symbols_requires_existing_local_source_path() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().expect("tempdir");
         fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
         fs::write(
@@ -229,10 +219,8 @@ roots = ["."]
         )
         .expect("write package function");
 
-        let prev = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let symbols = discover_known_project_symbols(Some("virtual/nonexistent_remote.m"));
-        std::env::set_current_dir(prev).expect("restore cwd");
 
         assert!(
             symbols.is_empty(),
@@ -242,7 +230,6 @@ roots = ["."]
 
     #[test]
     fn discover_known_project_symbols_rejects_colon_remote_name() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().expect("tempdir");
         fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
         fs::write(
@@ -263,10 +250,8 @@ roots = ["."]
         .expect("write package function");
         fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
 
-        let prev = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let symbols = discover_known_project_symbols(Some("remote:main.m"));
-        std::env::set_current_dir(prev).expect("restore cwd");
 
         assert!(
             symbols.is_empty(),

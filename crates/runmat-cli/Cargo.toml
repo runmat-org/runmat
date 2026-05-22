@@ -51,7 +51,6 @@ openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
-runmat-kernel = { version = "=0.4.1", path = "../runmat-kernel" }
 runmat-core = { version = "=0.4.1", path = "../runmat-core" }
 runmat-parser = { version = "=0.4.1", path = "../runmat-parser" }
 runmat-hir = { version = "=0.4.1", path = "../runmat-hir" }

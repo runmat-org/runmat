@@ -249,6 +249,13 @@ pub async fn build_slice_selectors(
                 values: indices,
                 output_shape: idx_t.shape.clone(),
             });
+        } else if let Value::LogicalArray(_) = &materialized {
+            // MATLAB linear logical indexing always yields a column vector.
+            let idxs = indices_from_value_linear(&materialized, total_len).await?;
+            selectors.push(SliceSelector::LinearIndices {
+                output_shape: vec![idxs.len(), 1],
+                values: idxs,
+            });
         } else {
             let idxs = indices_from_value_linear(&materialized, total_len).await?;
             selectors.push(SliceSelector::Indices(idxs));

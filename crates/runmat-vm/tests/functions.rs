@@ -2502,7 +2502,9 @@ fn classes_static_and_inheritance() {
 
 #[test]
 fn static_method_via_classref_without_class_registry_is_unresolved() {
-    let err = execute_source_result("P = classref(\"Point\").origin();")
+    let err = execute_source_result(
+        "P = classref(\"UnregisteredClassForStaticMethodTest\").origin();",
+    )
         .expect_err("classref static call should be unresolved without class registration");
     assert_eq!(
         err.identifier(),

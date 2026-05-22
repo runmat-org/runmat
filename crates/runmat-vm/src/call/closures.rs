@@ -7,13 +7,9 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{builtin_functions, lookup_method, Access, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
+use runmat_builtins::{builtin_functions, get_class, lookup_method, Access, Closure, Value};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
-
-fn method_identity(name: String) -> CallableIdentity {
-    CallableIdentity::Method(MethodId(name))
-}
 
 fn method_member_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
@@ -31,6 +27,27 @@ fn method_member_name(identity: &CallableIdentity) -> Option<String> {
             Some(segments[0].0.trim().to_string())
         }
         _ => None,
+    }
+}
+
+fn runtime_named_identity(name: &str) -> (CallableIdentity, CallableFallbackPolicy) {
+    let segments: Vec<&str> = name.split('.').collect();
+    if segments.len() > 1 && segments.iter().all(|segment| !segment.trim().is_empty()) {
+        let qualified = QualifiedName(
+            segments
+                .into_iter()
+                .map(|segment| SymbolName(segment.trim().to_string()))
+                .collect(),
+        );
+        (
+            CallableIdentity::ExternalName(qualified),
+            CallableFallbackPolicy::ExternalBoundary,
+        )
+    } else {
+        (
+            CallableIdentity::DynamicName(SymbolName(name.trim().to_string())),
+            CallableFallbackPolicy::RuntimeNameResolution,
+        )
     }
 }
 
@@ -72,9 +89,7 @@ async fn call_member_index_on_object_like(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
-    fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    let post_object_fallback = fallback_policy.post_object_dispatch();
     if let Some((m, _owner)) = lookup_method(class_name, &name) {
         if m.is_static {
             return Err(mex(
@@ -94,11 +109,12 @@ async fn call_member_index_on_object_like(
         let mut full_args = Vec::with_capacity(1 + args.len());
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
+        let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
         return call_identity_with_policy(
-            method_identity(m.function_name.clone()),
+            identity,
             full_args,
             requested_outputs,
-            CallableFallbackPolicy::RuntimeNameResolution,
+            fallback_policy,
         )
         .await;
     }
@@ -107,6 +123,7 @@ async fn call_member_index_on_object_like(
     method_args.push(receiver.clone());
     method_args.extend(args.iter().cloned());
     let qualified_identity = external_qualified_identity(class_name, &name);
+    let (name_identity, name_fallback) = runtime_named_identity(&name);
     if let Some(v) = try_call_identity_with_policy(
         qualified_identity.clone(),
         method_args.clone(),
@@ -118,10 +135,10 @@ async fn call_member_index_on_object_like(
         return Ok(v);
     }
     if let Some(v) = try_call_identity_with_policy(
-        method_identity(name.clone()),
+        name_identity.clone(),
         method_args.clone(),
         requested_outputs,
-        CallableFallbackPolicy::ObjectDispatch,
+        name_fallback,
     )
     .await?
     {
@@ -142,10 +159,10 @@ async fn call_member_index_on_object_like(
     }
 
     match call_identity_with_policy(
-        method_identity(name.clone()),
+        name_identity,
         method_args,
         requested_outputs,
-        post_object_fallback,
+        name_fallback,
     )
     .await
     {
@@ -256,7 +273,7 @@ pub async fn call_method_or_member_index_with_outputs(
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
-    fallback_policy: CallableFallbackPolicy,
+    _fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     let name = method_member_name(&identity).ok_or_else(|| {
         mex(
@@ -271,7 +288,6 @@ pub async fn call_method_or_member_index_with_outputs(
         name,
         args,
         requested_outputs,
-        fallback_policy,
     )
     .await
 }
@@ -281,7 +297,6 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
-    fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
@@ -292,7 +307,6 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                 name,
                 args,
                 requested_outputs,
-                fallback_policy,
             )
             .await
         }
@@ -304,7 +318,6 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                 name,
                 args,
                 requested_outputs,
-                fallback_policy,
             )
             .await
         }
@@ -316,13 +329,20 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                         &format!("Method '{}' is not static", name),
                     ));
                 }
+                let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
                 return call_identity_with_policy(
-                    method_identity(m.function_name.clone()),
+                    identity,
                     args,
                     requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
+                    fallback_policy,
                 )
                 .await;
+            }
+            if get_class(&cls).is_none() {
+                return Err(mex(
+                    "UndefinedFunction",
+                    &format!("Undefined function in direct call: {cls}.{name}"),
+                ));
             }
 
             let qualified_identity = external_qualified_identity(&cls, &name);
@@ -349,9 +369,17 @@ mod tests {
 
     #[test]
     fn classref_external_method_uses_external_boundary_semantic_resolution() {
+        let class_name = "ClassRefExternalMethodResolutionTest".to_string();
+        let resolved_name = format!("{class_name}.remote_inc");
+        register_class(ClassDef {
+            name: class_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
         let _resolver_guard =
             runmat_runtime::user_functions::install_semantic_function_resolver(Some(Arc::new(
-                |name| (name == "Point.remote_inc").then_some(7331),
+                move |name| (name == resolved_name).then_some(7331),
             )));
         let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
             Some(Arc::new(|function, args, requested_outputs| {
@@ -362,7 +390,7 @@ mod tests {
             })),
         );
         let value = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef("Point".to_string()),
+            Value::ClassRef(class_name),
             CallableIdentity::Method(MethodId("remote_inc".to_string())),
             vec![Value::Num(2.0)],
             1,

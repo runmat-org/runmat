@@ -335,7 +335,7 @@ pub async fn build_expr_index_plan<ResolveEnd, Fut>(
 ) -> Result<IndexPlan, RuntimeError>
 where
     ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
-    Fut: Future<Output = Result<i64, RuntimeError>>,
+    Fut: Future<Output = Result<f64, RuntimeError>>,
 {
     let rank = spec.shape.len();
     let full_shape: Vec<usize> = if spec.dims == 1 {
@@ -431,6 +431,10 @@ where
                                     vv.push(i + 1);
                                 }
                             }
+                            if spec.dims == 1 {
+                                // MATLAB-style linear logical indexing returns a column vector.
+                                linear_output_shape = Some(vec![vv.len(), 1]);
+                            }
                             selectors.push(ExprSel::Indices(vv));
                         }
                     }
@@ -481,10 +485,28 @@ where
                 let mut v = Vec::new();
                 let mut cur = *start;
                 let stp = *step;
-                let end_i = resolve_end(dim_len as usize, end_off).await?;
+                let end_bound = resolve_end(dim_len as usize, end_off).await?;
                 if stp == 0 {
                     return Err(mex("IndexStepZero", "Index step cannot be zero"));
                 }
+                if !end_bound.is_finite() {
+                    return Err(mex(
+                        "UnsupportedIndexType",
+                        "Index values must be positive integers or logical values",
+                    ));
+                }
+                let end_i = if stp > 0 {
+                    end_bound.floor()
+                } else {
+                    end_bound.ceil()
+                };
+                if end_i < i64::MIN as f64 || end_i > i64::MAX as f64 {
+                    return Err(mex(
+                        "UnsupportedIndexType",
+                        "Index values must be positive integers or logical values",
+                    ));
+                }
+                let end_i = end_i as i64;
                 if stp > 0 {
                     while cur <= end_i {
                         if cur < 1 || cur > dim_len {
@@ -676,16 +698,16 @@ mod tests {
                     let expr = expr.clone();
                     async move {
                         Ok(match &expr {
-                            EndExpr::End => dim_len as i64,
-                            EndExpr::Const(value) => *value as i64,
+                            EndExpr::End => dim_len as f64,
+                            EndExpr::Const(value) => *value,
                             EndExpr::Sub(lhs, rhs) => {
                                 let lhs_val = match lhs.as_ref() {
-                                    EndExpr::End => dim_len as i64,
-                                    EndExpr::Const(value) => *value as i64,
+                                    EndExpr::End => dim_len as f64,
+                                    EndExpr::Const(value) => *value,
                                     other => panic!("unsupported lhs expr: {other:?}"),
                                 };
                                 let rhs_val = match rhs.as_ref() {
-                                    EndExpr::Const(value) => *value as i64,
+                                    EndExpr::Const(value) => *value,
                                     other => panic!("unsupported rhs expr: {other:?}"),
                                 };
                                 lhs_val - rhs_val

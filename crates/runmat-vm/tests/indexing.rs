@@ -205,17 +205,26 @@ fn fractional_range_step_index_rejects_non_integer_selector() {
 }
 
 #[test]
-fn fractional_range_end_expression_rejects_non_integer_selector() {
-    let err = execute_source("A=[10,20,30,40,50]; y=A(1:end/2);")
-        .expect_err("fractional range end expression should fail");
-    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+fn fractional_range_end_expression_truncates_range_bound() {
+    let vars = execute_source("A=[10,20,30,40,50]; y=A(1:end/2);")
+        .expect("fractional range end expression should execute");
+    if let Value::Tensor(y) = &vars[1] {
+        assert_eq!(y.shape, vec![1, 2]);
+        assert_eq!(y.data, vec![10.0, 20.0]);
+    } else {
+        panic!("expected tensor result for fractional range end expression");
+    }
 }
 
 #[test]
-fn fractional_range_end_expression_with_step_rejects_non_integer_selector() {
-    let err = execute_source("A=[10,20,30,40,50]; y=A(1:2:end/2);")
-        .expect_err("fractional range end expression with step should fail");
-    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+fn fractional_range_end_expression_with_step_truncates_range_bound() {
+    let vars = execute_source("A=[10,20,30,40,50]; y=A(1:2:end/2);")
+        .expect("fractional range end expression with step should execute");
+    if let Value::Num(y) = &vars[1] {
+        assert_eq!(*y, 10.0);
+    } else {
+        panic!("expected scalar result for stepped fractional range end expression");
+    }
 }
 
 #[test]

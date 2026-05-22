@@ -1245,7 +1245,8 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::BoundFunction(_)) | MirCallee::Dynamic(_) => {
+                MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::Dynamic(_) => {
                     return Err(self
                         .compile_error(
                             "MIR method-call lowering expected a non-semantic static callee",
@@ -1470,13 +1471,34 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => match indexing.plan {
                 MirIndexPlan::Scalar => {
-                    self.compile_mir_scalar_index_components(indexing)?;
-                    self.compile_mir_rvalue(value)?;
-                    self.emit(if delete {
-                        Instr::StoreIndexDelete(indexing.components.len())
+                    if indexing.components.len() > 2 {
+                        let (numeric_count, colon_mask, end_mask) =
+                            self.compile_mir_slice_components(indexing)?;
+                        self.compile_mir_rvalue(value)?;
+                        self.emit(if delete {
+                            Instr::StoreSliceDelete(
+                                indexing.components.len(),
+                                numeric_count,
+                                colon_mask,
+                                end_mask,
+                            )
+                        } else {
+                            Instr::StoreSlice(
+                                indexing.components.len(),
+                                numeric_count,
+                                colon_mask,
+                                end_mask,
+                            )
+                        });
                     } else {
-                        Instr::StoreIndex(indexing.components.len())
-                    });
+                        self.compile_mir_scalar_index_components(indexing)?;
+                        self.compile_mir_rvalue(value)?;
+                        self.emit(if delete {
+                            Instr::StoreIndexDelete(indexing.components.len())
+                        } else {
+                            Instr::StoreIndex(indexing.components.len())
+                        });
+                    }
                 }
                 MirIndexPlan::SliceExpr => {
                     let components = self.compile_mir_slice_expr_components(
@@ -1691,13 +1713,34 @@ impl Compiler {
             IndexKind::Paren => {
                 match indexing.plan {
                     MirIndexPlan::Scalar => {
-                        self.compile_mir_scalar_index_components(indexing)?;
-                        self.emit(Instr::LoadVar(tmp));
-                        self.emit(if delete {
-                            Instr::StoreIndexDelete(indexing.components.len())
+                        if indexing.components.len() > 2 {
+                            let (numeric_count, colon_mask, end_mask) =
+                                self.compile_mir_slice_components(indexing)?;
+                            self.emit(Instr::LoadVar(tmp));
+                            self.emit(if delete {
+                                Instr::StoreSliceDelete(
+                                    indexing.components.len(),
+                                    numeric_count,
+                                    colon_mask,
+                                    end_mask,
+                                )
+                            } else {
+                                Instr::StoreSlice(
+                                    indexing.components.len(),
+                                    numeric_count,
+                                    colon_mask,
+                                    end_mask,
+                                )
+                            });
                         } else {
-                            Instr::StoreIndex(indexing.components.len())
-                        });
+                            self.compile_mir_scalar_index_components(indexing)?;
+                            self.emit(Instr::LoadVar(tmp));
+                            self.emit(if delete {
+                                Instr::StoreIndexDelete(indexing.components.len())
+                            } else {
+                                Instr::StoreIndex(indexing.components.len())
+                            });
+                        }
                     }
                     MirIndexPlan::SliceExpr => {
                         let components = self.compile_mir_slice_expr_components(
@@ -1992,7 +2035,8 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::BoundFunction(_)) | MirCallee::Dynamic(_) => {
+                MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::Dynamic(_) => {
                     return Err(self
                         .compile_error(
                             "MIR method-call lowering expected a non-semantic static callee",
@@ -2474,8 +2518,19 @@ impl Compiler {
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
         match indexing.plan {
             MirIndexPlan::Scalar => {
-                self.compile_mir_scalar_index_components(indexing)?;
-                self.emit(Instr::Index(indexing.components.len()));
+                if indexing.components.len() > 2 {
+                    let (numeric_count, colon_mask, end_mask) =
+                        self.compile_mir_slice_components(indexing)?;
+                    self.emit(Instr::IndexSlice(
+                        indexing.components.len(),
+                        numeric_count,
+                        colon_mask,
+                        end_mask,
+                    ));
+                } else {
+                    self.compile_mir_scalar_index_components(indexing)?;
+                    self.emit(Instr::Index(indexing.components.len()));
+                }
                 Ok(())
             }
             MirIndexPlan::SliceExpr => {

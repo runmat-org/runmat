@@ -368,16 +368,12 @@ async fn export_touched_figures(
 #[cfg(test)]
 mod tests {
     use super::resolve_script_input;
-    use once_cell::sync::Lazy;
+    use crate::test_support::ScopedCurrentDir;
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::Mutex;
-
-    static CWD_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
     fn resolves_named_entrypoint_to_manifest_path_target() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
@@ -397,10 +393,8 @@ path = "src/main"
         )
         .unwrap();
 
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let resolved = resolve_script_input(PathBuf::from("main")).expect("resolve entrypoint");
-        std::env::set_current_dir(original).unwrap();
 
         assert_eq!(
             resolved.canonicalize().unwrap(),
@@ -410,25 +404,20 @@ path = "src/main"
 
     #[test]
     fn resolve_script_input_infers_m_extension_for_relative_path() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
 
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
 
         let resolved =
             resolve_script_input(PathBuf::from("src/main")).expect("should infer .m extension");
-
-        std::env::set_current_dir(prev).unwrap();
 
         assert_eq!(resolved, PathBuf::from("src/main.m"));
     }
 
     #[test]
     fn resolves_module_function_entrypoint_to_source_root_file() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src/app")).unwrap();
         fs::write(
@@ -453,11 +442,9 @@ function = "main"
         )
         .unwrap();
 
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let resolved = resolve_script_input(PathBuf::from("server"))
             .expect("module/function entrypoint should resolve to module file");
-        std::env::set_current_dir(original).unwrap();
 
         assert_eq!(
             resolved.canonicalize().unwrap(),
@@ -467,7 +454,6 @@ function = "main"
 
     #[test]
     fn module_function_entrypoint_errors_when_module_file_missing() {
-        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(
@@ -487,11 +473,9 @@ function = "main"
         )
         .unwrap();
 
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
         let err = resolve_script_input(PathBuf::from("server"))
             .expect_err("missing module file should return explicit error");
-        std::env::set_current_dir(original).unwrap();
 
         let message = err.to_string();
         assert!(

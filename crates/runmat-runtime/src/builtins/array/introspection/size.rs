@@ -104,6 +104,9 @@ async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     match rest.len() {
         0 => {
             if let Some(out_count) = crate::output_count::current_output_count() {
+                if out_count <= 1 {
+                    return dimensions_to_value(&dims);
+                }
                 return Ok(Value::OutputList(size_outputs(&dims, out_count)));
             }
             dimensions_to_value(&dims)

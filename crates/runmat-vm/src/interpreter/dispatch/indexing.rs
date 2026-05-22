@@ -763,18 +763,12 @@ async fn resolve_end_expr_index(
     })
 }
 
-async fn resolve_range_end_index(
+async fn resolve_range_end_value(
     dim_len: usize,
     end_expr: &EndExpr,
     vars: &[Value],
-) -> Result<i64, RuntimeError> {
-    let value = resolve_end_expr_value(dim_len, end_expr, vars).await?;
-    exact_index_from_f64(value).ok_or_else(|| {
-        crate::interpreter::errors::mex(
-            "UnsupportedIndexType",
-            "Index values must be positive integers or logical values",
-        )
-    })
+) -> Result<f64, RuntimeError> {
+    resolve_end_expr_value(dim_len, end_expr, vars).await
 }
 
 async fn build_expr_slice_plan(
@@ -805,7 +799,7 @@ async fn build_expr_slice_plan(
         },
         |dim_len, expr| {
             let expr = expr.clone();
-            async move { resolve_range_end_index(dim_len, &expr, vars).await }
+            async move { resolve_range_end_value(dim_len, &expr, vars).await }
         },
     )
     .await

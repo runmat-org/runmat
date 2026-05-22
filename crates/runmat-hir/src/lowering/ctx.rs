@@ -1611,7 +1611,7 @@ impl LoweringCtx {
             return None;
         }
 
-        if let Some(min_inputs) = variadic_builtin_min_inputs(name) {
+        if let Some(min_inputs) = builtin_min_inputs_for_last_arg_expansion(name) {
             if min_inputs <= arg_count {
                 return None;
             }
@@ -1731,6 +1731,7 @@ impl LoweringCtx {
     ) -> Result<HirCall, HirError> {
         let qualified_call_name =
             qualified_name(&name.split('.').map(ToString::to_string).collect::<Vec<_>>());
+        let method_like_syntax = matches!(syntax, CallSyntax::Method | CallSyntax::DottedInvoke);
         let (callee, kind) = if let Some(function) = self.function_names.get(name) {
             (
                 HirCallableRef::Function(*function),
@@ -1740,6 +1741,11 @@ impl LoweringCtx {
             (
                 HirCallableRef::Function(*function),
                 CallKind::DirectFunction(*function),
+            )
+        } else if method_like_syntax {
+            (
+                HirCallableRef::Unresolved(qualified_call_name.clone()),
+                CallKind::Dynamic,
             )
         } else if is_builtin(name) {
             let builtin = BuiltinId(name.to_string());
@@ -2254,9 +2260,11 @@ fn is_builtin(name: &str) -> bool {
         || runmat_builtins::builtin_semantics_for_name(name).is_some()
 }
 
-fn variadic_builtin_min_inputs(name: &str) -> Option<usize> {
+fn builtin_min_inputs_for_last_arg_expansion(name: &str) -> Option<usize> {
     match name {
-        "max" | "min" | "cat" => Some(2),
+        // These call sites support "missing-argument filled by last argument expansion"
+        // when the final argument can supply a comma-list.
+        "max" | "min" | "cat" | "atan2" => Some(2),
         _ => None,
     }
 }

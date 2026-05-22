@@ -3012,7 +3012,7 @@ mod tests {
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
         assert_eq!(
             err.identifier.as_deref(),
-            Some("RunMat:MirDeletionContextWithoutDeleteInvalid")
+            Some("RunMat:MirIndexContextInvalid")
         );
     }
 
