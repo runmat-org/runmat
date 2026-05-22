@@ -128,8 +128,8 @@ const faqItems: FAQItem[] = [
     id: "mo-free",
     question: "Is RunMat really free?",
     answer:
-      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see pricing.",
-    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
+      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the free tier (100 MB). Paid plans add more storage and team features -- see pricing.",
+    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the free tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
   },
   {
     id: "mo-account",
@@ -684,7 +684,7 @@ export default function MatlabOnlinePage() {
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Every change versioned. No git required.</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Every save creates a version automatically. Per-file history and full project snapshots are included on all{" "}
-              <Link href="/pricing" className="underline hover:text-foreground/80">App tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
+              <Link href="/pricing" className="underline hover:text-foreground/80">App tiers</Link>, starting at $0 with 100 MB on the free tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">

@@ -127,10 +127,10 @@ const faqItems: FAQItem[] = [
     id: "ag-free",
     question: "Is the agent free to use?",
     answer:
-      "Yes, with usage limits. The sandbox includes a small free allowance per session. Signed-in Hobby accounts get a free monthly credit. Paid tiers add more credit and team features.",
+      "Yes, with usage limits. The sandbox includes a small free allowance per session. Signed-in free accounts get a monthly credit. Paid tiers add more credit and team features.",
     answerContent: (
       <>
-        Yes, with usage limits. The sandbox includes a small free allowance per session. Signed-in Hobby accounts get a free monthly credit. Paid tiers add more credit and team features. See <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.
+        Yes, with usage limits. The sandbox includes a small free allowance per session. Signed-in free accounts get a monthly credit. Paid tiers add more credit and team features. See <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.
       </>
     ),
   },
@@ -895,7 +895,7 @@ export default function AgentPage() {
               </span>
               <h3 className="text-lg font-semibold text-foreground">Free to start</h3>
               <p className="text-[0.938rem] text-foreground mt-1 flex-1">
-                The sandbox includes a free allowance per session. Signed-in Hobby accounts get a monthly credit on top. <Link href="/pricing" className="underline hover:text-foreground/80">See pricing</Link>.
+                The sandbox includes a free allowance per session. Signed-in free accounts get a monthly credit on top. <Link href="/pricing" className="underline hover:text-foreground/80">See pricing</Link>.
               </p>
             </div>
           </div>

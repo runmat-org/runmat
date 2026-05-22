@@ -233,7 +233,7 @@ Between the Accelerate launch in November and now, we also shipped:
 
 RunMat App launches with three tiers:
 
-**Hobby (free)** — 100 MB of storage. Unlimited projects. Sign in and start working.
+**Free** — 100 MB of storage. Unlimited projects. Sign in and start working.
 
 **Pro ($30/month per user)** — 10 GB of storage. Additional storage available from your account. For individuals and small teams doing real work.
 

@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 
 const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surface-runmat.webp";
 const heroVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.mp4";
+const pageDescription =
+  "GPU-accelerated MATLAB-syntax math with real-time feedback and a runtime-aware agent. Open source across desktop, browser, and CLI. No license required.";
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -18,30 +20,97 @@ const jsonLd = {
       "@type": "Organization",
       "@id": "https://runmat.com/#organization",
       "name": "RunMat",
+      "alternateName": ["RunMat by Dystr", "Dystr"],
+      "legalName": "Dystr Inc.",
       "url": "https://runmat.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://runmat.com/runmat-logo.svg",
+        "caption": "RunMat",
+      },
+      "description":
+        "RunMat is a GPU-first platform for engineering math with MATLAB syntax, real-time feedback, and an agent that understands runtime state.",
+      "sameAs": [
+        "https://github.com/runmat-org/runmat",
+        "https://x.com/runmat_com",
+        "https://dystr.com",
+      ],
+      "knowsAbout": [
+        "Scientific Computing",
+        "High Performance Computing",
+        "MATLAB",
+        "WebGPU",
+        "Compiler Design",
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "customer support",
+        "email": "team@runmat.com",
+      },
     },
     {
       "@type": "WebSite",
       "@id": "https://runmat.com/#website",
       "url": "https://runmat.com",
       "name": "RunMat",
+      "description": "A GPU-first platform for engineering math.",
       "publisher": { "@id": "https://runmat.com/#organization" },
+      "image": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://runmat.com/docs/search?q={search_term_string}",
+        },
+        "query-input": "required name=search_term_string",
+      },
     },
     {
       "@type": "SoftwareApplication",
       "@id": "https://runmat.com/#software",
       "name": "RunMat",
+      "description":
+        "RunMat runs MATLAB syntax workloads with real-time feedback, instant visualization, and GPU acceleration across desktop, browser, and CLI surfaces.",
+      "license": "https://opensource.org/licenses/MIT",
       "applicationCategory": "ScientificApplication",
+      "applicationSubCategory": "Numerical Analysis & Simulation",
       "operatingSystem": ["Windows", "macOS", "Linux", "Browser"],
+      "softwareVersion": "Beta",
+      "featureList": [
+        "JIT-accelerated MATLAB-style syntax",
+        "Full IDE experience with code editor, file explorer, and live plotting in-browser",
+        "Automatic GPU Fusion & Memory Management",
+        "Cross-platform binary (Metal, Vulkan, DX12) and CLI support",
+        "Interactive 2D and 3D plotting with GPU acceleration",
+        "Real-time type and shape tracking with dimension error detection",
+        "Execution tracing and diagnostic logging",
+        "Built-in agent with runtime execution and workspace inspection",
+        "Compatibility-guided script adaptation with reviewable diffs",
+        "OS-level sandboxed agent execution",
+        "Deterministic session replay and audit journal",
+      ],
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "availability": "https://schema.org/InStock",
+      },
+      "author": { "@id": "https://runmat.com/#organization" },
       "publisher": { "@id": "https://runmat.com/#organization" },
+      "downloadUrl": "https://runmat.com/download",
+      "mainEntityOfPage": { "@id": "https://runmat.com/#webpage" },
+      "screenshot": {
+        "@type": "ImageObject",
+        "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
+        "caption": "RunMat Desktop and Browser Sandbox",
+      },
     },
     {
       "@type": "WebPage",
       "@id": "https://runmat.com/#webpage",
       "url": "https://runmat.com",
       "name": "RunMat: GPU-First Platform for Engineering Math",
-      "description":
-        "Run MATLAB syntax workloads with real-time feedback, instant visualization, and an agent that understands your runtime state.",
+      "description": pageDescription,
       "isPartOf": { "@id": "https://runmat.com/#website" },
       "about": { "@id": "https://runmat.com/#software" },
       "primaryImageOfPage": {
@@ -67,8 +136,7 @@ const jsonLd = {
 
 export const metadata: Metadata = {
   title: "RunMat: GPU-First Platform for Engineering Math",
-  description:
-    "Run MATLAB syntax workloads with real-time feedback, instant visualization, and an agent that understands your runtime state.",
+  description: pageDescription,
   keywords: [
     "run matlab online",
     "free matlab runtime",
@@ -93,8 +161,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "RunMat: GPU-First Platform for Engineering Math",
-    description:
-      "Run MATLAB syntax workloads with real-time feedback and an agent that understands your runtime state.",
+    description: pageDescription,
     url: "/",
     siteName: "RunMat",
     type: "website",
@@ -116,8 +183,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "RunMat: GPU-First Platform for Engineering Math",
-    description:
-      "Run MATLAB syntax workloads with real-time feedback, instant visualization, and an agent that understands your runtime state.",
+    description: pageDescription,
     images: [heroPosterSrc],
   },
 };

@@ -21,13 +21,13 @@ const productRows: ProductRow[] = [
   ["Code editor and file explorer", "check", "check", "check", "Integrated editor and project file browser."],
   ["Interactive 2D/3D plotting", "check", "check", "check", "Interactive plots you can rotate, zoom, and inspect.", "compare-plotting"],
   ["Type and shape diagnostics", "check", "check", "check", "Real-time type and matrix shape tracking with dimension errors."],
-  ["File storage", "x", "check", "check", "Persist and sync projects in RunMat App."],
+  ["Project filesystem", "x", "check", "check", "Persist large project files in a high-bandwidth filesystem built for RunMat desktop workloads."],
   ["Project sharing", "x", "check", "check", "Share projects with editors in your organization. Each editor is billed as a seat on App plans."],
   ["Team workspaces", "x", "check", "check", "Organize projects under your team's organization. Created automatically when you sign up."],
   ["Collaborators", "x", "Paid per seat", "Included", "Each editor in your organization is billed as a seat on App plans."],
   ["File versioning", "x", "check", "check", "Built-in version history on all App tiers; counts toward storage.", "compare-versioning"],
-  ["Cloud storage", "x", "100 MB (Hobby); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is shared across your organization. Hobby: 100 MB. Pro: 10 GB included. Team: 100 GB included. Need more? Add storage from your account. Version history counts toward storage.", "compare-storage"],
-  ["LLM token credits", "x", "Pro: $10/mo; Team: $50/mo", "Included", "Hosted LLM-enabled features include monthly token credits on paid App tiers.", "compare-llm"],
+  ["Cloud storage", "x", "100 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is a high-bandwidth project filesystem for large math workloads. Free: 100 MB. Pro: 10 GB included. Team: 100 GB included. Need more? Add storage from your account. Version history counts toward storage.", "compare-storage"],
+  ["AI credits", "x", "Pro: $10/mo; Team: $50/mo", "Included", "AI credits include monthly usage on paid App tiers.", "compare-llm"],
   ["SOC 2 readiness", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q4 2026."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],
@@ -135,7 +135,7 @@ export function CompareProductsTable() {
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">Runtime</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Open-source runtime</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">GPU-accelerated math runtime</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">App</div>
@@ -143,7 +143,7 @@ export function CompareProductsTable() {
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">Enterprise</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Self-hosted App deployment</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Enterprise deployment</div>
                 </th>
               </tr>
             </thead>

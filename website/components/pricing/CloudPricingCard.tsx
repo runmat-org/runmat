@@ -28,8 +28,8 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     features: [
       "Code versioning and execution history",
       "Team collaboration and sync",
-      "10 GB cloud storage included",
-      "$10/mo LLM credits",
+      "10 GB high-bandwidth project storage",
+      "$10/mo AI credits",
     ],
     ctaLabel: "Sign up",
     ctaHref: "/login",
@@ -40,7 +40,7 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     inheritsFrom: "Everything in Pro, plus:",
     features: [
       "SSO / SAML / SCIM",
-      "$50/mo LLM credits",
+      "$50/mo AI credits",
       "100 GB storage included",
       "Priority support",
     ],
@@ -62,7 +62,7 @@ export default function CloudPricingCard() {
     <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
         <CardTitle className="text-3xl font-semibold text-foreground">{currentTier.price}</CardTitle>
-        <p className="text-[0.938rem] text-foreground">Cloud workspace for storage, collaboration, and AI credits.</p>
+        <p className="text-[0.938rem] text-foreground">High-bandwidth project filesystem for large math workloads.</p>
 
         <div
           role="tablist"

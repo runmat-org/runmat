@@ -10,21 +10,21 @@ import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
 import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
 
 export const metadata: Metadata = {
-  title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
+  title: "RunMat Pricing | Free, Pro, Team, and Enterprise",
   description:
-    "Simple RunMat pricing: free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. Enterprise for on-prem and air-gapped deployment.",
+    "Simple RunMat pricing: free runtime, free App tier. Pro from $30/mo per user, Team from $100/mo per user. Enterprise for on-prem and air-gapped deployment.",
   alternates: { canonical: "https://runmat.com/pricing" },
   openGraph: {
-    title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
+    title: "RunMat Pricing | Free, Pro, Team, and Enterprise",
     description:
-      "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+      "Free runtime, free App tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
     url: "https://runmat.com/pricing",
   },
   twitter: {
     card: "summary_large_image",
-    title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
+    title: "RunMat Pricing | Free, Pro, Team, and Enterprise",
     description:
-      "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+      "Free runtime, free App tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
   },
 };
 
@@ -48,26 +48,26 @@ const pricingFaqItems: FAQItem[] = [
     id: "pricing-diff",
     question: "What's the difference between RunMat, App, and Enterprise?",
     answer:
-      "RunMat Runtime is the free, open-source runtime for MATLAB-syntax execution, GPU acceleration, plotting, and CLI workflows. The browser sandbox and desktop app are free ways to use the runtime. RunMat App adds cloud storage, project sharing, version history, and AI credits. RunMat Enterprise is App deployed on your own infrastructure for air-gapped or compliance-sensitive environments.",
+      "RunMat Runtime is the free, open-source runtime for MATLAB-syntax execution, GPU acceleration, plotting, and CLI workflows. The browser sandbox and desktop app are free ways to use the runtime. RunMat App adds cloud storage, project sharing, version history, and AI model use within RunMat desktop. RunMat Enterprise is App deployed on your own infrastructure for air-gapped or compliance-sensitive environments.",
   },
   {
     id: "pricing-free",
     question: "Is RunMat really free?",
     answer:
-      "Yes. RunMat Runtime is open source. The browser sandbox is free to use, and you can download the desktop app from the download page. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
-    answerContent: <>Yes. RunMat Runtime is open source. The browser sandbox is free to use, and you can <Link href="/download" className="underline hover:text-foreground">download the desktop app</Link>. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.</>,
+      "Yes. RunMat Runtime is open source. The browser sandbox is free to use, and you can download the desktop app from the download page. RunMat App has a free tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+    answerContent: <>Yes. RunMat Runtime is open source. The browser sandbox is free to use, and you can <Link href="/download" className="underline hover:text-foreground">download the desktop app</Link>. RunMat App has a free tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.</>,
   },
   {
     id: "pricing-account",
     question: "Do I need an account to use RunMat?",
     answer:
-      "No. The runtime, CLI, and browser sandbox work without an account. An account is only required for RunMat App features like cloud storage, project sharing, version history, and AI credits.",
+      "No. The runtime, CLI, and browser sandbox work without an account. An account is only required for RunMat App features like cloud storage, project sharing, version history, and AI model use within RunMat desktop.",
   },
   {
     id: "pricing-tiers",
-    question: "What's included in App Hobby vs Pro vs Team?",
+    question: "What's included in App free vs Pro vs Team?",
     answer:
-      "Hobby: unlimited projects, 100 MB storage, and version history that counts toward storage. Pro: unlimited projects, 10 GB storage, version history, collaboration, and $10/mo LLM credits ($30/mo per user). Team: everything in Pro plus SSO / SAML / SCIM, 100 GB storage, $50/mo LLM credits, and priority support ($100/mo per user).",
+      "Free: unlimited projects, 100 MB storage, and version history that counts toward storage. Pro: unlimited projects, 10 GB storage, version history, collaboration, and $10/mo AI credits ($30/mo per user). Team: everything in Pro plus SSO / SAML / SCIM, 100 GB storage, $50/mo AI credits, and priority support ($100/mo per user).",
   },
   {
     id: "pricing-billing",
@@ -84,7 +84,7 @@ const pricingFaqItems: FAQItem[] = [
   {
     id: "pricing-trial",
     question: "Is there a free trial for Pro or Team?",
-    answer: "Start on the Hobby tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
+    answer: "Start on the free tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
   },
   {
     id: "pricing-contact",
