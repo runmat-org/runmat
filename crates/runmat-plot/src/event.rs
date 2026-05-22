@@ -232,6 +232,8 @@ pub enum ScenePlot {
         axes_index: u32,
         label: Option<String>,
         visible: bool,
+        #[serde(default)]
+        force_3d: bool,
     },
     Line3 {
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
@@ -935,6 +937,7 @@ impl ScenePlot {
                 axes_index,
                 label: patch.label().map(str::to_string),
                 visible: patch.is_visible(),
+                force_3d: patch.force_3d(),
             },
             PlotElement::Line3(line) => Self::Line3 {
                 x: line.x_data.clone(),
@@ -1290,6 +1293,7 @@ impl ScenePlot {
                 axes_index,
                 label,
                 visible,
+                force_3d,
             } => {
                 let vertices: Vec<Vec3> = vertices.into_iter().map(xyz_to_vec3).collect();
                 let faces: Vec<Vec<usize>> = faces
@@ -1306,6 +1310,7 @@ impl ScenePlot {
                 patch.set_line_width(line_width);
                 patch.set_label(label);
                 patch.set_visible(visible);
+                patch.set_force_3d(force_3d);
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
             ScenePlot::Line3 {
@@ -1830,6 +1835,7 @@ mod tests {
         )
         .unwrap();
         patch.set_label(Some("tri".into()));
+        patch.set_force_3d(true);
         figure.add_patch_plot(patch);
 
         let scene = FigureScene::capture(&figure);
@@ -1841,6 +1847,7 @@ mod tests {
         };
         assert_eq!(patch.faces(), &[vec![0, 1, 2]]);
         assert_eq!(patch.label(), Some("tri"));
+        assert!(patch.force_3d());
     }
 
     #[test]

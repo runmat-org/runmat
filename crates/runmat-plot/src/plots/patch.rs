@@ -33,6 +33,7 @@ pub struct PatchPlot {
     face_indices: Option<Vec<u32>>,
     edge_vertices: Option<Vec<Vertex>>,
     bounds: Option<BoundingBox>,
+    force_3d: bool,
     dirty: bool,
 }
 
@@ -63,6 +64,7 @@ impl PatchPlot {
             face_indices: None,
             edge_vertices: None,
             bounds: None,
+            force_3d: false,
             dirty: true,
         })
     }
@@ -109,6 +111,15 @@ impl PatchPlot {
 
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+
+    pub fn force_3d(&self) -> bool {
+        self.force_3d
+    }
+
+    pub fn set_force_3d(&mut self, force_3d: bool) {
+        self.force_3d = force_3d;
+        self.mark_dirty();
     }
 
     pub fn set_vertices(&mut self, vertices: Vec<Vec3>) -> Result<(), String> {

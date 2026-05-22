@@ -135,7 +135,7 @@ pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     Ok(handle)
 }
 
-fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
+pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
     if args.is_empty() {
         return Err(plotting_error(BUILTIN_NAME, "patch: expected input data"));
     }
@@ -482,7 +482,7 @@ fn is_vector_tensor(tensor: &Tensor) -> bool {
     tensor.rows == 1 || tensor.cols == 1
 }
 
-fn is_property_name(value: &Value) -> bool {
+pub(super) fn is_property_name(value: &Value) -> bool {
     value_as_string(value)
         .map(|name| {
             matches!(
