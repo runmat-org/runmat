@@ -14,6 +14,7 @@ use crate::{build_runtime_error, workspace, BuiltinResult};
     keywords = "clearvars,workspace,variables,except",
     sink = true,
     suppress_auto_output = true,
+    type_resolver(crate::builtins::introspection::type_resolvers::clearvars_type),
     builtin_path = "crate::builtins::introspection::clearvars"
 )]
 async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {

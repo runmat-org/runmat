@@ -156,3 +156,12 @@ fn impulse_discrete_response_through_vm_dispatch() {
         )
     );
 }
+
+#[test]
+fn impulse_statement_form_plots_without_error() {
+    let program = r#"
+        H = tf(20, [1 5]);
+        impulse(H);
+    "#;
+    execute_source(program).unwrap();
+}

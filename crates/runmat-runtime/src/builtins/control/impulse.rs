@@ -66,6 +66,7 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
+            emit_impulse_plot(&response).await?;
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
@@ -78,10 +79,28 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     }
 
     if crate::output_context::requested_output_count() == Some(0) {
-        return render_impulse_plot(&response).await;
+        emit_impulse_plot(&response).await?;
+        return Ok(Value::OutputList(Vec::new()));
     }
 
     response.y_value()
+}
+
+async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
+    if let Err(err) = render_impulse_plot(response).await {
+        if is_nonfatal_plot_setup_error(&err) {
+            return Ok(());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
+    let lower = err.message().to_ascii_lowercase();
+    lower.contains("plotting is unavailable")
+        || lower.contains("non-main thread")
+        || lower.contains("interactive plotting failed")
 }
 
 #[derive(Clone, Debug)]
@@ -695,6 +714,28 @@ mod tests {
             }
             other => panic!("expected t tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn impulse_zero_output_count_emits_no_values() {
+        let _guard = crate::output_count::push_output_count(Some(0));
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let result = run_impulse(sys, Vec::new()).expect("impulse");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn impulse_requested_zero_outputs_emits_no_values() {
+        let _guard = crate::output_context::push_output_count(0);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let result = run_impulse(sys, Vec::new()).expect("impulse");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert!(outputs.is_empty());
     }
 
     #[test]
