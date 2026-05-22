@@ -410,7 +410,7 @@ mod tests {
 
         let root = block_on(fzero_builtin(
             Value::BoundFunctionHandle {
-                name: "semantic_root".to_string(),
+                name: "root_function".to_string(),
                 function: 42,
             },
             Value::Num(0.0),

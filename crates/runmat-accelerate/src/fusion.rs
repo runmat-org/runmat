@@ -705,10 +705,10 @@ fn fusion_debug_enabled() -> bool {
 pub fn prepare_fusion_plan(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
-    semantic_candidate_group_count: usize,
+    candidate_group_count: usize,
 ) -> Option<Arc<FusionPlan>> {
     let graph = graph?;
-    if semantic_candidate_group_count == 0 {
+    if candidate_group_count == 0 {
         if !groups.is_empty() && fusion_debug_enabled() {
             log::debug!(
                 "fusion plan preparation: executable bytecode fusion groups present ({}) but semantic candidate groups are absent",
@@ -718,10 +718,10 @@ pub fn prepare_fusion_plan(
         return None;
     }
     if groups.is_empty() {
-        if semantic_candidate_group_count > 0 && fusion_debug_enabled() {
+        if candidate_group_count > 0 && fusion_debug_enabled() {
             log::debug!(
                 "fusion plan preparation: semantic candidate groups present ({}) but executable bytecode fusion groups are empty",
-                semantic_candidate_group_count
+                candidate_group_count
             );
         }
         return None;

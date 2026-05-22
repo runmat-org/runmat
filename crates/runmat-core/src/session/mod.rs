@@ -109,7 +109,7 @@ pub(crate) struct PreparedExecution {
     lowering: LoweringResult,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
-    semantic_function_registry_after_success: runmat_vm::FunctionRegistry,
+    function_registry_after_success: runmat_vm::FunctionRegistry,
     next_semantic_function_id_after_success: usize,
 }
 

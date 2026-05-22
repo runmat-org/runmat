@@ -59,7 +59,7 @@ pub(crate) fn build_fusion_snapshot(
             edges: Vec::new(),
             shaders: Vec::new(),
             decisions: vec![FusionPlanDecision {
-                node_id: "semantic-candidate-summary".to_string(),
+                node_id: "fusion-candidate-summary".to_string(),
                 fused: false,
                 reason: Some(format!(
                     "mir-signals={} mir-candidate-groups={} semantic-windows={} bytecode-groups=0 accel-graph={}",
@@ -77,7 +77,7 @@ pub(crate) fn build_fusion_snapshot(
     let mut edges = Vec::new();
     let mut shaders = Vec::with_capacity(groups.len());
     let mut decisions = Vec::with_capacity(groups.len());
-    let semantic_gate_open = planner.mir_fusion_candidate_group_count > 0;
+    let gate_open = planner.mir_fusion_candidate_group_count > 0;
 
     for (index, group) in groups.iter().enumerate() {
         let node_id = format!("group-{}", group.id);
@@ -102,15 +102,15 @@ pub(crate) fn build_fusion_snapshot(
         });
         decisions.push(FusionPlanDecision {
             node_id: node_id.clone(),
-            fused: semantic_gate_open,
-            reason: Some(if semantic_gate_open {
+            fused: gate_open,
+            reason: Some(if gate_open {
                 format!(
                     "kernel={:?} span=[{}..{}]",
                     group.kind, group.span.start, group.span.end
                 )
             } else {
                 format!(
-                    "kernel={:?} span=[{}..{}] semantic-candidate-groups=0 (bytecode compatibility artifact)",
+                    "kernel={:?} span=[{}..{}] fusion-candidate-groups=0 (bytecode compatibility artifact)",
                     group.kind, group.span.start, group.span.end
                 )
             }),
@@ -171,10 +171,10 @@ fn append_semantic_candidate_artifacts(
     decisions: &mut Vec<FusionPlanDecision>,
 ) {
     for (index, group) in candidate_groups.iter().enumerate() {
-        let node_id = format!("semantic-candidate-{}", group.id);
+        let node_id = format!("fusion-candidate-{}", group.id);
         nodes.push(FusionPlanNode {
             id: node_id.clone(),
-            kind: "SemanticCandidate".to_string(),
+            kind: "FusionCandidate".to_string(),
             label: format!(
                 "semantic-run f={:?} b={:?} stmts=[{}..{}] span=[{}..{}] signals={}",
                 group.function,
@@ -210,7 +210,7 @@ fn append_semantic_candidate_artifacts(
         if let Some(next) = candidate_groups.get(index + 1) {
             edges.push(FusionPlanEdge {
                 from: node_id,
-                to: format!("semantic-candidate-{}", next.id),
+                to: format!("fusion-candidate-{}", next.id),
                 reason: Some("semantic-program-order".to_string()),
             });
         }
@@ -230,7 +230,7 @@ fn append_semantic_window_artifacts(
         let node_id = format!("semantic-window-{index}");
         nodes.push(FusionPlanNode {
             id: node_id.clone(),
-            kind: "SemanticWindow".to_string(),
+            kind: "FusionWindow".to_string(),
             label: format!(
                 "semantic-window kind={:?} span=[{}..{}]",
                 window.kind, window.span.start, window.span.end
@@ -275,7 +275,7 @@ mod tests {
     use runmat_accelerate::graph::{InstrSpan, ShapeInfo};
 
     #[test]
-    fn semantic_candidate_summary_emits_without_accel_graph() {
+    fn candidate_summary_emits_without_accel_graph() {
         let snapshot = build_fusion_snapshot(
             &[],
             &[],
@@ -298,7 +298,7 @@ mod tests {
             snapshot
                 .decisions
                 .iter()
-                .any(|decision| decision.node_id == "semantic-candidate-summary"),
+                .any(|decision| decision.node_id == "fusion-candidate-summary"),
             "expected semantic candidate summary decision"
         );
         assert_eq!(
@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_candidate_groups_emit_nodes_without_bytecode_groups() {
+    fn candidate_groups_emit_nodes_without_bytecode_groups() {
         let snapshot = build_fusion_snapshot(
             &[],
             &[runmat_vm::FusionCandidateGroup {
@@ -342,25 +342,25 @@ mod tests {
             2,
             "expected semantic candidate and semantic window nodes"
         );
-        assert_eq!(snapshot.nodes[0].kind, "SemanticCandidate");
+        assert_eq!(snapshot.nodes[0].kind, "FusionCandidate");
         assert!(
             snapshot
                 .nodes
                 .iter()
-                .any(|node| node.kind == "SemanticWindow"),
+                .any(|node| node.kind == "FusionWindow"),
             "expected semantic window node"
         );
         assert!(
             snapshot
                 .decisions
                 .iter()
-                .any(|decision| decision.node_id == "semantic-candidate-0" && !decision.fused),
-            "expected semantic candidate decision for semantic-candidate-0"
+                .any(|decision| decision.node_id == "fusion-candidate-0" && !decision.fused),
+            "expected semantic candidate decision for fusion-candidate-0"
         );
     }
 
     #[test]
-    fn semantic_candidate_groups_emit_nodes_with_bytecode_groups() {
+    fn candidate_groups_emit_nodes_with_bytecode_groups() {
         let snapshot = build_fusion_snapshot(
             &[FusionGroup {
                 id: 7,
@@ -405,22 +405,22 @@ mod tests {
             snapshot
                 .nodes
                 .iter()
-                .any(|node| node.id == "semantic-candidate-1"),
+                .any(|node| node.id == "fusion-candidate-1"),
             "expected semantic candidate node"
         );
         assert!(
             snapshot
                 .nodes
                 .iter()
-                .any(|node| node.kind == "SemanticWindow"),
+                .any(|node| node.kind == "FusionWindow"),
             "expected semantic window node"
         );
         assert!(
             snapshot
                 .nodes
                 .iter()
-                .any(|node| node.id == "semantic-candidate-1" && node.kind == "SemanticCandidate"),
-            "expected semantic candidate node kind for semantic-candidate-1"
+                .any(|node| node.id == "fusion-candidate-1" && node.kind == "FusionCandidate"),
+            "expected semantic candidate node kind for fusion-candidate-1"
         );
     }
 
@@ -462,7 +462,7 @@ mod tests {
         );
         assert_eq!(
             snapshot.planner.mir_fusion_candidate_group_count, 0,
-            "expected semantic-candidate-group metadata to reflect semantic gating"
+            "expected fusion-candidate-group metadata to reflect semantic gating"
         );
     }
 }

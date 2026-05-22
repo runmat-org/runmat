@@ -125,7 +125,7 @@ mod tests {
 
         let out = block_on(ode23_builtin(
             Value::BoundFunctionHandle {
-                name: "semantic_decay".to_string(),
+                name: "ode_decay".to_string(),
                 function: 55,
             },
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),

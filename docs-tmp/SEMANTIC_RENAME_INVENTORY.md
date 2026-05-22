@@ -4,20 +4,19 @@ Date: 2026-05-21
 
 ## Current Footprint
 
-- Files containing `SemanticXxx` in `crates/`: 20
-- Files containing `semantic_xxx` in `crates/`: 53
+- Files containing `SemanticXxx` in `crates/`: 6
+- Files containing `semantic_xxx` in `crates/`: 10
 - Rust occurrences:
-  - `SemanticXxx`: 93
-  - `semantic_xxx`: 638
+  - `SemanticXxx`: 44
+  - `semantic_xxx`: 67
 
 Primary concentration:
 
-- `runmat-vm/src/bytecode/compile.rs`: 130 hits
-- `runmat-turbine/tests/jit.rs`: 70 hits
-- `runmat-vm/src/bytecode/program.rs`: 45 hits
 - `runmat-builtins/src/semantics.rs`: 42 hits
-- `runmat-vm/tests/functions.rs`: 41 hits
-- `runmat-runtime/src/lib.rs`: 36 hits
+- `runmat-lsp/src/core/semantic_tokens.rs`: 21 hits
+- `runmat-lsp/src/backend.rs`: 13 hits
+- `runmat-lsp/src/core/analysis.rs`: 5 hits
+- `runmat-runtime/src/lib.rs`: 4 hits
 
 ## Completed In This Rename Campaign
 
@@ -44,6 +43,18 @@ Primary concentration:
 - `semantic_registry()` -> `function_registry()`
 - `compile_semantic_source` -> `compile_source`
 - `execute_semantic_source` -> `execute_source`
+- `CallableIdentity::SemanticFunction` -> `CallableIdentity::BoundFunction`
+- `semantic_function` -> `bound_function`
+- `semantic_functions` -> `bound_functions`
+- `semantic_function_registry` -> `function_registry`
+- `semantic_async_metadata` -> `async_metadata`
+- `semantic_fusion_metadata` -> `fusion_metadata`
+- `semantic_instruction_windows` -> `instruction_windows`
+- `semantic_candidate_groups` / `semantic_candidates` -> `candidate_groups` / `candidates`
+- `semantic_index` (HIR index field/local) -> `hir_index`
+- `spawn_semantic_lifecycle.rs` -> `spawn_function_lifecycle.rs`
+- `semantic_lowering.rs` -> `hir_lowering.rs`
+- Remaining migration-era `semantic_*` test names and local helper names were de-prefixed.
 
 ## Keep As-Is (Confirmed)
 
@@ -53,30 +64,18 @@ These stay unchanged because they are protocol vocabulary, not migration leftove
    - `semantic_tokens`, `semantic_tokens_full`, `semantic_tokens_legend`
    - `SemanticToken*` types from LSP.
 
-## Rename-Now (Next Tranche, Resting Names)
+2. Builtin semantics vocabulary:
+   - `semantic_kind` and `BuiltinSemanticKind` in builtin metadata.
 
-Decision: keep draining migration-era `semantic_*` where the symbol denotes bytecode/runtime plumbing rather than language semantics.
+3. Compatibility-preserved runtime identifiers:
+   - `RunMat:SemanticFunctionUnavailable`
+   - `SemanticFunctionArity`
 
-### Bytecode/runtime function identity
+## Compatibility Policy (Final)
 
-- `CallableIdentity::SemanticFunction` -> `CallableIdentity::BoundFunction`
-- `semantic_function` field -> `bound_function`
-- `semantic_functions` maps -> `bound_functions`
-- `semantic_function_registry` variables/fields -> `function_registry`
+Public error identifiers containing `SemanticFunction` are intentionally retained for compatibility with existing downstream checks and scripts.
 
-### Bytecode metadata carriers
-
-- `semantic_async_metadata` -> `async_metadata`
-- `semantic_fusion_metadata` -> `fusion_metadata`
-- `semantic_instruction_windows` -> `instruction_windows`
-- `semantic_candidate_groups` / `semantic_candidates` -> `candidate_groups` / `candidates`
-- local `semantic_index` variables with `HirIndex` type -> `hir_index`
-
-### Tests and fixtures
-
-- Remaining `semantic_*` test function names -> domain names (drop `semantic_` prefix).
-- `spawn_semantic_lifecycle.rs` -> `spawn_function_lifecycle.rs`.
-- String literals like `"RunMat:SemanticFunctionUnavailable"` should move to `"RunMat:FunctionUnavailable"` if compatibility constraints permit.
+If we ever change them, ship aliases and a compatibility window first.
 
 ## Execution Plan (Updated)
 
@@ -85,12 +84,15 @@ Decision: keep draining migration-era `semantic_*` where the symbol denotes byte
 - Commit 1: internal/private rename sweep
 - Commit 2: public type/API rename sweep
 - Commit 3: tests/docs/support sweep
-
-### Next
-
 - Commit 4: rename callable identity + bound function field names.
 - Commit 5: rename async/fusion metadata field names.
 - Commit 6: rename remaining test symbols/file names and decide error identifier compatibility policy.
+
+### Next
+
+- Optional follow-up only if we choose a compatibility break:
+  - `RunMat:SemanticFunctionUnavailable` -> `RunMat:FunctionUnavailable`
+  - `SemanticFunctionArity` -> `FunctionArity`
 
 Validation gates after each commit:
 

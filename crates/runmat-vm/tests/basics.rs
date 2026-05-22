@@ -60,7 +60,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
 }
 
 #[test]
-fn semantic_logical_ops_use_typed_bytecode() {
+fn logical_ops_use_typed_bytecode() {
     let bytecode = compile_source("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
 
     assert!(bytecode
@@ -151,7 +151,7 @@ fn array_construct_like_and_size_vector_inference() {
 }
 
 #[test]
-fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
+fn complex_literal_matrix_uses_fixed_size_construction() {
     let input = "A = [1+2i 3-4j];";
     let bytecode = compile_source(input).unwrap();
     assert!(
@@ -171,7 +171,7 @@ fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
 }
 
 #[test]
-fn semantic_logical_slice_read_and_write_execute() {
+fn logical_slice_read_and_write_execute() {
     let bytecode =
         compile_source("A = [1 2 3 4]; mask = A > 2; B = A(mask); A(mask) = 9; C = A;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
@@ -188,7 +188,7 @@ fn semantic_logical_slice_read_and_write_execute() {
 }
 
 #[test]
-fn semantic_call_result_slice_index_executes() {
+fn call_result_slice_index_executes() {
     let bytecode =
         compile_source("A = [1 2 3 4]; idx = find(A > 2); B = A(idx); A(idx) = 9; C = A;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
@@ -205,7 +205,7 @@ fn semantic_call_result_slice_index_executes() {
 }
 
 #[test]
-fn semantic_scalar_call_result_index_assignment_executes() {
+fn scalar_call_result_index_assignment_executes() {
     let bytecode = compile_source("A = [1 2 3]; idx = length(A); A(idx) = 9; B = A;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
 
@@ -216,7 +216,7 @@ fn semantic_scalar_call_result_index_assignment_executes() {
 }
 
 #[test]
-fn semantic_scalar_value_index_assignment_executes() {
+fn scalar_value_index_assignment_executes() {
     let bytecode = compile_source("x = 1; x(1) = 2; y = x;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
     let updated = vars.last().expect("expected final variable");
@@ -231,7 +231,7 @@ fn semantic_scalar_value_index_assignment_executes() {
 }
 
 #[test]
-fn semantic_string_array_scalar_index_assignment_executes() {
+fn string_array_scalar_index_assignment_executes() {
     let bytecode = compile_source(r#"S = ["a" "b"]; S(2) = "z"; T = S;"#).unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
     let updated = vars.last().expect("expected final variable");

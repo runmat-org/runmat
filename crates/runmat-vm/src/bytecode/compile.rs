@@ -53,7 +53,7 @@ pub fn compile(
         &c.instr_spans,
         &fusion_metadata.mir_fusion_candidate_groups,
     );
-    fusion_metadata.semantic_instruction_window_count = instruction_windows.len();
+    fusion_metadata.instruction_window_count = instruction_windows.len();
     fusion_metadata.instruction_windows = instruction_windows.clone();
     #[cfg(feature = "native-accel")]
     let (accel_graph, fusion_groups) = if fusion_metadata.mir_fusion_candidate_group_count == 0
@@ -171,7 +171,7 @@ fn derive_semantic_fusion_metadata(
         mir_fusion_signal_count,
         mir_fusion_candidate_group_count: mir_fusion_candidate_groups.len(),
         mir_fusion_candidate_groups,
-        semantic_instruction_window_count: 0,
+        instruction_window_count: 0,
         instruction_windows: Vec::new(),
     }
 }
@@ -279,7 +279,7 @@ fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> boo
 }
 
 #[cfg(all(feature = "native-accel", test))]
-fn semantic_candidates_touch_accel_capable_instruction(
+fn candidates_touch_accel_capable_instruction(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
     candidate_groups: &[crate::bytecode::FusionCandidateGroup],
@@ -542,12 +542,12 @@ fn accel_node_matches_semantic_window_kind(
 fn instruction_within_semantic_candidate_span(
     instruction_index: usize,
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_span: runmat_hir::Span,
+    candidate_span: runmat_hir::Span,
 ) -> bool {
     if instr_spans.is_empty() || instruction_index >= instr_spans.len() {
         return false;
     }
-    source_span_contains(semantic_candidate_span, instr_spans[instruction_index])
+    source_span_contains(candidate_span, instr_spans[instruction_index])
 }
 
 #[cfg(feature = "native-accel")]
@@ -901,11 +901,11 @@ mod tests {
             "expected candidate groups to carry non-empty source spans"
         );
         assert!(
-            bytecode.fusion_metadata.semantic_instruction_window_count > 0,
+            bytecode.fusion_metadata.instruction_window_count > 0,
             "expected non-zero semantic instruction window count"
         );
         assert_eq!(
-            bytecode.fusion_metadata.semantic_instruction_window_count,
+            bytecode.fusion_metadata.instruction_window_count,
             bytecode.fusion_metadata.instruction_windows.len(),
             "window count should match serialized semantic instruction window entries"
         );
@@ -1093,7 +1093,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_rejects_logical_ops() {
+    fn candidate_accel_capability_gate_rejects_logical_ops() {
         let instructions = vec![Instr::LogicalAnd, Instr::LogicalOr];
         let instr_spans = vec![
             runmat_hir::Span { start: 10, end: 20 },
@@ -1109,7 +1109,7 @@ mod tests {
             source_span: runmat_hir::Span { start: 10, end: 30 },
         }];
         assert!(
-            !super::semantic_candidates_touch_accel_capable_instruction(
+            !super::candidates_touch_accel_capable_instruction(
                 &instructions,
                 &instr_spans,
                 &candidates,
@@ -1120,7 +1120,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_accepts_binary_ops() {
+    fn candidate_accel_capability_gate_accepts_binary_ops() {
         let instructions = vec![Instr::Add, Instr::ElemMul];
         let instr_spans = vec![
             runmat_hir::Span { start: 10, end: 20 },
@@ -1136,7 +1136,7 @@ mod tests {
             source_span: runmat_hir::Span { start: 10, end: 30 },
         }];
         assert!(
-            super::semantic_candidates_touch_accel_capable_instruction(
+            super::candidates_touch_accel_capable_instruction(
                 &instructions,
                 &instr_spans,
                 &candidates,
@@ -1147,7 +1147,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_rejects_partial_span_overlap() {
+    fn candidate_accel_capability_gate_rejects_partial_span_overlap() {
         let instructions = vec![Instr::Add];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
         let candidates = vec![crate::bytecode::FusionCandidateGroup {
@@ -1160,7 +1160,7 @@ mod tests {
             source_span: runmat_hir::Span { start: 19, end: 25 },
         }];
         assert!(
-            !super::semantic_candidates_touch_accel_capable_instruction(
+            !super::candidates_touch_accel_capable_instruction(
                 &instructions,
                 &instr_spans,
                 &candidates,
@@ -1171,7 +1171,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_accepts_reduction_builtin() {
+    fn candidate_accel_capability_gate_accepts_reduction_builtin() {
         let instructions = vec![Instr::CallBuiltinMulti("sum".to_string(), 1, 1)];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
         let candidates = vec![crate::bytecode::FusionCandidateGroup {
@@ -1184,7 +1184,7 @@ mod tests {
             source_span: runmat_hir::Span { start: 10, end: 20 },
         }];
         assert!(
-            super::semantic_candidates_touch_accel_capable_instruction(
+            super::candidates_touch_accel_capable_instruction(
                 &instructions,
                 &instr_spans,
                 &candidates,
@@ -1195,7 +1195,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_rejects_control_assert_builtin() {
+    fn candidate_accel_capability_gate_rejects_control_assert_builtin() {
         let instructions = vec![Instr::CallBuiltinMulti("assert".to_string(), 1, 0)];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
         let candidates = vec![crate::bytecode::FusionCandidateGroup {
@@ -1208,7 +1208,7 @@ mod tests {
             source_span: runmat_hir::Span { start: 10, end: 20 },
         }];
         assert!(
-            !super::semantic_candidates_touch_accel_capable_instruction(
+            !super::candidates_touch_accel_capable_instruction(
                 &instructions,
                 &instr_spans,
                 &candidates,
@@ -1219,7 +1219,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_rejects_sink_builtins() {
+    fn candidate_accel_capability_gate_rejects_sink_builtins() {
         for builtin in ["disp", "fprintf"] {
             let instructions = vec![Instr::CallBuiltinMulti(builtin.to_string(), 1, 0)];
             let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
@@ -1233,7 +1233,7 @@ mod tests {
                 source_span: runmat_hir::Span { start: 10, end: 20 },
             }];
             assert!(
-                !super::semantic_candidates_touch_accel_capable_instruction(
+                !super::candidates_touch_accel_capable_instruction(
                     &instructions,
                     &instr_spans,
                     &candidates,
@@ -1392,7 +1392,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidates_build_fusion_groups_from_accel_graph_nodes() {
+    fn candidates_build_fusion_groups_from_accel_graph_nodes() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![
                 runmat_accelerate::graph::AccelNode {
@@ -1487,7 +1487,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_fallback_to_empty_node_groups_when_mapping_drops_all_nodes() {
+    fn windows_fallback_to_empty_node_groups_when_mapping_drops_all_nodes() {
         let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 7, end: 9 },
             kind: crate::bytecode::FusionInstructionKind::Elementwise,
@@ -1512,7 +1512,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_preserve_unmapped_windows_alongside_mapped_groups() {
+    fn windows_preserve_unmapped_windows_alongside_mapped_groups() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1576,7 +1576,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_map_accel_nodes_without_semantic_tags() {
+    fn windows_map_accel_nodes_without_semantic_tags() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1633,7 +1633,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_without_tags_reject_category_mismatch() {
+    fn windows_without_tags_reject_category_mismatch() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1684,7 +1684,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_reject_covering_node_span_at_compile_mapping_stage() {
+    fn windows_reject_covering_node_span_at_compile_mapping_stage() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1735,7 +1735,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_reject_overly_wide_covering_node_spans() {
+    fn windows_reject_overly_wide_covering_node_spans() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1786,7 +1786,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_reject_partial_overlap_at_compile_mapping_stage() {
+    fn windows_reject_partial_overlap_at_compile_mapping_stage() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1837,7 +1837,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_reject_partial_overlap_with_large_boundary_shift() {
+    fn windows_reject_partial_overlap_with_large_boundary_shift() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1888,7 +1888,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_reject_disjoint_gap_at_compile_mapping_stage() {
+    fn windows_reject_disjoint_gap_at_compile_mapping_stage() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1939,7 +1939,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_reject_accel_nodes_with_large_disjoint_gap() {
+    fn windows_reject_accel_nodes_with_large_disjoint_gap() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1990,7 +1990,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_window_kind_is_not_overridden_by_graph_category() {
+    fn window_kind_is_not_overridden_by_graph_category() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -2055,7 +2055,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidates_build_fusion_groups_from_transpose_nodes() {
+    fn candidates_build_fusion_groups_from_transpose_nodes() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -2124,7 +2124,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_elementwise_window_excludes_reduction_nodes() {
+    fn elementwise_window_excludes_reduction_nodes() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -2175,7 +2175,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_reduction_window_accepts_reduction_nodes() {
+    fn reduction_window_accepts_reduction_nodes() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -2232,7 +2232,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_instruction_windows_split_on_non_accel_ops() {
+    fn candidate_instruction_windows_split_on_non_accel_ops() {
         let instructions = vec![Instr::Add, Instr::LoadConst(1.0), Instr::ElemMul];
         let instr_spans = vec![
             runmat_hir::Span { start: 10, end: 11 },
@@ -2267,7 +2267,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidates_without_overlap_do_not_build_fusion_groups() {
+    fn candidates_without_overlap_do_not_build_fusion_groups() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -2333,7 +2333,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidates_with_partial_overlap_do_not_build_fusion_groups() {
+    fn candidates_with_partial_overlap_do_not_build_fusion_groups() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,

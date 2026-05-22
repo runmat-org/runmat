@@ -3046,7 +3046,7 @@ impl Compiler {
                     // current compilation unit. Keep the identity and emit a simple semantic handle.
                     self.emit(Instr::CreateBoundFunctionHandle(
                         *function,
-                        format!("semantic_function_{}", function.0),
+                        format!("bound_function_{}", function.0),
                     ));
                     return Ok(());
                 };

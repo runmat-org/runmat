@@ -1110,7 +1110,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_assembly_owns_core_items() {
+    fn assembly_owns_core_items() {
         let module = ModuleId(0);
         let function = FunctionId(0);
         let binding = BindingId(0);
@@ -1239,7 +1239,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_facts_capture_value_flow_and_mutation_context() {
+    fn facts_capture_value_flow_and_mutation_context() {
         let binding = BindingId(0);
         let mutation = PlaceMutation {
             place: HirPlace::Binding(binding),

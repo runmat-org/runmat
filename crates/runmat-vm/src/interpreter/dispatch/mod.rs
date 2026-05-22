@@ -216,7 +216,7 @@ const FUTURE_KIND_FIELD: &str = "__runmat_future_kind";
 const FUTURE_FUNCTION_FIELD: &str = "__runmat_future_function";
 const FUTURE_REQUESTED_OUTPUTS_FIELD: &str = "__runmat_future_requested_outputs";
 const FUTURE_ARGS_FIELD: &str = "__runmat_future_args";
-const FUTURE_KIND_VALUE: &str = "semantic_future";
+const FUTURE_KIND_VALUE: &str = "async_future";
 
 fn allocate_spawn_task_id(context: &mut crate::bytecode::program::ExecutionContext) -> u64 {
     loop {
@@ -247,7 +247,7 @@ fn wrap_spawned_value(
     Value::Struct(task)
 }
 
-fn create_semantic_future_value(
+fn create_async_future_value(
     function: runmat_hir::FunctionId,
     requested_outputs: usize,
     args: Vec<Value>,
@@ -1182,14 +1182,14 @@ pub async fn dispatch_instruction(
         }
         Instr::CreateSemanticFuture(function, arg_count, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
-            stack.push(create_semantic_future_value(*function, *out_count, args));
+            stack.push(create_async_future_value(*function, *out_count, args));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
-            stack.push(create_semantic_future_value(*function, *out_count, args));
+            stack.push(create_async_future_value(*function, *out_count, args));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

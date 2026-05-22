@@ -170,7 +170,7 @@ mod tests {
 
         let out = block_on(ode15s_builtin(
             Value::BoundFunctionHandle {
-                name: "semantic_stiff_decay".to_string(),
+                name: "ode_stiff_decay".to_string(),
                 function: 57,
             },
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),

@@ -227,7 +227,7 @@ pub struct FusionMetadata {
     pub mir_fusion_signal_count: usize,
     pub mir_fusion_candidate_group_count: usize,
     pub mir_fusion_candidate_groups: Vec<FusionCandidateGroup>,
-    pub semantic_instruction_window_count: usize,
+    pub instruction_window_count: usize,
     #[serde(default)]
     pub instruction_windows: Vec<FusionInstructionWindow>,
 }
@@ -321,13 +321,13 @@ impl Bytecode {
 
     #[cfg(feature = "native-accel")]
     pub fn runtime_fusion_groups(&self) -> Vec<FusionGroup> {
-        let semantic_metadata_present = self.fusion_metadata.mir_fusion_signal_count > 0
+        let metadata_present = self.fusion_metadata.mir_fusion_signal_count > 0
             || self.fusion_metadata.mir_fusion_candidate_group_count > 0
             || !self.fusion_metadata.mir_fusion_candidate_groups.is_empty()
-            || self.fusion_metadata.semantic_instruction_window_count > 0
+            || self.fusion_metadata.instruction_window_count > 0
             || !self.fusion_metadata.instruction_windows.is_empty();
 
-        if !semantic_metadata_present {
+        if !metadata_present {
             return self.fusion_groups.clone();
         }
 

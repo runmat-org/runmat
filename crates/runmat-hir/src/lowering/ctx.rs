@@ -7,7 +7,7 @@ use crate::{
     FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
     HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
     HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
-    HirPlace, HirStmt as SemanticHirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
     IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind,
     PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
     ReferenceResolution, RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId,
@@ -841,7 +841,7 @@ impl LoweringCtx {
     fn lower_stmt_refs(&mut self, stmts: &[&AstStmt]) -> Result<HirBlock, HirError> {
         let mut statements = Vec::new();
         for stmt in stmts {
-            if let Some(stmt) = self.lower_stmt_semantic(stmt)? {
+            if let Some(stmt) = self.lower_stmt_hir(stmt)? {
                 statements.push(stmt);
             }
         }
@@ -853,7 +853,7 @@ impl LoweringCtx {
         self.lower_stmt_refs(&refs)
     }
 
-    fn lower_stmt_semantic(&mut self, stmt: &AstStmt) -> Result<Option<SemanticHirStmt>, HirError> {
+    fn lower_stmt_hir(&mut self, stmt: &AstStmt) -> Result<Option<HirStmtNode>, HirError> {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
@@ -1033,7 +1033,7 @@ impl LoweringCtx {
                 )
             }
         };
-        Ok(Some(SemanticHirStmt {
+        Ok(Some(HirStmtNode {
             id: self.alloc_stmt_id(),
             kind,
             span,
@@ -1314,7 +1314,7 @@ impl LoweringCtx {
                             *span,
                         );
                         let body_expr = ctx.lower_expr_semantic(body)?;
-                        let stmt = SemanticHirStmt {
+                        let stmt = HirStmtNode {
                             id: ctx.alloc_stmt_id(),
                             kind: HirStmtKind::Assign(
                                 HirPlace::Binding(output_id),

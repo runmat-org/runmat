@@ -860,7 +860,7 @@ pub(crate) mod tests {
         )));
         let cell = crate::make_cell(vec![Value::Num(2.0)], 1, 1).expect("cell");
         let handle = Value::BoundFunctionHandle {
-            name: "semantic_cellfun_target".to_string(),
+            name: "cellfun_target".to_string(),
             function: 77,
         };
 

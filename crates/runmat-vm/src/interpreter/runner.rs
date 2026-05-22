@@ -300,13 +300,13 @@ async fn run_interpreter_inner(
     } = state;
     let function_registry = Arc::new(bytecode.function_registry());
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
-    let semantic_registry_for_semantic_invoker = Arc::clone(&function_registry);
+    let registry_for_function_invoker = Arc::clone(&function_registry);
     let _semantic_function_guard =
         user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
                 let previous_invoker = previous_semantic_invoker.clone();
-                let function_registry = Arc::clone(&semantic_registry_for_semantic_invoker);
+                let function_registry = Arc::clone(&registry_for_function_invoker);
                 Box::pin(async move {
                     let local_function = function_registry
                         .get(runmat_hir::FunctionId(function))
@@ -327,10 +327,10 @@ async fn run_interpreter_inner(
             },
         )));
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
-    let semantic_registry_for_semantic_resolver = Arc::clone(&function_registry);
+    let registry_for_function_resolver = Arc::clone(&function_registry);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
-            if let Some(function) = semantic_registry_for_semantic_resolver.resolve_name(name) {
+            if let Some(function) = registry_for_function_resolver.resolve_name(name) {
                 return Some(function.0);
             }
             previous_semantic_resolver
@@ -786,13 +786,13 @@ mod tests {
     }
 
     #[test]
-    fn semantic_output_value_zero_requested_is_empty_output_list() {
+    fn output_value_zero_requested_is_empty_output_list() {
         let value = output_value(vec![Value::Num(1.0)], 0);
         assert_eq!(value, Value::OutputList(Vec::new()));
     }
 
     #[test]
-    fn semantic_output_value_multi_requested_returns_output_list() {
+    fn output_value_multi_requested_returns_output_list() {
         let value = output_value(vec![Value::Num(1.0), Value::Num(2.0)], 2);
         assert_eq!(
             value,

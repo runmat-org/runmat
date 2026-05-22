@@ -935,7 +935,7 @@ fn spawn_rejects_anonymous_function_with_lexical_capture() {
 }
 
 #[test]
-fn semantic_index_records_bindings_functions_imports_and_calls() {
+fn index_records_bindings_functions_imports_and_calls() {
     let result = lower_result("import pkg.*; x = f(1); function y = f(a); y = a; end");
     let function_id = result.assembly.modules[0].top_level_functions[0];
 
@@ -961,7 +961,7 @@ fn semantic_index_records_bindings_functions_imports_and_calls() {
 }
 
 #[test]
-fn semantic_index_records_unresolved_calls_explicitly() {
+fn index_records_unresolved_calls_explicitly() {
     let result = lower_result("x = definitely_missing(1);");
 
     assert!(result.hir_index.calls.iter().any(|call| {

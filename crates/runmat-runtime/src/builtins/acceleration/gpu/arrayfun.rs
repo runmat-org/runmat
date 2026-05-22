@@ -1154,7 +1154,7 @@ pub(crate) mod tests {
         )));
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
         let handle = Value::BoundFunctionHandle {
-            name: "semantic_arrayfun_target".to_string(),
+            name: "arrayfun_target".to_string(),
             function: 78,
         };
 

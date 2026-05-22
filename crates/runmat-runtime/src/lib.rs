@@ -1916,7 +1916,7 @@ mod tests {
             },
         )));
         let closure = Value::Closure(runmat_builtins::Closure {
-            function_name: "semantic_target".to_string(),
+            function_name: "function_target".to_string(),
             bound_function: Some(42),
             captures: Vec::new(),
         });
@@ -1937,7 +1937,7 @@ mod tests {
             },
         )));
         let handle = Value::BoundFunctionHandle {
-            name: "semantic_target".to_string(),
+            name: "function_target".to_string(),
             function: 43,
         };
 
@@ -1950,7 +1950,7 @@ mod tests {
     fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
         let _guard = crate::user_functions::install_semantic_function_invoker(None);
         let handle = Value::BoundFunctionHandle {
-            name: "semantic_target".to_string(),
+            name: "function_target".to_string(),
             function: 9043,
         };
 
@@ -1960,7 +1960,7 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:SemanticFunctionUnavailable"));
         assert!(
             err.message()
-                .contains("semantic function handle 'semantic_target' (9043) is unavailable"),
+                .contains("semantic function handle 'function_target' (9043) is unavailable"),
             "unexpected error: {err:?}"
         );
     }
@@ -3233,8 +3233,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "event_callback").then_some(61)
             })));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let listener = block_on(addlistener_builtin(
             target,
             "Changed".to_string(),
@@ -3257,8 +3257,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.event_callback").then_some(62)
             })));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let listener = block_on(addlistener_builtin(
             target,
             "Changed".to_string(),
@@ -3281,8 +3281,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "event_callback").then_some(63)
             })));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let listener = block_on(addlistener_builtin(
             target,
             "Changed".to_string(),
@@ -3305,8 +3305,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "event_callback").then_some(64)
             })));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let listener = block_on(addlistener_builtin(
             target,
             "Changed".to_string(),
@@ -3329,8 +3329,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "event_callback").then_some(66)
             })));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let callback =
             runmat_builtins::StringArray::new(vec!["@event_callback".to_string()], vec![1, 1])
                 .expect("string array");
@@ -3356,8 +3356,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "event_callback").then_some(65)
             })));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let callback = Value::Closure(runmat_builtins::Closure {
             function_name: "event_callback".to_string(),
             bound_function: None,
@@ -3392,10 +3392,10 @@ mod tests {
                 Box::pin(async { Ok(Value::Num(0.0)) })
             },
         )));
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let callback = Value::BoundFunctionHandle {
-            name: "semantic_event_callback".to_string(),
+            name: "event_callback".to_string(),
             function: 44,
         };
 
@@ -3413,8 +3413,8 @@ mod tests {
     #[test]
     fn notify_char_handle_callback_surfaces_unresolved_identifier() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         block_on(addlistener_builtin(
             target.clone(),
             "Changed".to_string(),
@@ -3431,8 +3431,8 @@ mod tests {
     #[test]
     fn notify_string_array_handle_callback_surfaces_unresolved_identifier() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
-            .expect("handle target");
+        let target =
+            block_on(new_handle_object_builtin("EventTarget".to_string())).expect("handle target");
         let callback = runmat_builtins::StringArray::new(
             vec!["@definitely_missing_callback".to_string()],
             vec![1, 1],
@@ -3461,7 +3461,7 @@ mod tests {
         )));
         let _output_guard = crate::output_count::push_output_count(Some(0));
         let handle = Value::BoundFunctionHandle {
-            name: "semantic_target".to_string(),
+            name: "function_target".to_string(),
             function: 46,
         };
 
@@ -3482,7 +3482,7 @@ mod tests {
         )));
         let _output_guard = crate::output_count::push_output_count(Some(2));
         let handle = Value::BoundFunctionHandle {
-            name: "semantic_target".to_string(),
+            name: "function_target".to_string(),
             function: 47,
         };
 
@@ -3498,7 +3498,7 @@ mod tests {
     fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
         let _guard = crate::user_functions::install_semantic_function_invoker(None);
         let closure = Value::Closure(runmat_builtins::Closure {
-            function_name: "semantic_target".to_string(),
+            function_name: "function_target".to_string(),
             bound_function: Some(9044),
             captures: vec![Value::Num(1.0)],
         });
@@ -3508,7 +3508,7 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:SemanticFunctionUnavailable"));
         assert!(
             err.message()
-                .contains("semantic closure 'semantic_target' (9044) is unavailable"),
+                .contains("semantic closure 'function_target' (9044) is unavailable"),
             "unexpected error: {err:?}"
         );
     }

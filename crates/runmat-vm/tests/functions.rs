@@ -1346,7 +1346,7 @@ fn shared_input_output_name_multi_output_reads_original_input() {
 }
 
 #[test]
-fn semantic_user_function_multi_assign_executes() {
+fn user_function_multi_assign_executes() {
     let bytecode = compile_source(
         r#"
         function [a,b] = g()
@@ -1366,7 +1366,7 @@ fn semantic_user_function_multi_assign_executes() {
 }
 
 #[test]
-fn semantic_feval_multi_assign_executes() {
+fn feval_multi_assign_executes() {
     let bytecode = compile_source(
         r#"
         function [a,b] = g()
@@ -1387,7 +1387,7 @@ fn semantic_feval_multi_assign_executes() {
 }
 
 #[test]
-fn semantic_feval_multi_assign_uses_typed_instruction() {
+fn feval_multi_assign_uses_typed_instruction() {
     let source = r#"
         function [a,b] = g()
             a = 6;
@@ -1404,7 +1404,7 @@ fn semantic_feval_multi_assign_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_feval_zero_output_uses_typed_instruction() {
+fn feval_zero_output_uses_typed_instruction() {
     let source = r#"
         function y = inc(x)
             y = x + 1;
@@ -1421,7 +1421,7 @@ fn semantic_feval_zero_output_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_feval_single_output_uses_typed_instruction() {
+fn feval_single_output_uses_typed_instruction() {
     let source = r#"
         function y = inc(x)
             y = x + 1;
@@ -1441,7 +1441,7 @@ fn semantic_feval_single_output_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_feval_expand_multi_assign_uses_typed_instruction() {
+fn feval_expand_multi_assign_uses_typed_instruction() {
     let source = r#"
         function [a,b] = pair(x,y)
             a = x;
@@ -1466,7 +1466,7 @@ fn semantic_feval_expand_multi_assign_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_feval_expand_zero_output_uses_typed_instruction() {
+fn feval_expand_zero_output_uses_typed_instruction() {
     let source = r#"
         function [a,b] = pair(x,y)
             a = x;
@@ -1486,7 +1486,7 @@ fn semantic_feval_expand_zero_output_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_feval_expand_single_output_uses_typed_instruction() {
+fn feval_expand_single_output_uses_typed_instruction() {
     let source = r#"
         function [a,b] = pair(x,y)
             a = x;
@@ -1509,7 +1509,7 @@ fn semantic_feval_expand_single_output_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_size_builtin_multi_assign_executes() {
+fn size_builtin_multi_assign_executes() {
     let bytecode = compile_source("[r,c] = size([1 2; 3 4]); z = r + c;").unwrap();
     let vars = interpret(&bytecode).expect("semantic size multi-assign should execute");
 
@@ -1519,7 +1519,7 @@ fn semantic_size_builtin_multi_assign_executes() {
 }
 
 #[test]
-fn semantic_min_max_builtin_multi_assign_execute() {
+fn min_max_builtin_multi_assign_execute() {
     let bytecode =
         compile_source("[mx,mi] = max([1 3 2]); [mn,ni] = min([4 1 5]); z = mx + mi + mn + ni;")
             .unwrap();
@@ -1531,7 +1531,7 @@ fn semantic_min_max_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_cummin_cummax_builtin_multi_assign_execute() {
+fn cummin_cummax_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[mx,mi] = cummax([2 1 3]); [mn,ni] = cummin([2 1 3]); z = sum(mx) + sum(mi) + sum(mn) + sum(ni);",
     )
@@ -1544,7 +1544,7 @@ fn semantic_cummin_cummax_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_sort_unique_find_builtin_multi_assign_execute() {
+fn sort_unique_find_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[s,si] = sort([3 1 2]); [u,ui] = unique([2 1 2]); [fr,fc] = find([0 1; 2 0]); z = sum(s) + sum(si) + sum(u) + sum(ui) + sum(fr) + sum(fc);",
     )
@@ -1557,7 +1557,7 @@ fn semantic_sort_unique_find_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_union_ismember_sortrows_builtin_multi_assign_execute() {
+fn union_ismember_sortrows_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[u,ia,ib] = union([3 1],[2 1]); [tf,loc] = ismember([3 1 2],[2 3]); [sr,idx] = sortrows([2 2; 1 3]); z = u(1) + u(2) + u(3) + ia(1) + ia(2) + ib + loc(1) + loc(2) + loc(3) + sr(1,1) + sr(1,2) + sr(2,1) + sr(2,2) + idx(1) + idx(2);",
     )
@@ -1571,7 +1571,7 @@ fn semantic_union_ismember_sortrows_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_chol_builtin_multi_assign_execute() {
+fn chol_builtin_multi_assign_execute() {
     let bytecode = compile_source("[r,p] = chol([4 0; 0 9]); z = r(1,1) + r(2,2) + p;").unwrap();
     let vars = interpret(&bytecode).expect("semantic chol multi-assign should execute");
 
@@ -1581,7 +1581,7 @@ fn semantic_chol_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_lu_builtin_multi_assign_execute() {
+fn lu_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[l,u,p] = lu([2 0; 0 3]); z = l(1,1) + l(2,2) + u(1,1) + u(2,2) + p(1,1) + p(2,2);",
     )
@@ -1594,7 +1594,7 @@ fn semantic_lu_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_qr_builtin_multi_assign_execute() {
+fn qr_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[q,r,p] = qr([2 0; 0 3]); z = q(1,1) + q(2,2) + r(1,1) + r(2,2) + p(1,1) + p(2,2);",
     )
@@ -1607,7 +1607,7 @@ fn semantic_qr_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_svd_builtin_multi_assign_execute() {
+fn svd_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[u,s,v] = svd([3 0; 0 2]); z = s(1,1) + s(2,2) + u(1,1) * u(1,1) + v(1,1) * v(1,1);",
     )
@@ -1620,7 +1620,7 @@ fn semantic_svd_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn semantic_eig_builtin_multi_assign_execute() {
+fn eig_builtin_multi_assign_execute() {
     let bytecode = compile_source(
         "[v,d] = eig([3 0; 0 2]); z = d(1,1) + d(2,2) + v(1,1) * v(1,1) + v(2,2) * v(2,2);",
     )
@@ -1688,7 +1688,7 @@ fn implicit_struct_creation_for_root_variable_assignment() {
 }
 
 #[test]
-fn semantic_member_read_write_executes() {
+fn member_read_write_executes() {
     let bytecode = compile_source("s.x = 10; s.y = 20; v = s.x + s.y;").unwrap();
     let vars = interpret(&bytecode).expect("semantic member read/write should succeed");
 
@@ -1698,7 +1698,7 @@ fn semantic_member_read_write_executes() {
 }
 
 #[test]
-fn semantic_dynamic_member_read_executes() {
+fn dynamic_member_read_executes() {
     let vars = execute_source("s = struct('x', 9); f = 'x'; y = s.(f);");
     assert!(vars
         .iter()
@@ -1706,7 +1706,7 @@ fn semantic_dynamic_member_read_executes() {
 }
 
 #[test]
-fn semantic_indexed_dynamic_member_read_executes() {
+fn indexed_dynamic_member_read_executes() {
     let vars = execute_source("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
     assert!(vars
         .iter()
@@ -1714,7 +1714,7 @@ fn semantic_indexed_dynamic_member_read_executes() {
 }
 
 #[test]
-fn semantic_indexed_member_store_back_executes() {
+fn indexed_member_store_back_executes() {
     let bytecode = compile_source("s.a = [1 2 3]; s.a(2) = 9; y = s.a(2);").unwrap();
     let vars = interpret(&bytecode).expect("semantic indexed member store-back should succeed");
 
@@ -1724,7 +1724,7 @@ fn semantic_indexed_member_store_back_executes() {
 }
 
 #[test]
-fn semantic_indexed_member_vector_store_back_lowers_to_slice_instruction() {
+fn indexed_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; idx = [2 4]; s.a(idx) = 99; y = s.a(4);";
     let bytecode = compile_source(source).expect("compile indexed member vector store");
     assert!(
@@ -1751,7 +1751,7 @@ fn semantic_indexed_member_vector_store_back_lowers_to_slice_instruction() {
 }
 
 #[test]
-fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
+fn indexed_member_logical_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [1 2 3 4]; mask = logical([1 0 1 0]); s.a(mask) = 0; y = s.a(3);";
     let bytecode = compile_source(source).expect("compile indexed member logical store");
     assert!(
@@ -1778,7 +1778,7 @@ fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
 }
 
 #[test]
-fn semantic_indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
+fn indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s = struct('a', {[10 20 30 40], [1 2 3 4]}); idx = [2 4]; s(2).a(idx) = 99; t = s(2); y = getfield(t, 'a'); z = y(4);";
     let bytecode = compile_source(source).expect("compile indexed-base member vector store");
     assert!(
@@ -1798,7 +1798,7 @@ fn semantic_indexed_base_member_vector_store_back_lowers_to_slice_instruction() 
 }
 
 #[test]
-fn semantic_indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
+fn indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
     let source = "s = struct('a', {[1 2 3 4], [5 6 7 8]}); mask = logical([1 0 1 0]); s(2).a(mask) = 0; t = s(2); y = getfield(t, 'a'); z = y(3);";
     let bytecode = compile_source(source).expect("compile indexed-base member logical store");
     assert!(
@@ -1818,7 +1818,7 @@ fn semantic_indexed_base_member_logical_store_back_lowers_to_slice_instruction()
 }
 
 #[test]
-fn semantic_indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
+fn indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; f = 'a'; idx = [2 4]; s.(f)(idx) = 99; y = s.(f)(4);";
     let bytecode = compile_source(source).expect("compile indexed dynamic member vector store");
     assert!(
@@ -1845,7 +1845,7 @@ fn semantic_indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction
 }
 
 #[test]
-fn semantic_indexed_dynamic_member_logical_store_back_lowers_to_slice_instruction() {
+fn indexed_dynamic_member_logical_store_back_lowers_to_slice_instruction() {
     let source =
         "s.a = [1 2 3 4]; f = 'a'; mask = logical([1 0 1 0]); s.(f)(mask) = 0; y = s.(f)(3);";
     let bytecode = compile_source(source).expect("compile indexed dynamic member logical store");
@@ -1921,7 +1921,7 @@ fn string_slice_delete_reports_identifier_contract() {
 }
 
 #[test]
-fn semantic_cell_member_store_back_executes() {
+fn cell_member_store_back_executes() {
     let bytecode = compile_source("C = {struct()}; C{1}.a = 5; y = C{1}.a;").unwrap();
     let vars = interpret(&bytecode).expect("semantic cell member store-back should succeed");
 
@@ -1931,7 +1931,7 @@ fn semantic_cell_member_store_back_executes() {
 }
 
 #[test]
-fn semantic_indexed_cell_member_vector_store_back_lowers_to_slice_instruction() {
+fn indexed_cell_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "C = {struct('a', [10 20 30 40])}; idx = [2 4]; C{1}.a(idx) = 99; y = C{1}.a(4);";
     let bytecode = compile_source(source).expect("compile indexed cell member vector store");
     assert!(
@@ -1958,7 +1958,7 @@ fn semantic_indexed_cell_member_vector_store_back_lowers_to_slice_instruction() 
 }
 
 #[test]
-fn semantic_indexed_cell_member_logical_store_back_lowers_to_slice_instruction() {
+fn indexed_cell_member_logical_store_back_lowers_to_slice_instruction() {
     let source =
         "C = {struct('a', [1 2 3 4])}; mask = logical([1 0 1 0]); C{1}.a(mask) = 0; y = C{1}.a(3);";
     let bytecode = compile_source(source).expect("compile indexed cell member logical store");
@@ -2115,7 +2115,7 @@ fn function_handle_anon_round_trip() {
 }
 
 #[test]
-fn semantic_builtin_function_handle_feval_executes() {
+fn builtin_function_handle_feval_executes() {
     let bytecode = compile_source("h = @sin; y = feval(h, 0);").unwrap();
     let vars = interpret(&bytecode).expect("semantic builtin handle feval should execute");
 
@@ -2125,7 +2125,7 @@ fn semantic_builtin_function_handle_feval_executes() {
 }
 
 #[test]
-fn semantic_anonymous_function_handle_feval_executes() {
+fn anonymous_function_handle_feval_executes() {
     let bytecode = compile_source("f = @(x) x + 1; y = feval(f, 4);").unwrap();
     let vars = interpret(&bytecode).expect("semantic anonymous handle feval should execute");
 
@@ -2135,7 +2135,7 @@ fn semantic_anonymous_function_handle_feval_executes() {
 }
 
 #[test]
-fn semantic_function_handle_index_call_executes() {
+fn function_handle_index_call_executes() {
     let bytecode =
         compile_source("h = @inc; y = h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();
     assert!(
@@ -2160,7 +2160,7 @@ fn semantic_function_handle_index_call_executes() {
 }
 
 #[test]
-fn semantic_function_handle_index_zero_output_executes() {
+fn function_handle_index_zero_output_executes() {
     let bytecode =
         compile_source("h = @inc; h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();
     assert!(
@@ -2179,7 +2179,7 @@ fn semantic_function_handle_index_zero_output_executes() {
 }
 
 #[test]
-fn semantic_function_handle_index_multi_output_executes() {
+fn function_handle_index_multi_output_executes() {
     let source =
         "h = @pair; [a,b] = h(2); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
     let bytecode = compile_source(source).expect("compile semantic handle multi-output");
@@ -2197,7 +2197,7 @@ fn semantic_function_handle_index_multi_output_executes() {
 }
 
 #[test]
-fn semantic_function_handle_expand_single_output_executes() {
+fn function_handle_expand_single_output_executes() {
     let source = "h = @inc; C = {2}; y = h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
     let bytecode = compile_source(source).expect("compile semantic handle expanded single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -2215,7 +2215,7 @@ fn semantic_function_handle_expand_single_output_executes() {
 }
 
 #[test]
-fn semantic_function_handle_expand_zero_output_executes() {
+fn function_handle_expand_zero_output_executes() {
     let source = "h = @inc; C = {2}; h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
     let bytecode = compile_source(source).expect("compile semantic handle expanded zero-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -2232,7 +2232,7 @@ fn semantic_function_handle_expand_zero_output_executes() {
 }
 
 #[test]
-fn semantic_function_handle_expand_multi_output_executes() {
+fn function_handle_expand_multi_output_executes() {
     let source =
         "h = @pair; C = {2}; [a,b] = h(C{:}); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
     let bytecode = compile_source(source).expect("compile semantic handle expanded multi-output");
@@ -3210,7 +3210,7 @@ fn builtin_expand_single_output_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_expand_single_output_uses_typed_instruction() {
+fn expand_single_output_uses_typed_instruction() {
     let source = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); r = sum2(C{:});";
     let bytecode = compile_source(source).expect("compile semantic expand single output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
@@ -3221,7 +3221,7 @@ fn semantic_expand_single_output_uses_typed_instruction() {
 }
 
 #[test]
-fn semantic_expand_multi_output_uses_typed_instruction() {
+fn expand_multi_output_uses_typed_instruction() {
     let source = "function [u,v] = pair(a,b); u = a; v = b; end; C = deal(7,8); [x,y] = pair(C{:}); s = x + y;";
     let bytecode = compile_source(source).expect("compile semantic expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(

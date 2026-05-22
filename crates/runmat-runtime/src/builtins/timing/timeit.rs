@@ -472,7 +472,7 @@ pub(crate) mod tests {
 
         let callable = prepare_callable(
             Value::BoundFunctionHandle {
-                name: "semantic_target".to_string(),
+                name: "function_target".to_string(),
                 function: 612,
             },
             Some(3),
@@ -550,7 +550,7 @@ pub(crate) mod tests {
     fn timeit_accepts_semantic_function_handle() {
         let callable = prepare_callable(
             Value::BoundFunctionHandle {
-                name: "semantic_target".to_string(),
+                name: "function_target".to_string(),
                 function: 41,
             },
             Some(1),
@@ -559,7 +559,7 @@ pub(crate) mod tests {
         assert_eq!(
             callable.handle,
             Value::BoundFunctionHandle {
-                name: "semantic_target".to_string(),
+                name: "function_target".to_string(),
                 function: 41,
             }
         );

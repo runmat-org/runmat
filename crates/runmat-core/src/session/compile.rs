@@ -48,13 +48,13 @@ impl RunMatSession {
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
-            let semantic_function_names = self.function_registry.names.clone();
+            let function_names = self.function_registry.names.clone();
             let workspace_bindings = self.lowering_workspace_bindings();
             let known_project_symbols = discover_known_project_symbols(&source_name);
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
-                    .with_bound_functions(&semantic_function_names)
+                    .with_bound_functions(&function_names)
                     .with_known_project_symbols(&known_project_symbols)
                     .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
                     .with_top_level_await_enabled(self.top_level_await_enabled),
@@ -73,14 +73,14 @@ impl RunMatSession {
             self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
         };
         bytecode.source_id = Some(source_id);
-        let (semantic_function_registry_after_success, next_semantic_function_id_after_success) =
+        let (function_registry_after_success, next_semantic_function_id_after_success) =
             self.prepare_session_semantic_function_registry(&mut bytecode);
         Ok(PreparedExecution {
             ast,
             lowering,
             analysis,
             bytecode,
-            semantic_function_registry_after_success,
+            function_registry_after_success,
             next_semantic_function_id_after_success,
         })
     }
@@ -237,7 +237,7 @@ impl RunMatSession {
                 mir_semantic_instruction_window_count: prepared
                     .bytecode
                     .fusion_metadata
-                    .semantic_instruction_window_count,
+                    .instruction_window_count,
             }),
         ))
     }

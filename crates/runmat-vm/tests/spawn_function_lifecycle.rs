@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_spawn_overwrite_releases_unaliased_provider_handle() {
+    fn spawn_overwrite_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![1.0, 2.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_spawn_overwrite_preserves_provider_handle_when_alias_retained() {
+    fn spawn_overwrite_preserves_provider_handle_when_alias_retained() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![3.0, 4.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_await_helper_overwrite_releases_unaliased_provider_handle() {
+    fn async_spawn_await_helper_overwrite_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![5.0, 6.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_await_overwrite_preserves_provider_handle_when_alias_retained() {
+    fn async_spawn_await_overwrite_preserves_provider_handle_when_alias_retained() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![7.0, 8.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_await_struct_helper_releases_unaliased_provider_handle() {
+    fn async_spawn_await_struct_helper_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![9.0, 10.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_await_cell_helper_releases_unaliased_provider_handle() {
+    fn async_spawn_await_cell_helper_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![11.0, 12.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_multi_output_helper_unrequested_handle_releases() {
+    fn async_spawn_multi_output_helper_unrequested_handle_releases() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![13.0, 14.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -436,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_varargout_helper_unrequested_handle_releases() {
+    fn async_spawn_varargout_helper_unrequested_handle_releases() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![15.0, 16.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -484,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_varargout_nested_unrequested_handle_releases() {
+    fn async_spawn_varargout_nested_unrequested_handle_releases() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![17.0, 18.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
@@ -532,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle() {
+    fn async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle_a = upload_provider_handle(vec![21.0, 22.0], vec![1, 2]);
         let handle_b = upload_provider_handle(vec![23.0, 24.0], vec![1, 2]);
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_parallel_await_releases_both_unaliased_handles() {
+    fn async_spawn_parallel_await_releases_both_unaliased_handles() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle_a = upload_provider_handle(vec![25.0, 26.0], vec![1, 2]);
         let handle_b = upload_provider_handle(vec![27.0, 28.0], vec![1, 2]);

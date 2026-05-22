@@ -1998,7 +1998,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_function_value_host_call_round_trips_scalar() {
+    fn function_value_host_call_round_trips_scalar() {
         let function = FunctionId(1);
         install_semantic_context(vec![bound_function(
             function,
@@ -2029,7 +2029,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_function_value_host_call_round_trips_handle_value() {
+    fn function_value_host_call_round_trips_handle_value() {
         let function = FunctionId(2);
         install_semantic_context(vec![bound_function(
             function,
@@ -2057,7 +2057,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_function_values_host_call_writes_multiple_outputs() {
+    fn function_values_host_call_writes_multiple_outputs() {
         let function = FunctionId(3);
         install_semantic_context(vec![bound_function(
             function,

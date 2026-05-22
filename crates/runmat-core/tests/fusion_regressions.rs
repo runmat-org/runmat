@@ -200,7 +200,7 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         snapshot
             .nodes
             .iter()
-            .any(|node| node.kind == "SemanticWindow"),
+            .any(|node| node.kind == "FusionWindow"),
         "expected semantic window artifacts in compile fusion snapshot"
     );
 }
@@ -254,7 +254,7 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
         snapshot
             .nodes
             .iter()
-            .any(|node| node.kind == "SemanticWindow"),
+            .any(|node| node.kind == "FusionWindow"),
         "expected semantic window artifacts in runtime fusion snapshot"
     );
 }
@@ -291,7 +291,7 @@ fn compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups() {
             snapshot
                 .decisions
                 .iter()
-                .any(|decision| decision.node_id == "semantic-candidate-summary"),
+                .any(|decision| decision.node_id == "fusion-candidate-summary"),
             "expected semantic candidate summary decision when bytecode groups are absent"
         );
     }
