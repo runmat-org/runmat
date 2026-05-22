@@ -69,7 +69,7 @@ export default function Navigation() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 py-2">
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex items-center justify-between px-4 md:px-6">
         <div className="mr-4 hidden md:flex">
           <Link href="/" className="mr-6 flex items-center">
@@ -271,7 +271,7 @@ export default function Navigation() {
             </Link>
             <ThemeToggle />
             <Link
-              href="/download/latest"
+              href="/download"
               className="inline-flex items-center gap-1.5 h-11 px-4 text-sm text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               <Download className="h-4 w-4" />
@@ -390,7 +390,7 @@ export default function Navigation() {
                 Pricing
               </Link>
               <Link
-                href="/download/latest"
+                href="/download"
                 className="flex w-full items-center p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
