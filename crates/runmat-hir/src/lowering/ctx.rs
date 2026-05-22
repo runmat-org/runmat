@@ -133,7 +133,7 @@ impl LoweringCtx {
             function_names: HashMap::new(),
             function_input_signatures: HashMap::new(),
             function_output_signatures: HashMap::new(),
-            external_function_names: context.semantic_functions.clone(),
+            external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
             captures: HashMap::new(),
         };

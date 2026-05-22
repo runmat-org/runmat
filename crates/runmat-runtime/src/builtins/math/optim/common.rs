@@ -415,7 +415,7 @@ mod tests {
             })));
         let raw = Value::Closure(Closure {
             function_name: "decay".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);
@@ -423,7 +423,7 @@ mod tests {
             canonical,
             Value::Closure(Closure {
                 function_name: "decay".to_string(),
-                semantic_function: Some(48),
+                bound_function: Some(48),
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -433,7 +433,7 @@ mod tests {
     fn callback_handle_canonicalizer_keeps_name_only_closure_without_resolver() {
         let raw = Value::Closure(Closure {
             function_name: "decay".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
         let canonical = canonicalize_callback_handle(&raw);

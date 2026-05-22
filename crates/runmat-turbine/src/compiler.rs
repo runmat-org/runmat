@@ -1151,7 +1151,7 @@ impl BytecodeCompiler {
         fallback_policy: runmat_hir::CallableFallbackPolicy,
         function_registry: &runmat_vm::FunctionRegistry,
     ) -> Option<runmat_hir::FunctionId> {
-        if let runmat_hir::CallableIdentity::SemanticFunction(function) = identity {
+        if let runmat_hir::CallableIdentity::BoundFunction(function) = identity {
             return Some(*function);
         }
         let name = fallback_policy.resolution_name_for(identity)?;

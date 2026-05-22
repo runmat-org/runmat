@@ -260,7 +260,7 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
         MirOperand::Constant(crate::MirConstant::String(_)) => {
             scalar_single_fact(TypeFact::CharArray)
         }
-        MirOperand::FunctionHandle(CallableIdentity::SemanticFunction(function))
+        MirOperand::FunctionHandle(CallableIdentity::BoundFunction(function))
         | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_single_fact(TypeFact::Function(*function))
         }

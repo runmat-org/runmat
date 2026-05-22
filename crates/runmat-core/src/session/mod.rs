@@ -70,7 +70,7 @@ pub struct RunMatSession {
     /// Stable ABI identity for this interactive workspace.
     abi_workspace_handle: crate::abi::WorkspaceHandle,
     /// Semantic function registry persisted across interactive inputs.
-    semantic_function_registry: runmat_vm::FunctionRegistry,
+    function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,

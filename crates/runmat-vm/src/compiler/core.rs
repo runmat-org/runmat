@@ -1245,8 +1245,7 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::SemanticFunction(_))
-                | MirCallee::Dynamic(_) => {
+                MirCallee::Static(CallableIdentity::BoundFunction(_)) | MirCallee::Dynamic(_) => {
                     return Err(self
                         .compile_error(
                             "MIR method-call lowering expected a non-semantic static callee",
@@ -1257,7 +1256,7 @@ impl Compiler {
             }
         }
         match &call.callee {
-            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => {
+            MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1993,8 +1992,7 @@ impl Compiler {
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
-                MirCallee::Static(CallableIdentity::SemanticFunction(_))
-                | MirCallee::Dynamic(_) => {
+                MirCallee::Static(CallableIdentity::BoundFunction(_)) | MirCallee::Dynamic(_) => {
                     return Err(self
                         .compile_error(
                             "MIR method-call lowering expected a non-semantic static callee",
@@ -2005,7 +2003,7 @@ impl Compiler {
             }
         }
         match &call.callee {
-            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => {
+            MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -3037,7 +3035,7 @@ impl Compiler {
                 ));
                 Ok(())
             }
-            CallableIdentity::SemanticFunction(function) => {
+            CallableIdentity::BoundFunction(function) => {
                 let Some((captures, display_name)) = self
                     .layout
                     .as_ref()

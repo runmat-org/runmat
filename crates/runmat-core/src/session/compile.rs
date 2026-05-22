@@ -48,13 +48,13 @@ impl RunMatSession {
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
-            let semantic_function_names = self.semantic_function_registry.names.clone();
+            let semantic_function_names = self.function_registry.names.clone();
             let workspace_bindings = self.lowering_workspace_bindings();
             let known_project_symbols = discover_known_project_symbols(&source_name);
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
-                    .with_semantic_functions(&semantic_function_names)
+                    .with_bound_functions(&semantic_function_names)
                     .with_known_project_symbols(&known_project_symbols)
                     .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
                     .with_top_level_await_enabled(self.top_level_await_enabled),
@@ -115,12 +115,11 @@ impl RunMatSession {
         mir: &runmat_mir::MirAssembly,
     ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
         let Some(entrypoint) = assembly.entrypoints.first() else {
-            let semantic_functions = runmat_vm::compile_semantic_function_registry(assembly, mir)?;
-            let semantic_function_registry =
-                runmat_vm::FunctionRegistry::new(semantic_functions.clone());
+            let bound_functions = runmat_vm::compile_semantic_function_registry(assembly, mir)?;
+            let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
             let mut bytecode = runmat_vm::Bytecode::empty();
-            bytecode.semantic_functions = semantic_functions;
-            bytecode.semantic_function_registry = semantic_function_registry;
+            bytecode.bound_functions = bound_functions;
+            bytecode.function_registry = function_registry;
             return Ok(bytecode);
         };
         Ok(runmat_vm::compile(assembly, mir, entrypoint.id)?)
@@ -130,12 +129,12 @@ impl RunMatSession {
         &self,
         bytecode: &mut runmat_vm::Bytecode,
     ) -> (runmat_vm::FunctionRegistry, usize) {
-        let mut session_registry = self.semantic_function_registry.clone();
+        let mut session_registry = self.function_registry.clone();
         let mut next_semantic_function_id = self.next_semantic_function_id;
         let current_registry = bytecode.function_registry();
         if current_registry.functions.is_empty() {
-            bytecode.semantic_function_registry = session_registry.clone();
-            bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
+            bytecode.function_registry = session_registry.clone();
+            bytecode.bound_functions = bytecode.function_registry.functions.clone();
             bind_semantic_function_references(bytecode);
             return (session_registry, next_semantic_function_id);
         }
@@ -183,8 +182,8 @@ impl RunMatSession {
             session_registry.insert_replacing_name(function);
         }
 
-        bytecode.semantic_function_registry = session_registry.clone();
-        bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
+        bytecode.function_registry = session_registry.clone();
+        bytecode.bound_functions = bytecode.function_registry.functions.clone();
         bind_semantic_function_references(bytecode);
         (session_registry, next_semantic_function_id)
     }
@@ -336,7 +335,7 @@ fn remap_semantic_function_instr(
 }
 
 fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
-    let registry = bytecode.semantic_function_registry.clone();
+    let registry = bytecode.function_registry.clone();
     bind_semantic_callback_literals(bytecode, &registry);
     for instr in &mut bytecode.instructions {
         match instr {
@@ -477,7 +476,7 @@ fn bind_semantic_function_end_expr(
             if let runmat_hir::CallableIdentity::DynamicName(name) = identity {
                 let dynamic_name = name.0.clone();
                 if let Some(function) = registry.resolve_name(&dynamic_name) {
-                    *identity = runmat_hir::CallableIdentity::SemanticFunction(function);
+                    *identity = runmat_hir::CallableIdentity::BoundFunction(function);
                 }
             }
             for arg in args {
@@ -519,7 +518,7 @@ fn remap_semantic_function_end_expr(
     match expr {
         runmat_vm::EndExpr::ResolvedCall { identity, args, .. } => {
             match identity {
-                runmat_hir::CallableIdentity::SemanticFunction(function)
+                runmat_hir::CallableIdentity::BoundFunction(function)
                 | runmat_hir::CallableIdentity::AnonymousFunction(function) => {
                     if let Some(new_id) = remap.get(function).copied() {
                         *function = new_id;

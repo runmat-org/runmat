@@ -831,7 +831,7 @@ impl RunMatSession {
                     }
                 }
             }
-            self.semantic_function_registry = semantic_function_registry_after_success;
+            self.function_registry = semantic_function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {

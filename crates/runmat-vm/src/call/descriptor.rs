@@ -107,7 +107,7 @@ impl CallableDescriptor {
         requested_outputs: usize,
         metadata: CallableMetadata,
     ) -> Self {
-        let identity = CallableIdentity::SemanticFunction(FunctionId(function));
+        let identity = CallableIdentity::BoundFunction(FunctionId(function));
         Self::resolved_inner(
             identity,
             name,
@@ -181,7 +181,7 @@ impl CallableDescriptor {
     ) -> (CallableIdentity, CallableFallbackPolicy) {
         if let Some(function) = function_registry.resolve_name(name) {
             return (
-                CallableIdentity::SemanticFunction(function),
+                CallableIdentity::BoundFunction(function),
                 CallableFallbackPolicy::None,
             );
         }
@@ -322,7 +322,7 @@ impl CallableDescriptor {
         let name = closure.function_name;
         let mut call_args = closure.captures;
         call_args.extend(args);
-        if let Some(function) = closure.semantic_function {
+        if let Some(function) = closure.bound_function {
             return Self::feval_semantic(
                 function,
                 name,
@@ -429,7 +429,7 @@ async fn execute_resolved_callable(
         CallableIdentity::Builtin(id) => {
             call_builtin_with_requested_outputs(&id.0, &args, requested_outputs).await
         }
-        CallableIdentity::SemanticFunction(function) => {
+        CallableIdentity::BoundFunction(function) => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
                 &args,
@@ -473,7 +473,7 @@ async fn try_execute_resolved_callable(
                 .await
                 .map(Some)
         }
-        CallableIdentity::SemanticFunction(function) => {
+        CallableIdentity::BoundFunction(function) => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
                 &args,
@@ -1024,7 +1024,7 @@ mod tests {
         let descriptor = CallableDescriptor::from_feval_value(
             Value::Closure(Closure {
                 function_name: "inc".to_string(),
-                semantic_function: None,
+                bound_function: None,
                 captures: vec![Value::Num(10.0)],
             }),
             vec![Value::Num(2.0)],
@@ -1053,7 +1053,7 @@ mod tests {
         let descriptor = CallableDescriptor::from_feval_value(
             Value::Closure(Closure {
                 function_name: "inc".to_string(),
-                semantic_function: Some(4242),
+                bound_function: Some(4242),
                 captures: vec![Value::Num(10.0)],
             }),
             vec![Value::Num(2.0)],

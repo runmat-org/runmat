@@ -160,8 +160,8 @@ pub async fn invoke_semantic_function_value(
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
-    bytecode.semantic_functions = function_registry.functions.clone();
-    bytecode.semantic_function_registry = function_registry.clone();
+    bytecode.bound_functions = function_registry.functions.clone();
+    bytecode.function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(
         &bytecode,
         vars,
@@ -1704,7 +1704,7 @@ mod tests {
         let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
         state.stack.push(Value::Closure(Closure {
             function_name: "worker".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::GpuTensor(handle.clone())],
         }));
         state.vars = vec![Value::Num(0.0)];

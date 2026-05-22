@@ -245,7 +245,7 @@ mod tests {
 
         let value = Value::Closure(Closure {
             function_name: "worker".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::GpuTensor(handle.clone())],
         });
         clear_value(&value);

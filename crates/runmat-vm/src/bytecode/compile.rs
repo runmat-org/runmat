@@ -26,9 +26,9 @@ pub fn compile(
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
     let mut c = Compiler::new(hir, mir, layout, entrypoint)?;
     c.compile()?;
-    let semantic_functions =
+    let bound_functions =
         compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
-    let semantic_function_registry = FunctionRegistry::new(semantic_functions.clone());
+    let function_registry = FunctionRegistry::new(bound_functions.clone());
     let var_names = c
         .layout
         .as_ref()
@@ -94,8 +94,8 @@ pub fn compile(
         call_arg_spans: c.call_arg_spans,
         source_id: None,
         var_count: c.var_count,
-        semantic_functions,
-        semantic_function_registry,
+        bound_functions,
+        function_registry,
         var_types: c.var_types,
         var_names,
         layout: c.layout,
@@ -5694,11 +5694,11 @@ mod tests {
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         let function_id = bytecode
-            .semantic_function_registry
+            .function_registry
             .resolve_name("tail_cell")
             .expect("tail_cell semantic function id");
         let function = bytecode
-            .semantic_function_registry
+            .function_registry
             .get(function_id)
             .expect("tail_cell semantic bytecode");
         let read_offsets: Vec<Vec<(usize, isize)>> = function
@@ -5746,11 +5746,11 @@ mod tests {
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         let function_id = bytecode
-            .semantic_function_registry
+            .function_registry
             .resolve_name("patch_cell")
             .expect("patch_cell semantic function id");
         let function = bytecode
-            .semantic_function_registry
+            .function_registry
             .get(function_id)
             .expect("patch_cell semantic bytecode");
         let store_offsets: Vec<Vec<(usize, isize)>> = function
@@ -6292,9 +6292,9 @@ mod tests {
     #[test]
     fn compile_external_semantic_function_handle_keeps_identity() {
         let ast = runmat_parser::parse("h = @remote_inc; y = feval(h, 2);").expect("parse");
-        let mut semantic_functions = HashMap::new();
-        semantic_functions.insert("remote_inc".to_string(), FunctionId(9001));
-        let context = LoweringContext::empty().with_semantic_functions(&semantic_functions);
+        let mut bound_functions = HashMap::new();
+        bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_bound_functions(&bound_functions);
         let hir = lower(&ast, &context).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
@@ -6332,9 +6332,9 @@ mod tests {
     #[test]
     fn compile_external_semantic_direct_call_uses_host_invoker() {
         let ast = runmat_parser::parse("y = remote_inc(2);").expect("parse");
-        let mut semantic_functions = HashMap::new();
-        semantic_functions.insert("remote_inc".to_string(), FunctionId(9001));
-        let context = LoweringContext::empty().with_semantic_functions(&semantic_functions);
+        let mut bound_functions = HashMap::new();
+        bound_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_bound_functions(&bound_functions);
         let hir = lower(&ast, &context).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;

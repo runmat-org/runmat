@@ -2430,7 +2430,7 @@ fn cellfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .resolve_name("inc")
             .is_some(),
         "local callback target should be available as semantic function bytecode"
@@ -2483,13 +2483,13 @@ fn cellfun_session_function_uses_semantic_registry() {
         .expect("compile callback using session function");
     let inc_id = prepared
         .bytecode
-        .semantic_function_registry
+        .function_registry
         .resolve_name("inc")
         .expect("session callback target should resolve through semantic function registry");
     assert!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .get(inc_id)
             .and_then(|function| function.source_id)
             .is_some(),
@@ -2497,14 +2497,14 @@ fn cellfun_session_function_uses_semantic_registry() {
     );
     let inc_source = prepared
         .bytecode
-        .semantic_function_registry
+        .function_registry
         .get(inc_id)
         .and_then(|function| function.source_id)
         .expect("inc source metadata");
     assert!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .functions_for_source(inc_source)
             .contains(&inc_id),
         "session semantic callback target should be indexed by source ownership"
@@ -2735,7 +2735,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .resolve_name("inc")
             .is_some(),
         "function handle target should be present in semantic registry"
@@ -2975,7 +2975,7 @@ fn session_semantic_registry_replaces_redefined_function() {
     assert_eq!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .functions
             .values()
             .filter(|function| function.display_name == "inc")
@@ -3006,7 +3006,7 @@ fn session_semantic_registry_retires_replaced_source_group() {
     assert!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .resolve_name("inc")
             .is_some(),
         "replacement function should remain in semantic registry"
@@ -3014,7 +3014,7 @@ fn session_semantic_registry_retires_replaced_source_group() {
     assert!(
         prepared
             .bytecode
-            .semantic_function_registry
+            .function_registry
             .resolve_name("dec")
             .is_none(),
         "other functions from the replaced source should be retired"

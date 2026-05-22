@@ -49,7 +49,7 @@ pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> Strin
 
 pub(crate) fn strict_callable_display_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
-        CallableIdentity::SemanticFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+        CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
         CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
         CallableIdentity::Imported(path) => path.module.display_name(),
         CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
@@ -1248,7 +1248,7 @@ mod tests {
             &[None],
             &[None],
             &[EndExpr::ResolvedCall {
-                identity: CallableIdentity::SemanticFunction(FunctionId(7)),
+                identity: CallableIdentity::BoundFunction(FunctionId(7)),
                 fallback_policy: CallableFallbackPolicy::None,
                 args: vec![],
             }],

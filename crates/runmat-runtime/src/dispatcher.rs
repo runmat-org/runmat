@@ -351,7 +351,7 @@ mod tests {
     fn value_contains_gpu_detects_nested_closure_captures() {
         let value = Value::Closure(Closure {
             function_name: "worker".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::GpuTensor(GpuTensorHandle {
                 shape: vec![1],
                 device_id: 999,
@@ -392,7 +392,7 @@ mod tests {
         let _provider_guard = ThreadProviderGuard::set(None);
         let value = Value::Closure(Closure {
             function_name: "worker".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::GpuTensor(GpuTensorHandle {
                 shape: vec![1],
                 device_id: 996,

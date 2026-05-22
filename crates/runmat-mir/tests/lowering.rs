@@ -1130,7 +1130,7 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
 
     assert!(matches!(
         call.callee,
-        MirCallee::Static(CallableIdentity::SemanticFunction(_))
+        MirCallee::Static(CallableIdentity::BoundFunction(_))
     ));
     assert!(matches!(
         call.requested_outputs,

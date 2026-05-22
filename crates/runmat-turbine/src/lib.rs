@@ -1948,16 +1948,16 @@ mod tests {
     use std::collections::HashMap;
 
     fn install_semantic_context(functions: Vec<FunctionBytecode>) {
-        let mut semantic_functions = HashMap::new();
+        let mut bound_functions = HashMap::new();
         for function in functions {
-            semantic_functions.insert(function.function, function);
+            bound_functions.insert(function.function, function);
         }
-        let registry = FunctionRegistry::new(semantic_functions);
+        let registry = FunctionRegistry::new(bound_functions);
         let context = Box::leak(Box::new(RuntimeContext::new(registry)));
         set_runtime_context(context);
     }
 
-    fn semantic_function(
+    fn bound_function(
         function: FunctionId,
         display_name: &str,
         instructions: Vec<Instr>,
@@ -2000,7 +2000,7 @@ mod tests {
     #[test]
     fn semantic_function_value_host_call_round_trips_scalar() {
         let function = FunctionId(1);
-        install_semantic_context(vec![semantic_function(
+        install_semantic_context(vec![bound_function(
             function,
             "inc",
             vec![
@@ -2031,7 +2031,7 @@ mod tests {
     #[test]
     fn semantic_function_value_host_call_round_trips_handle_value() {
         let function = FunctionId(2);
-        install_semantic_context(vec![semantic_function(
+        install_semantic_context(vec![bound_function(
             function,
             "label",
             vec![Instr::LoadString("ok".to_string()), Instr::StoreVar(0)],
@@ -2059,7 +2059,7 @@ mod tests {
     #[test]
     fn semantic_function_values_host_call_writes_multiple_outputs() {
         let function = FunctionId(3);
-        install_semantic_context(vec![semantic_function(
+        install_semantic_context(vec![bound_function(
             function,
             "pair",
             vec![

@@ -176,7 +176,7 @@ pub fn create_closure(
     captures.reverse();
     stack.push(Value::Closure(Closure {
         function_name: func_name,
-        semantic_function: None,
+        bound_function: None,
         captures,
     }));
     Ok(())
@@ -195,7 +195,7 @@ pub fn create_semantic_closure(
     captures.reverse();
     stack.push(Value::Closure(Closure {
         function_name: display_name,
-        semantic_function: Some(function.0),
+        bound_function: Some(function.0),
         captures,
     }));
     Ok(())
@@ -206,10 +206,9 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
         Value::Object(obj) => {
             let function_name = external_qualified_display_name(&obj.class_name, &name);
             Ok(Value::Closure(Closure {
-                semantic_function:
-                    runmat_runtime::user_functions::resolve_semantic_function_by_name(
-                        &function_name,
-                    ),
+                bound_function: runmat_runtime::user_functions::resolve_semantic_function_by_name(
+                    &function_name,
+                ),
                 function_name,
                 captures: vec![Value::Object(obj)],
             }))
@@ -223,7 +222,7 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
                     ));
                 }
                 return Ok(Value::Closure(Closure {
-                    semantic_function:
+                    bound_function:
                         runmat_runtime::user_functions::resolve_semantic_function_by_name(
                             &m.function_name,
                         ),
@@ -234,7 +233,7 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
             let qualified_name = external_qualified_display_name(&cls, &name);
             if builtin_functions().iter().any(|b| b.name == qualified_name) {
                 Ok(Value::Closure(Closure {
-                    semantic_function:
+                    bound_function:
                         runmat_runtime::user_functions::resolve_semantic_function_by_name(
                             &qualified_name,
                         ),

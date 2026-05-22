@@ -1016,7 +1016,7 @@ fn test_jit_direct_semantic_function_call() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1036,10 +1036,10 @@ fn test_jit_direct_semantic_function_call() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(41.0),
@@ -1070,7 +1070,7 @@ fn test_jit_named_call_resolves_semantic_registry() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1090,10 +1090,10 @@ fn test_jit_named_call_resolves_semantic_registry() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
@@ -1127,7 +1127,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1147,10 +1147,10 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(9.0),
@@ -1184,7 +1184,7 @@ fn test_jit_semantic_multi_output_call() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "pair".to_string(),
         source_id: None,
@@ -1206,10 +1206,10 @@ fn test_jit_semantic_multi_output_call() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(7.0),
@@ -1243,7 +1243,7 @@ fn test_jit_named_semantic_multi_output_call() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "pair".to_string(),
         source_id: None,
@@ -1265,10 +1265,10 @@ fn test_jit_named_semantic_multi_output_call() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
@@ -1305,7 +1305,7 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1325,10 +1325,10 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(11.0),
@@ -1370,7 +1370,7 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "pair".to_string(),
         source_id: None,
@@ -1392,10 +1392,10 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(6.0),
@@ -1440,7 +1440,7 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = FunctionBytecode {
+    let bound_function = FunctionBytecode {
         function,
         display_name: "add2".to_string(),
         source_id: None,
@@ -1460,10 +1460,10 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
         capture_slots: Vec::new(),
     };
 
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(function, semantic_function);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(function, bound_function);
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadVar(0),
@@ -1648,8 +1648,8 @@ fn test_jit_mixed_execution_patterns() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -1674,7 +1674,7 @@ fn test_jit_mixed_execution_patterns() {
 
     // Bytecode that mixes arithmetic (JIT-able) with function calls (interpreter)
     let mixed_bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 // JIT-able: x = 5
@@ -1717,8 +1717,8 @@ fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -1746,7 +1746,7 @@ fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
@@ -1786,8 +1786,8 @@ fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_displa
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -1826,7 +1826,7 @@ fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_displa
     });
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
@@ -1865,8 +1865,8 @@ fn test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_na
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -1905,7 +1905,7 @@ fn test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_na
     });
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
@@ -1943,8 +1943,8 @@ fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -1972,7 +1972,7 @@ fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
@@ -2015,8 +2015,8 @@ fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -2044,7 +2044,7 @@ fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
@@ -2167,8 +2167,8 @@ fn test_jit_simple_function_compilation() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -2192,7 +2192,7 @@ fn test_jit_simple_function_compilation() {
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
@@ -2244,8 +2244,8 @@ fn test_jit_nested_function_calls_compilation() {
 
     let add = runmat_hir::FunctionId(1);
     let multiply_and_add = runmat_hir::FunctionId(2);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         add,
         FunctionBytecode {
             function: add,
@@ -2267,7 +2267,7 @@ fn test_jit_nested_function_calls_compilation() {
             capture_slots: Vec::new(),
         },
     );
-    semantic_functions.insert(
+    bound_functions.insert(
         multiply_and_add,
         FunctionBytecode {
             function: multiply_and_add,
@@ -2295,7 +2295,7 @@ fn test_jit_nested_function_calls_compilation() {
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
@@ -2341,8 +2341,8 @@ fn test_jit_function_parameter_validation() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -2367,7 +2367,7 @@ fn test_jit_function_parameter_validation() {
 
     // Test with wrong number of arguments (should fallback to interpreter which will handle the error)
     let bytecode_wrong_args = Bytecode {
-        semantic_functions: semantic_functions.clone(),
+        bound_functions: bound_functions.clone(),
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
@@ -2392,7 +2392,7 @@ fn test_jit_function_parameter_validation() {
 
     // Test with correct number of arguments
     let bytecode_correct = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(3.0),
@@ -2426,8 +2426,8 @@ fn test_jit_function_variable_isolation() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -2451,7 +2451,7 @@ fn test_jit_function_variable_isolation() {
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(100.0),
@@ -2497,8 +2497,8 @@ fn test_jit_function_compilation_performance() {
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -2526,7 +2526,7 @@ fn test_jit_function_compilation_performance() {
     );
 
     let bytecode = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(6.0),
@@ -2591,8 +2591,8 @@ fn test_jit_function_error_handling() {
     assert!(result.is_err(), "Undefined function should cause error");
 
     let function = runmat_hir::FunctionId(1);
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert(
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert(
         function,
         FunctionBytecode {
             function,
@@ -2611,7 +2611,7 @@ fn test_jit_function_error_handling() {
     );
 
     let bytecode_simple = Bytecode {
-        semantic_functions,
+        bound_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(42.0),

@@ -318,9 +318,7 @@ impl HirCallableRef {
 
     pub fn identity(&self) -> Option<CallableIdentity> {
         match self {
-            HirCallableRef::Function(function) => {
-                Some(CallableIdentity::SemanticFunction(*function))
-            }
+            HirCallableRef::Function(function) => Some(CallableIdentity::BoundFunction(*function)),
             HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
             HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
             HirCallableRef::DynamicExpr(_) => None,
@@ -337,7 +335,7 @@ impl HirCallableRef {
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum CallableIdentity {
-    SemanticFunction(FunctionId),
+    BoundFunction(FunctionId),
     Builtin(BuiltinId),
     Imported(DefPath),
     Method(MethodId),
@@ -349,7 +347,7 @@ pub enum CallableIdentity {
 impl CallableIdentity {
     pub fn display_name(&self) -> Option<String> {
         match self {
-            CallableIdentity::SemanticFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+            CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
             CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
             CallableIdentity::Imported(path) => path.module.display_name(),
             CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
@@ -696,9 +694,7 @@ pub enum FunctionHandleTarget {
 impl FunctionHandleTarget {
     pub fn identity(&self) -> CallableIdentity {
         match self {
-            FunctionHandleTarget::Function(function) => {
-                CallableIdentity::SemanticFunction(*function)
-            }
+            FunctionHandleTarget::Function(function) => CallableIdentity::BoundFunction(*function),
             FunctionHandleTarget::Builtin(builtin) => CallableIdentity::Builtin(builtin.clone()),
             FunctionHandleTarget::Anonymous(function) => {
                 CallableIdentity::AnonymousFunction(*function)

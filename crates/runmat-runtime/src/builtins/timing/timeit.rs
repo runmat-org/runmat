@@ -287,11 +287,11 @@ fn prepare_callable(
         }
         Value::Closure(mut closure) => Ok(TimeitCallable {
             handle: {
-                if closure.semantic_function.is_none() {
+                if closure.bound_function.is_none() {
                     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(
                         &closure.function_name,
                     ) {
-                        closure.semantic_function = Some(function);
+                        closure.bound_function = Some(function);
                     }
                 }
                 Value::Closure(closure)
@@ -575,7 +575,7 @@ pub(crate) mod tests {
         let callable = prepare_callable(
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".to_string(),
-                semantic_function: None,
+                bound_function: None,
                 captures: vec![Value::Num(9.0)],
             }),
             None,
@@ -585,7 +585,7 @@ pub(crate) mod tests {
             callable.handle,
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".to_string(),
-                semantic_function: Some(89),
+                bound_function: Some(89),
                 captures: vec![Value::Num(9.0)],
             })
         );
@@ -596,7 +596,7 @@ pub(crate) mod tests {
         let callable = prepare_callable(
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".to_string(),
-                semantic_function: None,
+                bound_function: None,
                 captures: vec![Value::Num(9.0)],
             }),
             None,
@@ -606,7 +606,7 @@ pub(crate) mod tests {
             callable.handle,
             Value::Closure(Closure {
                 function_name: "__timeit_helper_counter_default".to_string(),
-                semantic_function: None,
+                bound_function: None,
                 captures: vec![Value::Num(9.0)],
             })
         );

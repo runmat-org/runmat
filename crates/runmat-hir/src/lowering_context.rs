@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
-    pub semantic_functions: &'a HashMap<String, FunctionId>,
+    pub bound_functions: &'a HashMap<String, FunctionId>,
     pub known_project_symbols: &'a HashSet<String>,
     pub runmat_extensions_enabled: bool,
     pub top_level_await_enabled: bool,
@@ -14,18 +14,18 @@ impl<'a> LoweringContext<'a> {
     pub fn new(variables: &'a HashMap<String, usize>) -> Self {
         Self {
             variables,
-            semantic_functions: empty_semantic_functions(),
+            bound_functions: empty_bound_functions(),
             known_project_symbols: empty_project_symbols(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
         }
     }
 
-    pub fn with_semantic_functions(
+    pub fn with_bound_functions(
         mut self,
-        semantic_functions: &'a HashMap<String, FunctionId>,
+        bound_functions: &'a HashMap<String, FunctionId>,
     ) -> Self {
-        self.semantic_functions = semantic_functions;
+        self.bound_functions = bound_functions;
         self
     }
 
@@ -48,7 +48,7 @@ impl<'a> LoweringContext<'a> {
         static EMPTY_VARS: OnceLock<HashMap<String, usize>> = OnceLock::new();
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
-            semantic_functions: empty_semantic_functions(),
+            bound_functions: empty_bound_functions(),
             known_project_symbols: empty_project_symbols(),
             runmat_extensions_enabled: true,
             top_level_await_enabled: true,
@@ -56,7 +56,7 @@ impl<'a> LoweringContext<'a> {
     }
 }
 
-fn empty_semantic_functions() -> &'static HashMap<String, FunctionId> {
+fn empty_bound_functions() -> &'static HashMap<String, FunctionId> {
     static EMPTY_SEMANTIC_FUNCS: OnceLock<HashMap<String, FunctionId>> = OnceLock::new();
     EMPTY_SEMANTIC_FUNCS.get_or_init(HashMap::new)
 }

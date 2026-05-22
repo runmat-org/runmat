@@ -64,7 +64,7 @@ mod tests {
         );
         bytecode.instr_spans = function_bytecode.instr_spans.clone();
         bytecode.call_arg_spans = function_bytecode.call_arg_spans.clone();
-        bytecode.semantic_functions = registry;
+        bytecode.bound_functions = registry;
 
         Ok((bytecode, input_slot, output_slot))
     }
@@ -87,16 +87,16 @@ mod tests {
             .map(|function| function.id)
             .ok_or_else(|| RuntimeError::new(format!("missing function `{function_name}`")))?;
 
-        let semantic_functions =
+        let bound_functions =
             compile_semantic_function_registry(&hir.assembly, &mir).map_err(RuntimeError::from)?;
-        let function_bytecode = semantic_functions
+        let function_bytecode = bound_functions
             .get(&function_id)
             .ok_or_else(|| RuntimeError::new("missing semantic function bytecode"))?;
         let input_slot = *function_bytecode
             .input_slots
             .first()
             .ok_or_else(|| RuntimeError::new("semantic function missing input slot"))?;
-        let registry = runmat_vm::FunctionRegistry::new(semantic_functions);
+        let registry = runmat_vm::FunctionRegistry::new(bound_functions);
         Ok((function_id, registry, input_slot))
     }
 

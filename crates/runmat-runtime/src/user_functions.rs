@@ -22,7 +22,7 @@ pub struct CallableRequest {
 impl CallableRequest {
     pub fn semantic(function: usize, args: Vec<Value>, requested_outputs: usize) -> Self {
         Self {
-            identity: CallableIdentity::SemanticFunction(runmat_hir::FunctionId(function)),
+            identity: CallableIdentity::BoundFunction(runmat_hir::FunctionId(function)),
             fallback_policy: CallableFallbackPolicy::None,
             args,
             requested_outputs,
@@ -134,7 +134,7 @@ pub async fn try_call_semantic_descriptor(
         args,
         requested_outputs,
     } = request;
-    if let CallableIdentity::SemanticFunction(function) = identity {
+    if let CallableIdentity::BoundFunction(function) = identity {
         return try_call_semantic_function(function.0, &args, requested_outputs).await;
     }
     if !fallback_policy.allows_semantic_name_resolution_for(&identity) {

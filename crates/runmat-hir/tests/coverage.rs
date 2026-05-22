@@ -10,14 +10,14 @@ fn lower_assembly(src: &str) -> HirAssembly {
     lower(&ast, &LoweringContext::empty()).unwrap().assembly
 }
 
-fn lower_assembly_with_semantic_functions(
+fn lower_assembly_with_bound_functions(
     src: &str,
-    semantic_functions: &HashMap<String, FunctionId>,
+    bound_functions: &HashMap<String, FunctionId>,
 ) -> HirAssembly {
     let ast = parse(src).unwrap();
     lower(
         &ast,
-        &LoweringContext::empty().with_semantic_functions(semantic_functions),
+        &LoweringContext::empty().with_bound_functions(bound_functions),
     )
     .unwrap()
     .assembly
@@ -301,9 +301,9 @@ fn wildcard_import_non_builtin_call_lowers_to_dynamic_identity() {
 
 #[test]
 fn function_handle_prefers_semantic_function_identity_from_context() {
-    let mut semantic_functions = HashMap::new();
-    semantic_functions.insert("remote_inc".to_string(), FunctionId(4242));
-    let assembly = lower_assembly_with_semantic_functions("h = @remote_inc;", &semantic_functions);
+    let mut bound_functions = HashMap::new();
+    bound_functions.insert("remote_inc".to_string(), FunctionId(4242));
+    let assembly = lower_assembly_with_bound_functions("h = @remote_inc;", &bound_functions);
     assert!(entry_body(&assembly).iter().any(|stmt| matches!(
         &stmt.kind,
         HirStmtKind::Assign(_, expr, _)

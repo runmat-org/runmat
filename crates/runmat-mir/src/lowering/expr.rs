@@ -543,7 +543,7 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
             | CallableIdentity::AnonymousFunction(_),
         )
         | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
-        MirCallee::Static(CallableIdentity::SemanticFunction(_)) => BuiltinSemantics {
+        MirCallee::Static(CallableIdentity::BoundFunction(_)) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::NeverSuspends,
             effects: runmat_builtins::BuiltinEffects::none(),
@@ -564,12 +564,12 @@ fn call_fallback_policy(
         runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
     ) && !matches!(
         callee,
-        MirCallee::Static(runmat_hir::CallableIdentity::SemanticFunction(_))
+        MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
     ) {
         return runmat_hir::CallableFallbackPolicy::ObjectDispatch;
     }
     match callee {
-        MirCallee::Static(runmat_hir::CallableIdentity::SemanticFunction(_))
+        MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
         | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_)) => {
             runmat_hir::CallableFallbackPolicy::None
         }

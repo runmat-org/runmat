@@ -425,7 +425,7 @@ impl Callable {
         let function = user_functions::resolve_semantic_function_by_name(name)?;
         Some(Callable::Closure(Closure {
             function_name: name.to_string(),
-            semantic_function: Some(function),
+            bound_function: Some(function),
             captures: Vec::new(),
         }))
     }
@@ -466,15 +466,15 @@ impl Callable {
             }
             Value::BoundFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
                 function_name: name,
-                semantic_function: Some(function),
+                bound_function: Some(function),
                 captures: Vec::new(),
             })),
             Value::Closure(mut c) => {
-                if c.semantic_function.is_none() {
+                if c.bound_function.is_none() {
                     if let Some(function) =
                         user_functions::resolve_semantic_function_by_name(&c.function_name)
                     {
-                        c.semantic_function = Some(function);
+                        c.bound_function = Some(function);
                     }
                 }
                 Ok(Callable::Closure(c))
@@ -570,7 +570,7 @@ impl Callable {
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
-                if let Some(function) = c.semantic_function {
+                if let Some(function) = c.bound_function {
                     let request =
                         user_functions::CallableRequest::semantic(function, captures.clone(), 1);
                     if let Some(result) =
@@ -987,7 +987,7 @@ pub(crate) mod tests {
             callable,
             Callable::Closure(Closure {
                 function_name,
-                semantic_function: Some(86),
+                bound_function: Some(86),
                 ..
             }) if function_name == "pkg.callback"
         ));
@@ -1001,7 +1001,7 @@ pub(crate) mod tests {
             })));
         let callable = Callable::from_function(Value::Closure(Closure {
             function_name: "pkg.callback".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(9.0)],
         }))
         .expect("closure callback should parse");
@@ -1009,7 +1009,7 @@ pub(crate) mod tests {
             callable,
             Callable::Closure(Closure {
                 function_name,
-                semantic_function: Some(186),
+                bound_function: Some(186),
                 captures
             }) if function_name == "pkg.callback" && captures == vec![Value::Num(9.0)]
         ));
@@ -1031,7 +1031,7 @@ pub(crate) mod tests {
         ));
         let callable = Callable::Closure(Closure {
             function_name: "pkg.callback".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
         let value = block_on(callable.call(&[Value::Num(4.0)])).expect("closure call");
@@ -1135,7 +1135,7 @@ pub(crate) mod tests {
         .expect("cell");
         let handler = Value::Closure(Closure {
             function_name: "__cellfun_test_handler".into(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(0.0)],
         });
         let result = cellfun_builtin(

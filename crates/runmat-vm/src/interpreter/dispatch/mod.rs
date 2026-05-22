@@ -361,7 +361,7 @@ async fn resolve_semantic_future_value(value: Value) -> Result<Value, RuntimeErr
     };
 
     let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
-        runmat_hir::CallableIdentity::SemanticFunction(function),
+        runmat_hir::CallableIdentity::BoundFunction(function),
         args,
         requested_outputs,
         runmat_hir::CallableFallbackPolicy::None,
@@ -1226,7 +1226,7 @@ pub async fn dispatch_instruction(
             match handle_user_function_call(
                 calls::UserCallContext {
                     stack,
-                    identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
+                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
@@ -1341,7 +1341,7 @@ pub async fn dispatch_instruction(
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
-                    identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
+                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
@@ -1620,7 +1620,7 @@ mod tests {
         let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
         let value = Value::Closure(runmat_builtins::Closure {
             function_name: "worker".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![
                 Value::Num(2.0),
                 Value::GpuTensor(GpuTensorHandle {

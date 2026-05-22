@@ -156,9 +156,9 @@ pub struct Bytecode {
     pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
     #[serde(default)]
-    pub semantic_functions: HashMap<FunctionId, FunctionBytecode>,
+    pub bound_functions: HashMap<FunctionId, FunctionBytecode>,
     #[serde(default)]
-    pub semantic_function_registry: FunctionRegistry,
+    pub function_registry: FunctionRegistry,
     #[serde(default)]
     pub var_types: Vec<Type>,
     #[serde(default)]
@@ -285,8 +285,8 @@ impl Bytecode {
             call_arg_spans: Vec::new(),
             source_id: None,
             var_count: 0,
-            semantic_functions: HashMap::new(),
-            semantic_function_registry: FunctionRegistry::default(),
+            bound_functions: HashMap::new(),
+            function_registry: FunctionRegistry::default(),
             var_types: Vec::new(),
             var_names: HashMap::new(),
             layout: None,
@@ -313,12 +313,10 @@ impl Bytecode {
     }
 
     pub fn function_registry(&self) -> FunctionRegistry {
-        if self.semantic_function_registry.functions.is_empty()
-            && !self.semantic_functions.is_empty()
-        {
-            return FunctionRegistry::new(self.semantic_functions.clone());
+        if self.function_registry.functions.is_empty() && !self.bound_functions.is_empty() {
+            return FunctionRegistry::new(self.bound_functions.clone());
         }
-        self.semantic_function_registry.clone()
+        self.function_registry.clone()
     }
 
     #[cfg(feature = "native-accel")]

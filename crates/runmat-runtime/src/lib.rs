@@ -579,11 +579,11 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
             }
         }
         Value::Closure(mut closure) => {
-            if closure.semantic_function.is_none() {
+            if closure.bound_function.is_none() {
                 if let Some(function) =
                     crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
                 {
-                    closure.semantic_function = Some(function);
+                    closure.bound_function = Some(function);
                 }
             }
             Value::Closure(closure)
@@ -1439,7 +1439,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             .build())
         }
         Value::Closure(c) => {
-            if let Some(function) = c.semantic_function {
+            if let Some(function) = c.bound_function {
                 let mut args = c.captures.clone();
                 args.extend(rest);
                 let request = crate::user_functions::CallableRequest::semantic(
@@ -1874,7 +1874,7 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
             // Return a closure capturing the receiver; feval will call runtime builtin call_method
             Ok(Value::Closure(runmat_builtins::Closure {
                 function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
-                semantic_function: None,
+                bound_function: None,
                 captures: vec![Value::Object(o), Value::String(method_name.to_string())],
             }))
         }
@@ -1917,7 +1917,7 @@ mod tests {
         )));
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: "semantic_target".to_string(),
-            semantic_function: Some(42),
+            bound_function: Some(42),
             captures: Vec::new(),
         });
 
@@ -2039,7 +2039,7 @@ mod tests {
 
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: "resolved_target".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
 
@@ -2058,7 +2058,7 @@ mod tests {
 
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: "sin".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: Vec::new(),
         });
 
@@ -2552,7 +2552,7 @@ mod tests {
         assert_eq!(
             func2str_builtin(Value::Closure(runmat_builtins::Closure {
                 function_name: "captured_fn".to_string(),
-                semantic_function: None,
+                bound_function: None,
                 captures: Vec::new(),
             }))
             .expect("func2str"),
@@ -2933,7 +2933,7 @@ mod tests {
         ));
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![
                 base.clone(),
                 Value::String("deal".to_string()),
@@ -2964,7 +2964,7 @@ mod tests {
         ));
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![
                 base.clone(),
                 Value::String("  deal  ".to_string()),
@@ -2991,7 +2991,7 @@ mod tests {
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![
                 Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
                 Value::Num(1.0),
@@ -3360,7 +3360,7 @@ mod tests {
             .expect("handle target");
         let callback = Value::Closure(runmat_builtins::Closure {
             function_name: "event_callback".to_string(),
-            semantic_function: None,
+            bound_function: None,
             captures: vec![Value::Num(9.0)],
         });
         let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
@@ -3372,7 +3372,7 @@ mod tests {
             &*listener.callback,
             Value::Closure(runmat_builtins::Closure {
                 function_name,
-                semantic_function: Some(65),
+                bound_function: Some(65),
                 captures,
             }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
         ));
@@ -3499,7 +3499,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(None);
         let closure = Value::Closure(runmat_builtins::Closure {
             function_name: "semantic_target".to_string(),
-            semantic_function: Some(9044),
+            bound_function: Some(9044),
             captures: vec![Value::Num(1.0)],
         });
 
