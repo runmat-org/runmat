@@ -1,0 +1,112 @@
+{
+  "title": "db",
+  "category": "control",
+  "keywords": [
+    "db",
+    "decibel",
+    "voltage",
+    "power",
+    "resistance",
+    "complex"
+  ],
+  "summary": "Convert numeric values to decibels using MATLAB-compatible voltage, power, or resistance forms.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "matlab",
+    "notes": "gpuArray inputs are gathered to the host before conversion. No provider-level GPU kernel is required for this compound builtin."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`db` parses optional string modes and resistance values, so it executes as a host-side fusion boundary."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::db::tests"
+  },
+  "description": "`Y = db(X)` converts magnitudes to decibels with `20*log10(abs(X))`. `db(X, 'power')` uses `10*log10(abs(X))`, and `db(X, R)` treats `X` as voltage across resistance `R` and returns `10*log10(abs(X).^2 ./ R)`.",
+  "behaviors": [
+    "`db(X)` and `db(X, 'voltage')` compute voltage-style decibels with `20*log10(abs(X))`.",
+    "`db(X, 'power')` computes power-style decibels with `10*log10(abs(X))`.",
+    "`db(X, R)` computes power through a finite positive resistance with `10*log10(abs(X).^2 ./ R)`.",
+    "Complex inputs are converted through their magnitude before applying the decibel formula.",
+    "The resistance form supports MATLAB implicit expansion between `X` and `R`.",
+    "Zero input returns `-Inf`, matching the logarithm singularity at zero.",
+    "Integer and logical inputs are promoted to double precision."
+  ],
+  "examples": [
+    {
+      "description": "Voltage-style decibel conversion",
+      "input": "y = db(10)",
+      "output": "y = 20"
+    },
+    {
+      "description": "Power-style decibel conversion",
+      "input": "p = db(100, 'power')",
+      "output": "p = 20"
+    },
+    {
+      "description": "Voltage across a reference resistance",
+      "input": "p = db(10, 50)",
+      "output": "p = 3.0103"
+    },
+    {
+      "description": "Complex magnitude conversion",
+      "input": "z = db(3 + 4i)",
+      "output": "z = 13.9794"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the default mode?",
+      "answer": "The default is voltage mode, equivalent to `db(X, 'voltage')`."
+    },
+    {
+      "question": "How does `db` handle complex values?",
+      "answer": "RunMat first computes `abs(X)` and then applies the selected decibel formula, so complex outputs are not produced."
+    },
+    {
+      "question": "What happens for zero input?",
+      "answer": "`db(0)` returns `-Inf` because `log10(0)` is negative infinity."
+    },
+    {
+      "question": "Can resistance be an array?",
+      "answer": "Yes. The resistance form broadcasts `X` and `R` using MATLAB implicit expansion. Resistance values must be finite and positive."
+    }
+  ],
+  "links": [
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "log10",
+      "url": "./log10"
+    },
+    {
+      "label": "tf",
+      "url": "./tf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/db.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/db.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "Y = db(X)\nY = db(X, 'voltage')\nY = db(X, 'power')\nY = db(X, R)",
+      "output": "Y is a real double scalar or array."
+    },
+    "points": [
+      "`X` may be real or complex numeric data.",
+      "`R` is a finite positive real numeric scalar or array.",
+      "The output shape follows `X` for mode arguments and the broadcasted shape of `X` and `R` for the resistance form."
+    ]
+  }
+}
