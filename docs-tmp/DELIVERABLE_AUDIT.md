@@ -178,19 +178,20 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirIndexContextInvalid` for malformed direct indexed assignment-place context invariants at compile boundaries.
     - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads.
     - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants.
-    - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable external/imported function-handle targets at VM compile boundaries.
-    - `RunMat:MirFunctionHandleTargetUnsupported` for unsupported method function-handle targets at VM compile boundaries (explicit ABI invariant until typed method-handle semantic identity exists).
-  - VM function-handle compile lowering now enforces one strict textual-name policy for all textual handle identities in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable function-handle targets at VM compile boundaries (including method handles with empty/whitespace names).
+  - VM function-handle compile lowering now enforces one strict textual-name policy plus typed method-handle identity in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `Builtin`, `DynamicName`, `ExternalName`, and `Imported` targets now derive runtime names through `strict_callable_display_name(...)` before instruction emission.
-    - `Method` function-handle targets now reject at compile time with `RunMat:MirFunctionHandleTargetUnsupported` instead of lowering to generic external-handle bytecode.
+    - `Method` function-handle targets now lower to `Instr::CreateMethodFunctionHandle` and runtime `Value::MethodFunctionHandle` identity instead of degrading to generic name-only handles.
     - empty builtin/dynamic handle names now reject at compile time with `RunMat:MirFunctionHandleNameMissing` instead of emitting empty runtime handles.
+    - empty/whitespace method handle names now reject at compile time with `RunMat:MirFunctionHandleNameMissing`.
     - single-segment `ExternalName` handle targets now reject at compile time with `RunMat:MirFunctionHandleNameMissing` (external identities must be qualified to remain on external-handle lowering paths).
     - `Imported` handle targets with empty `DefPath.item` now reject at compile time with `RunMat:MirFunctionHandleNameMissing`.
     - `Imported` handle targets with mismatched `DefPath` module/item leaves now reject at compile time with `RunMat:MirFunctionHandleNameMissing`.
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier`
       - `primary_compile_rejects_empty_builtin_function_handle_name_with_identifier`
-      - `primary_compile_rejects_method_function_handle_target_with_identifier`
+      - `primary_compile_lowers_method_function_handle_target_to_typed_instruction`
+      - `primary_compile_rejects_whitespace_method_function_handle_name_with_identifier`
       - `primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier`
       - `primary_compile_rejects_single_segment_external_function_handle_name_with_identifier`
       - `primary_compile_rejects_imported_function_handle_missing_item_with_identifier`
@@ -461,6 +462,51 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `build_cell_scalar_selectors_rejects_negative_index`
       - `cell_paren_read_rejects_zero_index`
       - `cell_paren_read_rejects_negative_index`
+  - callable identity text normalization is now consistent across compile/runtime fallback-policy boundaries:
+    - shared fallback-policy checks in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now reject whitespace-only dynamic/method/external/imported segments for semantic-resolution and VM fallback-name eligibility.
+    - compile callable-name extraction in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now trims and rejects whitespace-only static-call/function-handle names (`RunMat:MirCallTargetNameInvalid`, `RunMat:MirFunctionHandleNameMissing`).
+    - direct ratchets:
+      - `callable_name_fallback_policies_require_well_formed_external_names`
+      - `primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`
+      - `primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier`
+      - `primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`
+  - method/member callable dispatch lanes now enforce typed callee-shape invariants at compile and runtime entrypoints:
+    - compile method/member lowering in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now rejects malformed static method/member callee identities before bytecode emission (`RunMat:MirMethodCallCalleeInvalid`).
+    - runtime method/member call entrypoint in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs) now emits `RunMat:MethodCallCalleeInvalid` for non-method-like identities instead of generic unresolved-name failures.
+    - runtime `call_method` in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now trims method names before typed callable dispatch.
+    - direct ratchets:
+      - `primary_compile_rejects_imported_mir_method_call_callee_with_identifier`
+      - `primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`
+      - `primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`
+      - `primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`
+      - `primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`
+      - `primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`
+      - `method_member_call_rejects_identity_without_method_name`
+      - `method_member_call_rejects_imported_identity_with_identifier`
+      - `method_member_call_rejects_multisegment_external_identity_with_identifier`
+      - `method_member_call_rejects_whitespace_method_identity_with_identifier`
+      - `method_member_call_rejects_whitespace_single_segment_external_identity_with_identifier`
+      - `call_method_trims_method_name_for_resolution`
+      - `feval_call_method_closure_fast_path_trims_method_name_for_resolution`
+  - runtime callable-handle normalization now includes scalar string-array `str2func` parity with `feval` handle routing:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `str2func_builtin(...)` now accepts scalar `Value::StringArray` names under the same semantic-resolver-first classifier and rejects nonscalar name arrays with stable identifier `RunMat:Str2FuncNameShapeInvalid`.
+    - direct ratchets:
+      - `str2func_accepts_scalar_string_array_name`
+      - `str2func_rejects_nonscalar_string_array_name_with_identifier`
+      - `str2func_scalar_string_array_prefers_semantic_handle_when_resolved`
+      - `str2func_scalar_string_array_qualified_name_prefers_semantic_handle_when_resolved`
+      - `str2func_scalar_string_array_returns_external_handle_for_qualified_name`
+      - `str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle`
+      - `str2func_scalar_string_array_rejects_empty_name_with_identifier`
+  - callable descriptor optional-dispatch policy parity now has explicit ratchets:
+    - `try_execute_callable_descriptor(...)` in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs) now has direct tests pinning runtime-name and external-boundary behavior on unresolved dynamic/imported/external identities.
+    - runtime semantic descriptor dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now has direct malformed-imported-path contract coverage that rejects mismatched imported identities before resolver probing.
+    - direct ratchets:
+      - `try_execute_dynamic_name_runtime_name_resolution_can_reach_builtin`
+      - `try_execute_imported_identity_never_falls_back_to_builtin_name_resolution`
+      - `try_execute_external_boundary_single_segment_name_returns_none_without_semantic_resolution`
+      - `try_execute_external_boundary_qualified_name_can_use_semantic_resolver`
+      - `imported_identity_runtime_name_resolution_policy_rejects_malformed_path_without_semantic_probe`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

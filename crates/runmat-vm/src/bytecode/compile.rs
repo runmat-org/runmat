@@ -4441,6 +4441,39 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::FunctionHandle(
+                        CallableIdentity::DynamicName(SymbolName("   ".to_string())),
+                    ));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirFunctionHandleNameMissing")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_empty_builtin_function_handle_name_with_identifier() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -4474,7 +4507,40 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_rejects_method_function_handle_target_with_identifier() {
+    fn primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::FunctionHandle(CallableIdentity::Builtin(
+                        BuiltinId("   ".to_string()),
+                    )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirFunctionHandleNameMissing")
+        );
+    }
+
+    #[test]
+    fn primary_compile_lowers_method_function_handle_target_to_typed_instruction() {
         let ast = runmat_parser::parse("f = @sin;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
@@ -4499,10 +4565,43 @@ mod tests {
         }
         assert!(patched, "expected assignment in lowered MIR");
 
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile should succeed");
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CreateMethodFunctionHandle(name) if name == "m"
+        )));
+    }
+
+    #[test]
+    fn primary_compile_rejects_whitespace_method_function_handle_name_with_identifier() {
+        let ast = runmat_parser::parse("f = @sin;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::FunctionHandle(CallableIdentity::Method(
+                        MethodId("   ".to_string()),
+                    )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
         assert_eq!(
             err.identifier.as_deref(),
-            Some("RunMat:MirFunctionHandleTargetUnsupported")
+            Some("RunMat:MirFunctionHandleNameMissing")
         );
     }
 
@@ -4784,6 +4883,44 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape() {
+        let ast = runmat_parser::parse("x = sin(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } = &mut stmt.kind
+                {
+                    call.callee = MirCallee::Static(CallableIdentity::DynamicName(SymbolName(
+                        "   ".to_string(),
+                    )));
+                    call.fallback_policy = CallableFallbackPolicy::RuntimeNameResolution;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected call assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCallTargetNameInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_multi_assign_static_call_with_invalid_name_shape() {
         let ast = runmat_parser::parse("[a, b] = max([1,2]);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -5001,6 +5138,57 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_imported_mir_method_call_callee_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.callee = MirCallee::Static(CallableIdentity::Imported(DefPath {
+                            package: PackageName("pkg".into()),
+                            module: QualifiedName(vec![
+                                SymbolName("pkg".into()),
+                                SymbolName("method".into()),
+                            ]),
+                            item: vec![DefPathSegment::Function(SymbolName("method".into()))],
+                        }));
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallCalleeInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier() {
         let ast = runmat_parser::parse("obj = 1; [a, b] = obj.method(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -5034,6 +5222,240 @@ mod tests {
             }
         }
         assert!(patched, "expected multi-assign method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallCalleeInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; [a, b] = obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::MultiAssign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.callee = MirCallee::Static(CallableIdentity::Imported(DefPath {
+                            package: PackageName("pkg".into()),
+                            module: QualifiedName(vec![
+                                SymbolName("pkg".into()),
+                                SymbolName("method".into()),
+                            ]),
+                            item: vec![DefPathSegment::Function(SymbolName("method".into()))],
+                        }));
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected multi-assign method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallCalleeInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.callee =
+                            MirCallee::Static(CallableIdentity::ExternalName(QualifiedName(vec![
+                                SymbolName("pkg".into()),
+                                SymbolName("method".into()),
+                            ])));
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallCalleeInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.callee =
+                            MirCallee::Static(CallableIdentity::Method(MethodId(String::new())));
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallCalleeInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.callee = MirCallee::Static(CallableIdentity::Method(MethodId(
+                            "   ".to_string(),
+                        )));
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallCalleeInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier(
+    ) {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.callee =
+                            MirCallee::Static(CallableIdentity::ExternalName(QualifiedName(vec![
+                                SymbolName("   ".into()),
+                            ])));
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call in lowered MIR");
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
         assert_eq!(

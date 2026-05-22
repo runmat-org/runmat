@@ -339,6 +339,7 @@ fn analyse_like_prototype(proto: &Value) -> crate::BuiltinResult<PrototypeSpec> 
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)

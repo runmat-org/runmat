@@ -98,6 +98,8 @@ pub enum Value {
     FunctionHandle(String),
     // Function handle whose resolution must stay at the external boundary.
     ExternalFunctionHandle(String),
+    // Function handle preserving typed method identity.
+    MethodFunctionHandle(String),
     // Function handle with compiler/session semantic identity.
     SemanticFunctionHandle {
         name: String,
@@ -1171,6 +1173,7 @@ impl Type {
             Value::Struct(_) => Type::Struct { known_fields: None },
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
             | Value::SemanticFunctionHandle { .. } => Type::Function {
                 params: vec![Type::Unknown],
                 returns: Box::new(Type::Unknown),
@@ -1928,7 +1931,9 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
+            Value::FunctionHandle(name)
+            | Value::ExternalFunctionHandle(name)
+            | Value::MethodFunctionHandle(name) => {
                 write!(f, "@{name}")
             }
             Value::SemanticFunctionHandle { name, .. } => write!(f, "@{name}"),

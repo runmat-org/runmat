@@ -14,6 +14,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         Value::GpuTensor(_) => "gpuArray".to_string(),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => {
@@ -98,6 +99,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         | Value::OutputList(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)

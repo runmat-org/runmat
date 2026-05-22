@@ -148,6 +148,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         )),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)

@@ -140,6 +140,7 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)

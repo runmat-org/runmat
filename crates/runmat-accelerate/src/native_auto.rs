@@ -1330,7 +1330,9 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Struct(_) => "Struct",
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
-        Value::FunctionHandle(_) | Value::ExternalFunctionHandle(_) => "FunctionHandle",
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_) => "FunctionHandle",
         Value::SemanticFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",

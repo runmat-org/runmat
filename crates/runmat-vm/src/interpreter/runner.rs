@@ -577,6 +577,7 @@ async fn run_interpreter_inner(
             | Instr::LoadMethod(_)
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateExternalFunctionHandle(_)
+            | Instr::CreateMethodFunctionHandle(_)
             | Instr::CreateSemanticFunctionHandle(_, _)
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)

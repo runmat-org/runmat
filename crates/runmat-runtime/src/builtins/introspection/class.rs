@@ -61,6 +61,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::GpuTensor(_) => "gpuArray".to_string(),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => {

@@ -135,6 +135,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM).await?),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)

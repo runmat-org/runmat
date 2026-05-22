@@ -497,7 +497,7 @@ Treat current MIR bytecode gap markers as follows:
 - `{count} call outputs`: semantic user-function, `feval`, `size`, min/max family, sort/set/index builtins (`sort`, `unique`, `find`, `union`, `ismember`, `sortrows`), and linalg factorization builtins (`chol`, `lu`, `qr`, `svd`, `eig`) are ratcheted through multi-output bytecode/runtime output context; generic rvalue call outputs and broader builtin output splitting remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
 - `aggregate kind`: forward design track for future struct/object aggregate-literal source form (not an active current MIR bytecode gap).
-- `function handle target`: builtin/anonymous semantic-handle `feval` paths are ratcheted; `CallableIdentity::Method` function-handle targets now fail fast at compile boundaries with `RunMat:MirFunctionHandleTargetUnsupported` until typed method-handle semantic identity is designed, and remaining work is DefPath resolver/ABI closure.
+- `function handle target`: builtin/anonymous semantic-handle `feval` paths are ratcheted; `CallableIdentity::Method` function-handle targets now lower through typed method-handle runtime identity (`Instr::CreateMethodFunctionHandle` -> `Value::MethodFunctionHandle`) with semantic-resolver-first runtime-name policy (no builtin fallback), and remaining work is DefPath resolver/ABI closure.
 - `assignment place`: multi-assign output storage now reuses MIR place assignment for non-local targets; remaining assignment-place gaps should be explicit source reproducers or object/dynamic descriptor plans, not generic slot-only lowering.
 
 ## Recommended Semantic Design Slice

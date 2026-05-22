@@ -110,8 +110,6 @@ const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
 const IDENT_MIR_NUMBER_LITERAL_INVALID: &str = "RunMat:MirNumberLiteralInvalid";
 const IDENT_MIR_CONSTANT_UNKNOWN: &str = "RunMat:MirConstantUnknown";
 const IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING: &str = "RunMat:MirFunctionHandleNameMissing";
-const IDENT_MIR_FUNCTION_HANDLE_TARGET_UNSUPPORTED: &str =
-    "RunMat:MirFunctionHandleTargetUnsupported";
 const IDENT_MIR_CALL_TARGET_NAME_INVALID: &str = "RunMat:MirCallTargetNameInvalid";
 const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
@@ -165,13 +163,25 @@ fn call_name(call: &MirCall) -> Option<&str> {
 }
 
 fn imported_handle_runtime_name(path: &runmat_hir::DefPath) -> Option<String> {
-    let module_name = path.module.display_name()?;
     let item_name = path.item.last().map(|item| item.display_name())?;
+    let item_name = item_name.trim();
     if item_name.is_empty() {
         return None;
     }
     let module_leaf = path.module.0.last()?;
-    (module_leaf.0 == item_name).then_some(module_name)
+    let module_leaf_name = module_leaf.0.trim();
+    if module_leaf_name.is_empty() || module_leaf_name != item_name {
+        return None;
+    }
+    let mut segments = Vec::with_capacity(path.module.0.len());
+    for segment in &path.module.0 {
+        let normalized = segment.0.trim();
+        if normalized.is_empty() {
+            return None;
+        }
+        segments.push(normalized.to_string());
+    }
+    Some(segments.join("."))
 }
 
 fn randn_assignment(stmt: &MirStmt) -> Option<(runmat_mir::MirLocalId, &MirCall)> {
@@ -2100,24 +2110,38 @@ impl Compiler {
     fn mir_runtime_name_callee(&self, callee: &CallableIdentity) -> Option<String> {
         match callee {
             CallableIdentity::Builtin(runmat_hir::BuiltinId(name)) => {
-                (!name.is_empty()).then_some(name.clone())
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
             }
             CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
-                (!name.is_empty()).then_some(name.clone())
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
             }
             CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
-                if segments.len() > 1 && segments.iter().all(|segment| !segment.0.is_empty()) =>
+                if segments.len() > 1
+                    && segments.iter().all(|segment| !segment.0.trim().is_empty()) =>
             {
                 Some(
                     segments
                         .iter()
-                        .map(|segment| segment.0.as_str())
+                        .map(|segment| segment.0.trim())
                         .collect::<Vec<_>>()
                         .join("."),
                 )
             }
             CallableIdentity::Imported(path) => imported_handle_runtime_name(path),
             _ => None,
+        }
+    }
+
+    fn mir_method_or_member_callee_supported(&self, callee: &CallableIdentity) -> bool {
+        match callee {
+            CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            | CallableIdentity::Method(runmat_hir::MethodId(name)) => !name.trim().is_empty(),
+            CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)) => {
+                segments.len() == 1 && !segments[0].0.trim().is_empty()
+            }
+            _ => false,
         }
     }
 
@@ -2140,6 +2164,14 @@ impl Compiler {
                     fallback_policy, identity
                 ))
                 .with_identifier(IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED));
+        }
+        if !self.mir_method_or_member_callee_supported(&identity) {
+            return Err(self
+                .compile_error(format!(
+                    "MIR method-call callee identity {:?} is not supported for method/member dispatch",
+                    identity
+                ))
+                .with_identifier(IDENT_MIR_METHOD_CALL_CALLEE_INVALID));
         }
         if call.args.is_empty() {
             return Err(self
@@ -2906,11 +2938,18 @@ impl Compiler {
         target: &CallableIdentity,
     ) -> Result<(), CompileError> {
         match target {
-            CallableIdentity::Method(_) => Err(self
-                .compile_error(
-                    "method function-handle lowering requires explicit semantic/defpath ABI",
-                )
-                .with_identifier(IDENT_MIR_FUNCTION_HANDLE_TARGET_UNSUPPORTED)),
+            CallableIdentity::Method(runmat_hir::MethodId(name)) => {
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    return Err(self
+                        .compile_error(format!(
+                            "missing runtime name for function handle target {target:?}"
+                        ))
+                        .with_identifier(IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING));
+                }
+                self.emit(Instr::CreateMethodFunctionHandle(trimmed.to_string()));
+                Ok(())
+            }
             CallableIdentity::Builtin(_)
             | CallableIdentity::DynamicName(_)
             | CallableIdentity::ExternalName(_)

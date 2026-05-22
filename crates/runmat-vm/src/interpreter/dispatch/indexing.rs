@@ -334,6 +334,7 @@ async fn execute_brace_operation(
         base,
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
             | Value::SemanticFunctionHandle { .. }
             | Value::Closure(_)
     ) {
@@ -854,6 +855,7 @@ pub async fn dispatch_indexing(
                 }
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
                     let args = raw_indices;
@@ -1029,6 +1031,7 @@ pub async fn dispatch_indexing(
                 }
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
                     return Err(crate::interpreter::errors::mex(
@@ -1179,6 +1182,7 @@ pub async fn dispatch_indexing(
                 }
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
                     if *colon_mask != 0 || *end_mask != 0 {
@@ -1382,6 +1386,7 @@ pub async fn dispatch_indexing(
                 }
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
                     return Err(crate::interpreter::errors::mex(

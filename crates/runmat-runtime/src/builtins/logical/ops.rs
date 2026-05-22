@@ -97,6 +97,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::Listener(_) => Err(conversion_error("event.listener")),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),

@@ -247,6 +247,7 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::HandleObject(_)

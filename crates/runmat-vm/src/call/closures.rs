@@ -18,15 +18,17 @@ fn method_identity(name: String) -> CallableIdentity {
 fn method_member_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
         CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
-            (!name.is_empty()).then_some(name.clone())
+            let trimmed = name.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
         }
         CallableIdentity::Method(runmat_hir::MethodId(name)) => {
-            (!name.is_empty()).then_some(name.clone())
+            let trimmed = name.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
         }
         CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
-            if segments.len() == 1 && !segments[0].0.is_empty() =>
+            if segments.len() == 1 && !segments[0].0.trim().is_empty() =>
         {
-            Some(segments[0].0.clone())
+            Some(segments[0].0.trim().to_string())
         }
         _ => None,
     }
@@ -259,8 +261,10 @@ pub async fn call_method_or_member_index_with_outputs(
 ) -> Result<Value, RuntimeError> {
     let name = method_member_name(&identity).ok_or_else(|| {
         mex(
-            "UndefinedFunction",
-            "method/member-index call missing callable name",
+            "MethodCallCalleeInvalid",
+            &format!(
+                "method/member-index call requires method-like callable identity, got {identity:?}"
+            ),
         )
     })?;
     call_method_or_member_index_named_with_outputs(
@@ -392,7 +396,75 @@ mod tests {
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("anonymous identity should not be used for method/member call");
-        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert_eq!(err.identifier(), Some("RunMat:MethodCallCalleeInvalid"));
+    }
+
+    #[test]
+    fn method_member_call_rejects_imported_identity_with_identifier() {
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::Imported(runmat_hir::DefPath {
+                package: runmat_hir::PackageName("Point".to_string()),
+                module: runmat_hir::QualifiedName(vec![
+                    runmat_hir::SymbolName("Point".to_string()),
+                    runmat_hir::SymbolName("origin".to_string()),
+                ]),
+                item: vec![runmat_hir::DefPathSegment::Function(
+                    runmat_hir::SymbolName("origin".to_string()),
+                )],
+            }),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err("imported identity should not be used for method/member call");
+        assert_eq!(err.identifier(), Some("RunMat:MethodCallCalleeInvalid"));
+    }
+
+    #[test]
+    fn method_member_call_rejects_multisegment_external_identity_with_identifier() {
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ])),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err("multi-segment external identity should not be used for method/member call");
+        assert_eq!(err.identifier(), Some("RunMat:MethodCallCalleeInvalid"));
+    }
+
+    #[test]
+    fn method_member_call_rejects_whitespace_method_identity_with_identifier() {
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::Method(MethodId("   ".to_string())),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err("whitespace method identity should not be used for method/member call");
+        assert_eq!(err.identifier(), Some("RunMat:MethodCallCalleeInvalid"));
+    }
+
+    #[test]
+    fn method_member_call_rejects_whitespace_single_segment_external_identity_with_identifier() {
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName("   ".to_string()),
+            ])),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err(
+            "whitespace single-segment external identity should not be used for method/member call",
+        );
+        assert_eq!(err.identifier(), Some("RunMat:MethodCallCalleeInvalid"));
     }
 
     #[test]

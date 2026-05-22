@@ -364,7 +364,7 @@ pub enum CallableFallbackPolicy {
 
 impl CallableFallbackPolicy {
     fn is_well_formed_external_name(name: &QualifiedName) -> bool {
-        name.0.len() > 1 && name.0.iter().all(|segment| !segment.0.is_empty())
+        name.0.len() > 1 && name.0.iter().all(|segment| !segment.0.trim().is_empty())
     }
 
     fn is_well_formed_imported_path(path: &DefPath) -> bool {
@@ -375,12 +375,15 @@ impl CallableFallbackPolicy {
             return false;
         };
         let item_name = last_item.display_name();
-        if item_name.is_empty() {
+        if item_name.trim().is_empty() {
             return false;
         }
         let Some(last_module_segment) = path.module.0.last() else {
             return false;
         };
+        if last_module_segment.0.trim().is_empty() {
+            return false;
+        }
         // Imported callable identities must keep module leaf and item leaf aligned.
         // This prevents silently routing a mismatched DefPath through name-shaped fallback.
         let _ = module_name;
@@ -393,8 +396,9 @@ impl CallableFallbackPolicy {
 
     pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
         match identity {
-            CallableIdentity::DynamicName(_) | CallableIdentity::Method(_) => {
-                self.allows_runtime_name_resolution()
+            CallableIdentity::DynamicName(SymbolName(name))
+            | CallableIdentity::Method(MethodId(name)) => {
+                self.allows_runtime_name_resolution() && !name.trim().is_empty()
             }
             CallableIdentity::Imported(path) => {
                 self.allows_runtime_name_resolution() && Self::is_well_formed_imported_path(path)
@@ -409,7 +413,9 @@ impl CallableFallbackPolicy {
 
     pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
         match identity {
-            CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
+            CallableIdentity::DynamicName(SymbolName(name)) => {
+                self.allows_runtime_name_resolution() && !name.trim().is_empty()
+            }
             CallableIdentity::Imported(path) => {
                 self.allows_runtime_name_resolution() && Self::is_well_formed_imported_path(path)
             }
@@ -429,7 +435,8 @@ impl CallableFallbackPolicy {
         match identity {
             CallableIdentity::DynamicName(SymbolName(name))
             | CallableIdentity::Method(MethodId(name)) => {
-                (!name.is_empty()).then_some(name.clone())
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
             }
             CallableIdentity::Imported(path) => path.module.display_name(),
             CallableIdentity::ExternalName(name) if Self::is_well_formed_external_name(name) => {
@@ -452,7 +459,8 @@ impl CallableFallbackPolicy {
 
         match identity {
             CallableIdentity::DynamicName(SymbolName(name)) => {
-                (!name.is_empty()).then_some(name.clone())
+                let trimmed = name.trim();
+                (!trimmed.is_empty()).then_some(trimmed.to_string())
             }
             CallableIdentity::Imported(path) => path.module.display_name(),
             CallableIdentity::ExternalName(name) if Self::is_well_formed_external_name(name) => {
@@ -1384,8 +1392,14 @@ mod tests {
             item: vec![DefPathSegment::Function(SymbolName("different".into()))],
         });
         let method = CallableIdentity::Method(MethodId("deal".into()));
+        let whitespace_dynamic = CallableIdentity::DynamicName(SymbolName("   ".into()));
+        let whitespace_method = CallableIdentity::Method(MethodId("   ".into()));
         let single_external =
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".into())]));
+        let whitespace_external = CallableIdentity::ExternalName(QualifiedName(vec![
+            SymbolName("OverIdx".into()),
+            SymbolName("   ".into()),
+        ]));
         let qualified_external = CallableIdentity::ExternalName(QualifiedName(vec![
             SymbolName("OverIdx".into()),
             SymbolName("plus".into()),
@@ -1408,6 +1422,10 @@ mod tests {
             .allows_semantic_name_resolution_for(&imported_mismatched_item));
         assert!(CallableFallbackPolicy::RuntimeNameResolution
             .allows_semantic_name_resolution_for(&method));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&whitespace_dynamic));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&whitespace_method));
         assert!(
             !CallableFallbackPolicy::ExternalBoundary.allows_semantic_name_resolution_for(&dynamic)
         );
@@ -1421,9 +1439,13 @@ mod tests {
         assert!(CallableFallbackPolicy::ExternalBoundary
             .allows_semantic_name_resolution_for(&qualified_external));
         assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_semantic_name_resolution_for(&whitespace_external));
+        assert!(!CallableFallbackPolicy::ExternalBoundary
             .allows_semantic_name_resolution_for(&malformed_external));
 
         assert!(CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&dynamic));
+        assert!(!CallableFallbackPolicy::RuntimeNameResolution
+            .allows_vm_name_fallback_for(&whitespace_dynamic));
         assert!(
             CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&imported)
         );
@@ -1441,6 +1463,8 @@ mod tests {
         assert!(CallableFallbackPolicy::ExternalBoundary
             .allows_vm_name_fallback_for(&qualified_external));
         assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_vm_name_fallback_for(&whitespace_external));
+        assert!(!CallableFallbackPolicy::ExternalBoundary
             .allows_vm_name_fallback_for(&malformed_external));
 
         assert_eq!(
@@ -1449,6 +1473,10 @@ mod tests {
         );
         assert_eq!(
             CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&dynamic),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&whitespace_dynamic),
             None
         );
         assert_eq!(
@@ -1494,6 +1522,11 @@ mod tests {
             Some("deal".into())
         );
         assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution
+                .semantic_resolution_name_for(&whitespace_method),
+            None
+        );
+        assert_eq!(
             CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&single_external),
             None
         );
@@ -1509,6 +1542,15 @@ mod tests {
             CallableFallbackPolicy::ExternalBoundary
                 .semantic_resolution_name_for(&qualified_external),
             Some("OverIdx.plus".into())
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&whitespace_external),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary
+                .semantic_resolution_name_for(&whitespace_external),
+            None
         );
         assert_eq!(
             CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&malformed_external),

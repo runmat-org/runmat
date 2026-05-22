@@ -5365,6 +5365,186 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier -- --nocapture`
     - `cargo fmt --all --check`
 
+- RM-378: refresh completion audit checklist and gates
+  - Added a dated completion-audit refresh section to [COMPLETION_AUDIT.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/COMPLETION_AUDIT.md) mapping the active objective to concrete deliverables and evidence commands.
+  - Refreshed objective evidence runs:
+    - `rg -n "compile_legacy|LegacyUserFunction|runmat_vm::execute|HirProgram|VarId" crates` (no matches)
+    - `rg -n "runmat.toml|entrypoint|manifest|sources|dependencies" crates/runmat-config crates/runmat-core crates/runmat-cli`
+    - `rg -n "CallableIdentity|CallableFallbackPolicy|Builtin|ClassDef|semantics" crates/runmat-hir/src/hir.rs crates/runmat-builtins/src/semantics.rs`
+    - `rg -n "AnalysisStore|fusion|FusionPlan|Accel|semantic" crates/runmat-mir crates/runmat-vm crates/runmat-core`
+  - Refreshed required gates (all green):
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+  - Audit decision remains unchanged: objective item `### 3` is still `partial`; goal is not achieved yet.
+
+- RM-378: unify str2func scalar string-array handle semantics
+  - Runtime `str2func` normalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now accepts scalar `Value::StringArray` handle names and applies the same normalized-name + semantic-resolver-first policy already used for `Value::String`/row `Value::CharArray`.
+  - Nonscalar string-array handle names now fail with stable identifier `RunMat:Str2FuncNameShapeInvalid`, removing text-handle shape drift between `str2func` and existing `feval` string-array semantics.
+  - Added ratchets:
+    - `str2func_accepts_scalar_string_array_name`
+    - `str2func_rejects_nonscalar_string_array_name_with_identifier`
+    - `str2func_scalar_string_array_prefers_semantic_handle_when_resolved`
+    - `str2func_scalar_string_array_returns_external_handle_for_qualified_name`
+    - `str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle`
+    - `str2func_scalar_string_array_rejects_empty_name_with_identifier`
+    - `str2func_scalar_string_array_qualified_name_prefers_semantic_handle_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime str2func_accepts_scalar_string_array_name -- --nocapture`
+    - `cargo test -p runmat-runtime str2func_rejects_nonscalar_string_array_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime str2func_scalar_string_array_prefers_semantic_handle_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime str2func_scalar_string_array_returns_external_handle_for_qualified_name -- --nocapture`
+    - `cargo test -p runmat-runtime str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle -- --nocapture`
+    - `cargo test -p runmat-runtime str2func_scalar_string_array_rejects_empty_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime str2func_scalar_string_array_qualified_name_prefers_semantic_handle_when_resolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
+- RM-378: ratchet try-execute callable fallback policy parity
+  - Added direct optional-dispatch (`try_execute_callable_descriptor`) coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs) so policy-sensitive fallback behavior is explicitly pinned outside hard-error execution paths.
+  - New contracts now cover:
+    - dynamic runtime-name fallback success to builtin (`sqrt`)
+    - imported identity non-fallback to builtin under runtime-name policy (`None`)
+    - single-segment external identity non-fallback under external-boundary policy (`None`)
+    - qualified external identity semantic-resolver dispatch under external-boundary policy (`Some(...)`)
+  - Added ratchets:
+    - `try_execute_dynamic_name_runtime_name_resolution_can_reach_builtin`
+    - `try_execute_imported_identity_never_falls_back_to_builtin_name_resolution`
+    - `try_execute_external_boundary_single_segment_name_returns_none_without_semantic_resolution`
+    - `try_execute_external_boundary_qualified_name_can_use_semantic_resolver`
+  - Validation:
+    - `cargo test -p runmat-vm try_execute_ -- --nocapture`
+
+- RM-378: reject malformed imported descriptor identities before runtime semantic resolver probe
+  - Runtime semantic descriptor dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now has explicit contract coverage that malformed imported callable identities do not enter semantic name-resolution probing.
+  - This pins fallback-policy shape validation at the runtime descriptor boundary and prevents resolver-side behavior from masking malformed imported `DefPath` metadata.
+  - Added ratchet:
+    - `imported_identity_runtime_name_resolution_policy_rejects_malformed_path_without_semantic_probe`
+  - Validation:
+    - `cargo test -p runmat-runtime imported_identity_runtime_name_resolution_policy_ -- --nocapture`
+
+- RM-378: enforce method/member-call callee identity shape at compile boundaries
+  - VM method/member call lowering in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now validates static callee identity shape before emitting `CallMethodOrMemberIndex*` instructions.
+  - Method/member dispatch now accepts only name-carrying callee identities supported by runtime method/member paths (`DynamicName`, `Method`, or single-segment `ExternalName`); malformed/non-member identity shapes are rejected at compile time with `RunMat:MirMethodCallCalleeInvalid` instead of leaking to runtime `"missing callable name"` fallback errors.
+  - Added ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_imported_mir_method_call_callee_with_identifier`
+    - `primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_imported_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_invalid_mir_method_call_callee_with_identifier -- --nocapture`
+
+- RM-378: complete method/member invalid-callee shape rejection matrix
+  - Extended VM compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) to pin additional malformed method/member static callee identity shapes:
+    - multi-segment external identities (`ExternalName(["pkg","method"])`) are rejected on method/member call lanes.
+    - empty method identities (`MethodId("")`) are rejected on method/member call lanes.
+  - These contracts close the remaining validator-shape seam for injected MIR method-call identities and keep failures on stable compile identifier `RunMat:MirMethodCallCalleeInvalid`.
+  - Added ratchets:
+    - `primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`
+    - `primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier -- --nocapture`
+
+- RM-378: harden runtime method/member call identity boundary with typed identifier
+  - VM method/member call entrypoint in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs) now rejects non-method-like callable identities with dedicated runtime identifier `RunMat:MethodCallCalleeInvalid` (instead of generic `RunMat:UndefinedFunction`), tightening malformed identity diagnostics for runtime-injected bytecode/API surfaces.
+  - Added ratchets:
+    - `method_member_call_rejects_identity_without_method_name`
+    - `method_member_call_rejects_imported_identity_with_identifier`
+    - `method_member_call_rejects_multisegment_external_identity_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm method_member_call_rejects_ -- --nocapture`
+
+- RM-378: normalize `call_method` name payloads before callable descriptor dispatch
+  - Runtime `call_method` in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now trims method-name payload text before object fallback and typed callable dispatch, so whitespace-padded method names no longer bypass resolver/builtin dispatch due to name-shape drift.
+  - This aligns `call_method` name normalization with existing `feval` handle-name normalization and removes another name-shaped callable ABI seam on closure fast-path dispatch (`feval` -> `call_method` captures).
+  - Added ratchets:
+    - `call_method_trims_method_name_for_resolution`
+    - `feval_call_method_closure_fast_path_trims_method_name_for_resolution`
+  - Validation:
+    - `cargo test -p runmat-runtime call_method_trims_method_name_for_resolution -- --nocapture`
+    - `cargo test -p runmat-runtime feval_call_method_closure_fast_path_trims_method_name_for_resolution -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
+- RM-378: reject whitespace-only method/member callee identities at compile/runtime boundaries
+  - VM compile method/member callee validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now treats whitespace-only `DynamicName`/`Method`/single-segment `ExternalName` identities as malformed and rejects them with stable compile identifier `RunMat:MirMethodCallCalleeInvalid`.
+  - VM runtime method/member identity normalization in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs) now trims method/member identity text before dispatch and rejects whitespace-only identities with stable runtime identifier `RunMat:MethodCallCalleeInvalid`.
+  - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`
+    - `primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`
+  - Added runtime ratchets in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs):
+    - `method_member_call_rejects_whitespace_method_identity_with_identifier`
+    - `method_member_call_rejects_whitespace_single_segment_external_identity_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_whitespace_ -- --nocapture`
+    - `cargo test -p runmat-vm method_member_call_rejects_whitespace_ -- --nocapture`
+
+- RM-378: tighten shared callable fallback policy against whitespace-only names
+  - Shared fallback-policy validation in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now rejects whitespace-only dynamic/method/external/imported callable name segments at the policy boundary (`allows_semantic_name_resolution_for`, `allows_vm_name_fallback_for`, `semantic_resolution_name_for`, `vm_fallback_name_for`).
+  - This closes a remaining policy-level seam where whitespace-only dynamic/method names could still be treated as resolver/fallback candidates even after runtime `feval`/`call_method` name normalization hardening.
+  - Extended ratchet coverage in HIR fallback-policy tests:
+    - `callable_name_fallback_policies_require_well_formed_external_names`
+      - rejects whitespace-only `DynamicName` semantic/fallback eligibility
+      - rejects whitespace-only `Method` semantic-resolution name extraction
+      - rejects whitespace-only external qualified segment fallback/semantic names
+  - Validation:
+    - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
+    - `cargo test -p runmat-runtime imported_identity_runtime_name_resolution_policy_ -- --nocapture`
+    - `cargo test -p runmat-vm try_execute_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
+- RM-378: normalize static-call/function-handle compile names against whitespace-only callee shapes
+  - VM compile callable-name extraction in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now trims builtin/dynamic/external/imported name segments before static-call and function-handle lowering.
+  - Whitespace-only callable names now fail fast at compile boundaries:
+    - function-handle lanes surface `RunMat:MirFunctionHandleNameMissing`
+    - static-call lanes surface `RunMat:MirCallTargetNameInvalid`
+  - Added compile ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`
+    - `primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier`
+    - `primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape -- --nocapture`
+    - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
+- RM-378: complete typed method-function-handle runtime identity
+  - `scope: in-scope`
+  - blocker: method function-handle support was still ABI-incomplete because `CallableIdentity::Method` either degraded to generic name-shaped handles or required compile rejection, leaving method-handle identity untyped at runtime boundaries.
+  - Implemented typed method-handle identity path:
+    - value/runtime surface: added `Value::MethodFunctionHandle(String)` in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-builtins/src/lib.rs) and updated runtime/VM/type/metadata consumers to classify it as a function handle shape.
+    - compiler/bytecode surface: added `Instr::CreateMethodFunctionHandle(String)` in [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs) and lowered `CallableIdentity::Method` function-handle operands through this typed instruction in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) (with existing `RunMat:MirFunctionHandleNameMissing` name-shape guard retained for empty/whitespace method names).
+    - interpreter/runtime dispatch: materialized `CreateMethodFunctionHandle` to runtime `Value::MethodFunctionHandle` in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and threaded support through runner + JIT unsupported-instruction list in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs).
+    - callable descriptor/runtime execution: `feval` descriptor construction now classifies method-handle values as `CallableIdentity::Method` with `RuntimeNameResolution` policy in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs), and runtime `feval` now executes `Value::MethodFunctionHandle` through typed method identity policy in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs).
+  - Ratchets:
+    - `primary_compile_lowers_method_function_handle_target_to_typed_instruction`
+    - `primary_compile_rejects_whitespace_method_function_handle_name_with_identifier`
+    - `feval_method_function_handle_classifies_as_method_identity`
+    - `feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolver`
+    - `feval_method_function_handle_uses_semantic_resolver`
+    - `feval_method_function_handle_does_not_fallback_to_builtin_name`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm feval_method_function_handle_ -- --nocapture`
+    - `cargo test -p runmat-runtime feval_method_function_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -171,6 +171,7 @@ fn for_each_gpu_handle_in_value_with_visited(
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => Ok(()),
@@ -442,6 +443,7 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => {}
@@ -499,6 +501,7 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => false,
@@ -1355,6 +1358,12 @@ pub async fn dispatch_instruction(
         }
         Instr::CreateExternalFunctionHandle(name) => {
             stack.push(Value::ExternalFunctionHandle(name.clone()));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateMethodFunctionHandle(name) => {
+            stack.push(Value::MethodFunctionHandle(name.clone()));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

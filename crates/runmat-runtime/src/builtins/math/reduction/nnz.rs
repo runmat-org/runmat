@@ -392,6 +392,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Listener(l) => format!("listener for {}", l.event_name),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_) => "function handle".to_string(),
         Value::ClassRef(_) => "class reference".to_string(),

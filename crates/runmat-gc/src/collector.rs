@@ -208,6 +208,7 @@ impl MarkSweepCollector {
             }
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
             | Value::SemanticFunctionHandle { .. } => {}
             Value::ClassRef(_) => {}
             Value::Closure(c) => {
@@ -268,6 +269,7 @@ impl MarkSweepCollector {
             Value::GpuTensor(_) => {}
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
             | Value::SemanticFunctionHandle { .. } => {}
             Value::ClassRef(_) => {}
             Value::Closure(c) => {

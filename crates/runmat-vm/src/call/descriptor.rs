@@ -295,6 +295,13 @@ impl CallableDescriptor {
                     Self::resolve_named_target(&name, semantic_registry);
                 Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
+            Value::MethodFunctionHandle(name) => Self::feval_resolved_name(
+                CallableIdentity::Method(runmat_hir::MethodId(name.clone())),
+                name,
+                CallableFallbackPolicy::RuntimeNameResolution,
+                args,
+                requested_outputs,
+            ),
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
                 name,
@@ -552,7 +559,8 @@ pub(crate) async fn try_execute_callable_descriptor(
 #[cfg(test)]
 mod tests {
     use super::{
-        execute_callable_descriptor, CallableCallKind, CallableDescriptor, CallableTarget,
+        execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
+        CallableDescriptor, CallableTarget,
     };
     use crate::bytecode::SemanticFunctionRegistry;
     use futures::executor::block_on;
@@ -816,6 +824,77 @@ mod tests {
     }
 
     #[test]
+    fn try_execute_dynamic_name_runtime_name_resolution_can_reach_builtin() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(try_execute_callable_descriptor(descriptor))
+            .expect("try_execute should allow dynamic builtin fallback");
+        assert_eq!(value, Some(Value::Num(3.0)));
+    }
+
+    #[test]
+    fn try_execute_imported_identity_never_falls_back_to_builtin_name_resolution() {
+        let descriptor = CallableDescriptor::resolved(
+            imported_identity("sqrt"),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(try_execute_callable_descriptor(descriptor))
+            .expect("try_execute should suppress unresolved imported identities");
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn try_execute_external_boundary_single_segment_name_returns_none_without_semantic_resolution()
+    {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".to_string())])),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(try_execute_callable_descriptor(descriptor))
+            .expect("try_execute should suppress unresolved external boundary names");
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn try_execute_external_boundary_qualified_name_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(9393))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 9393);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![
+                SymbolName("pkg".to_string()),
+                SymbolName("remote_inc".to_string()),
+            ])),
+            vec![Value::Num(2.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(try_execute_callable_descriptor(descriptor))
+            .expect("try_execute should use semantic resolver for qualified external identities");
+        assert_eq!(value, Some(Value::Num(3.0)));
+    }
+
+    #[test]
     fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver() {
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| (name == "sqrt").then_some(4242))),
@@ -854,6 +933,53 @@ mod tests {
         };
         assert!(matches!(identity, CallableIdentity::ExternalName(_)));
         assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+    }
+
+    #[test]
+    fn feval_method_function_handle_classifies_as_method_identity() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::MethodFunctionHandle("resolved_method".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(identity, CallableIdentity::Method(_)));
+        assert_eq!(
+            *fallback_policy,
+            CallableFallbackPolicy::RuntimeNameResolution
+        );
+    }
+
+    #[test]
+    fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "resolved_method").then_some(5252))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 5252);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::MethodFunctionHandle("resolved_method".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("method function handle should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(3.0));
     }
 
     #[test]

@@ -135,6 +135,7 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::Cell(_) => Err(fliplr_error("fliplr: cell arrays are not yet supported")),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)

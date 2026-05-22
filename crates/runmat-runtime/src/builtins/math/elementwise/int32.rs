@@ -94,6 +94,7 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::Listener(_) => Err(conversion_error("event.listener")),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),

@@ -374,7 +374,8 @@ async fn call_method_builtin(
     method: String,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    if method.trim().is_empty() {
+    let method = method.trim().to_string();
+    if method.is_empty() {
         return Err(
             build_runtime_error("call_method method name must not be empty")
                 .with_identifier("RunMat:CallMethodNameInvalid")
@@ -569,6 +570,14 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
             }
             Value::ExternalFunctionHandle(name)
         }
+        Value::MethodFunctionHandle(name) => {
+            if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
+            {
+                Value::SemanticFunctionHandle { name, function }
+            } else {
+                Value::MethodFunctionHandle(name)
+            }
+        }
         Value::Closure(mut closure) => {
             if closure.semantic_function.is_none() {
                 if let Some(function) =
@@ -676,6 +685,7 @@ async fn notify_builtin(
             }
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
             | Value::SemanticFunctionHandle { .. }
             | Value::Closure(_) => true,
             _ => false,
@@ -1395,6 +1405,23 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         }
         Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
         Value::ExternalFunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
+        Value::MethodFunctionHandle(name) => {
+            let method_name = name.trim().to_string();
+            if method_name.is_empty() {
+                return Err(
+                    build_runtime_error("feval: method handle name must not be empty")
+                        .with_identifier("RunMat:FevalHandleNameInvalid")
+                        .build(),
+                );
+            }
+            dispatch_callable_with_policy(
+                runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(method_name)),
+                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                rest,
+                requested_outputs,
+            )
+            .await
+        }
         Value::SemanticFunctionHandle { name, function } => {
             let request = crate::user_functions::SemanticCallableRequest::semantic(
                 function,
@@ -1496,6 +1523,14 @@ fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
     let name = match value {
         Value::String(text) => normalize_handle_name(&text),
+        Value::StringArray(sa) if sa.data.len() == 1 => normalize_handle_name(&sa.data[0]),
+        Value::StringArray(_) => {
+            return Err(
+                build_runtime_error("str2func: function name string array must be scalar")
+                    .with_identifier("RunMat:Str2FuncNameShapeInvalid")
+                    .build(),
+            )
+        }
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
             normalize_handle_name(&text)
@@ -1535,6 +1570,7 @@ fn func2str_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
+        | Value::MethodFunctionHandle(name)
         | Value::SemanticFunctionHandle { name, .. } => Ok(Value::String(name)),
         Value::Closure(closure) => Ok(Value::String(closure.function_name)),
         other => Err(build_runtime_error(format!(
@@ -1953,6 +1989,40 @@ mod tests {
     }
 
     #[test]
+    fn feval_method_function_handle_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_method").then_some(5045)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 5045);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(15.0)) })
+            }),
+        ));
+
+        let result = block_on(feval_builtin(
+            Value::MethodFunctionHandle("resolved_method".to_string()),
+            vec![Value::Num(4.0)],
+        ))
+        .expect("resolved method handle feval succeeds");
+        assert_eq!(result, Value::Num(15.0));
+    }
+
+    #[test]
+    fn feval_method_function_handle_does_not_fallback_to_builtin_name() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let err = block_on(feval_builtin(
+            Value::MethodFunctionHandle("sqrt".to_string()),
+            vec![Value::Num(9.0)],
+        ))
+        .expect_err("method function handle should not fallback to builtin name dispatch");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
     fn feval_name_only_closure_uses_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
@@ -2182,6 +2252,105 @@ mod tests {
         let err =
             str2func_builtin(Value::Num(1.0)).expect_err("non-text function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
+    }
+
+    #[test]
+    fn str2func_accepts_scalar_string_array_name() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = str2func_builtin(Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
+                .expect("string array construction should succeed"),
+        ))
+        .expect("scalar string-array function name should succeed");
+        assert_eq!(value, Value::FunctionHandle("missing_target".to_string()));
+    }
+
+    #[test]
+    fn str2func_rejects_nonscalar_string_array_name_with_identifier() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
+                .expect("string array construction should succeed"),
+        );
+        let err =
+            str2func_builtin(value).expect_err("nonscalar string-array function name must fail");
+        assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
+    }
+
+    #[test]
+    fn str2func_scalar_string_array_prefers_semantic_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(445)
+            })));
+        let value = str2func_builtin(Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
+                .expect("string array construction should succeed"),
+        ))
+        .expect("scalar string-array function name should resolve semantically");
+        assert_eq!(
+            value,
+            Value::SemanticFunctionHandle {
+                name: "resolved_target".to_string(),
+                function: 445,
+            }
+        );
+    }
+
+    #[test]
+    fn str2func_scalar_string_array_returns_external_handle_for_qualified_name() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = str2func_builtin(Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
+                .expect("string array construction should succeed"),
+        ))
+        .expect("scalar string-array qualified name should succeed");
+        assert_eq!(
+            value,
+            Value::ExternalFunctionHandle("Point.origin".to_string())
+        );
+    }
+
+    #[test]
+    fn str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = str2func_builtin(Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
+                .expect("string array construction should succeed"),
+        ))
+        .expect("scalar string-array malformed qualified name should succeed");
+        assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
+    }
+
+    #[test]
+    fn str2func_scalar_string_array_rejects_empty_name_with_identifier() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let err = str2func_builtin(Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["   ".to_string()], vec![1, 1])
+                .expect("string array construction should succeed"),
+        ))
+        .expect_err("scalar string-array empty function name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
+    }
+
+    #[test]
+    fn str2func_scalar_string_array_qualified_name_prefers_semantic_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.resolved_target").then_some(446)
+            })));
+        let value = str2func_builtin(Value::StringArray(
+            runmat_builtins::StringArray::new(vec!["@pkg.resolved_target".to_string()], vec![1, 1])
+                .expect("string array construction should succeed"),
+        ))
+        .expect("scalar string-array qualified function name should resolve semantically");
+        assert_eq!(
+            value,
+            Value::SemanticFunctionHandle {
+                name: "pkg.resolved_target".to_string(),
+                function: 446,
+            }
+        );
     }
 
     #[test]
@@ -2662,6 +2831,53 @@ mod tests {
     }
 
     #[test]
+    fn imported_identity_runtime_name_resolution_policy_rejects_malformed_path_without_semantic_probe(
+    ) {
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let resolver_calls_for_closure = Arc::clone(&resolver_calls);
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(move |_| {
+                resolver_calls_for_closure.fetch_add(1, Ordering::Relaxed);
+                Some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
+                package: runmat_hir::PackageName("Point".to_string()),
+                module: runmat_hir::QualifiedName(vec![
+                    runmat_hir::SymbolName("Point".to_string()),
+                    runmat_hir::SymbolName("origin".to_string()),
+                ]),
+                item: vec![runmat_hir::DefPathSegment::Function(
+                    runmat_hir::SymbolName("other".to_string()),
+                )],
+            }),
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            vec![Value::Num(4.0)],
+            1,
+        );
+
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
+        assert!(
+            result.is_none(),
+            "mismatched imported identity should not attempt semantic resolver"
+        );
+        assert_eq!(
+            resolver_calls.load(Ordering::Relaxed),
+            0,
+            "malformed imported identity should be rejected before resolver probe"
+        );
+    }
+
+    #[test]
     fn call_method_fallback_preserves_requested_outputs() {
         let _output_guard = crate::output_count::push_output_count(Some(2));
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
@@ -2681,6 +2897,30 @@ mod tests {
             }
             other => {
                 panic!("expected output list from multi-output call_method fallback, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn call_method_trims_method_name_for_resolution() {
+        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+            "NoSuchMethodClass".to_string(),
+        ));
+        let result = block_on(call_method_builtin(
+            base.clone(),
+            "  deal  ".to_string(),
+            vec![Value::Num(9.0), Value::Num(10.0)],
+        ))
+        .expect("call_method fallback should succeed after method-name trimming");
+        match result {
+            Value::OutputList(values) => {
+                assert!(values.len() >= 2);
+                assert_eq!(values[0], base);
+                assert_eq!(values[1], Value::Num(9.0));
+            }
+            other => {
+                panic!("expected output list from trimmed-name call_method fallback, got {other:?}")
             }
         }
     }
@@ -2711,6 +2951,37 @@ mod tests {
             other => {
                 panic!(
                     "expected output list from feval call_method closure fast path, got {other:?}"
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn feval_call_method_closure_fast_path_trims_method_name_for_resolution() {
+        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+            "NoSuchMethodClass".to_string(),
+        ));
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
+            semantic_function: None,
+            captures: vec![
+                base.clone(),
+                Value::String("  deal  ".to_string()),
+                Value::Num(9.0),
+            ],
+        });
+        let result = block_on(feval_builtin(closure, vec![Value::Num(10.0)]))
+            .expect("feval call_method closure should succeed after method-name trimming");
+        match result {
+            Value::OutputList(values) => {
+                assert!(values.len() >= 2);
+                assert_eq!(values[0], base);
+                assert_eq!(values[1], Value::Num(9.0));
+            }
+            other => {
+                panic!(
+                    "expected output list from trimmed call_method closure fast path, got {other:?}"
                 )
             }
         }
