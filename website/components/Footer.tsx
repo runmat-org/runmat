@@ -1,13 +1,31 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 import { SiGithub, SiLinkedin, SiX } from "react-icons/si";
 import Image from "next/image";
 import NewsletterCta from "@/components/NewsletterCta";
 
 export default function Footer() {
-  const currentYear = new Date().getUTCFullYear();
+  // Default to plain Dystr URL during SSR; hydrate with UTM params on client
+  const [dystrHref, setDystrHref] = useState("https://dystr.com");
+  const currentYear = new Date().getFullYear();
+  useEffect(() => {
+    try {
+      const baseUrl = "https://dystr.com";
+      const url = new URL(baseUrl);
+      const params = new URLSearchParams(window.location.search);
+      params.forEach((value, key) => {
+        if (key.toLowerCase().startsWith("utm_") && value) {
+          url.searchParams.append(key, value);
+        }
+      });
+      setDystrHref(url.toString());
+    } catch {
+      // ignore; keep base URL
+    }
+  }, []);
 
   return (
     <footer className="bg-background">
@@ -73,17 +91,31 @@ export default function Footer() {
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 md:flex-row">
           <div className="text-sm text-center md:text-left text-muted-foreground">
-            <p className="flex items-center">
-              © {currentYear} Dystr
+            <p>
+            © {currentYear} Dystr Inc. All rights reserved. MIT+ Licensed.
             {" · "}
-              Made with
-              <Heart className="mx-1 h-4 w-4 fill-destructive text-destructive" />
-              for the scientific community.
+            <Link href="/docs/terms" className="hover:underline underline-offset-2">Terms</Link>
             </p>
             <p>
-              MATLAB is a registered trademark of The MathWorks, Inc. RunMat is not affiliated with The MathWorks, Inc.
+              MATLAB is a registered trademark of The MathWorks, Inc.
+            </p>
+            <p>
+              RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc. or the Free Software Foundation.
             </p>
           </div>
+          <p className="flex items-center text-center text-sm md:text-left text-muted-foreground">
+            Made with
+            <Heart className="mx-1 h-4 w-4 fill-destructive text-destructive" />
+            for the scientific community by{" "}
+            <Link
+              href={dystrHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-1 font-medium underline underline-offset-4"
+            >
+              Dystr
+            </Link>
+          </p>
         </div>
       </div>
     </footer>

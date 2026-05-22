@@ -78,7 +78,6 @@ export type BuiltinDoc = {
   seo_title?: string;
   seo_description?: string;
   behaviors?: string[];
-  extended_capabilities?: string[];
   examples?: BuiltinDocExample[];
   faqs?: BuiltinDocFAQ[];
   links?: BuiltinDocLink[];
@@ -129,7 +128,6 @@ export function loadBuiltinDocs(): BuiltinDocEntry[] {
       ...parsed,
       title,
       aliases: normalizeStringArray(parsed.aliases),
-      extended_capabilities: normalizeStringArray(parsed.extended_capabilities),
       gpu_behavior: normalizeStringArray(parsed.gpu_behavior),
     };
     docs.push({ ...normalized, slug: slugFromTitle(title) });

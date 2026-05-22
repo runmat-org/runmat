@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { Check } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type CloudTier = "pro" | "team";
+type CloudTier = "hobby" | "pro" | "team";
 
 type Feature = string | { label: string; href: string };
 
@@ -22,34 +23,50 @@ interface CloudTierDef {
 }
 
 const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
+  hobby: {
+    price: "$0",
+    description: "Sign up to get cloud storage and versioning.",
+    features: [
+      { label: "GPU accelerated plotting", href: "#compare-plotting" },
+      "Plot, code and variable version history",
+      "Project sharing and team workspaces",
+      { label: "100 MB storage", href: "#compare-storage" },
+      "Limited LLM tokens included",
+      "Community support",
+    ],
+    ctaLabel: "Start free",
+    ctaHref: "/sandbox",
+  },
   pro: {
-    price: "$30/month per user",
+    price: "$30/mo per user",
     description: "For individuals and small teams shipping real work.",
     features: [
-      "Code versioning and execution history",
-      "Team collaboration and sync",
-      "Elastic remote filesystem (10GB included)",
-      "$10/mo LLM credits",
+      { label: "GPU accelerated plotting", href: "#compare-plotting" },
+      { label: "Plot, code and variable version history", href: "#compare-versioning" },
+      "Project sharing and team workspaces",
+      { label: "10 GB storage", href: "#compare-storage" },
+      { label: "$10/mo LLM tokens included", href: "#compare-llm" },
     ],
-    ctaLabel: "Sign up",
-    ctaHref: "/login",
+    ctaLabel: "Get started",
+    ctaHref: "/sandbox",
   },
   team: {
     price: "$100/mo per user",
     description: "For organizations that need SSO and centralized identity management.",
     inheritsFrom: "Everything in Pro, plus:",
     features: [
+      { label: "100 GB storage", href: "#compare-storage" },
       "SSO / SAML / SCIM",
-      "$50/mo LLM credits",
-      "100 GB storage included",
+      "$50/mo LLM tokens included",
       "Priority support",
     ],
     ctaLabel: "Get started",
-    ctaHref: "/login",
+    ctaHref: "/sandbox",
   },
 };
 
 const cloudTierTabs: { id: CloudTier; label: string }[] = [
+  { id: "hobby", label: "Hobby" },
   { id: "pro", label: "Pro" },
   { id: "team", label: "Team" },
 ];
@@ -61,13 +78,19 @@ export default function CloudPricingCard() {
   return (
     <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
-        <CardTitle className="text-3xl font-semibold text-foreground">{currentTier.price}</CardTitle>
+        <Badge className="w-fit bg-secondary text-foreground border-border hover:bg-secondary">
+          App
+        </Badge>
+        <CardTitle className="text-lg font-semibold text-foreground">RunMat App</CardTitle>
         <p className="text-[0.938rem] text-foreground">High-performance computing platform.</p>
-
-        <div
+        <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
+      </CardHeader>
+      <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">
+        <div className="flex min-h-0 flex-1 flex-col space-y-5">
+          <div
             role="tablist"
-          aria-label="RunMat tiers"
-          className="grid min-w-[7rem] grid-cols-2 gap-1 rounded-lg border border-border/60 bg-background/50 p-1 pb-0"
+            aria-label="RunMat App tiers"
+            className="grid min-w-[7rem] grid-cols-3 gap-1 rounded-lg border border-border/60 bg-background/50 p-1"
           >
             {cloudTierTabs.map(({ id, label }) => {
               const selected = activeTier === id;
@@ -93,10 +116,6 @@ export default function CloudPricingCard() {
               );
             })}
           </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">
-        <div className="flex min-h-0 flex-1 flex-col space-y-5">
-
 
           <div
             role="tabpanel"
