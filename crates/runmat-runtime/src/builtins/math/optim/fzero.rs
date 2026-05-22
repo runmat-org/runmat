@@ -409,7 +409,7 @@ mod tests {
         )));
 
         let root = block_on(fzero_builtin(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_root".to_string(),
                 function: 42,
             },

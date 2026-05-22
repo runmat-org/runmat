@@ -610,7 +610,7 @@ impl Callable {
                     Ok(Callable::Builtin { name })
                 }
             }
-            Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
+            Value::BoundFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
                 function_name: name,
                 semantic_function: Some(function),
                 captures: Vec::new(),
@@ -680,7 +680,7 @@ impl Callable {
     async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
             Callable::Builtin { name } => {
-                let request = user_functions::SemanticCallableRequest::resolved(
+                let request = user_functions::CallableRequest::resolved(
                     runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name.clone())),
                     runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
                     args.to_vec(),
@@ -693,7 +693,7 @@ impl Callable {
             }
             Callable::ExternalName { name } => {
                 let identity = crate::external_callable_identity_for_name(name);
-                let request = user_functions::SemanticCallableRequest::resolved(
+                let request = user_functions::CallableRequest::resolved(
                     identity.clone(),
                     runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                     args.to_vec(),
@@ -711,11 +711,8 @@ impl Callable {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
                 if let Some(function) = c.semantic_function {
-                    let request = user_functions::SemanticCallableRequest::semantic(
-                        function,
-                        merged.clone(),
-                        1,
-                    );
+                    let request =
+                        user_functions::CallableRequest::semantic(function, merged.clone(), 1);
                     if let Some(result) =
                         user_functions::try_call_semantic_descriptor(request).await
                     {
@@ -729,11 +726,8 @@ impl Callable {
                 if let Some(function) =
                     user_functions::resolve_semantic_function_by_name(&c.function_name)
                 {
-                    let request = user_functions::SemanticCallableRequest::semantic(
-                        function,
-                        merged.clone(),
-                        1,
-                    );
+                    let request =
+                        user_functions::CallableRequest::semantic(function, merged.clone(), 1);
                     if let Some(result) =
                         user_functions::try_call_semantic_descriptor(request).await
                     {
@@ -1159,7 +1153,7 @@ pub(crate) mod tests {
             },
         )));
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
-        let handle = Value::SemanticFunctionHandle {
+        let handle = Value::BoundFunctionHandle {
             name: "semantic_arrayfun_target".to_string(),
             function: 78,
         };

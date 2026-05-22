@@ -724,7 +724,7 @@ impl PageOperation {
         let raw = match value {
             Value::FunctionHandle(func) => func,
             Value::ExternalFunctionHandle(func) => func,
-            Value::SemanticFunctionHandle { name, .. } => name,
+            Value::BoundFunctionHandle { name, .. } => name,
             Value::String(s) => s,
             Value::StringArray(sa) => {
                 if sa.data.len() != 1 {
@@ -855,7 +855,7 @@ impl TypeName for Value {
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::SemanticFunctionHandle { .. } => "function handle",
+            | Value::BoundFunctionHandle { .. } => "function handle",
             Value::Closure(_) => "closure",
             Value::ClassRef(_) => "class reference",
             Value::MException(_) => "MException",
@@ -1000,7 +1000,7 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let result = pagefun_builtin(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "mtimes".to_string(),
                 function: 17,
             },

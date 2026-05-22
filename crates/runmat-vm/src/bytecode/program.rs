@@ -32,7 +32,7 @@ pub struct ExecutionContext {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SemanticFunctionBytecode {
+pub struct FunctionBytecode {
     pub function: FunctionId,
     pub display_name: String,
     #[serde(default)]
@@ -53,16 +53,16 @@ pub struct SemanticFunctionBytecode {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SemanticFunctionRegistry {
-    pub functions: HashMap<FunctionId, SemanticFunctionBytecode>,
+pub struct FunctionRegistry {
+    pub functions: HashMap<FunctionId, FunctionBytecode>,
     #[serde(default)]
     pub names: HashMap<String, FunctionId>,
     #[serde(default)]
     pub source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>>,
 }
 
-impl SemanticFunctionRegistry {
-    pub fn new(functions: HashMap<FunctionId, SemanticFunctionBytecode>) -> Self {
+impl FunctionRegistry {
+    pub fn new(functions: HashMap<FunctionId, FunctionBytecode>) -> Self {
         let mut names = HashMap::new();
         let mut source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>> = HashMap::new();
         let mut ids: Vec<_> = functions.keys().copied().collect();
@@ -82,7 +82,7 @@ impl SemanticFunctionRegistry {
         }
     }
 
-    pub fn get(&self, function: FunctionId) -> Option<&SemanticFunctionBytecode> {
+    pub fn get(&self, function: FunctionId) -> Option<&FunctionBytecode> {
         self.functions.get(&function)
     }
 
@@ -90,7 +90,7 @@ impl SemanticFunctionRegistry {
         self.names.get(name).copied()
     }
 
-    pub fn insert_replacing_name(&mut self, function: SemanticFunctionBytecode) {
+    pub fn insert_replacing_name(&mut self, function: FunctionBytecode) {
         if let Some(previous) = self
             .names
             .insert(function.display_name.clone(), function.function)
@@ -107,7 +107,7 @@ impl SemanticFunctionRegistry {
         self.functions.insert(function_id, function);
     }
 
-    pub fn remove(&mut self, function: FunctionId) -> Option<SemanticFunctionBytecode> {
+    pub fn remove(&mut self, function: FunctionId) -> Option<FunctionBytecode> {
         let removed = self.functions.remove(&function)?;
         if self.names.get(&removed.display_name) == Some(&function) {
             self.names.remove(&removed.display_name);
@@ -123,7 +123,7 @@ impl SemanticFunctionRegistry {
         Some(removed)
     }
 
-    pub fn remove_source(&mut self, source: runmat_hir::SourceId) -> Vec<SemanticFunctionBytecode> {
+    pub fn remove_source(&mut self, source: runmat_hir::SourceId) -> Vec<FunctionBytecode> {
         let ids = self.source_functions.remove(&source).unwrap_or_default();
         let mut removed = Vec::new();
         for id in ids {
@@ -156,9 +156,9 @@ pub struct Bytecode {
     pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
     #[serde(default)]
-    pub semantic_functions: HashMap<FunctionId, SemanticFunctionBytecode>,
+    pub semantic_functions: HashMap<FunctionId, FunctionBytecode>,
     #[serde(default)]
-    pub semantic_function_registry: SemanticFunctionRegistry,
+    pub semantic_function_registry: FunctionRegistry,
     #[serde(default)]
     pub var_types: Vec<Type>,
     #[serde(default)]
@@ -166,7 +166,7 @@ pub struct Bytecode {
     #[serde(default)]
     pub layout: Option<VmAssemblyLayout>,
     #[serde(default)]
-    pub semantic_async_metadata: SemanticAsyncMetadata,
+    pub semantic_async_metadata: AsyncMetadata,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -175,31 +175,31 @@ pub struct Bytecode {
     pub fusion_groups: Vec<FusionGroup>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
-    pub semantic_fusion_metadata: SemanticFusionMetadata,
+    pub semantic_fusion_metadata: FusionMetadata,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SemanticAsyncMetadata {
+pub struct AsyncMetadata {
     pub mir_spawn_site_count: usize,
-    pub mir_spawn_sites: Vec<SemanticSpawnSite>,
+    pub mir_spawn_sites: Vec<SpawnSite>,
     pub mir_await_site_count: usize,
-    pub mir_await_sites: Vec<SemanticAwaitSite>,
+    pub mir_await_sites: Vec<AwaitSite>,
     #[serde(default)]
-    pub runtime_model: SemanticAsyncRuntimeModel,
+    pub runtime_model: AsyncRuntimeModel,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SemanticAsyncRuntimeModel {
+pub enum AsyncRuntimeModel {
     LazyFutureDescriptorLane,
 }
 
-impl Default for SemanticAsyncRuntimeModel {
+impl Default for AsyncRuntimeModel {
     fn default() -> Self {
         Self::LazyFutureDescriptorLane
     }
 }
 
-impl SemanticAsyncRuntimeModel {
+impl AsyncRuntimeModel {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LazyFutureDescriptorLane => "lazy_future_descriptor_lane",
@@ -208,14 +208,14 @@ impl SemanticAsyncRuntimeModel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SemanticSpawnSite {
+pub struct SpawnSite {
     pub function: runmat_hir::FunctionId,
     pub block: runmat_mir::BasicBlockId,
     pub stmt_index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SemanticAwaitSite {
+pub struct AwaitSite {
     pub function: runmat_hir::FunctionId,
     pub block: runmat_mir::BasicBlockId,
     pub resume: runmat_mir::BasicBlockId,
@@ -223,18 +223,18 @@ pub struct SemanticAwaitSite {
 
 #[cfg(feature = "native-accel")]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SemanticFusionMetadata {
+pub struct FusionMetadata {
     pub mir_fusion_signal_count: usize,
     pub mir_fusion_candidate_group_count: usize,
-    pub mir_fusion_candidate_groups: Vec<SemanticFusionCandidateGroup>,
+    pub mir_fusion_candidate_groups: Vec<FusionCandidateGroup>,
     pub semantic_instruction_window_count: usize,
     #[serde(default)]
-    pub semantic_instruction_windows: Vec<SemanticFusionInstructionWindow>,
+    pub semantic_instruction_windows: Vec<FusionInstructionWindow>,
 }
 
 #[cfg(feature = "native-accel")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SemanticFusionCandidateGroup {
+pub struct FusionCandidateGroup {
     pub id: usize,
     pub signal_count: usize,
     pub function: runmat_hir::FunctionId,
@@ -247,7 +247,7 @@ pub struct SemanticFusionCandidateGroup {
 
 #[cfg(feature = "native-accel")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum SemanticFusionInstructionKind {
+pub enum FusionInstructionKind {
     Elementwise,
     Reduction,
     Matmul,
@@ -255,9 +255,9 @@ pub enum SemanticFusionInstructionKind {
 
 #[cfg(feature = "native-accel")]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SemanticFusionInstructionWindow {
+pub struct FusionInstructionWindow {
     pub span: runmat_accelerate::graph::InstrSpan,
-    pub kind: SemanticFusionInstructionKind,
+    pub kind: FusionInstructionKind,
 }
 
 #[cfg(feature = "native-accel")]
@@ -286,17 +286,17 @@ impl Bytecode {
             source_id: None,
             var_count: 0,
             semantic_functions: HashMap::new(),
-            semantic_function_registry: SemanticFunctionRegistry::default(),
+            semantic_function_registry: FunctionRegistry::default(),
             var_types: Vec::new(),
             var_names: HashMap::new(),
             layout: None,
-            semantic_async_metadata: SemanticAsyncMetadata::default(),
+            semantic_async_metadata: AsyncMetadata::default(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
             fusion_groups: Vec::new(),
             #[cfg(feature = "native-accel")]
-            semantic_fusion_metadata: SemanticFusionMetadata::default(),
+            semantic_fusion_metadata: FusionMetadata::default(),
         }
     }
 
@@ -312,11 +312,11 @@ impl Bytecode {
         }
     }
 
-    pub fn semantic_registry(&self) -> SemanticFunctionRegistry {
+    pub fn function_registry(&self) -> FunctionRegistry {
         if self.semantic_function_registry.functions.is_empty()
             && !self.semantic_functions.is_empty()
         {
-            return SemanticFunctionRegistry::new(self.semantic_functions.clone());
+            return FunctionRegistry::new(self.semantic_functions.clone());
         }
         self.semantic_function_registry.clone()
     }
@@ -363,13 +363,13 @@ impl Bytecode {
             .map(|(id, window)| FusionGroup {
                 id,
                 kind: match window.kind {
-                    SemanticFusionInstructionKind::Elementwise => {
+                    FusionInstructionKind::Elementwise => {
                         runmat_accelerate::fusion::FusionKind::ElementwiseChain
                     }
-                    SemanticFusionInstructionKind::Reduction => {
+                    FusionInstructionKind::Reduction => {
                         runmat_accelerate::fusion::FusionKind::Reduction
                     }
-                    SemanticFusionInstructionKind::Matmul => {
+                    FusionInstructionKind::Matmul => {
                         runmat_accelerate::fusion::FusionKind::MatmulEpilogue
                     }
                 },
@@ -425,7 +425,7 @@ impl Bytecode {
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::{Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow};
+    use super::{Bytecode, FusionInstructionKind, FusionInstructionWindow};
     use runmat_accelerate::graph::InstrSpan;
     use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 
@@ -437,9 +437,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 4 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let groups = bytecode.runtime_fusion_groups();
@@ -470,9 +470,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 10, end: 20 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let groups = bytecode.runtime_fusion_groups();
@@ -542,9 +542,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 0, end: 0 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let runtime_groups = bytecode.runtime_fusion_groups();
@@ -581,9 +581,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let runtime_groups = bytecode.runtime_fusion_groups();
@@ -626,9 +626,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let runtime_groups = bytecode.runtime_fusion_groups();

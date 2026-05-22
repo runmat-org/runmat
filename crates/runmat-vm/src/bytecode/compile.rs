@@ -4,8 +4,8 @@ use crate::accel::graph::build_accel_graph;
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 #[cfg(feature = "native-accel")]
 use crate::bytecode::instr::Instr;
-use crate::bytecode::program::SemanticFunctionBytecode;
-use crate::bytecode::{Bytecode, SemanticFunctionRegistry};
+use crate::bytecode::program::FunctionBytecode;
+use crate::bytecode::{Bytecode, FunctionRegistry};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
 #[cfg(feature = "native-accel")]
@@ -28,7 +28,7 @@ pub fn compile(
     c.compile()?;
     let semantic_functions =
         compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
-    let semantic_function_registry = SemanticFunctionRegistry::new(semantic_functions.clone());
+    let semantic_function_registry = FunctionRegistry::new(semantic_functions.clone());
     let var_names = c
         .layout
         .as_ref()
@@ -112,7 +112,7 @@ pub fn compile(
 fn derive_semantic_async_metadata(
     mir: &MirAssembly,
     entrypoint_target: Option<FunctionId>,
-) -> crate::bytecode::SemanticAsyncMetadata {
+) -> crate::bytecode::AsyncMetadata {
     let mut spawn_sites = Vec::new();
     let mut await_sites = Vec::new();
     let mut function_ids: Vec<_> = if let Some(function) = entrypoint_target {
@@ -136,7 +136,7 @@ fn derive_semantic_async_metadata(
                     | MirStmtKind::EnvironmentEffect(_) => continue,
                 };
                 if matches!(value, MirRvalue::Spawn(_)) {
-                    spawn_sites.push(crate::bytecode::SemanticSpawnSite {
+                    spawn_sites.push(crate::bytecode::SpawnSite {
                         function: body.function,
                         block: block.id,
                         stmt_index,
@@ -144,7 +144,7 @@ fn derive_semantic_async_metadata(
                 }
             }
             if let MirTerminatorKind::Await { resume, .. } = &block.terminator.kind {
-                await_sites.push(crate::bytecode::SemanticAwaitSite {
+                await_sites.push(crate::bytecode::AwaitSite {
                     function: body.function,
                     block: block.id,
                     resume: *resume,
@@ -152,13 +152,12 @@ fn derive_semantic_async_metadata(
             }
         }
     }
-    crate::bytecode::SemanticAsyncMetadata {
+    crate::bytecode::AsyncMetadata {
         mir_spawn_site_count: spawn_sites.len(),
         mir_spawn_sites: spawn_sites,
         mir_await_site_count: await_sites.len(),
         mir_await_sites: await_sites,
-        runtime_model:
-            crate::bytecode::program::SemanticAsyncRuntimeModel::LazyFutureDescriptorLane,
+        runtime_model: crate::bytecode::program::AsyncRuntimeModel::LazyFutureDescriptorLane,
     }
 }
 
@@ -166,10 +165,10 @@ fn derive_semantic_async_metadata(
 fn derive_semantic_fusion_metadata(
     mir: &MirAssembly,
     entrypoint_target: Option<FunctionId>,
-) -> crate::bytecode::SemanticFusionMetadata {
+) -> crate::bytecode::FusionMetadata {
     let (mir_fusion_signal_count, mir_fusion_candidate_groups) =
         derive_semantic_fusion_candidate_groups(mir, entrypoint_target);
-    crate::bytecode::SemanticFusionMetadata {
+    crate::bytecode::FusionMetadata {
         mir_fusion_signal_count,
         mir_fusion_candidate_group_count: mir_fusion_candidate_groups.len(),
         mir_fusion_candidate_groups,
@@ -182,7 +181,7 @@ fn derive_semantic_fusion_metadata(
 fn derive_semantic_fusion_candidate_groups(
     mir: &MirAssembly,
     entrypoint_target: Option<FunctionId>,
-) -> (usize, Vec<crate::bytecode::SemanticFusionCandidateGroup>) {
+) -> (usize, Vec<crate::bytecode::FusionCandidateGroup>) {
     let mut signal_count = 0usize;
     let mut groups = Vec::new();
     let mut function_ids: Vec<_> = if let Some(function) = entrypoint_target {
@@ -208,7 +207,7 @@ fn derive_semantic_fusion_candidate_groups(
                         if run_len >= 2 {
                             let stmt_start = stmt_index - run_len;
                             let stmt_end = stmt_index;
-                            groups.push(crate::bytecode::SemanticFusionCandidateGroup {
+                            groups.push(crate::bytecode::FusionCandidateGroup {
                                 id: groups.len(),
                                 signal_count: run_len,
                                 function: body.function,
@@ -229,7 +228,7 @@ fn derive_semantic_fusion_candidate_groups(
                     if run_len >= 2 {
                         let stmt_start = stmt_index - run_len;
                         let stmt_end = stmt_index;
-                        groups.push(crate::bytecode::SemanticFusionCandidateGroup {
+                        groups.push(crate::bytecode::FusionCandidateGroup {
                             id: groups.len(),
                             signal_count: run_len,
                             function: body.function,
@@ -245,7 +244,7 @@ fn derive_semantic_fusion_candidate_groups(
             if run_len >= 2 {
                 let stmt_start = block.statements.len() - run_len;
                 let stmt_end = block.statements.len();
-                groups.push(crate::bytecode::SemanticFusionCandidateGroup {
+                groups.push(crate::bytecode::FusionCandidateGroup {
                     id: groups.len(),
                     signal_count: run_len,
                     function: body.function,
@@ -284,7 +283,7 @@ fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> boo
 fn semantic_candidates_touch_accel_capable_instruction(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+    semantic_candidate_groups: &[crate::bytecode::FusionCandidateGroup],
 ) -> bool {
     if instructions.is_empty() || instr_spans.is_empty() || semantic_candidate_groups.is_empty() {
         return false;
@@ -349,7 +348,7 @@ fn instr_is_accel_capable(instr: &Instr) -> bool {
 fn fusion_group_within_semantic_candidate_spans(
     group: &runmat_accelerate::fusion::FusionGroup,
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+    semantic_candidate_groups: &[crate::bytecode::FusionCandidateGroup],
 ) -> bool {
     if instr_spans.is_empty()
         || group.span.start > group.span.end
@@ -371,7 +370,7 @@ fn fusion_group_within_semantic_candidate_spans(
 
 #[cfg(all(feature = "native-accel", test))]
 fn derive_semantic_fusion_groups_from_candidates(
-    semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
+    semantic_instruction_windows: &[crate::bytecode::FusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
     let mut groups = Vec::new();
@@ -402,7 +401,7 @@ fn derive_semantic_fusion_groups_from_candidates(
 
 #[cfg(all(feature = "native-accel", test))]
 fn derive_semantic_fusion_groups_preserving_unmapped_windows(
-    semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
+    semantic_instruction_windows: &[crate::bytecode::FusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
     let mut groups = Vec::new();
@@ -429,7 +428,7 @@ fn derive_semantic_fusion_groups_preserving_unmapped_windows(
 
 #[cfg(feature = "native-accel")]
 fn derive_semantic_fusion_groups_from_instruction_windows(
-    semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
+    semantic_instruction_windows: &[crate::bytecode::FusionInstructionWindow],
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
     semantic_instruction_windows
         .iter()
@@ -449,7 +448,7 @@ fn derive_semantic_fusion_groups_from_instruction_windows(
 #[cfg(all(feature = "native-accel", test))]
 fn accel_nodes_for_instruction_window(
     accel_graph: &runmat_accelerate::graph::AccelGraph,
-    window: &crate::bytecode::SemanticFusionInstructionWindow,
+    window: &crate::bytecode::FusionInstructionWindow,
     assigned_nodes: &HashSet<runmat_accelerate::graph::NodeId>,
 ) -> Vec<runmat_accelerate::graph::NodeId> {
     let mut nodes: Vec<_> = accel_graph
@@ -475,7 +474,7 @@ fn accel_nodes_for_instruction_window(
 #[cfg(all(feature = "native-accel", test))]
 fn accel_node_span_matches_instruction_window(
     node: &runmat_accelerate::graph::AccelNode,
-    window: &crate::bytecode::SemanticFusionInstructionWindow,
+    window: &crate::bytecode::FusionInstructionWindow,
 ) -> bool {
     // Compile-time mapping is strict: only contained spans are assigned.
     // Broader reconciliation remains runtime-owned in fusion plan sanitization.
@@ -499,25 +498,25 @@ fn accel_node_has_semantic_signal(node: &runmat_accelerate::graph::AccelNode) ->
 #[cfg(all(feature = "native-accel", test))]
 fn accel_node_matches_semantic_window_kind(
     node: &runmat_accelerate::graph::AccelNode,
-    kind: crate::bytecode::SemanticFusionInstructionKind,
+    kind: crate::bytecode::FusionInstructionKind,
 ) -> bool {
     let has_semantic_signal = accel_node_has_semantic_signal(node);
     if !has_semantic_signal {
         // If graph tags are absent, fall back to accel category compatibility
         // instead of admitting any span-matched node.
         return match kind {
-            crate::bytecode::SemanticFusionInstructionKind::Elementwise => matches!(
+            crate::bytecode::FusionInstructionKind::Elementwise => matches!(
                 node.category,
                 runmat_accelerate::graph::AccelOpCategory::Elementwise
                     | runmat_accelerate::graph::AccelOpCategory::Transpose
             ),
-            crate::bytecode::SemanticFusionInstructionKind::Reduction => {
+            crate::bytecode::FusionInstructionKind::Reduction => {
                 matches!(
                     node.category,
                     runmat_accelerate::graph::AccelOpCategory::Reduction
                 )
             }
-            crate::bytecode::SemanticFusionInstructionKind::Matmul => {
+            crate::bytecode::FusionInstructionKind::Matmul => {
                 matches!(
                     node.category,
                     runmat_accelerate::graph::AccelOpCategory::MatMul
@@ -534,11 +533,9 @@ fn accel_node_matches_semantic_window_kind(
         .iter()
         .any(|tag| matches!(tag, runmat_accelerate::graph::AccelGraphTag::MatMul));
     match kind {
-        crate::bytecode::SemanticFusionInstructionKind::Elementwise => {
-            !has_reduction && !has_matmul
-        }
-        crate::bytecode::SemanticFusionInstructionKind::Reduction => !has_matmul,
-        crate::bytecode::SemanticFusionInstructionKind::Matmul => true,
+        crate::bytecode::FusionInstructionKind::Elementwise => !has_reduction && !has_matmul,
+        crate::bytecode::FusionInstructionKind::Reduction => !has_matmul,
+        crate::bytecode::FusionInstructionKind::Matmul => true,
     }
 }
 
@@ -558,8 +555,8 @@ fn instruction_within_semantic_candidate_span(
 fn derive_semantic_fusion_instruction_windows(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
-) -> Vec<crate::bytecode::SemanticFusionInstructionWindow> {
+    semantic_candidate_groups: &[crate::bytecode::FusionCandidateGroup],
+) -> Vec<crate::bytecode::FusionInstructionWindow> {
     if instructions.is_empty() || instr_spans.is_empty() || semantic_candidate_groups.is_empty() {
         return Vec::new();
     }
@@ -569,17 +566,17 @@ fn derive_semantic_fusion_instruction_windows(
 
     for candidate in semantic_candidate_groups {
         let mut run_start: Option<usize> = None;
-        let mut run_kind: Option<crate::bytecode::SemanticFusionInstructionKind> = None;
+        let mut run_kind: Option<crate::bytecode::FusionInstructionKind> = None;
         for (index, instr) in instructions.iter().enumerate() {
             if index >= instr_spans.len() || assigned_instructions.contains(&index) {
                 if let Some(start) = run_start.take() {
-                    windows.push(crate::bytecode::SemanticFusionInstructionWindow {
+                    windows.push(crate::bytecode::FusionInstructionWindow {
                         span: runmat_accelerate::graph::InstrSpan {
                             start,
                             end: index.saturating_sub(1),
                         },
                         kind: run_kind
-                            .unwrap_or(crate::bytecode::SemanticFusionInstructionKind::Elementwise),
+                            .unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
                     });
                     run_kind = None;
                 }
@@ -591,13 +588,13 @@ fn derive_semantic_fusion_instruction_windows(
                 candidate.source_span,
             ) {
                 if let Some(start) = run_start.take() {
-                    windows.push(crate::bytecode::SemanticFusionInstructionWindow {
+                    windows.push(crate::bytecode::FusionInstructionWindow {
                         span: runmat_accelerate::graph::InstrSpan {
                             start,
                             end: index.saturating_sub(1),
                         },
                         kind: run_kind
-                            .unwrap_or(crate::bytecode::SemanticFusionInstructionKind::Elementwise),
+                            .unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
                     });
                     run_kind = None;
                 }
@@ -605,13 +602,13 @@ fn derive_semantic_fusion_instruction_windows(
             }
             let Some(signal_kind) = instr_fusion_signal_kind(instr) else {
                 if let Some(start) = run_start.take() {
-                    windows.push(crate::bytecode::SemanticFusionInstructionWindow {
+                    windows.push(crate::bytecode::FusionInstructionWindow {
                         span: runmat_accelerate::graph::InstrSpan {
                             start,
                             end: index.saturating_sub(1),
                         },
                         kind: run_kind
-                            .unwrap_or(crate::bytecode::SemanticFusionInstructionKind::Elementwise),
+                            .unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
                     });
                     run_kind = None;
                 }
@@ -621,30 +618,26 @@ fn derive_semantic_fusion_instruction_windows(
             if run_start.is_none() {
                 run_start = Some(index);
                 run_kind = Some(signal_kind);
+            } else if matches!(signal_kind, crate::bytecode::FusionInstructionKind::Matmul) {
+                run_kind = Some(crate::bytecode::FusionInstructionKind::Matmul);
             } else if matches!(
                 signal_kind,
-                crate::bytecode::SemanticFusionInstructionKind::Matmul
-            ) {
-                run_kind = Some(crate::bytecode::SemanticFusionInstructionKind::Matmul);
-            } else if matches!(
-                signal_kind,
-                crate::bytecode::SemanticFusionInstructionKind::Reduction
+                crate::bytecode::FusionInstructionKind::Reduction
             ) && !matches!(
                 run_kind,
-                Some(crate::bytecode::SemanticFusionInstructionKind::Matmul)
+                Some(crate::bytecode::FusionInstructionKind::Matmul)
             ) {
-                run_kind = Some(crate::bytecode::SemanticFusionInstructionKind::Reduction);
+                run_kind = Some(crate::bytecode::FusionInstructionKind::Reduction);
             }
             assigned_instructions.insert(index);
         }
         if let Some(start) = run_start.take() {
-            windows.push(crate::bytecode::SemanticFusionInstructionWindow {
+            windows.push(crate::bytecode::FusionInstructionWindow {
                 span: runmat_accelerate::graph::InstrSpan {
                     start,
                     end: instructions.len().saturating_sub(1),
                 },
-                kind: run_kind
-                    .unwrap_or(crate::bytecode::SemanticFusionInstructionKind::Elementwise),
+                kind: run_kind.unwrap_or(crate::bytecode::FusionInstructionKind::Elementwise),
             });
         }
     }
@@ -653,9 +646,7 @@ fn derive_semantic_fusion_instruction_windows(
 }
 
 #[cfg(feature = "native-accel")]
-fn instr_fusion_signal_kind(
-    instr: &Instr,
-) -> Option<crate::bytecode::SemanticFusionInstructionKind> {
+fn instr_fusion_signal_kind(instr: &Instr) -> Option<crate::bytecode::FusionInstructionKind> {
     match instr {
         Instr::Add
         | Instr::Sub
@@ -676,7 +667,7 @@ fn instr_fusion_signal_kind(
         | Instr::Greater
         | Instr::GreaterEqual
         | Instr::Equal
-        | Instr::NotEqual => Some(crate::bytecode::SemanticFusionInstructionKind::Elementwise),
+        | Instr::NotEqual => Some(crate::bytecode::FusionInstructionKind::Elementwise),
         Instr::CallBuiltinMulti(name, _, _) => builtin_functions()
             .iter()
             .find(|func| func.name == name.as_str())
@@ -686,14 +677,14 @@ fn instr_fusion_signal_kind(
                     .iter()
                     .any(|tag| matches!(tag, AccelTag::MatMul));
                 if has_matmul {
-                    return Some(crate::bytecode::SemanticFusionInstructionKind::Matmul);
+                    return Some(crate::bytecode::FusionInstructionKind::Matmul);
                 }
                 let has_reduction = func
                     .accel_tags
                     .iter()
                     .any(|tag| matches!(tag, AccelTag::Reduction));
                 if has_reduction {
-                    return Some(crate::bytecode::SemanticFusionInstructionKind::Reduction);
+                    return Some(crate::bytecode::FusionInstructionKind::Reduction);
                 }
                 let has_elementwise = func.accel_tags.iter().any(|tag| {
                     matches!(
@@ -701,8 +692,7 @@ fn instr_fusion_signal_kind(
                         AccelTag::Unary | AccelTag::Elementwise | AccelTag::Transpose
                     )
                 });
-                has_elementwise
-                    .then_some(crate::bytecode::SemanticFusionInstructionKind::Elementwise)
+                has_elementwise.then_some(crate::bytecode::FusionInstructionKind::Elementwise)
             }),
         _ => None,
     }
@@ -710,16 +700,16 @@ fn instr_fusion_signal_kind(
 
 #[cfg(feature = "native-accel")]
 fn infer_semantic_fusion_kind(
-    kind_hint: crate::bytecode::SemanticFusionInstructionKind,
+    kind_hint: crate::bytecode::FusionInstructionKind,
 ) -> runmat_accelerate::fusion::FusionKind {
     match kind_hint {
-        crate::bytecode::SemanticFusionInstructionKind::Matmul => {
+        crate::bytecode::FusionInstructionKind::Matmul => {
             runmat_accelerate::fusion::FusionKind::MatmulEpilogue
         }
-        crate::bytecode::SemanticFusionInstructionKind::Reduction => {
+        crate::bytecode::FusionInstructionKind::Reduction => {
             runmat_accelerate::fusion::FusionKind::Reduction
         }
-        crate::bytecode::SemanticFusionInstructionKind::Elementwise => {
+        crate::bytecode::FusionInstructionKind::Elementwise => {
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
         }
     }
@@ -755,7 +745,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
 pub fn compile_semantic_function_registry(
     hir: &HirAssembly,
     mir: &MirAssembly,
-) -> Result<HashMap<FunctionId, SemanticFunctionBytecode>, CompileError> {
+) -> Result<HashMap<FunctionId, FunctionBytecode>, CompileError> {
     let layout = derive_layout(hir, mir)
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
     compile_semantic_functions(hir, mir, &layout, None)
@@ -766,7 +756,7 @@ fn compile_semantic_functions(
     mir: &MirAssembly,
     layout: &crate::layout::VmAssemblyLayout,
     entrypoint: Option<EntrypointId>,
-) -> Result<HashMap<FunctionId, SemanticFunctionBytecode>, CompileError> {
+) -> Result<HashMap<FunctionId, FunctionBytecode>, CompileError> {
     let entry_target = entrypoint
         .and_then(|entrypoint| layout.entrypoints.get(&entrypoint))
         .map(|entry| entry.target);
@@ -782,7 +772,7 @@ fn compile_semantic_functions(
         })?;
         functions.insert(
             function.id,
-            SemanticFunctionBytecode {
+            FunctionBytecode {
                 function: function.id,
                 display_name: function_layout.display_name.clone(),
                 source_id: None,
@@ -1134,7 +1124,7 @@ mod tests {
             runmat_hir::Span { start: 10, end: 20 },
             runmat_hir::Span { start: 21, end: 30 },
         ];
-        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1161,7 +1151,7 @@ mod tests {
             runmat_hir::Span { start: 10, end: 20 },
             runmat_hir::Span { start: 21, end: 30 },
         ];
-        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1185,7 +1175,7 @@ mod tests {
     fn semantic_candidate_accel_capability_gate_rejects_partial_span_overlap() {
         let instructions = vec![Instr::Add];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -1209,7 +1199,7 @@ mod tests {
     fn semantic_candidate_accel_capability_gate_accepts_reduction_builtin() {
         let instructions = vec![Instr::CallBuiltinMulti("sum".to_string(), 1, 1)];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1233,7 +1223,7 @@ mod tests {
     fn semantic_candidate_accel_capability_gate_rejects_control_assert_builtin() {
         let instructions = vec![Instr::CallBuiltinMulti("assert".to_string(), 1, 0)];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1258,7 +1248,7 @@ mod tests {
         for builtin in ["disp", "fprintf"] {
             let instructions = vec![Instr::CallBuiltinMulti(builtin.to_string(), 1, 0)];
             let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-            let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            let candidates = vec![crate::bytecode::FusionCandidateGroup {
                 id: 0,
                 signal_count: 2,
                 function: runmat_hir::FunctionId(0),
@@ -1328,7 +1318,7 @@ mod tests {
             pattern: None,
             stack_layout: None,
         };
-        let fully_covering_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let fully_covering_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 3,
             function: runmat_hir::FunctionId(0),
@@ -1337,7 +1327,7 @@ mod tests {
             stmt_end: 2,
             source_span: runmat_hir::Span { start: 2, end: 6 },
         }];
-        let partially_covering_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let partially_covering_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1346,7 +1336,7 @@ mod tests {
             stmt_end: 1,
             source_span: runmat_hir::Span { start: 0, end: 3 },
         }];
-        let non_overlapping_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let non_overlapping_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1399,7 +1389,7 @@ mod tests {
             stack_layout: None,
         };
         let split_candidates = vec![
-            crate::bytecode::SemanticFusionCandidateGroup {
+            crate::bytecode::FusionCandidateGroup {
                 id: 0,
                 signal_count: 1,
                 function: runmat_hir::FunctionId(0),
@@ -1408,7 +1398,7 @@ mod tests {
                 stmt_end: 1,
                 source_span: runmat_hir::Span { start: 0, end: 2 },
             },
-            crate::bytecode::SemanticFusionCandidateGroup {
+            crate::bytecode::FusionCandidateGroup {
                 id: 1,
                 signal_count: 1,
                 function: runmat_hir::FunctionId(0),
@@ -1492,7 +1482,7 @@ mod tests {
             runmat_hir::Span { start: 10, end: 11 },
             runmat_hir::Span { start: 11, end: 12 },
         ];
-        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1523,9 +1513,9 @@ mod tests {
     #[cfg(feature = "native-accel")]
     #[test]
     fn semantic_windows_fallback_to_empty_node_groups_when_mapping_drops_all_nodes() {
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 7, end: 9 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_instruction_windows(&windows);
         assert_eq!(
@@ -1586,13 +1576,13 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let windows = vec![
-            crate::bytecode::SemanticFusionInstructionWindow {
+            crate::bytecode::FusionInstructionWindow {
                 span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
-                kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+                kind: crate::bytecode::FusionInstructionKind::Elementwise,
             },
-            crate::bytecode::SemanticFusionInstructionWindow {
+            crate::bytecode::FusionInstructionWindow {
                 span: runmat_accelerate::graph::InstrSpan { start: 5, end: 5 },
-                kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+                kind: crate::bytecode::FusionInstructionKind::Elementwise,
             },
         ];
         let groups = super::derive_semantic_fusion_groups_preserving_unmapped_windows(
@@ -1649,9 +1639,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert_eq!(
@@ -1706,9 +1696,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -1757,9 +1747,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 1, end: 1 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -1808,9 +1798,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 2, end: 2 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -1859,9 +1849,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 1, end: 2 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -1910,9 +1900,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 2, end: 3 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -1961,9 +1951,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 1, end: 1 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -2012,9 +2002,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 3, end: 3 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -2064,7 +2054,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
-        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2129,7 +2119,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
-        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2197,9 +2187,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            kind: crate::bytecode::FusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -2248,9 +2238,9 @@ mod tests {
             var_bindings: std::collections::HashMap::new(),
             node_bindings: std::collections::HashMap::new(),
         };
-        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+        let windows = vec![crate::bytecode::FusionInstructionWindow {
             span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
-            kind: crate::bytecode::SemanticFusionInstructionKind::Reduction,
+            kind: crate::bytecode::FusionInstructionKind::Reduction,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert_eq!(
@@ -2274,7 +2264,7 @@ mod tests {
             runmat_hir::Span { start: 11, end: 12 },
             runmat_hir::Span { start: 12, end: 13 },
         ];
-        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 3,
             function: runmat_hir::FunctionId(0),
@@ -2341,7 +2331,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
-        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2407,7 +2397,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2463,7 +2453,7 @@ mod tests {
         );
         assert_eq!(
             bytecode.semantic_async_metadata.runtime_model,
-            crate::bytecode::program::SemanticAsyncRuntimeModel::LazyFutureDescriptorLane,
+            crate::bytecode::program::AsyncRuntimeModel::LazyFutureDescriptorLane,
             "semantic async metadata should surface the current lazy-future runtime model"
         );
         assert_eq!(
@@ -2535,7 +2525,7 @@ mod tests {
         );
         assert_eq!(
             bytecode.semantic_async_metadata.runtime_model,
-            crate::bytecode::program::SemanticAsyncRuntimeModel::LazyFutureDescriptorLane,
+            crate::bytecode::program::AsyncRuntimeModel::LazyFutureDescriptorLane,
             "semantic async metadata should surface the current lazy-future runtime model"
         );
     }
@@ -6310,10 +6300,10 @@ mod tests {
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            Instr::CreateSemanticFunctionHandle(FunctionId(9001), _)
-        )));
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::CreateBoundFunctionHandle(FunctionId(9001), _))));
 
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| {

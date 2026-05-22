@@ -177,7 +177,7 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

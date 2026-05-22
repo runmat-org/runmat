@@ -8,8 +8,8 @@ use super::{
 
 pub(crate) fn build_fusion_snapshot(
     groups: &[FusionGroup],
-    semantic_candidate_groups: &[runmat_vm::SemanticFusionCandidateGroup],
-    semantic_instruction_windows: &[runmat_vm::SemanticFusionInstructionWindow],
+    semantic_candidate_groups: &[runmat_vm::FusionCandidateGroup],
+    semantic_instruction_windows: &[runmat_vm::FusionInstructionWindow],
     planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
     let planner = planner.unwrap_or_default();
@@ -162,7 +162,7 @@ fn shape_info(shape: &ShapeInfo) -> Vec<usize> {
 }
 
 fn append_semantic_candidate_artifacts(
-    semantic_candidate_groups: &[runmat_vm::SemanticFusionCandidateGroup],
+    semantic_candidate_groups: &[runmat_vm::FusionCandidateGroup],
     bytecode_group_state: &str,
     accel_graph_state: &str,
     nodes: &mut Vec<FusionPlanNode>,
@@ -218,7 +218,7 @@ fn append_semantic_candidate_artifacts(
 }
 
 fn append_semantic_window_artifacts(
-    semantic_instruction_windows: &[runmat_vm::SemanticFusionInstructionWindow],
+    semantic_instruction_windows: &[runmat_vm::FusionInstructionWindow],
     bytecode_group_state: &str,
     accel_graph_state: &str,
     nodes: &mut Vec<FusionPlanNode>,
@@ -311,7 +311,7 @@ mod tests {
     fn semantic_candidate_groups_emit_nodes_without_bytecode_groups() {
         let snapshot = build_fusion_snapshot(
             &[],
-            &[runmat_vm::SemanticFusionCandidateGroup {
+            &[runmat_vm::FusionCandidateGroup {
                 id: 0,
                 signal_count: 3,
                 function: runmat_hir::FunctionId(0),
@@ -320,9 +320,9 @@ mod tests {
                 stmt_end: 4,
                 source_span: runmat_hir::Span { start: 10, end: 18 },
             }],
-            &[runmat_vm::SemanticFusionInstructionWindow {
+            &[runmat_vm::FusionInstructionWindow {
                 span: InstrSpan { start: 1, end: 3 },
-                kind: runmat_vm::SemanticFusionInstructionKind::Elementwise,
+                kind: runmat_vm::FusionInstructionKind::Elementwise,
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
@@ -371,7 +371,7 @@ mod tests {
                 pattern: None,
                 stack_layout: None,
             }],
-            &[runmat_vm::SemanticFusionCandidateGroup {
+            &[runmat_vm::FusionCandidateGroup {
                 id: 1,
                 signal_count: 2,
                 function: runmat_hir::FunctionId(1),
@@ -380,9 +380,9 @@ mod tests {
                 stmt_end: 2,
                 source_span: runmat_hir::Span { start: 20, end: 30 },
             }],
-            &[runmat_vm::SemanticFusionInstructionWindow {
+            &[runmat_vm::FusionInstructionWindow {
                 span: InstrSpan { start: 3, end: 9 },
-                kind: runmat_vm::SemanticFusionInstructionKind::Elementwise,
+                kind: runmat_vm::FusionInstructionKind::Elementwise,
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),

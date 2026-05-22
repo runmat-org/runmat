@@ -179,7 +179,7 @@ async fn dispatch_callable_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
-    let request = crate::user_functions::SemanticCallableRequest::resolved(
+    let request = crate::user_functions::CallableRequest::resolved(
         identity.clone(),
         fallback_policy,
         args.clone(),
@@ -536,7 +536,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
             return None;
         }
         let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
-        Some(Value::SemanticFunctionHandle {
+        Some(Value::BoundFunctionHandle {
             name: name.to_string(),
             function,
         })
@@ -555,7 +555,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                Value::SemanticFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function }
             } else {
                 Value::FunctionHandle(name)
             }
@@ -565,7 +565,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
                 if let Some(function) =
                     crate::user_functions::resolve_semantic_function_by_name(&name)
                 {
-                    return Value::SemanticFunctionHandle { name, function };
+                    return Value::BoundFunctionHandle { name, function };
                 }
             }
             Value::ExternalFunctionHandle(name)
@@ -573,7 +573,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::MethodFunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                Value::SemanticFunctionHandle { name, function }
+                Value::BoundFunctionHandle { name, function }
             } else {
                 Value::MethodFunctionHandle(name)
             }
@@ -686,7 +686,7 @@ async fn notify_builtin(
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::SemanticFunctionHandle { .. }
+            | Value::BoundFunctionHandle { .. }
             | Value::Closure(_) => true,
             _ => false,
         };
@@ -1422,8 +1422,8 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             )
             .await
         }
-        Value::SemanticFunctionHandle { name, function } => {
-            let request = crate::user_functions::SemanticCallableRequest::semantic(
+        Value::BoundFunctionHandle { name, function } => {
+            let request = crate::user_functions::CallableRequest::semantic(
                 function,
                 rest.clone(),
                 requested_outputs,
@@ -1442,7 +1442,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if let Some(function) = c.semantic_function {
                 let mut args = c.captures.clone();
                 args.extend(rest);
-                let request = crate::user_functions::SemanticCallableRequest::semantic(
+                let request = crate::user_functions::CallableRequest::semantic(
                     function,
                     args.clone(),
                     requested_outputs,
@@ -1483,7 +1483,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if let Some(function) =
                 crate::user_functions::resolve_semantic_function_by_name(&c.function_name)
             {
-                let request = crate::user_functions::SemanticCallableRequest::semantic(
+                let request = crate::user_functions::CallableRequest::semantic(
                     function,
                     args.clone(),
                     requested_outputs,
@@ -1557,7 +1557,7 @@ fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
     })?;
 
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
-        Ok(Value::SemanticFunctionHandle { name, function })
+        Ok(Value::BoundFunctionHandle { name, function })
     } else if is_well_formed_qualified_name(&name) {
         Ok(Value::ExternalFunctionHandle(name))
     } else {
@@ -1571,7 +1571,7 @@ fn func2str_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name)
-        | Value::SemanticFunctionHandle { name, .. } => Ok(Value::String(name)),
+        | Value::BoundFunctionHandle { name, .. } => Ok(Value::String(name)),
         Value::Closure(closure) => Ok(Value::String(closure.function_name)),
         other => Err(build_runtime_error(format!(
             "func2str: expected function handle, got {other:?}"
@@ -1936,7 +1936,7 @@ mod tests {
                 Box::pin(async { Ok(Value::Num(9.0)) })
             },
         )));
-        let handle = Value::SemanticFunctionHandle {
+        let handle = Value::BoundFunctionHandle {
             name: "semantic_target".to_string(),
             function: 43,
         };
@@ -1949,7 +1949,7 @@ mod tests {
     #[test]
     fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
         let _guard = crate::user_functions::install_semantic_function_invoker(None);
-        let handle = Value::SemanticFunctionHandle {
+        let handle = Value::BoundFunctionHandle {
             name: "semantic_target".to_string(),
             function: 9043,
         };
@@ -2190,7 +2190,7 @@ mod tests {
             .expect("str2func should succeed");
         assert_eq!(
             value,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "resolved_target".to_string(),
                 function: 145,
             }
@@ -2290,7 +2290,7 @@ mod tests {
         .expect("scalar string-array function name should resolve semantically");
         assert_eq!(
             value,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "resolved_target".to_string(),
                 function: 445,
             }
@@ -2346,7 +2346,7 @@ mod tests {
         .expect("scalar string-array qualified function name should resolve semantically");
         assert_eq!(
             value,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "pkg.resolved_target".to_string(),
                 function: 446,
             }
@@ -2542,7 +2542,7 @@ mod tests {
             Value::String("Point.origin".to_string())
         );
         assert_eq!(
-            func2str_builtin(Value::SemanticFunctionHandle {
+            func2str_builtin(Value::BoundFunctionHandle {
                 name: "local_fn".to_string(),
                 function: 44,
             })
@@ -2575,7 +2575,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
                 "resolved_target".to_string(),
             )),
@@ -2603,7 +2603,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
                 "resolved_target".to_string(),
             )),
@@ -2633,7 +2633,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
                 "resolved_target".to_string(),
             )),
@@ -2661,7 +2661,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
                 runmat_hir::SymbolName("resolved_target".to_string()),
             ])),
@@ -2689,7 +2689,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
                 runmat_hir::SymbolName("pkg".to_string()),
                 runmat_hir::SymbolName("resolved_target".to_string()),
@@ -2720,7 +2720,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
                 runmat_hir::SymbolName("pkg..resolved_target".to_string()),
             ])),
@@ -2748,7 +2748,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
                 "resolved_target".to_string(),
             )),
@@ -2778,7 +2778,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(
                 "resolved_target".to_string(),
             )),
@@ -2808,7 +2808,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
                 package: runmat_hir::PackageName("Point".to_string()),
                 module: runmat_hir::QualifiedName(vec![
@@ -2849,7 +2849,7 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::resolved(
+        let request = crate::user_functions::CallableRequest::resolved(
             runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
                 package: runmat_hir::PackageName("Point".to_string()),
                 module: runmat_hir::QualifiedName(vec![
@@ -3246,7 +3246,7 @@ mod tests {
         };
         assert!(matches!(
             &*listener.callback,
-            Value::SemanticFunctionHandle { name, function }
+            Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 61
         ));
     }
@@ -3270,7 +3270,7 @@ mod tests {
         };
         assert!(matches!(
             &*listener.callback,
-            Value::SemanticFunctionHandle { name, function }
+            Value::BoundFunctionHandle { name, function }
                 if name == "pkg.event_callback" && *function == 62
         ));
     }
@@ -3294,7 +3294,7 @@ mod tests {
         };
         assert!(matches!(
             &*listener.callback,
-            Value::SemanticFunctionHandle { name, function }
+            Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 63
         ));
     }
@@ -3318,7 +3318,7 @@ mod tests {
         };
         assert!(matches!(
             &*listener.callback,
-            Value::SemanticFunctionHandle { name, function }
+            Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 64
         ));
     }
@@ -3345,7 +3345,7 @@ mod tests {
         };
         assert!(matches!(
             &*listener.callback,
-            Value::SemanticFunctionHandle { name, function }
+            Value::BoundFunctionHandle { name, function }
                 if name == "event_callback" && *function == 66
         ));
     }
@@ -3394,7 +3394,7 @@ mod tests {
         )));
         let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
             .expect("handle target");
-        let callback = Value::SemanticFunctionHandle {
+        let callback = Value::BoundFunctionHandle {
             name: "semantic_event_callback".to_string(),
             function: 44,
         };
@@ -3460,7 +3460,7 @@ mod tests {
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(0));
-        let handle = Value::SemanticFunctionHandle {
+        let handle = Value::BoundFunctionHandle {
             name: "semantic_target".to_string(),
             function: 46,
         };
@@ -3481,7 +3481,7 @@ mod tests {
             },
         )));
         let _output_guard = crate::output_count::push_output_count(Some(2));
-        let handle = Value::SemanticFunctionHandle {
+        let handle = Value::BoundFunctionHandle {
             name: "semantic_target".to_string(),
             function: 47,
         };

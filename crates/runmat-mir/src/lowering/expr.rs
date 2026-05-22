@@ -4,9 +4,9 @@ use crate::{
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
-    CallableIdentity, CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr,
+    CallableIdentity, CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirError, HirExpr,
     HirExprKind, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics, OperatorKind,
-    RequestedOutputCount, SemanticError, StringLiteral,
+    RequestedOutputCount, StringLiteral,
 };
 use std::collections::HashMap;
 
@@ -17,7 +17,7 @@ pub(crate) fn lower_expr_with_replacements(
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<MirRvalue, SemanticError> {
+) -> Result<MirRvalue, HirError> {
     if let Some(operand) = await_replacements.get(&expr.id) {
         return Ok(MirRvalue::Use(operand.clone()));
     }
@@ -73,7 +73,7 @@ pub(crate) fn lower_expr_with_replacements(
                         lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
                     ))
                 })
-                .collect::<Result<_, SemanticError>>()?,
+                .collect::<Result<_, HirError>>()?,
         },
         HirExprKind::ObjectLiteral { class_name, fields } => MirRvalue::ObjectLiteral {
             class_name: class_name.clone(),
@@ -85,7 +85,7 @@ pub(crate) fn lower_expr_with_replacements(
                         lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
                     ))
                 })
-                .collect::<Result<_, SemanticError>>()?,
+                .collect::<Result<_, HirError>>()?,
         },
         HirExprKind::Call(call) => {
             let mut args: Vec<MirCallArg> = call
@@ -101,10 +101,10 @@ pub(crate) fn lower_expr_with_replacements(
                 )?
             } else if call.callee.is_feval_builtin_like() {
                 if args.is_empty() {
-                    return Err(SemanticError::new("feval: missing function argument"));
+                    return Err(HirError::new("feval: missing function argument"));
                 }
                 let MirCallArg::Single(callee) = args.remove(0) else {
-                    return Err(SemanticError::new(
+                    return Err(HirError::new(
                         "feval: function argument cannot be a comma-list expansion",
                     ));
                 };
@@ -153,7 +153,7 @@ pub(crate) fn lower_expr_with_replacements(
             CallableIdentity::AnonymousFunction(*function),
         )),
         HirExprKind::Await(_) => {
-            return Err(SemanticError::new(
+            return Err(HirError::new(
                 "await expression was not lowered through an await terminator",
             ))
         }
@@ -165,7 +165,7 @@ fn lower_call_arg(
     arg: &HirExpr,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<MirCallArg, SemanticError> {
+) -> Result<MirCallArg, HirError> {
     if let HirExprKind::Call(call) = &arg.kind {
         let requested_count = requested_output_count_for_arg_expansion(&call.requested_outputs);
         if requested_count > 1 {
@@ -187,7 +187,7 @@ fn lower_call_arg(
             unreachable!()
         };
         if indexing.kind != IndexKind::Brace {
-            return Err(SemanticError::new(
+            return Err(HirError::new(
                 "comma-list expansion requires cell/content indexing",
             ));
         }
@@ -286,7 +286,7 @@ fn lower_aggregate_elements(
     rows: &[Vec<HirExpr>],
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<Vec<MirOperand>, SemanticError> {
+) -> Result<Vec<MirOperand>, HirError> {
     rows.iter()
         .flat_map(|row| row.iter())
         .map(|element| lower_operand_with_replacements(ctx, element, temps, await_replacements))
@@ -301,7 +301,7 @@ pub(crate) fn lower_indexing(
     ctx: &MirLoweringContext,
     indexing: &IndexingSemantics,
     temps: &mut Vec<MirStmt>,
-) -> Result<MirIndexing, SemanticError> {
+) -> Result<MirIndexing, HirError> {
     lower_indexing_with_replacements(ctx, indexing, temps, &HashMap::new())
 }
 
@@ -310,7 +310,7 @@ pub(crate) fn lower_indexing_with_replacements(
     indexing: &IndexingSemantics,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<MirIndexing, SemanticError> {
+) -> Result<MirIndexing, HirError> {
     Ok(MirIndexing {
         kind: indexing.kind.clone(),
         plan: classify_mir_index_plan(indexing),
@@ -419,7 +419,7 @@ fn lower_index_component(
     component: &IndexComponent,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<MirIndexComponent, SemanticError> {
+) -> Result<MirIndexComponent, HirError> {
     Ok(match component {
         IndexComponent::Colon => MirIndexComponent::Colon,
         IndexComponent::End { dim, offset } => MirIndexComponent::End {
@@ -448,9 +448,9 @@ fn lower_index_component(
     })
 }
 
-fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, SemanticError> {
+fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
     let Some(identity) = call.command.identity() else {
-        return Err(SemanticError::new(
+        return Err(HirError::new(
             "command call requires a statically classified callee identity",
         ));
     };
@@ -476,12 +476,9 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, SemanticError>
     }))
 }
 
-fn call_rvalue(
-    call: &runmat_hir::HirCall,
-    args: Vec<MirCallArg>,
-) -> Result<MirRvalue, SemanticError> {
+fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> Result<MirRvalue, HirError> {
     let Some(identity) = call.callee.identity() else {
-        return Err(SemanticError::new(
+        return Err(HirError::new(
             "call requires either a static callable identity or a dynamic callee expression",
         ));
     };
@@ -507,7 +504,7 @@ fn dynamic_call_rvalue(
     call: &runmat_hir::HirCall,
     callee: MirOperand,
     args: Vec<MirCallArg>,
-) -> Result<MirRvalue, SemanticError> {
+) -> Result<MirRvalue, HirError> {
     let callee = MirCallee::Dynamic(callee);
     let semantics = call_semantics(&callee);
     let fallback_policy = call_fallback_policy(&callee, &call.syntax);
@@ -612,7 +609,7 @@ pub(crate) fn lower_operand(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
-) -> Result<MirOperand, SemanticError> {
+) -> Result<MirOperand, HirError> {
     lower_operand_with_replacements(ctx, expr, temps, &HashMap::new())
 }
 
@@ -621,7 +618,7 @@ pub(crate) fn lower_operand_with_replacements(
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
-) -> Result<MirOperand, SemanticError> {
+) -> Result<MirOperand, HirError> {
     if let Some(operand) = await_replacements.get(&expr.id) {
         return Ok(operand.clone());
     }
@@ -644,7 +641,7 @@ pub(crate) fn lower_operand_with_replacements(
 pub(crate) fn lower_simple_operand(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
-) -> Result<Option<MirOperand>, SemanticError> {
+) -> Result<Option<MirOperand>, HirError> {
     Ok(Some(match &expr.kind {
         HirExprKind::Number(value) => MirOperand::Constant(MirConstant::Number(value.clone())),
         HirExprKind::String(value) => MirOperand::Constant(MirConstant::String(value.clone())),

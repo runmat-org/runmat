@@ -124,7 +124,7 @@ mod tests {
         )));
 
         let out = block_on(ode23_builtin(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_decay".to_string(),
                 function: 55,
             },

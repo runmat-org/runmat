@@ -1,6 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
+use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
 use crate::interpreter::engine as interp_engine;
@@ -84,10 +84,10 @@ pub async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
-    semantic_registry: &SemanticFunctionRegistry,
+    function_registry: &FunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
-    let func = semantic_registry.get(function_id).ok_or_else(|| {
+    let func = function_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
         mex("UndefinedSemanticFunction", &message)
     })?;
@@ -160,8 +160,8 @@ pub async fn invoke_semantic_function_value(
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
-    bytecode.semantic_functions = semantic_registry.functions.clone();
-    bytecode.semantic_function_registry = semantic_registry.clone();
+    bytecode.semantic_functions = function_registry.functions.clone();
+    bytecode.semantic_function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(
         &bytecode,
         vars,
@@ -177,7 +177,7 @@ pub async fn invoke_semantic_function_value(
 }
 
 fn collect_semantic_outputs(
-    func: &crate::bytecode::program::SemanticFunctionBytecode,
+    func: &crate::bytecode::program::FunctionBytecode,
     result_vars: &[Value],
     requested_outputs: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
@@ -298,17 +298,17 @@ async fn run_interpreter_inner(
         fusion_accel_graph,
         bytecode,
     } = state;
-    let semantic_registry = Arc::new(bytecode.semantic_registry());
+    let function_registry = Arc::new(bytecode.function_registry());
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
-    let semantic_registry_for_semantic_invoker = Arc::clone(&semantic_registry);
+    let semantic_registry_for_semantic_invoker = Arc::clone(&function_registry);
     let _semantic_function_guard =
         user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
                 let previous_invoker = previous_semantic_invoker.clone();
-                let semantic_registry = Arc::clone(&semantic_registry_for_semantic_invoker);
+                let function_registry = Arc::clone(&semantic_registry_for_semantic_invoker);
                 Box::pin(async move {
-                    let local_function = semantic_registry
+                    let local_function = function_registry
                         .get(runmat_hir::FunctionId(function))
                         .is_some();
                     if !local_function {
@@ -320,14 +320,14 @@ async fn run_interpreter_inner(
                         function,
                         &args,
                         requested_outputs,
-                        &semantic_registry,
+                        &function_registry,
                     )
                     .await
                 })
             },
         )));
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
-    let semantic_registry_for_semantic_resolver = Arc::clone(&semantic_registry);
+    let semantic_registry_for_semantic_resolver = Arc::clone(&function_registry);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
             if let Some(function) = semantic_registry_for_semantic_resolver.resolve_name(name) {
@@ -452,7 +452,7 @@ async fn run_interpreter_inner(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
                 var_names: &bytecode.var_names,
-                semantic_registry: &semantic_registry,
+                function_registry: &function_registry,
                 source_id: bytecode.source_id,
                 call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
                 call_counts: &call_counts_snapshot,
@@ -578,7 +578,7 @@ async fn run_interpreter_inner(
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateMethodFunctionHandle(_)
-            | Instr::CreateSemanticFunctionHandle(_, _)
+            | Instr::CreateBoundFunctionHandle(_, _)
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)
@@ -720,7 +720,7 @@ mod tests {
     use super::{
         collect_semantic_outputs, interpret_with_vars, output_value, run_interpreter_inner,
     };
-    use crate::bytecode::program::{Bytecode, SemanticFunctionBytecode};
+    use crate::bytecode::program::{Bytecode, FunctionBytecode};
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
@@ -750,8 +750,8 @@ mod tests {
             .expect("upload should succeed")
     }
 
-    fn test_function(varargout_slot: Option<usize>) -> SemanticFunctionBytecode {
-        SemanticFunctionBytecode {
+    fn test_function(varargout_slot: Option<usize>) -> FunctionBytecode {
+        FunctionBytecode {
             function: FunctionId(0),
             display_name: "f".into(),
             source_id: None,

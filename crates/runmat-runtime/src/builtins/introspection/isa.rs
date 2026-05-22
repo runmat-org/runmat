@@ -110,7 +110,7 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
             Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::SemanticFunctionHandle { .. }
+                | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_)
         ),
         "gpuarray" => matches!(value, Value::GpuTensor(_)),

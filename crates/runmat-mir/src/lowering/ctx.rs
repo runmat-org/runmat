@@ -1,5 +1,5 @@
 use crate::{MirLocal, MirLocalId, MirLocalKind};
-use runmat_hir::{BindingId, FunctionId, HirFunction, SemanticError, Span};
+use runmat_hir::{BindingId, FunctionId, HirError, HirFunction, Span};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
@@ -23,14 +23,11 @@ impl MirLoweringContext {
         self.async_functions.contains(&function)
     }
 
-    pub(crate) fn local_for_binding(
-        &self,
-        binding: BindingId,
-    ) -> Result<MirLocalId, SemanticError> {
+    pub(crate) fn local_for_binding(&self, binding: BindingId) -> Result<MirLocalId, HirError> {
         self.binding_locals
             .get(&binding)
             .copied()
-            .ok_or_else(|| SemanticError::new("binding has no MIR local"))
+            .ok_or_else(|| HirError::new("binding has no MIR local"))
     }
 
     pub(crate) fn locals_for_function(&mut self, function: &HirFunction) -> Vec<MirLocal> {

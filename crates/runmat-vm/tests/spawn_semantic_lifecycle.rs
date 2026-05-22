@@ -72,14 +72,7 @@ mod tests {
     fn compile_semantic_function_invocation_fixture(
         source: &str,
         function_name: &str,
-    ) -> Result<
-        (
-            runmat_hir::FunctionId,
-            runmat_vm::SemanticFunctionRegistry,
-            usize,
-        ),
-        RuntimeError,
-    > {
+    ) -> Result<(runmat_hir::FunctionId, runmat_vm::FunctionRegistry, usize), RuntimeError> {
         let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
         let hir = lower(&ast, &LoweringContext::empty())
             .map_err(|err| RuntimeError::new(err.to_string()))?;
@@ -103,7 +96,7 @@ mod tests {
             .input_slots
             .first()
             .ok_or_else(|| RuntimeError::new("semantic function missing input slot"))?;
-        let registry = runmat_vm::SemanticFunctionRegistry::new(semantic_functions);
+        let registry = runmat_vm::FunctionRegistry::new(semantic_functions);
         Ok((function_id, registry, input_slot))
     }
 

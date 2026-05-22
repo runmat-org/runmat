@@ -6,8 +6,7 @@ use lsp_types::{
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
-    FunctionKind, HirDiagnostic, HirDiagnosticSeverity, LoweringContext, LoweringResult,
-    SemanticError,
+    FunctionKind, HirDiagnostic, HirDiagnosticSeverity, HirError, LoweringContext, LoweringResult,
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
@@ -21,9 +20,9 @@ use std::fmt::Write;
 pub struct DocumentAnalysis {
     pub tokens: Vec<SpannedToken>,
     pub syntax_error: Option<SyntaxErrorInfo>,
-    pub lowering_error: Option<SemanticError>,
+    pub lowering_error: Option<HirError>,
     pub compile_error: Option<CompileError>,
-    pub semantic: Option<SemanticModel>,
+    pub semantic: Option<AnalysisModel>,
 }
 
 impl DocumentAnalysis {
@@ -459,7 +458,7 @@ fn diagnostic_range_for_parse_error(
 }
 
 fn diagnostic_for_lowering_error(
-    error: &SemanticError,
+    error: &HirError,
     tokens: &[SpannedToken],
     text: &str,
 ) -> Diagnostic {
@@ -655,7 +654,7 @@ pub struct FunctionSemantic {
 }
 
 #[derive(Clone)]
-pub struct SemanticModel {
+pub struct AnalysisModel {
     pub globals: HashMap<String, VariableSymbol>,
     pub functions: Vec<FunctionSemantic>,
     pub function_lookup: HashMap<String, Vec<usize>>,
@@ -663,13 +662,13 @@ pub struct SemanticModel {
     pub diagnostics: Vec<HirDiagnostic>,
 }
 
-impl SemanticModel {
+impl AnalysisModel {
     fn function_at_offset(&self, offset: usize) -> Option<&FunctionSemantic> {
         self.functions.iter().find(|f| f.range.contains(offset))
     }
 }
 
-fn completion_from_semantic(semantic: &SemanticModel) -> Vec<CompletionItem> {
+fn completion_from_semantic(semantic: &AnalysisModel) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     for var in semantic.globals.values() {
         items.push(variable_completion(var));
@@ -790,7 +789,7 @@ fn build_semantic_model(
     lowering: LoweringResult,
     tokens: &[SpannedToken],
     text: &str,
-) -> SemanticModel {
+) -> AnalysisModel {
     let mut functions = Vec::new();
     let mut function_lookup: HashMap<String, Vec<usize>> = HashMap::new();
     let mut globals = HashMap::new();
@@ -909,7 +908,7 @@ fn build_semantic_model(
     let mut diagnostics = runmat_static_analysis::lint_shapes(&lowering);
     diagnostics.extend(runmat_static_analysis::lint_mir_analysis(&lowering));
 
-    SemanticModel {
+    AnalysisModel {
         globals,
         functions,
         function_lookup,

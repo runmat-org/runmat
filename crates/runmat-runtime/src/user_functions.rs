@@ -8,19 +8,18 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
-pub type SemanticFunctionInvoker =
-    dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
-pub type SemanticFunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
+pub type FunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
+pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 
 #[derive(Debug, Clone)]
-pub struct SemanticCallableRequest {
+pub struct CallableRequest {
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
 }
 
-impl SemanticCallableRequest {
+impl CallableRequest {
     pub fn semantic(function: usize, args: Vec<Value>, requested_outputs: usize) -> Self {
         Self {
             identity: CallableIdentity::SemanticFunction(runmat_hir::FunctionId(function)),
@@ -46,21 +45,21 @@ impl SemanticCallableRequest {
 }
 
 runmat_thread_local! {
-    static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Arc<SemanticFunctionInvoker>>> =
+    static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Arc<FunctionInvoker>>> =
         const { RefCell::new(None) };
-    static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<SemanticFunctionResolver>>> =
+    static SEMANTIC_FUNCTION_RESOLVER: RefCell<Option<Arc<FunctionResolver>>> =
         const { RefCell::new(None) };
 }
 
-pub struct SemanticFunctionInvokerGuard {
-    previous: Option<Arc<SemanticFunctionInvoker>>,
+pub struct FunctionInvokerGuard {
+    previous: Option<Arc<FunctionInvoker>>,
 }
 
-pub struct SemanticFunctionResolverGuard {
-    previous: Option<Arc<SemanticFunctionResolver>>,
+pub struct FunctionResolverGuard {
+    previous: Option<Arc<FunctionResolver>>,
 }
 
-impl Drop for SemanticFunctionInvokerGuard {
+impl Drop for FunctionInvokerGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
         SEMANTIC_FUNCTION_INVOKER.with(|slot| {
@@ -69,7 +68,7 @@ impl Drop for SemanticFunctionInvokerGuard {
     }
 }
 
-impl Drop for SemanticFunctionResolverGuard {
+impl Drop for FunctionResolverGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
         SEMANTIC_FUNCTION_RESOLVER.with(|slot| {
@@ -79,26 +78,26 @@ impl Drop for SemanticFunctionResolverGuard {
 }
 
 pub fn install_semantic_function_invoker(
-    invoker: Option<Arc<SemanticFunctionInvoker>>,
-) -> SemanticFunctionInvokerGuard {
+    invoker: Option<Arc<FunctionInvoker>>,
+) -> FunctionInvokerGuard {
     let previous =
         SEMANTIC_FUNCTION_INVOKER.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), invoker));
-    SemanticFunctionInvokerGuard { previous }
+    FunctionInvokerGuard { previous }
 }
 
 pub fn install_semantic_function_resolver(
-    resolver: Option<Arc<SemanticFunctionResolver>>,
-) -> SemanticFunctionResolverGuard {
+    resolver: Option<Arc<FunctionResolver>>,
+) -> FunctionResolverGuard {
     let previous = SEMANTIC_FUNCTION_RESOLVER
         .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), resolver));
-    SemanticFunctionResolverGuard { previous }
+    FunctionResolverGuard { previous }
 }
 
-pub fn current_semantic_function_invoker() -> Option<Arc<SemanticFunctionInvoker>> {
+pub fn current_semantic_function_invoker() -> Option<Arc<FunctionInvoker>> {
     SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
 }
 
-pub fn current_semantic_function_resolver() -> Option<Arc<SemanticFunctionResolver>> {
+pub fn current_semantic_function_resolver() -> Option<Arc<FunctionResolver>> {
     SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
 }
 
@@ -127,9 +126,9 @@ pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
 }
 
 pub async fn try_call_semantic_descriptor(
-    request: SemanticCallableRequest,
+    request: CallableRequest,
 ) -> Option<Result<Value, RuntimeError>> {
-    let SemanticCallableRequest {
+    let CallableRequest {
         identity,
         fallback_policy,
         args,
@@ -141,6 +140,6 @@ pub async fn try_call_semantic_descriptor(
     if !fallback_policy.allows_semantic_name_resolution_for(&identity) {
         return None;
     }
-    let name = fallback_policy.semantic_resolution_name_for(&identity)?;
+    let name = fallback_policy.resolution_name_for(&identity)?;
     try_call_semantic_function_by_name(&name, &args, requested_outputs).await
 }

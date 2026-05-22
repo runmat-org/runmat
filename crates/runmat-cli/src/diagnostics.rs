@@ -46,7 +46,7 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
                     span.end.saturating_sub(span.start).max(1),
                 )
             });
-            let identifier = err.identifier.as_deref().or(Some("RunMat:SemanticError"));
+            let identifier = err.identifier.as_deref().or(Some("RunMat:HirError"));
             Some(format_diagnostic(
                 &err.message,
                 identifier,

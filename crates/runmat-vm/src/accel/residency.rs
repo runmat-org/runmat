@@ -116,7 +116,7 @@ fn clear_handles_in_value_excluding_with_visited(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }
@@ -184,7 +184,7 @@ fn collect_gpu_buffer_ids_with_visited(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }

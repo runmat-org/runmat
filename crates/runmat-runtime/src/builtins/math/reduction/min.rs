@@ -583,7 +583,7 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

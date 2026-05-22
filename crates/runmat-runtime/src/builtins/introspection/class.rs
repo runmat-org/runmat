@@ -62,7 +62,7 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => {
             if handle.class_name.is_empty() {

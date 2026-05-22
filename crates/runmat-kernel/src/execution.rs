@@ -184,9 +184,7 @@ impl ExecutionEngine {
                     RunError::Semantic(err) => {
                         let identifier = err.identifier.clone();
                         (
-                            identifier
-                                .clone()
-                                .unwrap_or_else(|| "SemanticError".to_string()),
+                            identifier.clone().unwrap_or_else(|| "HirError".to_string()),
                             identifier,
                             err.to_string(),
                         )
@@ -390,7 +388,7 @@ mod tests {
             error.error_type == "RuntimeError"
                 || error.error_type == "CompileError"
                 || error.error_type == "UndefinedVariable"
-                || error.error_type == "SemanticError"
+                || error.error_type == "HirError"
                 || error.error_type.contains(':')
         );
     }

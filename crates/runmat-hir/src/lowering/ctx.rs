@@ -6,14 +6,13 @@ use crate::{
     DefPathSegment, EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId,
     FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
     HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
-    HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirModule, HirPlace,
-    HirStmt as SemanticHirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
+    HirPlace, HirStmt as SemanticHirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
     IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind,
     PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
-    ReferenceResolution, RequestedOutputCount, SemanticError, SemanticIndex, SourceId,
-    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
-    WorkspaceVisibility, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    ReferenceResolution, RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId,
+    StringLiteral, SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
+    DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -43,7 +42,7 @@ struct ScopeFrame {
 
 struct LoweringCtx {
     assembly: HirAssembly,
-    semantic_index: SemanticIndex,
+    semantic_index: HirIndex,
     module: ModuleId,
     next_expr: usize,
     next_stmt: usize,
@@ -61,10 +60,7 @@ struct LoweringCtx {
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
 
-pub fn lower(
-    prog: &AstProgram,
-    context: &LoweringContext<'_>,
-) -> Result<LoweringResult, SemanticError> {
+pub fn lower(prog: &AstProgram, context: &LoweringContext<'_>) -> Result<LoweringResult, HirError> {
     let (assembly, semantic_index) = LoweringCtx::lower_program(prog, context)?;
 
     Ok(LoweringResult {
@@ -104,7 +100,7 @@ impl LoweringCtx {
         &self,
         kind: &str,
         rows: &[Vec<AstExpr>],
-    ) -> Result<(), SemanticError> {
+    ) -> Result<(), HirError> {
         let Some(expected_cols) = rows.first().map(Vec::len) else {
             return Ok(());
         };
@@ -112,7 +108,7 @@ impl LoweringCtx {
             return Ok(());
         }
 
-        Err(SemanticError::new(format!(
+        Err(HirError::new(format!(
             "{kind} literal rows must have consistent column counts",
         ))
         .with_identifier(IDENT_AGGREGATE_SHAPE_MISMATCH))
@@ -121,10 +117,10 @@ impl LoweringCtx {
     fn lower_program(
         prog: &AstProgram,
         context: &LoweringContext<'_>,
-    ) -> Result<(HirAssembly, SemanticIndex), SemanticError> {
+    ) -> Result<(HirAssembly, HirIndex), HirError> {
         let mut ctx = Self {
             assembly: HirAssembly::default(),
-            semantic_index: SemanticIndex::default(),
+            semantic_index: HirIndex::default(),
             module: ModuleId(0),
             next_expr: 0,
             next_stmt: 0,
@@ -332,8 +328,8 @@ impl LoweringCtx {
         workspace_visibility: WorkspaceVisibility,
         modifiers: FunctionModifiers,
         top_level_await: bool,
-        f: impl FnOnce(&mut Self) -> Result<T, SemanticError>,
-    ) -> Result<T, SemanticError> {
+        f: impl FnOnce(&mut Self) -> Result<T, HirError>,
+    ) -> Result<T, HirError> {
         self.scopes.push(ScopeFrame {
             owner,
             bindings: HashMap::new(),
@@ -530,7 +526,7 @@ impl LoweringCtx {
         modifiers: FunctionModifiers,
         parent: Option<FunctionId>,
         enclosing_class: Option<ClassId>,
-    ) -> Result<HirFunction, SemanticError> {
+    ) -> Result<HirFunction, HirError> {
         self.with_scope(
             id,
             WorkspaceVisibility::Hidden,
@@ -616,7 +612,7 @@ impl LoweringCtx {
                 let locals = ctx.binding_ids_for_owner(id);
                 let captures = ctx.captures.remove(&id).unwrap_or_default();
                 if modifiers.isolated && !captures.is_empty() {
-                    return Err(SemanticError::new(
+                    return Err(HirError::new(
                         "isolated functions cannot capture outer lexical bindings",
                     )
                     .with_identifier(IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED)
@@ -667,10 +663,10 @@ impl LoweringCtx {
         super_class: Option<&str>,
         members: &[runmat_parser::ClassMember],
         span: Span,
-    ) -> Result<HirClass, SemanticError> {
+    ) -> Result<HirClass, HirError> {
         if super_class.is_some_and(|sup| sup == name) {
             return Err(
-                SemanticError::new(format!("Class '{name}' cannot inherit from itself"))
+                HirError::new(format!("Class '{name}' cannot inherit from itself"))
                     .with_identifier(IDENT_CLASS_SELF_INHERITANCE_INVALID),
             );
         }
@@ -690,13 +686,13 @@ impl LoweringCtx {
                     let attributes = property_attributes(name, attributes)?;
                     for prop_name in names {
                         if !property_names.insert(prop_name.clone()) {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "Duplicate property '{prop_name}' in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
                         if method_names.contains(prop_name) {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "Name '{prop_name}' used for both property and method in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
@@ -743,13 +739,13 @@ impl LoweringCtx {
                             )?;
                             self.assembly.functions.push(function);
                             if !method_names.insert(method_name.clone()) {
-                                return Err(SemanticError::new(format!(
+                                return Err(HirError::new(format!(
                                     "Duplicate method '{method_name}' in class {name}",
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                             }
                             if property_names.contains(method_name) {
-                                return Err(SemanticError::new(format!(
+                                return Err(HirError::new(format!(
                                     "Name '{method_name}' used for both property and method in class {name}",
                                 ))
                                 .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
@@ -768,14 +764,14 @@ impl LoweringCtx {
                     let mut seen = HashSet::new();
                     for event_name in names {
                         if !seen.insert(event_name) {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "Duplicate event '{event_name}' in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
                         if property_names.contains(event_name) || method_names.contains(event_name)
                         {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "Name '{event_name}' used for event conflicts with existing member in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
@@ -790,13 +786,13 @@ impl LoweringCtx {
                     let mut seen = HashSet::new();
                     for enum_name in names {
                         if !seen.insert(enum_name) {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "Duplicate enumeration '{enum_name}' in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
                         if property_names.contains(enum_name) || method_names.contains(enum_name) {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "Name '{enum_name}' used for enumeration conflicts with existing member in class {name}"
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
@@ -842,7 +838,7 @@ impl LoweringCtx {
         })
     }
 
-    fn lower_stmt_refs(&mut self, stmts: &[&AstStmt]) -> Result<HirBlock, SemanticError> {
+    fn lower_stmt_refs(&mut self, stmts: &[&AstStmt]) -> Result<HirBlock, HirError> {
         let mut statements = Vec::new();
         for stmt in stmts {
             if let Some(stmt) = self.lower_stmt_semantic(stmt)? {
@@ -852,15 +848,12 @@ impl LoweringCtx {
         Ok(HirBlock { statements })
     }
 
-    fn lower_stmts_semantic(&mut self, stmts: &[AstStmt]) -> Result<HirBlock, SemanticError> {
+    fn lower_stmts_semantic(&mut self, stmts: &[AstStmt]) -> Result<HirBlock, HirError> {
         let refs: Vec<_> = stmts.iter().collect();
         self.lower_stmt_refs(&refs)
     }
 
-    fn lower_stmt_semantic(
-        &mut self,
-        stmt: &AstStmt,
-    ) -> Result<Option<SemanticHirStmt>, SemanticError> {
+    fn lower_stmt_semantic(&mut self, stmt: &AstStmt) -> Result<Option<SemanticHirStmt>, HirError> {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
@@ -930,7 +923,7 @@ impl LoweringCtx {
                             self.lower_stmts_semantic(body)?,
                         ))
                     })
-                    .collect::<Result<_, SemanticError>>()?,
+                    .collect::<Result<_, HirError>>()?,
                 else_body: else_body
                     .as_ref()
                     .map(|body| self.lower_stmts_semantic(body))
@@ -998,7 +991,7 @@ impl LoweringCtx {
                             self.lower_stmts_semantic(body)?,
                         ))
                     })
-                    .collect::<Result<_, SemanticError>>()?,
+                    .collect::<Result<_, HirError>>()?,
                 otherwise: otherwise
                     .as_ref()
                     .map(|body| self.lower_stmts_semantic(body))
@@ -1052,7 +1045,7 @@ impl LoweringCtx {
         lvalue: &runmat_parser::LValue,
         span: Span,
         deletion: bool,
-    ) -> Result<HirPlace, SemanticError> {
+    ) -> Result<HirPlace, HirError> {
         use runmat_parser::LValue;
         Ok(match lvalue {
             LValue::Var(name) => HirPlace::Binding(self.binding_for_write(name, span)),
@@ -1104,7 +1097,7 @@ impl LoweringCtx {
         expr: &AstExpr,
         span: Span,
         index_context: IndexResultContext,
-    ) -> Result<HirExpr, SemanticError> {
+    ) -> Result<HirExpr, HirError> {
         match expr {
             AstExpr::Ident(name, _) => {
                 let binding = self.binding_for_write(name, span);
@@ -1165,7 +1158,7 @@ impl LoweringCtx {
         });
     }
 
-    fn lower_expr_semantic(&mut self, expr: &AstExpr) -> Result<HirExpr, SemanticError> {
+    fn lower_expr_semantic(&mut self, expr: &AstExpr) -> Result<HirExpr, HirError> {
         self.lower_expr_semantic_requested(expr, RequestedOutputCount::One)
     }
 
@@ -1173,7 +1166,7 @@ impl LoweringCtx {
         &mut self,
         expr: &AstExpr,
         requested_outputs: RequestedOutputCount,
-    ) -> Result<HirExpr, SemanticError> {
+    ) -> Result<HirExpr, HirError> {
         let span = expr.span();
         let kind = match expr {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
@@ -1187,7 +1180,7 @@ impl LoweringCtx {
                 {
                     HirExprKind::Constant(SymbolName(name.clone()))
                 } else {
-                    return Err(SemanticError::new(format!("undefined variable '{name}'"))
+                    return Err(HirError::new(format!("undefined variable '{name}'"))
                         .with_span(span)
                         .with_identifier(IDENT_UNDEFINED_VARIABLE));
                 }
@@ -1196,14 +1189,14 @@ impl LoweringCtx {
                 let args: Vec<HirExpr> = self.lower_call_arguments_for_name(name, args)?;
                 if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
                     if !self.runmat_extensions_enabled {
-                        return Err(SemanticError::new(
+                        return Err(HirError::new(
                             "await is a RunMat extension and is not available in MATLAB strict mode",
                         )
                         .with_span(span)
                         .with_identifier(IDENT_AWAIT_EXTENSION_DISABLED));
                     }
                     if !self.current_allows_await() {
-                        return Err(SemanticError::new(
+                        return Err(HirError::new(
                             "await is only allowed in async functions or top-level script code",
                         )
                         .with_span(span)
@@ -1212,7 +1205,7 @@ impl LoweringCtx {
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
                 } else if name == SPAWN_EXTENSION_NAME && args.len() == 1 {
                     if !self.runmat_extensions_enabled {
-                        return Err(SemanticError::new(
+                        return Err(HirError::new(
                             "spawn is a RunMat extension and is not available in MATLAB strict mode",
                         )
                         .with_span(span)
@@ -1220,7 +1213,7 @@ impl LoweringCtx {
                     }
                     let arg = args.into_iter().next().unwrap();
                     if self.spawn_arg_captures_lexical_binding(&arg) {
-                        return Err(SemanticError::new(
+                        return Err(HirError::new(
                             "spawn cannot capture outer lexical bindings in this context",
                         )
                         .with_span(span)
@@ -1402,7 +1395,7 @@ impl LoweringCtx {
                             self.lower_expr_semantic(expr)?,
                         ))
                     })
-                    .collect::<Result<_, SemanticError>>()?,
+                    .collect::<Result<_, HirError>>()?,
             ),
             AstExpr::ObjectLiteral(class_name, fields, _) => HirExprKind::ObjectLiteral {
                 class_name: qualified_name(
@@ -1419,7 +1412,7 @@ impl LoweringCtx {
                             self.lower_expr_semantic(expr)?,
                         ))
                     })
-                    .collect::<Result<_, SemanticError>>()?,
+                    .collect::<Result<_, HirError>>()?,
             },
             AstExpr::Index(base, indices, _) => HirExprKind::Index(
                 Box::new(self.lower_expr_semantic(base)?),
@@ -1478,7 +1471,7 @@ impl LoweringCtx {
                 if let AstExpr::Ident(class_name, _) = &**base {
                     if let Some((method, _)) = runmat_builtins::lookup_method(class_name, name) {
                         if !method.is_static || method.access != runmat_builtins::Access::Public {
-                            return Err(SemanticError::new(format!(
+                            return Err(HirError::new(format!(
                                 "method {class_name}.{name} is not accessible as a public static method"
                             ))
                             .with_span(span));
@@ -1583,7 +1576,7 @@ impl LoweringCtx {
         &mut self,
         indices: &[AstExpr],
         kind: IndexKind,
-    ) -> Result<IndexingSemantics, SemanticError> {
+    ) -> Result<IndexingSemantics, HirError> {
         self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
     }
 
@@ -1591,7 +1584,7 @@ impl LoweringCtx {
         &mut self,
         name: &str,
         args: &[AstExpr],
-    ) -> Result<Vec<HirExpr>, SemanticError> {
+    ) -> Result<Vec<HirExpr>, HirError> {
         let expanded_last_outputs = self.expanded_last_output_count_for_call(name, args);
 
         args.iter()
@@ -1664,7 +1657,7 @@ impl LoweringCtx {
         &mut self,
         arg: &AstExpr,
         requested_outputs: RequestedOutputCount,
-    ) -> Result<HirExpr, SemanticError> {
+    ) -> Result<HirExpr, HirError> {
         if let AstExpr::IndexCell(base, indices, _) = arg {
             return Ok(HirExpr {
                 id: self.alloc_expr_id(),
@@ -1687,7 +1680,7 @@ impl LoweringCtx {
         indices: &[AstExpr],
         kind: IndexKind,
         result_context: IndexResultContext,
-    ) -> Result<IndexingSemantics, SemanticError> {
+    ) -> Result<IndexingSemantics, HirError> {
         Ok(IndexingSemantics {
             kind,
             components: indices
@@ -1704,12 +1697,12 @@ impl LoweringCtx {
                         }
                     })
                 })
-                .collect::<Result<_, SemanticError>>()?,
+                .collect::<Result<_, HirError>>()?,
             result_context,
         })
     }
 
-    fn classref_expr(&mut self, class_name: &str, span: Span) -> Result<HirExpr, SemanticError> {
+    fn classref_expr(&mut self, class_name: &str, span: Span) -> Result<HirExpr, HirError> {
         let arg = HirExpr {
             id: self.alloc_expr_id(),
             kind: HirExprKind::String(StringLiteral(class_name.to_string())),
@@ -1735,7 +1728,7 @@ impl LoweringCtx {
         syntax: CallSyntax,
         requested_outputs: RequestedOutputCount,
         span: Span,
-    ) -> Result<HirCall, SemanticError> {
+    ) -> Result<HirCall, HirError> {
         let qualified_call_name =
             qualified_name(&name.split('.').map(ToString::to_string).collect::<Vec<_>>());
         let (callee, kind) = if let Some(function) = self.function_names.get(name) {
@@ -1784,7 +1777,7 @@ impl LoweringCtx {
         &self,
         name: &str,
         span: Span,
-    ) -> Result<Option<DefPath>, SemanticError> {
+    ) -> Result<Option<DefPath>, HirError> {
         let imports = &self.assembly.modules[self.module.0].imports;
         let specific_matches: Vec<&HirImport> = imports
             .iter()
@@ -1797,7 +1790,7 @@ impl LoweringCtx {
         }
         if specific_matches.len() > 1 {
             return Err(
-                SemanticError::new(format!("ambiguous call target '{name}' via imports"))
+                HirError::new(format!("ambiguous call target '{name}' via imports"))
                     .with_span(span)
                     .with_identifier(IDENT_IMPORT_AMBIGUOUS),
             );
@@ -1812,7 +1805,7 @@ impl LoweringCtx {
             return Ok(Some(def_path_for_import_path(&wildcard_matches[0])));
         }
         if wildcard_matches.len() > 1 {
-            return Err(SemanticError::new(format!(
+            return Err(HirError::new(format!(
                 "ambiguous call target '{name}' via wildcard imports"
             ))
             .with_span(span)
@@ -1825,7 +1818,7 @@ impl LoweringCtx {
         &self,
         name: &str,
         span: Span,
-    ) -> Result<crate::FunctionHandleTarget, SemanticError> {
+    ) -> Result<crate::FunctionHandleTarget, HirError> {
         if let Some(function) = self.function_names.get(name) {
             return Ok(crate::FunctionHandleTarget::Function(*function));
         }
@@ -1857,7 +1850,7 @@ impl LoweringCtx {
             })
             .collect();
         if specific_matches.len() > 1 {
-            return Err(SemanticError::new(format!(
+            return Err(HirError::new(format!(
                 "ambiguous function handle target '{name}' via imports"
             ))
             .with_span(span)
@@ -1875,7 +1868,7 @@ impl LoweringCtx {
             .filter(|qualified| self.wildcard_candidate_is_resolvable(qualified))
             .collect();
         if wildcard_matches.len() > 1 {
-            return Err(SemanticError::new(format!(
+            return Err(HirError::new(format!(
                 "ambiguous function handle target '{name}' via wildcard imports"
             ))
             .with_span(span)
@@ -1902,7 +1895,7 @@ impl LoweringCtx {
     }
 }
 
-fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), SemanticError> {
+fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), HirError> {
     let mut seen_exact: HashSet<(String, bool)> = HashSet::new();
     for import in imports {
         let path = import
@@ -1913,7 +1906,7 @@ fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), SemanticError>
             .collect::<Vec<_>>()
             .join(".");
         if !seen_exact.insert((path.clone(), import.wildcard)) {
-            return Err(SemanticError::new(format!(
+            return Err(HirError::new(format!(
                 "duplicate import '{}{}'",
                 path,
                 if import.wildcard { ".*" } else { "" }
@@ -1940,7 +1933,7 @@ fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), SemanticError>
     }
     for (name, sources) in by_unqualified {
         if sources.len() > 1 {
-            return Err(SemanticError::new(format!(
+            return Err(HirError::new(format!(
                 "ambiguous import for '{}': {}",
                 name,
                 sources.join(", ")
@@ -2139,12 +2132,12 @@ fn parse_member_access_value(
     class_name: &str,
     section: &str,
     raw: &str,
-) -> Result<crate::MemberAccess, SemanticError> {
+) -> Result<crate::MemberAccess, HirError> {
     let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
     match normalized.as_str() {
         "public" => Ok(crate::MemberAccess::Public),
         "private" => Ok(crate::MemberAccess::Private),
-        other => Err(SemanticError::new(format!(
+        other => Err(HirError::new(format!(
             "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private)"
         ))
         .with_identifier(IDENT_CLASS_ACCESS_VALUE_INVALID)),
@@ -2154,7 +2147,7 @@ fn parse_member_access_value(
 fn property_attributes(
     class_name: &str,
     attrs: &[runmat_parser::Attr],
-) -> Result<crate::PropertyAttributes, SemanticError> {
+) -> Result<crate::PropertyAttributes, HirError> {
     let mut result = crate::PropertyAttributes::default();
     let mut has_static = false;
     let mut has_constant = false;
@@ -2175,7 +2168,7 @@ fn property_attributes(
             result.is_hidden = true;
         } else if attr.name.eq_ignore_ascii_case("Access") {
             let raw = attr.value.as_deref().ok_or_else(|| {
-                SemanticError::new(format!(
+                HirError::new(format!(
                     "Access requires value in class '{class_name}' properties block",
                 ))
             })?;
@@ -2185,7 +2178,7 @@ fn property_attributes(
             result.set_access = access;
         } else if attr.name.eq_ignore_ascii_case("GetAccess") {
             let raw = attr.value.as_deref().ok_or_else(|| {
-                SemanticError::new(format!(
+                HirError::new(format!(
                     "GetAccess requires value in class '{class_name}' properties block",
                 ))
             })?;
@@ -2193,7 +2186,7 @@ fn property_attributes(
             result.get_access = access;
         } else if attr.name.eq_ignore_ascii_case("SetAccess") {
             let raw = attr.value.as_deref().ok_or_else(|| {
-                SemanticError::new(format!(
+                HirError::new(format!(
                     "SetAccess requires value in class '{class_name}' properties block",
                 ))
             })?;
@@ -2202,13 +2195,13 @@ fn property_attributes(
         }
     }
     if has_static && has_dependent {
-        return Err(SemanticError::new(format!(
+        return Err(HirError::new(format!(
             "class '{class_name}' properties: attributes 'Static' and 'Dependent' cannot be combined"
         ))
         .with_identifier(IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT));
     }
     if has_constant && has_dependent {
-        return Err(SemanticError::new(format!(
+        return Err(HirError::new(format!(
             "class '{class_name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"
         ))
         .with_identifier(IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT));
@@ -2219,14 +2212,14 @@ fn property_attributes(
 fn method_attributes(
     class_name: &str,
     attrs: &[runmat_parser::Attr],
-) -> Result<crate::MethodAttributes, SemanticError> {
+) -> Result<crate::MethodAttributes, HirError> {
     let mut result = crate::MethodAttributes::default();
     let mut has_abstract = false;
     let mut has_sealed = false;
     for attr in attrs {
         if attr.name.eq_ignore_ascii_case("Access") {
             let raw = attr.value.as_deref().ok_or_else(|| {
-                SemanticError::new(format!(
+                HirError::new(format!(
                     "Access requires value in class '{class_name}' methods block",
                 ))
             })?;
@@ -2243,7 +2236,7 @@ fn method_attributes(
         }
     }
     if has_abstract && has_sealed {
-        return Err(SemanticError::new(format!(
+        return Err(HirError::new(format!(
             "class '{class_name}' methods: attributes 'Abstract' and 'Sealed' cannot be combined"
         ))
         .with_identifier(IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT));

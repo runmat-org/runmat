@@ -491,7 +491,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. } => 0,
+        | Value::BoundFunctionHandle { .. } => 0,
         Value::ClassRef(name) => name.len().saturating_mul(2),
         Value::MException(exc) => {
             let base = exc

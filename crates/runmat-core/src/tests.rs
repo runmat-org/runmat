@@ -1979,7 +1979,7 @@ fn feval_string_local_function_uses_semantic_handle() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "local feval string callee should lower to a semantic function handle"
     );
@@ -2063,7 +2063,7 @@ fn local_function_handle_uses_semantic_handle() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "local function handles should lower to semantic function handles"
     );
@@ -2438,7 +2438,7 @@ fn cellfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "local string callback should be bound to a semantic function handle"
     );
@@ -2460,7 +2460,7 @@ fn cellfun_runtime_string_callback_uses_semantic_resolver() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "runtime string callback variables should not be compile-time literal rewrites"
     );
@@ -2512,7 +2512,7 @@ fn cellfun_session_function_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "session string callback should be bound to a semantic function handle"
     );
@@ -2534,7 +2534,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "local arrayfun string callback should be bound to a semantic function handle"
     );
@@ -2558,7 +2558,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "session arrayfun string callback should be bound to a semantic function handle"
     );
@@ -2580,7 +2580,7 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "runtime arrayfun string callback variables should not be compile-time literal rewrites"
     );
@@ -2745,7 +2745,7 @@ fn session_function_handle_uses_semantic_registry() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CreateSemanticFunctionHandle(_, _))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CreateBoundFunctionHandle(_, _))),
         "session function handles should carry semantic identity"
     );
     assert!(
@@ -2810,7 +2810,7 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
         )),
         "session feval string callee should carry semantic identity"
     );
@@ -2871,7 +2871,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "add2"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "add2"
         )),
         "session feval string expansion callee should carry semantic identity"
     );
@@ -2937,7 +2937,7 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
         )),
         "session feval string expansion multi-output callee should carry semantic identity"
     );

@@ -156,7 +156,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -532,7 +532,7 @@ fn summarize_for_cell(value: &Value) -> String {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Object(_)
         | Value::HandleObject(_)

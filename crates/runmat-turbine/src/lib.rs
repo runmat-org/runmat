@@ -20,7 +20,7 @@ use futures::task::noop_waker;
 use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_vm::{ArgSpec, Bytecode, Instr, InterpreterOutcome, SemanticFunctionRegistry};
+use runmat_vm::{ArgSpec, Bytecode, FunctionRegistry, Instr, InterpreterOutcome};
 use std::cell::Cell;
 use std::env;
 use std::future::Future;
@@ -71,12 +71,12 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 }
 
 struct RuntimeContext {
-    semantic_registry: SemanticFunctionRegistry,
+    function_registry: FunctionRegistry,
 }
 
 impl RuntimeContext {
-    fn new(semantic_registry: SemanticFunctionRegistry) -> Self {
-        Self { semantic_registry }
+    fn new(function_registry: FunctionRegistry) -> Self {
+        Self { function_registry }
     }
 }
 
@@ -541,7 +541,7 @@ impl TurbineEngine {
             &bytecode.instructions,
             &mut func,
             bytecode.var_count,
-            &bytecode.semantic_registry(),
+            &bytecode.function_registry(),
             &mut self.module,
             self.runmat_call_semantic_function_id,
             self.runmat_call_semantic_function_outputs_id,
@@ -581,7 +581,7 @@ impl TurbineEngine {
 
     /// Execute compiled function
     pub fn execute_compiled(&mut self, hash: u64, vars: &mut [Value]) -> Result<i32> {
-        self.execute_compiled_with_registry(hash, vars, &SemanticFunctionRegistry::default())
+        self.execute_compiled_with_registry(hash, vars, &FunctionRegistry::default())
     }
 
     /// Execute compiled function with access to semantic function identities for user calls.
@@ -589,16 +589,16 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        semantic_registry: &SemanticFunctionRegistry,
+        function_registry: &FunctionRegistry,
     ) -> Result<i32> {
-        self.execute_compiled_with_function_products(hash, vars, semantic_registry)
+        self.execute_compiled_with_function_products(hash, vars, function_registry)
     }
 
     fn execute_compiled_with_function_products(
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        semantic_registry: &SemanticFunctionRegistry,
+        function_registry: &FunctionRegistry,
     ) -> Result<i32> {
         let func = self
             .cache
@@ -614,7 +614,7 @@ impl TurbineEngine {
             .collect::<Result<Vec<_>>>()?;
 
         // Set up runtime context for user function calls
-        let runtime_context = RuntimeContext::new(semantic_registry.clone());
+        let runtime_context = RuntimeContext::new(function_registry.clone());
         // Note: Using Box::leak to create a 'static reference - this is safe for our use case
         // but in production we'd want a more sophisticated lifetime management
         let static_context = Box::leak(Box::new(runtime_context));
@@ -670,11 +670,11 @@ impl TurbineEngine {
             instrs = bytecode.instructions.len()
         )
         .entered();
-        let semantic_registry = bytecode.semantic_registry();
+        let function_registry = bytecode.function_registry();
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
-            match self.execute_compiled_with_function_products(hash, vars, &semantic_registry) {
+            match self.execute_compiled_with_function_products(hash, vars, &function_registry) {
                 Ok(result) => return Ok((result, true)),
                 Err(err) => {
                     warn!(
@@ -692,7 +692,7 @@ impl TurbineEngine {
                     match self.execute_compiled_with_function_products(
                         hash,
                         vars,
-                        &semantic_registry,
+                        &function_registry,
                     ) {
                         Ok(result) => return Ok((result, true)),
                         Err(err) => {
@@ -1060,7 +1060,7 @@ pub extern "C" fn runmat_call_semantic_function(
         function_id,
         &args,
         1,
-        &context.semantic_registry,
+        &context.function_registry,
     )))
     .and_then(|result| result.map_err(TurbineError::ExecutionError));
 
@@ -1143,7 +1143,7 @@ pub extern "C" fn runmat_call_semantic_function_outputs(
         function_id,
         &args,
         out_count,
-        &context.semantic_registry,
+        &context.function_registry,
     )))
     .and_then(|result| result.map_err(TurbineError::ExecutionError));
 
@@ -1377,7 +1377,7 @@ pub extern "C" fn runmat_call_semantic_function_value(
             function_id,
             &args,
             1,
-            &context.semantic_registry,
+            &context.function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)
     })();
@@ -1418,7 +1418,7 @@ pub extern "C" fn runmat_call_semantic_function_values(
             function_id,
             &args,
             out_count,
-            &context.semantic_registry,
+            &context.function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)?;
         Ok(match output {
@@ -1467,7 +1467,7 @@ pub extern "C" fn runmat_call_semantic_function_expanded_value(
             function_id,
             &expanded_args,
             1,
-            &context.semantic_registry,
+            &context.function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)
     })();
@@ -1514,7 +1514,7 @@ pub extern "C" fn runmat_call_semantic_function_expanded_values(
             function_id,
             &expanded_args,
             out_count,
-            &context.semantic_registry,
+            &context.function_registry,
         )))?
         .map_err(TurbineError::ExecutionError)?;
         Ok(match output {
@@ -1944,15 +1944,15 @@ pub extern "C" fn runtime_create_matrix(
 mod tests {
     use super::*;
     use runmat_hir::FunctionId;
-    use runmat_vm::SemanticFunctionBytecode;
+    use runmat_vm::FunctionBytecode;
     use std::collections::HashMap;
 
-    fn install_semantic_context(functions: Vec<SemanticFunctionBytecode>) {
+    fn install_semantic_context(functions: Vec<FunctionBytecode>) {
         let mut semantic_functions = HashMap::new();
         for function in functions {
             semantic_functions.insert(function.function, function);
         }
-        let registry = SemanticFunctionRegistry::new(semantic_functions);
+        let registry = FunctionRegistry::new(semantic_functions);
         let context = Box::leak(Box::new(RuntimeContext::new(registry)));
         set_runtime_context(context);
     }
@@ -1964,8 +1964,8 @@ mod tests {
         var_count: usize,
         input_slots: Vec<usize>,
         output_slots: Vec<usize>,
-    ) -> SemanticFunctionBytecode {
-        SemanticFunctionBytecode {
+    ) -> FunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: display_name.to_string(),
             source_id: None,

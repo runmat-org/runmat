@@ -5,11 +5,9 @@ pub mod program;
 pub use compile::{compile, compile_semantic_function_registry};
 pub use instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
 pub use program::{
-    Bytecode, SemanticAsyncMetadata, SemanticAwaitSite, SemanticFunctionBytecode,
-    SemanticFunctionRegistry, SemanticSpawnSite,
+    AsyncMetadata, AwaitSite, Bytecode, FunctionBytecode, FunctionRegistry, SpawnSite,
 };
 #[cfg(feature = "native-accel")]
 pub use program::{
-    SemanticFusionCandidateGroup, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
-    SemanticFusionMetadata,
+    FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };

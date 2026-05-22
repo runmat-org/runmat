@@ -43,7 +43,7 @@ pub enum DispatchHandled {
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
-    pub semantic_registry: &'a crate::bytecode::SemanticFunctionRegistry,
+    pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub call_counts: &'a [(usize, usize)],
@@ -172,7 +172,7 @@ fn for_each_gpu_handle_in_value_with_visited(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => Ok(()),
     }
@@ -494,7 +494,7 @@ fn collect_spawn_task_ids_in_value_with_visited(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => {}
     }
@@ -552,7 +552,7 @@ fn value_contains_spawn_task_id_with_visited(
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::ClassRef(_)
         | Value::MException(_) => false,
     }
@@ -715,7 +715,7 @@ pub async fn dispatch_instruction(
     let DispatchMeta {
         instr,
         var_names,
-        semantic_registry,
+        function_registry,
         source_id,
         call_arg_spans,
         call_counts,
@@ -745,7 +745,7 @@ pub async fn dispatch_instruction(
             instr,
             stack,
             vars,
-            semantic_registry,
+            function_registry,
             *pc,
             &mut *clear_value_residency,
         )
@@ -1155,7 +1155,7 @@ pub async fn dispatch_instruction(
         Instr::CallFevalMulti(argc, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match crate::call::feval::execute_feval(func_val, args, *out_count, semantic_registry)
+            match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
@@ -1169,7 +1169,7 @@ pub async fn dispatch_instruction(
         Instr::CallFevalExpandMultiOutput(specs, out_count) => {
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match crate::call::feval::execute_feval(func_val, args, *out_count, semantic_registry)
+            match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
@@ -1440,8 +1440,8 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CreateSemanticFunctionHandle(function, name) => {
-            stack.push(Value::SemanticFunctionHandle {
+        Instr::CreateBoundFunctionHandle(function, name) => {
+            stack.push(Value::BoundFunctionHandle {
                 name: name.clone(),
                 function: function.0,
             });

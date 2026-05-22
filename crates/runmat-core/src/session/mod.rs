@@ -70,7 +70,7 @@ pub struct RunMatSession {
     /// Stable ABI identity for this interactive workspace.
     abi_workspace_handle: crate::abi::WorkspaceHandle,
     /// Semantic function registry persisted across interactive inputs.
-    semantic_function_registry: runmat_vm::SemanticFunctionRegistry,
+    semantic_function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
@@ -109,7 +109,7 @@ pub(crate) struct PreparedExecution {
     lowering: LoweringResult,
     analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
-    semantic_function_registry_after_success: runmat_vm::SemanticFunctionRegistry,
+    semantic_function_registry_after_success: runmat_vm::FunctionRegistry,
     next_semantic_function_id_after_success: usize,
 }
 

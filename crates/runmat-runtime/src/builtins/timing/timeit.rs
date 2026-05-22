@@ -275,10 +275,10 @@ fn prepare_callable(
                 num_outputs,
             })
         }
-        Value::SemanticFunctionHandle { name, function } => {
+        Value::BoundFunctionHandle { name, function } => {
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
-                handle: Value::SemanticFunctionHandle {
+                handle: Value::BoundFunctionHandle {
                     name: normalized,
                     function,
                 },
@@ -306,7 +306,7 @@ fn prepare_callable(
 
 fn handle_for_name(name: &str) -> Option<Value> {
     let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
-    Some(Value::SemanticFunctionHandle {
+    Some(Value::BoundFunctionHandle {
         name: name.to_string(),
         function,
     })
@@ -446,7 +446,7 @@ pub(crate) mod tests {
         .expect("timeit should normalize function-handle payload name");
         assert_eq!(
             callable.handle,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".to_string(),
                 function: 188,
             }
@@ -471,7 +471,7 @@ pub(crate) mod tests {
         ));
 
         let callable = prepare_callable(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_target".to_string(),
                 function: 612,
             },
@@ -496,7 +496,7 @@ pub(crate) mod tests {
         .expect("timeit should accept string function handle");
         assert_eq!(
             callable.handle,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".to_string(),
                 function: 87,
             }
@@ -518,7 +518,7 @@ pub(crate) mod tests {
         .expect("timeit should accept char function handle");
         assert_eq!(
             callable.handle,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "__timeit_helper_counter_default".to_string(),
                 function: 88,
             }
@@ -538,7 +538,7 @@ pub(crate) mod tests {
         .expect("timeit should accept external function handle");
         assert_eq!(
             callable.handle,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "pkg.callback".to_string(),
                 function: 86,
             }
@@ -549,7 +549,7 @@ pub(crate) mod tests {
     #[test]
     fn timeit_accepts_semantic_function_handle() {
         let callable = prepare_callable(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_target".to_string(),
                 function: 41,
             },
@@ -558,7 +558,7 @@ pub(crate) mod tests {
         .expect("timeit should accept semantic function handle");
         assert_eq!(
             callable.handle,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_target".to_string(),
                 function: 41,
             }

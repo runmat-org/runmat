@@ -1,5 +1,5 @@
 use crate::{MirPlace, MirStmt};
-use runmat_hir::{HirExpr, HirExprKind, HirPlace, SemanticError};
+use runmat_hir::{HirError, HirExpr, HirExprKind, HirPlace};
 
 use super::{
     expr::{lower_indexing, lower_operand},
@@ -10,7 +10,7 @@ pub(crate) fn lower_place(
     ctx: &MirLoweringContext,
     place: &HirPlace,
     temps: &mut Vec<MirStmt>,
-) -> Result<MirPlace, SemanticError> {
+) -> Result<MirPlace, HirError> {
     Ok(match place {
         HirPlace::Binding(binding) => MirPlace::Local(ctx.local_for_binding(*binding)?),
         HirPlace::Member(base, member) => MirPlace::Member(
@@ -32,7 +32,7 @@ fn lower_expr_place(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
-) -> Result<MirPlace, SemanticError> {
+) -> Result<MirPlace, HirError> {
     Ok(match &expr.kind {
         HirExprKind::Binding(binding) => MirPlace::Local(ctx.local_for_binding(*binding)?),
         HirExprKind::Member(base, member) => MirPlace::Member(
@@ -47,6 +47,6 @@ fn lower_expr_place(
             Box::new(lower_expr_place(ctx, base, temps)?),
             lower_indexing(ctx, indexing, temps)?,
         ),
-        _ => return Err(SemanticError::new("expression is not a simple MIR place")),
+        _ => return Err(HirError::new("expression is not a simple MIR place")),
     })
 }

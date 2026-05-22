@@ -94,7 +94,7 @@ async fn uint16_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),

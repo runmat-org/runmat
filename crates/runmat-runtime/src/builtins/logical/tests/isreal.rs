@@ -97,7 +97,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. } => false,
+        | Value::BoundFunctionHandle { .. } => false,
         Value::Closure(_) => false,
         Value::ClassRef(_) => false,
         Value::MException(_) => false,

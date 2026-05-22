@@ -16,13 +16,12 @@ pub(crate) mod runtime;
 
 pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
-    ArgSpec, Bytecode, EmitLabel, EndExpr, Instr, SemanticAsyncMetadata, SemanticAwaitSite,
-    SemanticFunctionBytecode, SemanticFunctionRegistry, SemanticSpawnSite, StackEffect,
+    ArgSpec, AsyncMetadata, AwaitSite, Bytecode, EmitLabel, EndExpr, FunctionBytecode,
+    FunctionRegistry, Instr, SpawnSite, StackEffect,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
-    SemanticFusionCandidateGroup, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
-    SemanticFusionMetadata,
+    FusionCandidateGroup, FusionInstructionKind, FusionInstructionWindow, FusionMetadata,
 };
 pub use compiler::CompileError;
 pub use interpreter::api::{

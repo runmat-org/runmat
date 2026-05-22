@@ -2,9 +2,9 @@ use crate::{
     MirOutputTarget, MirOutputTargetList, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirExpr,
-    HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount,
-    SemanticError, Span, WorkspaceEffect,
+    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirError, HirExpr,
+    HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount, Span,
+    WorkspaceEffect,
 };
 use std::collections::HashMap;
 
@@ -14,7 +14,7 @@ pub(crate) fn lower_stmt_with_replacements(
     ctx: &MirLoweringContext,
     stmt: &HirStmt,
     await_replacements: &HashMap<ExprId, crate::MirOperand>,
-) -> Result<Vec<MirStmt>, SemanticError> {
+) -> Result<Vec<MirStmt>, HirError> {
     Ok(match &stmt.kind {
         HirStmtKind::Assign(place, expr, _) => {
             let mut stmts = Vec::new();
@@ -45,14 +45,14 @@ pub(crate) fn lower_stmt_with_replacements(
             };
             let requested_outputs = lowered_target_list
                 .validate_fixed_arity("MIR multi-assign")
-                .map_err(SemanticError::new)?;
+                .map_err(HirError::new)?;
             if let MirRvalue::Call(call) = &value {
                 let call_outputs = fixed_requested_output_count(
                     &call.requested_outputs,
                     "MIR call requested output count",
                 );
                 if call_outputs != requested_outputs {
-                    return Err(SemanticError::new(format!(
+                    return Err(HirError::new(format!(
                         "MIR call requested outputs ({call_outputs}) must match multi-assign targets ({requested_outputs})"
                     )));
                 }
@@ -98,7 +98,7 @@ pub(crate) fn lower_stmt_with_replacements(
         }],
         HirStmtKind::Return | HirStmtKind::Import(_) => Vec::new(),
         _ => {
-            return Err(SemanticError::new(format!(
+            return Err(HirError::new(format!(
                 "unexpected statement in stmt-level MIR lowering; control-flow lowering should have handled: {:?}",
                 stmt.kind
             )))
@@ -224,7 +224,7 @@ fn lower_output_targets(
     ctx: &MirLoweringContext,
     targets: &[OutputTarget],
     stmts: &mut Vec<MirStmt>,
-) -> Result<Vec<MirOutputTarget>, SemanticError> {
+) -> Result<Vec<MirOutputTarget>, HirError> {
     targets
         .iter()
         .map(|target| lower_output_target(ctx, target, stmts))
@@ -235,7 +235,7 @@ fn lower_output_target(
     ctx: &MirLoweringContext,
     target: &OutputTarget,
     stmts: &mut Vec<MirStmt>,
-) -> Result<MirOutputTarget, SemanticError> {
+) -> Result<MirOutputTarget, HirError> {
     Ok(match target {
         OutputTarget::Place(place) => {
             let mut temps = Vec::new();

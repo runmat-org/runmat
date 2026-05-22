@@ -210,7 +210,7 @@ pub enum Instr {
     CreateFunctionHandle(String),
     CreateExternalFunctionHandle(String),
     CreateMethodFunctionHandle(String),
-    CreateSemanticFunctionHandle(FunctionId, String),
+    CreateBoundFunctionHandle(FunctionId, String),
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
@@ -316,7 +316,7 @@ impl Instr {
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateMethodFunctionHandle(_)
-            | Instr::CreateSemanticFunctionHandle(_, _)
+            | Instr::CreateBoundFunctionHandle(_, _)
             | Instr::LoadVar(_)
             | Instr::LoadLocal(_) => effect(0, 1),
             Instr::StoreVar(_)

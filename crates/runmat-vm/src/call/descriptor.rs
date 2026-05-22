@@ -1,4 +1,4 @@
-use crate::bytecode::SemanticFunctionRegistry;
+use crate::bytecode::FunctionRegistry;
 use crate::call::feval::forward_builtin_feval;
 use crate::call::shared::strict_callable_display_name;
 use runmat_builtins::{Closure, Value};
@@ -177,9 +177,9 @@ impl CallableDescriptor {
 
     fn resolve_named_target(
         name: &str,
-        semantic_registry: &SemanticFunctionRegistry,
+        function_registry: &FunctionRegistry,
     ) -> (CallableIdentity, CallableFallbackPolicy) {
-        if let Some(function) = semantic_registry.resolve_name(name) {
+        if let Some(function) = function_registry.resolve_name(name) {
             return (
                 CallableIdentity::SemanticFunction(function),
                 CallableFallbackPolicy::None,
@@ -236,13 +236,13 @@ impl CallableDescriptor {
         func_val: Value,
         args: Vec<Value>,
         requested_outputs: usize,
-        semantic_registry: &SemanticFunctionRegistry,
+        function_registry: &FunctionRegistry,
     ) -> Self {
         match func_val {
             Value::String(text) => {
                 if let Some(name) = Self::parse_at_handle_name(&text) {
                     let (identity, fallback_policy) =
-                        Self::resolve_named_target(&name, semantic_registry);
+                        Self::resolve_named_target(&name, function_registry);
                     return Self::feval_resolved_name(
                         identity,
                         name,
@@ -257,7 +257,7 @@ impl CallableDescriptor {
                 let text: String = ca.data.iter().collect();
                 if let Some(name) = Self::parse_at_handle_name(&text) {
                     let (identity, fallback_policy) =
-                        Self::resolve_named_target(&name, semantic_registry);
+                        Self::resolve_named_target(&name, function_registry);
                     return Self::feval_resolved_name(
                         identity,
                         name,
@@ -271,7 +271,7 @@ impl CallableDescriptor {
             Value::StringArray(sa) if sa.data.len() == 1 => {
                 if let Some(name) = Self::parse_at_handle_name(&sa.data[0]) {
                     let (identity, fallback_policy) =
-                        Self::resolve_named_target(&name, semantic_registry);
+                        Self::resolve_named_target(&name, function_registry);
                     return Self::feval_resolved_name(
                         identity,
                         name,
@@ -283,16 +283,16 @@ impl CallableDescriptor {
                 Self::feval_forward(Value::StringArray(sa), args, requested_outputs)
             }
             Value::Closure(closure) => {
-                Self::from_closure(closure, args, requested_outputs, semantic_registry)
+                Self::from_closure(closure, args, requested_outputs, function_registry)
             }
             Value::FunctionHandle(name) => {
                 let (identity, fallback_policy) =
-                    Self::resolve_named_target(&name, semantic_registry);
+                    Self::resolve_named_target(&name, function_registry);
                 Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
             Value::ExternalFunctionHandle(name) => {
                 let (identity, fallback_policy) =
-                    Self::resolve_named_target(&name, semantic_registry);
+                    Self::resolve_named_target(&name, function_registry);
                 Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
             Value::MethodFunctionHandle(name) => Self::feval_resolved_name(
@@ -302,7 +302,7 @@ impl CallableDescriptor {
                 args,
                 requested_outputs,
             ),
-            Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
+            Value::BoundFunctionHandle { name, function } => Self::feval_semantic(
                 function,
                 name,
                 CallableFallbackPolicy::None,
@@ -317,7 +317,7 @@ impl CallableDescriptor {
         closure: Closure,
         args: Vec<Value>,
         requested_outputs: usize,
-        semantic_registry: &SemanticFunctionRegistry,
+        function_registry: &FunctionRegistry,
     ) -> Self {
         let name = closure.function_name;
         let mut call_args = closure.captures;
@@ -331,7 +331,7 @@ impl CallableDescriptor {
                 requested_outputs,
             );
         }
-        if let Some(function) = semantic_registry.resolve_name(&name) {
+        if let Some(function) = function_registry.resolve_name(&name) {
             return Self::feval_semantic(
                 function.0,
                 name,
@@ -340,7 +340,7 @@ impl CallableDescriptor {
                 requested_outputs,
             );
         }
-        let (identity, fallback_policy) = Self::resolve_named_target(&name, semantic_registry);
+        let (identity, fallback_policy) = Self::resolve_named_target(&name, function_registry);
         Self::feval_resolved_name(
             identity,
             name,
@@ -442,7 +442,7 @@ async fn execute_resolved_callable(
             Err(function_unavailable_error(function.0, &metadata))
         }
         other => {
-            let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+            let request = runmat_runtime::user_functions::CallableRequest::resolved(
                 other.clone(),
                 fallback_policy,
                 args.clone(),
@@ -486,7 +486,7 @@ async fn try_execute_resolved_callable(
             Ok(None)
         }
         other => {
-            let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+            let request = runmat_runtime::user_functions::CallableRequest::resolved(
                 other.clone(),
                 fallback_policy,
                 args.clone(),
@@ -562,7 +562,7 @@ mod tests {
         execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
         CallableDescriptor, CallableTarget,
     };
-    use crate::bytecode::SemanticFunctionRegistry;
+    use crate::bytecode::FunctionRegistry;
     use futures::executor::block_on;
     use runmat_builtins::{Closure, StringArray, Tensor, Value};
     use runmat_hir::{
@@ -909,7 +909,7 @@ mod tests {
             Value::FunctionHandle("sqrt".to_string()),
             vec![Value::Num(9.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("builtin handle feval should execute");
@@ -922,7 +922,7 @@ mod tests {
             Value::FunctionHandle("pkg.remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -941,7 +941,7 @@ mod tests {
             Value::MethodFunctionHandle("resolved_method".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -975,7 +975,7 @@ mod tests {
             Value::MethodFunctionHandle("resolved_method".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("method function handle should resolve through semantic resolver");
@@ -1000,7 +1000,7 @@ mod tests {
             Value::FunctionHandle("pkg.remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("qualified function handle should resolve through semantic resolver");
@@ -1009,7 +1009,7 @@ mod tests {
 
     #[test]
     fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
-        let mut registry = SemanticFunctionRegistry::default();
+        let mut registry = FunctionRegistry::default();
         registry.names.insert("inc".to_string(), FunctionId(4242));
 
         let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
-        let mut registry = SemanticFunctionRegistry::default();
+        let mut registry = FunctionRegistry::default();
         registry.names.insert("inc".to_string(), FunctionId(9999));
 
         let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
@@ -1071,7 +1071,7 @@ mod tests {
             Value::FunctionHandle("pkg..remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -1096,7 +1096,7 @@ mod tests {
             Value::ExternalFunctionHandle("pkg..remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -1121,7 +1121,7 @@ mod tests {
             Value::ExternalFunctionHandle("origin".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -1146,7 +1146,7 @@ mod tests {
             Value::String("@pkg.remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -1177,7 +1177,7 @@ mod tests {
             Value::String("@pkg.remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("@handle literal should resolve through semantic resolver");
@@ -1193,7 +1193,7 @@ mod tests {
             ),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let CallableTarget::Resolved {
             identity,
@@ -1227,7 +1227,7 @@ mod tests {
             ),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("string-array @handle should resolve through semantic resolver");
@@ -1252,7 +1252,7 @@ mod tests {
             Value::ExternalFunctionHandle("pkg.remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("external function handle should resolve through semantic resolver");
@@ -1272,7 +1272,7 @@ mod tests {
                 Box::pin(async { Ok(Value::Num(3.0)) })
             })),
         );
-        let mut registry = SemanticFunctionRegistry::default();
+        let mut registry = FunctionRegistry::default();
         registry
             .names
             .insert("pkg.remote_inc".to_string(), FunctionId(8181));
@@ -1303,13 +1303,13 @@ mod tests {
         );
 
         let descriptor = CallableDescriptor::from_feval_value(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "inc".to_string(),
                 function: 4242,
             },
             vec![Value::Num(2.0)],
             1,
-            &SemanticFunctionRegistry::default(),
+            &FunctionRegistry::default(),
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("semantic function handle should use embedded semantic function id");

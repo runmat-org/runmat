@@ -1,10 +1,10 @@
 use crate::{MirAssembly, MirBody, MirOperand, MirTerminator, MirTerminatorKind};
-use runmat_hir::{HirAssembly, HirFunction, SemanticError};
+use runmat_hir::{HirAssembly, HirError, HirFunction};
 use std::collections::HashSet;
 
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
 
-pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
+pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
     let mut assembly = MirAssembly::default();
     let async_functions: HashSet<_> = hir
         .functions
@@ -27,7 +27,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
 fn lower_function_with_context(
     function: &HirFunction,
     mut ctx: MirLoweringContext,
-) -> Result<MirBody, SemanticError> {
+) -> Result<MirBody, HirError> {
     let mut locals = ctx.locals_for_function(function);
     let returns: Vec<MirOperand> = function
         .outputs
@@ -39,7 +39,7 @@ fn lower_function_with_context(
                 span: function.span,
             };
             lower_simple_operand(&ctx, &expr)?.ok_or_else(|| {
-                SemanticError::new("function return binding did not lower to a simple MIR operand")
+                HirError::new("function return binding did not lower to a simple MIR operand")
             })
         })
         .collect::<Result<_, _>>()?;

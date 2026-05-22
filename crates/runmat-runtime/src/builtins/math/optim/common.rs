@@ -270,7 +270,7 @@ mod tests {
         let canonical = canonicalize_callback_handle(&Value::FunctionHandle("decay".to_string()));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "decay".to_string(),
                 function: 42,
             }
@@ -287,7 +287,7 @@ mod tests {
             canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".to_string()));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "pkg.decay".to_string(),
                 function: 43,
             }
@@ -314,7 +314,7 @@ mod tests {
         let canonical = canonicalize_callback_handle(&Value::String("@decay".to_string()));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "decay".to_string(),
                 function: 45,
             }
@@ -330,7 +330,7 @@ mod tests {
         let canonical = canonicalize_callback_handle(&Value::String("  @decay  ".to_string()));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "decay".to_string(),
                 function: 145,
             }
@@ -348,7 +348,7 @@ mod tests {
         ));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "pkg.decay".to_string(),
                 function: 46,
             }
@@ -366,7 +366,7 @@ mod tests {
         ));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "pkg.decay".to_string(),
                 function: 146,
             }
@@ -383,7 +383,7 @@ mod tests {
             canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("@decay")));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "decay".to_string(),
                 function: 47,
             }
@@ -400,7 +400,7 @@ mod tests {
             canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("  @decay  ")));
         assert_eq!(
             canonical,
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "decay".to_string(),
                 function: 147,
             }

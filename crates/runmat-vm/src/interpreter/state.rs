@@ -108,9 +108,7 @@ impl InterpreterState {
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
     use super::InterpreterState;
-    use crate::bytecode::{
-        Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
-    };
+    use crate::bytecode::{Bytecode, FusionInstructionKind, FusionInstructionWindow};
     use runmat_accelerate::graph::{AccelNodeLabel, InstrSpan, PrimitiveOp};
 
     #[test]
@@ -131,9 +129,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let mut initial_vars = Vec::new();
@@ -175,9 +173,9 @@ mod tests {
             .mir_fusion_candidate_group_count = 1;
         bytecode
             .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            .semantic_instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
-            kind: SemanticFusionInstructionKind::Elementwise,
+            kind: FusionInstructionKind::Elementwise,
         }];
 
         let mut initial_vars = Vec::new();

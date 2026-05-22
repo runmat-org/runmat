@@ -4,7 +4,7 @@ use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
 };
-use runmat_vm::{ArgSpec, Bytecode, Instr, SemanticFunctionBytecode};
+use runmat_vm::{ArgSpec, Bytecode, FunctionBytecode, Instr};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
@@ -1016,7 +1016,7 @@ fn test_jit_direct_semantic_function_call() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1070,7 +1070,7 @@ fn test_jit_named_call_resolves_semantic_registry() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1127,7 +1127,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1184,7 +1184,7 @@ fn test_jit_semantic_multi_output_call() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "pair".to_string(),
         source_id: None,
@@ -1243,7 +1243,7 @@ fn test_jit_named_semantic_multi_output_call() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "pair".to_string(),
         source_id: None,
@@ -1305,7 +1305,7 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "inc".to_string(),
         source_id: None,
@@ -1370,7 +1370,7 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "pair".to_string(),
         source_id: None,
@@ -1440,7 +1440,7 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
     let function = runmat_hir::FunctionId(1);
-    let semantic_function = SemanticFunctionBytecode {
+    let semantic_function = FunctionBytecode {
         function,
         display_name: "add2".to_string(),
         source_id: None,
@@ -1651,7 +1651,7 @@ fn test_jit_mixed_execution_patterns() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "square".to_string(),
             source_id: None,
@@ -1720,7 +1720,7 @@ fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "double_pair".to_string(),
             source_id: None,
@@ -1789,7 +1789,7 @@ fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_displa
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "double_pair".to_string(),
             source_id: None,
@@ -1868,7 +1868,7 @@ fn test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_na
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "pkg.double_pair".to_string(),
             source_id: None,
@@ -1946,7 +1946,7 @@ fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "pkg.remote_pair".to_string(),
             source_id: None,
@@ -2018,7 +2018,7 @@ fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "pkg..remote_pair".to_string(),
             source_id: None,
@@ -2170,7 +2170,7 @@ fn test_jit_simple_function_compilation() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "double".to_string(),
             source_id: None,
@@ -2247,7 +2247,7 @@ fn test_jit_nested_function_calls_compilation() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         add,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function: add,
             display_name: "add".to_string(),
             source_id: None,
@@ -2269,7 +2269,7 @@ fn test_jit_nested_function_calls_compilation() {
     );
     semantic_functions.insert(
         multiply_and_add,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function: multiply_and_add,
             display_name: "multiply_and_add".to_string(),
             source_id: None,
@@ -2344,7 +2344,7 @@ fn test_jit_function_parameter_validation() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "add_two".to_string(),
             source_id: None,
@@ -2429,7 +2429,7 @@ fn test_jit_function_variable_isolation() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "isolate_test".to_string(),
             source_id: None,
@@ -2500,7 +2500,7 @@ fn test_jit_function_compilation_performance() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "compute_intensive".to_string(),
             source_id: None,
@@ -2594,7 +2594,7 @@ fn test_jit_function_error_handling() {
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(
         function,
-        SemanticFunctionBytecode {
+        FunctionBytecode {
             function,
             display_name: "simple".to_string(),
             source_id: None,

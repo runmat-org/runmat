@@ -435,7 +435,7 @@ mod tests {
             },
         )));
         let root = block_on(fsolve_builtin(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_system".to_string(),
                 function: 43,
             },

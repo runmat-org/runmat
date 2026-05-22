@@ -31,7 +31,7 @@ pub fn infer_binding_shapes(
         .collect()
 }
 
-fn mir_lowering_diagnostic(err: runmat_hir::SemanticError) -> HirDiagnostic {
+fn mir_lowering_diagnostic(err: runmat_hir::HirError) -> HirDiagnostic {
     HirDiagnostic::new(
         "lint.mir.lowering_failed",
         HirDiagnosticSeverity::Error,

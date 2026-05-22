@@ -1,6 +1,6 @@
 use crate::{BasicBlock, BasicBlockId, MirOperand, MirPlace, MirTerminator, MirTerminatorKind};
 use runmat_hir::{
-    ExprId, HirBlock, HirExpr, HirExprKind, HirStmt, HirStmtKind, SemanticError, Span, StmtId,
+    ExprId, HirBlock, HirError, HirExpr, HirExprKind, HirStmt, HirStmtKind, Span, StmtId,
 };
 use std::collections::HashMap;
 
@@ -33,7 +33,7 @@ impl ControlFlowBuilder {
         ctx: &MirLoweringContext,
         body: &HirBlock,
         return_terminator: MirTerminator,
-    ) -> Result<Vec<BasicBlock>, SemanticError> {
+    ) -> Result<Vec<BasicBlock>, HirError> {
         let entry = self.fresh_block();
         let entry = self.lower_block_from(
             ctx,
@@ -60,7 +60,7 @@ impl ControlFlowBuilder {
         return_terminator: &MirTerminator,
         loop_targets: Option<(BasicBlockId, BasicBlockId)>,
         await_replacements: &HashMap<ExprId, MirOperand>,
-    ) -> Result<BasicBlock, SemanticError> {
+    ) -> Result<BasicBlock, HirError> {
         let mut statements = Vec::new();
         for (idx, stmt) in body.statements.iter().enumerate().skip(start) {
             if let Some(await_expr) = first_unlowered_await_in_stmt(stmt, await_replacements) {
@@ -438,7 +438,7 @@ impl ControlFlowBuilder {
             }
             if matches!(stmt.kind, HirStmtKind::Break) {
                 let Some((_, break_target)) = loop_targets else {
-                    return Err(SemanticError::new("break outside loop"));
+                    return Err(HirError::new("break outside loop"));
                 };
                 return Ok(BasicBlock {
                     id,
@@ -451,7 +451,7 @@ impl ControlFlowBuilder {
             }
             if matches!(stmt.kind, HirStmtKind::Continue) {
                 let Some((continue_target, _)) = loop_targets else {
-                    return Err(SemanticError::new("continue outside loop"));
+                    return Err(HirError::new("continue outside loop"));
                 };
                 return Ok(BasicBlock {
                     id,
@@ -553,7 +553,7 @@ impl ControlFlowBuilder {
         return_terminator: &MirTerminator,
         loop_targets: Option<(BasicBlockId, BasicBlockId)>,
         await_replacements: &HashMap<ExprId, MirOperand>,
-    ) -> Result<BasicBlockId, SemanticError> {
+    ) -> Result<BasicBlockId, HirError> {
         let id = self.fresh_block();
         let block = self.lower_block_from(
             ctx,
@@ -581,7 +581,7 @@ fn top_level_await_result(
     stmt: &HirStmt,
     await_expr: &HirExpr,
     statements: &mut Vec<crate::MirStmt>,
-) -> Result<TopLevelAwaitResult, SemanticError> {
+) -> Result<TopLevelAwaitResult, HirError> {
     match &stmt.kind {
         HirStmtKind::ExprStmt(expr, _) if expr.id == await_expr.id => {
             Ok(TopLevelAwaitResult::ExpressionStatement)

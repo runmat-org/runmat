@@ -283,7 +283,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. } => "FunctionHandle",
+        | Value::BoundFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",

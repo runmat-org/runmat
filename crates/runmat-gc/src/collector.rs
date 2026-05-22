@@ -209,7 +209,7 @@ impl MarkSweepCollector {
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::SemanticFunctionHandle { .. } => {}
+            | Value::BoundFunctionHandle { .. } => {}
             Value::ClassRef(_) => {}
             Value::Closure(c) => {
                 for v in &c.captures {
@@ -270,7 +270,7 @@ impl MarkSweepCollector {
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::SemanticFunctionHandle { .. } => {}
+            | Value::BoundFunctionHandle { .. } => {}
             Value::ClassRef(_) => {}
             Value::Closure(c) => {
                 for v in &c.captures {

@@ -432,7 +432,7 @@ impl CallableFallbackPolicy {
         }
     }
 
-    pub fn semantic_resolution_name_for(self, identity: &CallableIdentity) -> Option<String> {
+    pub fn resolution_name_for(self, identity: &CallableIdentity) -> Option<String> {
         if !self.allows_semantic_name_resolution_for(identity) {
             return None;
         }
@@ -863,7 +863,7 @@ pub enum CallKind {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub struct SemanticIndex {
+pub struct HirIndex {
     pub bindings: Vec<BindingResolution>,
     pub functions: Vec<FunctionResolution>,
     pub classes: Vec<ClassResolution>,
@@ -1102,7 +1102,7 @@ pub struct StringLiteral(pub String);
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,
-    pub semantic_index: SemanticIndex,
+    pub semantic_index: HirIndex,
 }
 
 #[cfg(test)]
@@ -1505,17 +1505,17 @@ mod tests {
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution
-                .semantic_resolution_name_for(&imported_missing_item),
+                .resolution_name_for(&imported_missing_item),
             None
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution
-                .semantic_resolution_name_for(&imported_empty_item_name),
+                .resolution_name_for(&imported_empty_item_name),
             None
         );
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution
-                .semantic_resolution_name_for(&imported_mismatched_item),
+                .resolution_name_for(&imported_mismatched_item),
             None
         );
         assert_eq!(
@@ -1523,12 +1523,11 @@ mod tests {
             None
         );
         assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution.semantic_resolution_name_for(&method),
+            CallableFallbackPolicy::RuntimeNameResolution.resolution_name_for(&method),
             Some("deal".into())
         );
         assert_eq!(
-            CallableFallbackPolicy::RuntimeNameResolution
-                .semantic_resolution_name_for(&whitespace_method),
+            CallableFallbackPolicy::RuntimeNameResolution.resolution_name_for(&whitespace_method),
             None
         );
         assert_eq!(
@@ -1536,7 +1535,7 @@ mod tests {
             None
         );
         assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary.semantic_resolution_name_for(&single_external),
+            CallableFallbackPolicy::ExternalBoundary.resolution_name_for(&single_external),
             None
         );
         assert_eq!(
@@ -1544,8 +1543,7 @@ mod tests {
             Some("OverIdx.plus".into())
         );
         assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary
-                .semantic_resolution_name_for(&qualified_external),
+            CallableFallbackPolicy::ExternalBoundary.resolution_name_for(&qualified_external),
             Some("OverIdx.plus".into())
         );
         assert_eq!(
@@ -1553,8 +1551,7 @@ mod tests {
             None
         );
         assert_eq!(
-            CallableFallbackPolicy::ExternalBoundary
-                .semantic_resolution_name_for(&whitespace_external),
+            CallableFallbackPolicy::ExternalBoundary.resolution_name_for(&whitespace_external),
             None
         );
         assert_eq!(

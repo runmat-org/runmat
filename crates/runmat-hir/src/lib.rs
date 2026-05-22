@@ -12,7 +12,7 @@ pub use diagnostic::{
     HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,
     HirDiagnosticSuggestion,
 };
-pub use error::{set_error_namespace, SemanticError};
+pub use error::{set_error_namespace, HirError};
 pub use hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, AsyncValueFact, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
@@ -23,13 +23,13 @@ pub use hir::{
     FunctionHandleTarget, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
     FutureFact, FutureStateFact, HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef,
     HirClass, HirCommandCall, HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport,
-    HirModule, HirPlace, HirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
-    IndexResultContext, IndexingSemantics, LoweringResult, MemberAccess, MemberName,
+    HirIndex, HirModule, HirPlace, HirStmt, HirStmtKind, ImportResolution, IndexComponent,
+    IndexKind, IndexResultContext, IndexingSemantics, LoweringResult, MemberAccess, MemberName,
     MethodAttributes, MethodId, MethodName, NumericClass, NumericDomain, OperatorKind,
     OutputTarget, OutputTargetList, PackageName, PlaceMutation, PlaceMutationKind,
     PropertyAttributes, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
-    SemanticIndex, ShapeFact, SourceUnitKind, SpawnSafetyFact, SpawnSafetyReason, StringLiteral,
-    SymbolName, TaskHandleFact, TensorElementDomainFact, TensorTypeFact, TypeFact, ValueFlowFact,
+    ShapeFact, SourceUnitKind, SpawnSafetyFact, SpawnSafetyReason, StringLiteral, SymbolName,
+    TaskHandleFact, TensorElementDomainFact, TensorTypeFact, TypeFact, ValueFlowFact,
     WorkspaceEffect, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
     DISCARD_OUTPUT_NAME, FEVAL_BUILTIN_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
     SPAWN_EXTENSION_NAME, TEST_CLASS_REGISTRATION_BUILTIN_NAME,

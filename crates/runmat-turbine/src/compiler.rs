@@ -9,13 +9,13 @@ use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use runmat_vm::ArgSpec;
-use runmat_vm::{Instr, SemanticFunctionRegistry};
+use runmat_vm::{FunctionRegistry, Instr};
 use std::collections::{BTreeSet, HashMap};
 
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
-    semantic_registry: &'a SemanticFunctionRegistry,
+    function_registry: &'a FunctionRegistry,
     module: &'a mut JITModule,
     runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
@@ -233,7 +233,7 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
-        semantic_registry: &SemanticFunctionRegistry,
+        function_registry: &FunctionRegistry,
         module: &mut JITModule,
         runmat_call_semantic_function_id: FuncId,
         runmat_call_semantic_function_outputs_id: FuncId,
@@ -274,7 +274,7 @@ impl BytecodeCompiler {
         // Compile with control flow graph
         let mut ctx = CompileContext {
             vars_ptr,
-            semantic_registry,
+            function_registry,
             module,
             runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
@@ -901,7 +901,7 @@ impl BytecodeCompiler {
                         let results = if Self::resolve_named_multi_call_target(
                             identity,
                             *fallback_policy,
-                            ctx.semantic_registry,
+                            ctx.function_registry,
                         )
                         .is_some()
                         {
@@ -978,7 +978,7 @@ impl BytecodeCompiler {
                     | Instr::CreateFunctionHandle(_)
                     | Instr::CreateExternalFunctionHandle(_)
                     | Instr::CreateMethodFunctionHandle(_)
-                    | Instr::CreateSemanticFunctionHandle(_, _)
+                    | Instr::CreateBoundFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
                     | Instr::CallMethodOrMemberIndexMulti { .. }
@@ -1101,7 +1101,7 @@ impl BytecodeCompiler {
         out_count: usize,
     ) -> Result<Vec<Value>> {
         let Some(function) =
-            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.semantic_registry)
+            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.function_registry)
         else {
             return Err(execution_error(
                 "Named multi-output function calls without semantic identities are not supported in JIT; use interpreter",
@@ -1128,7 +1128,7 @@ impl BytecodeCompiler {
         out_count: usize,
     ) -> Result<Vec<Value>> {
         let Some(function) =
-            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.semantic_registry)
+            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.function_registry)
         else {
             return Err(execution_error(
                 "Named expanded multi-output function calls without semantic identities are not supported in JIT; use interpreter",
@@ -1149,13 +1149,13 @@ impl BytecodeCompiler {
     fn resolve_named_multi_call_target(
         identity: &runmat_hir::CallableIdentity,
         fallback_policy: runmat_hir::CallableFallbackPolicy,
-        semantic_registry: &runmat_vm::SemanticFunctionRegistry,
+        function_registry: &runmat_vm::FunctionRegistry,
     ) -> Option<runmat_hir::FunctionId> {
         if let runmat_hir::CallableIdentity::SemanticFunction(function) = identity {
             return Some(*function);
         }
-        let name = fallback_policy.semantic_resolution_name_for(identity)?;
-        semantic_registry.resolve_name(&name)
+        let name = fallback_policy.resolution_name_for(identity)?;
+        function_registry.resolve_name(&name)
     }
 
     fn call_semantic_function_jit(

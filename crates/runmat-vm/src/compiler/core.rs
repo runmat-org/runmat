@@ -3046,14 +3046,14 @@ impl Compiler {
                 else {
                     // External semantic function identities may not have a local VM layout in the
                     // current compilation unit. Keep the identity and emit a simple semantic handle.
-                    self.emit(Instr::CreateSemanticFunctionHandle(
+                    self.emit(Instr::CreateBoundFunctionHandle(
                         *function,
                         format!("semantic_function_{}", function.0),
                     ));
                     return Ok(());
                 };
                 if captures.is_empty() {
-                    self.emit(Instr::CreateSemanticFunctionHandle(*function, display_name));
+                    self.emit(Instr::CreateBoundFunctionHandle(*function, display_name));
                     return Ok(());
                 }
                 for capture in &captures {

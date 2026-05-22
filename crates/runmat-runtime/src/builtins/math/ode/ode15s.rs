@@ -169,7 +169,7 @@ mod tests {
         )));
 
         let out = block_on(ode15s_builtin(
-            Value::SemanticFunctionHandle {
+            Value::BoundFunctionHandle {
                 name: "semantic_stiff_decay".to_string(),
                 function: 57,
             },

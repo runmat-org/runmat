@@ -20,13 +20,13 @@ pub fn set_error_namespace(namespace: &str) {
 }
 
 #[derive(Debug, Clone)]
-pub struct SemanticError {
+pub struct HirError {
     pub message: String,
     pub span: Option<Span>,
     pub identifier: Option<String>,
 }
 
-impl SemanticError {
+impl HirError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -46,16 +46,16 @@ impl SemanticError {
     }
 }
 
-impl std::fmt::Display for SemanticError {
+impl std::fmt::Display for HirError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl std::error::Error for SemanticError {}
+impl std::error::Error for HirError {}
 
-impl From<String> for SemanticError {
+impl From<String> for HirError {
     fn from(value: String) -> Self {
-        SemanticError::new(value)
+        HirError::new(value)
     }
 }

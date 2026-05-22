@@ -335,7 +335,7 @@ async fn execute_brace_operation(
         Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::SemanticFunctionHandle { .. }
+            | Value::BoundFunctionHandle { .. }
             | Value::Closure(_)
     ) {
         return Err(crate::interpreter::errors::mex(
@@ -815,7 +815,7 @@ pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
     vars: &mut Vec<Value>,
-    semantic_registry: &crate::bytecode::SemanticFunctionRegistry,
+    function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
     mut clear_value_residency: impl FnMut(&Value),
 ) -> Result<bool, RuntimeError> {
@@ -856,10 +856,10 @@ pub async fn dispatch_indexing(
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::SemanticFunctionHandle { .. }
+                | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_) => {
                     let args = raw_indices;
-                    match crate::call::feval::execute_feval(base, args, 1, semantic_registry)
+                    match crate::call::feval::execute_feval(base, args, 1, function_registry)
                         .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
@@ -1032,7 +1032,7 @@ pub async fn dispatch_indexing(
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::SemanticFunctionHandle { .. }
+                | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_) => {
                     return Err(crate::interpreter::errors::mex(
                         "UnsupportedFunctionHandleSelector",
@@ -1183,7 +1183,7 @@ pub async fn dispatch_indexing(
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::SemanticFunctionHandle { .. }
+                | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_) => {
                     if *colon_mask != 0 || *end_mask != 0 {
                         return Err(crate::interpreter::errors::mex(
@@ -1192,7 +1192,7 @@ pub async fn dispatch_indexing(
                         ));
                     }
                     let args = numeric;
-                    match crate::call::feval::execute_feval(base, args, 1, semantic_registry)
+                    match crate::call::feval::execute_feval(base, args, 1, function_registry)
                         .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
@@ -1387,7 +1387,7 @@ pub async fn dispatch_indexing(
                 Value::FunctionHandle(_)
                 | Value::ExternalFunctionHandle(_)
                 | Value::MethodFunctionHandle(_)
-                | Value::SemanticFunctionHandle { .. }
+                | Value::BoundFunctionHandle { .. }
                 | Value::Closure(_) => {
                     return Err(crate::interpreter::errors::mex(
                         "UnsupportedFunctionHandleSelector",

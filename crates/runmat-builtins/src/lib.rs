@@ -101,7 +101,7 @@ pub enum Value {
     // Function handle preserving typed method identity.
     MethodFunctionHandle(String),
     // Function handle with compiler/session semantic identity.
-    SemanticFunctionHandle {
+    BoundFunctionHandle {
         name: String,
         function: usize,
     },
@@ -1174,7 +1174,7 @@ impl Type {
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
             | Value::MethodFunctionHandle(_)
-            | Value::SemanticFunctionHandle { .. } => Type::Function {
+            | Value::BoundFunctionHandle { .. } => Type::Function {
                 params: vec![Type::Unknown],
                 returns: Box::new(Type::Unknown),
             },
@@ -1936,7 +1936,7 @@ impl fmt::Display for Value {
             | Value::MethodFunctionHandle(name) => {
                 write!(f, "@{name}")
             }
-            Value::SemanticFunctionHandle { name, .. } => write!(f, "@{name}"),
+            Value::BoundFunctionHandle { name, .. } => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",

@@ -136,7 +136,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
-        | Value::SemanticFunctionHandle { .. }
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)

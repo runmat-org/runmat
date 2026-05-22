@@ -117,7 +117,7 @@ impl RunMatSession {
         let Some(entrypoint) = assembly.entrypoints.first() else {
             let semantic_functions = runmat_vm::compile_semantic_function_registry(assembly, mir)?;
             let semantic_function_registry =
-                runmat_vm::SemanticFunctionRegistry::new(semantic_functions.clone());
+                runmat_vm::FunctionRegistry::new(semantic_functions.clone());
             let mut bytecode = runmat_vm::Bytecode::empty();
             bytecode.semantic_functions = semantic_functions;
             bytecode.semantic_function_registry = semantic_function_registry;
@@ -129,10 +129,10 @@ impl RunMatSession {
     fn prepare_session_semantic_function_registry(
         &self,
         bytecode: &mut runmat_vm::Bytecode,
-    ) -> (runmat_vm::SemanticFunctionRegistry, usize) {
+    ) -> (runmat_vm::FunctionRegistry, usize) {
         let mut session_registry = self.semantic_function_registry.clone();
         let mut next_semantic_function_id = self.next_semantic_function_id;
-        let current_registry = bytecode.semantic_registry();
+        let current_registry = bytecode.function_registry();
         if current_registry.functions.is_empty() {
             bytecode.semantic_function_registry = session_registry.clone();
             bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
@@ -301,7 +301,7 @@ fn remap_semantic_function_instr(
 ) {
     match instr {
         runmat_vm::Instr::CreateSemanticClosure(function, _, _)
-        | runmat_vm::Instr::CreateSemanticFunctionHandle(function, _)
+        | runmat_vm::Instr::CreateBoundFunctionHandle(function, _)
         | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
             if let Some(new_id) = remap.get(function).copied() {
@@ -342,7 +342,7 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
         match instr {
             runmat_vm::Instr::CreateFunctionHandle(name) => {
                 if let Some(function) = registry.resolve_name(name) {
-                    *instr = runmat_vm::Instr::CreateSemanticFunctionHandle(function, name.clone());
+                    *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
                 }
             }
             runmat_vm::Instr::IndexSliceExpr {
@@ -375,7 +375,7 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
 
 fn bind_semantic_callback_literals(
     bytecode: &mut runmat_vm::Bytecode,
-    registry: &runmat_vm::SemanticFunctionRegistry,
+    registry: &runmat_vm::FunctionRegistry,
 ) {
     let mut stack: Vec<usize> = Vec::new();
     let mut replacements = Vec::new();
@@ -438,13 +438,13 @@ fn bind_semantic_callback_literals(
 
     for (producer, function, display_name) in replacements {
         bytecode.instructions[producer] =
-            runmat_vm::Instr::CreateSemanticFunctionHandle(function, display_name);
+            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name);
     }
 }
 
 fn callback_literal(
     instr: Option<&runmat_vm::Instr>,
-    registry: &runmat_vm::SemanticFunctionRegistry,
+    registry: &runmat_vm::FunctionRegistry,
 ) -> Option<(runmat_hir::FunctionId, String)> {
     let text = match instr? {
         runmat_vm::Instr::LoadString(text) | runmat_vm::Instr::LoadCharRow(text) => text,
@@ -461,7 +461,7 @@ fn callback_literal(
 
 fn bind_optional_end_exprs(
     exprs: &mut [Option<runmat_vm::EndExpr>],
-    registry: &runmat_vm::SemanticFunctionRegistry,
+    registry: &runmat_vm::FunctionRegistry,
 ) {
     for expr in exprs.iter_mut().flatten() {
         bind_semantic_function_end_expr(expr, registry);
@@ -470,7 +470,7 @@ fn bind_optional_end_exprs(
 
 fn bind_semantic_function_end_expr(
     expr: &mut runmat_vm::EndExpr,
-    registry: &runmat_vm::SemanticFunctionRegistry,
+    registry: &runmat_vm::FunctionRegistry,
 ) {
     match expr {
         runmat_vm::EndExpr::ResolvedCall { identity, args, .. } => {

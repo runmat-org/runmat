@@ -2162,7 +2162,7 @@ fn semantic_function_handle_index_call_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "semantic function handle index calls should carry semantic identity"
     );
@@ -2187,7 +2187,7 @@ fn semantic_function_handle_index_zero_output_executes() {
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
         )),
         "semantic function handle zero-output index calls should carry semantic identity"
     );
@@ -2206,7 +2206,7 @@ fn semantic_function_handle_index_multi_output_executes() {
     let bytecode = compile_semantic_source(source).expect("compile semantic handle multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -2224,7 +2224,7 @@ fn semantic_function_handle_expand_single_output_executes() {
         compile_semantic_source(source).expect("compile semantic handle expanded single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -2243,7 +2243,7 @@ fn semantic_function_handle_expand_zero_output_executes() {
         compile_semantic_source(source).expect("compile semantic handle expanded zero-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -2262,7 +2262,7 @@ fn semantic_function_handle_expand_multi_output_executes() {
         compile_semantic_source(source).expect("compile semantic handle expanded multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+        runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
     )));
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
