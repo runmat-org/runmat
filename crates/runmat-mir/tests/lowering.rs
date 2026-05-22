@@ -1272,6 +1272,56 @@ fn cell_literal_lowers_to_mir_aggregate() {
 }
 
 #[test]
+fn struct_aggregate_literal_lowers_to_mir_struct_literal() {
+    let mir = lower_mir("s = struct{a = 1, a = 2};");
+    let body = mir.bodies.values().next().expect("body");
+    let value = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign { value, .. } => Some(value),
+            _ => None,
+        })
+        .expect("assignment");
+    let MirRvalue::StructLiteral { fields } = value else {
+        panic!("expected MIR struct literal");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].0 .0, "a");
+    assert_eq!(fields[1].0 .0, "a");
+}
+
+#[test]
+fn object_aggregate_literal_lowers_to_mir_object_literal() {
+    let mir = lower_mir("p = ?Point{x = 1, y = 2};");
+    let body = mir.bodies.values().next().expect("body");
+    let value = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign { value, .. } => Some(value),
+            _ => None,
+        })
+        .expect("assignment");
+    let MirRvalue::ObjectLiteral { class_name, fields } = value else {
+        panic!("expected MIR object literal");
+    };
+    assert_eq!(
+        class_name
+            .0
+            .iter()
+            .map(|segment| segment.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Point"]
+    );
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].0 .0, "x");
+    assert_eq!(fields[1].0 .0, "y");
+}
+
+#[test]
 fn complex_call_arguments_lower_through_temporary_locals() {
     let mir = lower_mir("function y = g(x); y = f(x + 1); end\nfunction z = f(a); z = a; end");
     let body = mir

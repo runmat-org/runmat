@@ -219,6 +219,10 @@ impl Parser {
                 let span = self.span_from(start, end);
                 expr = Expr::Index(Box::new(expr), indices, span);
             } else if self.consume(&Token::LBrace) {
+                if let Some(aggregate_expr) = self.try_parse_brace_aggregate_literal(&expr)? {
+                    expr = aggregate_expr;
+                    continue;
+                }
                 let start = expr.span().start;
                 let mut indices = Vec::new();
                 indices.push(self.parse_expr()?);
@@ -564,5 +568,72 @@ impl Parser {
         }
         self.skip_newlines();
         Ok(Expr::Cell(rows, Span::default()))
+    }
+
+    fn try_parse_brace_aggregate_literal(&mut self, base: &Expr) -> Result<Option<Expr>, String> {
+        enum AggregateBase {
+            Struct,
+            Object(String),
+        }
+
+        let aggregate_base = match base {
+            Expr::Ident(name, _) if name == "struct" => AggregateBase::Struct,
+            Expr::MetaClass(class_name, _) => AggregateBase::Object(class_name.clone()),
+            _ => return Ok(None),
+        };
+
+        let checkpoint = self.pos;
+        let mut fields: Vec<(String, Expr)> = Vec::new();
+
+        self.skip_newlines();
+        if self.consume(&Token::RBrace) {
+            let span = self.span_from(base.span().start, self.last_token_end());
+            return Ok(Some(match aggregate_base {
+                AggregateBase::Struct => Expr::StructLiteral(fields, span),
+                AggregateBase::Object(class_name) => Expr::ObjectLiteral(class_name, fields, span),
+            }));
+        }
+
+        loop {
+            self.skip_newlines();
+            let Some(token) = self.next() else {
+                self.pos = checkpoint;
+                return Ok(None);
+            };
+            let field_name = if token.token == Token::Ident {
+                token.lexeme
+            } else {
+                self.pos = checkpoint;
+                return Ok(None);
+            };
+            if !self.consume(&Token::Assign) {
+                self.pos = checkpoint;
+                return Ok(None);
+            }
+            let value = match self.parse_expr() {
+                Ok(value) => value,
+                Err(_) => {
+                    self.pos = checkpoint;
+                    return Ok(None);
+                }
+            };
+            fields.push((field_name, value));
+            if self.consume(&Token::Comma) || self.consume(&Token::Semicolon) {
+                continue;
+            }
+            break;
+        }
+
+        self.skip_newlines();
+        if !self.consume(&Token::RBrace) {
+            self.pos = checkpoint;
+            return Ok(None);
+        }
+
+        let span = self.span_from(base.span().start, self.last_token_end());
+        Ok(Some(match aggregate_base {
+            AggregateBase::Struct => Expr::StructLiteral(fields, span),
+            AggregateBase::Object(class_name) => Expr::ObjectLiteral(class_name, fields, span),
+        }))
     }
 }

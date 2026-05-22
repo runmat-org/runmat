@@ -1393,6 +1393,34 @@ impl SemanticCtx {
                         .collect::<Result<_, _>>()?,
                 )
             }
+            AstExpr::StructLiteral(fields, _) => HirExprKind::StructLiteral(
+                fields
+                    .iter()
+                    .map(|(name, expr)| {
+                        Ok((
+                            crate::MemberName(name.clone()),
+                            self.lower_expr_semantic(expr)?,
+                        ))
+                    })
+                    .collect::<Result<_, SemanticError>>()?,
+            ),
+            AstExpr::ObjectLiteral(class_name, fields, _) => HirExprKind::ObjectLiteral {
+                class_name: qualified_name(
+                    &class_name
+                        .split('.')
+                        .map(|segment| segment.to_string())
+                        .collect::<Vec<_>>(),
+                ),
+                fields: fields
+                    .iter()
+                    .map(|(name, expr)| {
+                        Ok((
+                            crate::MemberName(name.clone()),
+                            self.lower_expr_semantic(expr)?,
+                        ))
+                    })
+                    .collect::<Result<_, SemanticError>>()?,
+            },
             AstExpr::Index(base, indices, _) => HirExprKind::Index(
                 Box::new(self.lower_expr_semantic(base)?),
                 self.lower_indexing(indices, IndexKind::Paren)?,

@@ -21,6 +21,13 @@ pub enum MirRvalue {
         cols: usize,
         elements: Vec<MirOperand>,
     },
+    StructLiteral {
+        fields: Vec<(MemberName, MirOperand)>,
+    },
+    ObjectLiteral {
+        class_name: QualifiedName,
+        fields: Vec<(MemberName, MirOperand)>,
+    },
     Index {
         base: MirOperand,
         indexing: MirIndexing,

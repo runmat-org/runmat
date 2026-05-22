@@ -436,7 +436,10 @@ Accepted resolution (A/A/A/A/A):
 Current state:
 
 - Tensor and cell aggregates lower directly.
-- Parser/HIR/MIR do not currently define a struct/object aggregate-literal source form; active aggregate products are tensor/cell only (`AstExpr::{Tensor,Cell}` -> `HirExprKind::{Tensor,Cell}` -> `MirAggregateKind::{Tensor,Cell}`).
+- Struct/object aggregate-literal source forms now lower through semantic products:
+  - `struct{field = expr, ...}` -> `AstExpr::StructLiteral` -> `HirExprKind::StructLiteral` -> `MirRvalue::StructLiteral` -> `Instr::CreateStructLiteral`.
+  - `?Class{field = expr, ...}` -> `AstExpr::ObjectLiteral` -> `HirExprKind::ObjectLiteral` -> `MirRvalue::ObjectLiteral` -> `Instr::CreateObjectLiteral`.
+- Tensor/cell aggregate products remain in place (`AstExpr::{Tensor,Cell}` -> `HirExprKind::{Tensor,Cell}` -> `MirAggregateKind::{Tensor,Cell}`).
 
 Design options:
 
@@ -458,7 +461,7 @@ Accepted resolution:
 
 Current scope note:
 
-- This is a forward design track, not an active migration blocker for current semantic pipeline closure, because there is no production struct/object aggregate-literal IR surface to lower today.
+- Struct/object aggregate literal source forms are now on production parser/HIR/MIR/VM paths with typed bytecode construction.
 
 ### 9. Compatibility Mode Cleanup
 
@@ -496,7 +499,7 @@ Treat current MIR bytecode gap markers as follows:
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
 - `{count} call outputs`: semantic user-function, `feval`, `size`, min/max family, sort/set/index builtins (`sort`, `unique`, `find`, `union`, `ismember`, `sortrows`), and linalg factorization builtins (`chol`, `lu`, `qr`, `svd`, `eig`) are ratcheted through multi-output bytecode/runtime output context; generic rvalue call outputs and broader builtin output splitting remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
-- `aggregate kind`: forward design track for future struct/object aggregate-literal source form (not an active current MIR bytecode gap).
+- `aggregate kind`: struct/object aggregate-literal source forms now lower through typed MIR/bytecode products; remaining work is compatibility/syntax-policy refinement only.
 - `function handle target`: builtin/anonymous semantic-handle `feval` paths are ratcheted; `CallableIdentity::Method` function-handle targets now lower through typed method-handle runtime identity (`Instr::CreateMethodFunctionHandle` -> `Value::MethodFunctionHandle`) with semantic-resolver-first runtime-name policy (no builtin fallback), and remaining work is DefPath resolver/ABI closure.
 - `assignment place`: multi-assign output storage now reuses MIR place assignment for non-local targets; remaining assignment-place gaps should be explicit source reproducers or object/dynamic descriptor plans, not generic slot-only lowering.
 

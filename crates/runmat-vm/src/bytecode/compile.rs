@@ -739,6 +739,8 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
         MirRvalue::Use(_)
         | MirRvalue::Range { .. }
         | MirRvalue::Aggregate { .. }
+        | MirRvalue::StructLiteral { .. }
+        | MirRvalue::ObjectLiteral { .. }
         | MirRvalue::Index { .. }
         | MirRvalue::Member { .. }
         | MirRvalue::DynamicMember { .. }
@@ -4570,6 +4572,36 @@ mod tests {
             instr,
             Instr::CreateMethodFunctionHandle(name) if name == "m"
         )));
+    }
+
+    #[test]
+    fn primary_compile_lowers_struct_aggregate_literal_to_typed_instruction() {
+        let ast = runmat_parser::parse("s = struct{a = 1, a = 2, b = 3};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile should succeed");
+        assert!(bytecode.instructions.iter().any(|instr| match instr {
+            Instr::CreateStructLiteral(fields) => {
+                fields.as_slice() == ["a".to_string(), "a".to_string(), "b".to_string()]
+            }
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn primary_compile_lowers_object_aggregate_literal_to_typed_instruction() {
+        let ast = runmat_parser::parse("p = ?Point{x = 1, y = 2};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile should succeed");
+        assert!(bytecode.instructions.iter().any(|instr| match instr {
+            Instr::CreateObjectLiteral { class_name, fields } => {
+                class_name == "Point" && fields.as_slice() == ["x".to_string(), "y".to_string()]
+            }
+            _ => false,
+        }));
     }
 
     #[test]

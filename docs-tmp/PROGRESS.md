@@ -12,6 +12,31 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Struct/object aggregate-literal source form now lowers through typed compiler/runtime products
+  - `scope: in-scope`
+  - `blocker: queue item 15 required parser/HIR/MIR source-form enablement plus typed bytecode construction for struct/object aggregate literals; prior state only exposed tensor/cell aggregate products.`
+  - Added parser source forms in [expr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/src/parser/expr.rs):
+    - `struct{field = expr, ...}` -> `Expr::StructLiteral`
+    - `?Class{field = expr, ...}` -> `Expr::ObjectLiteral`
+  - Added semantic/MIR typed aggregate products:
+    - HIR: `HirExprKind::{StructLiteral,ObjectLiteral}` in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) + lowering in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs)
+    - MIR: `MirRvalue::{StructLiteral,ObjectLiteral}` in [rvalue.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/src/rvalue.rs) + lowering in [expr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/src/lowering/expr.rs)
+  - Added typed VM bytecode/runtime construction:
+    - `Instr::{CreateStructLiteral,CreateObjectLiteral}` in [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs)
+    - compile lowering in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs)
+    - dispatch materialization in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) (object path initializes class defaults then applies literal fields in source order)
+  - Ratchet coverage:
+    - parser: `parse_struct_aggregate_literal`, `parse_object_aggregate_literal`
+    - HIR: `struct_aggregate_literal_lowers_with_field_order_and_duplicates`, `object_aggregate_literal_lowers_to_typed_object_literal`
+    - MIR: `struct_aggregate_literal_lowers_to_mir_struct_literal`, `object_aggregate_literal_lowers_to_mir_object_literal`
+    - VM compile: `primary_compile_lowers_struct_aggregate_literal_to_typed_instruction`, `primary_compile_lowers_object_aggregate_literal_to_typed_instruction`
+    - VM runtime: `struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates`, `object_aggregate_literal_uses_typed_instruction_and_sets_properties`
+  - Validation:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Callable-descriptor unresolved diagnostics now stay on typed identity when VM fallback policy disallows named fallback
   - `scope: in-scope`
   - blocker: `execute_resolved_callable(...)` still used `strict_callable_display_name(...)` as a secondary unresolved-name path when `vm_fallback_name_for(...)` returned `None`, reintroducing name-shaped diagnostics on policy-denied fallback paths.

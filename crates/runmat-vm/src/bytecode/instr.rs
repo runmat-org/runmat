@@ -137,6 +137,11 @@ pub enum Instr {
 
     // Cell array construction and indexing.
     CreateCell2D(usize, usize),
+    CreateStructLiteral(Vec<String>),
+    CreateObjectLiteral {
+        class_name: String,
+        fields: Vec<String>,
+    },
     IndexCell {
         num_indices: usize,
         end_offsets: Vec<(usize, isize)>,
@@ -360,6 +365,8 @@ impl Instr {
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
             }
+            Instr::CreateStructLiteral(fields) => effect(fields.len(), 1),
+            Instr::CreateObjectLiteral { fields, .. } => effect(fields.len(), 1),
             Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
             Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
             Instr::Unpack(n) => effect(1, *n),

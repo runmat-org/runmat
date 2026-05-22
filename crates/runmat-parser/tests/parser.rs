@@ -153,6 +153,21 @@ fn strip_expr(expr: &Expr) -> Expr {
         ),
         Expr::Tensor(rows, _) => Expr::Tensor(strip_rows(rows), Span::default()),
         Expr::Cell(rows, _) => Expr::Cell(strip_rows(rows), Span::default()),
+        Expr::StructLiteral(fields, _) => Expr::StructLiteral(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), strip_expr(value)))
+                .collect(),
+            Span::default(),
+        ),
+        Expr::ObjectLiteral(class_name, fields, _) => Expr::ObjectLiteral(
+            class_name.clone(),
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), strip_expr(value)))
+                .collect(),
+            Span::default(),
+        ),
         Expr::Index(base, indices, _) => Expr::Index(
             Box::new(strip_expr(base)),
             indices.iter().map(strip_expr).collect(),
@@ -305,6 +320,49 @@ fn parse_assignment() {
                     Box::new(num("5".to_string())),
                 ),
                 true, // Semicolon suppresses display even at EOF
+            )],
+        },
+    );
+}
+
+#[test]
+fn parse_struct_aggregate_literal() {
+    let program = parse("x = struct{name = 1, age = 2};").unwrap();
+    assert_program_eq(
+        program,
+        Program {
+            body: vec![assign(
+                "x".to_string(),
+                Expr::StructLiteral(
+                    vec![
+                        ("name".to_string(), num("1".to_string())),
+                        ("age".to_string(), num("2".to_string())),
+                    ],
+                    Span::default(),
+                ),
+                true,
+            )],
+        },
+    );
+}
+
+#[test]
+fn parse_object_aggregate_literal() {
+    let program = parse("p = ?Point{x = 1, y = 2};").unwrap();
+    assert_program_eq(
+        program,
+        Program {
+            body: vec![assign(
+                "p".to_string(),
+                Expr::ObjectLiteral(
+                    "Point".to_string(),
+                    vec![
+                        ("x".to_string(), num("1".to_string())),
+                        ("y".to_string(), num("2".to_string())),
+                    ],
+                    Span::default(),
+                ),
+                true,
             )],
         },
     );

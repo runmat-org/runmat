@@ -255,6 +255,11 @@ pub enum HirExprKind {
     Binary(Box<HirExpr>, OperatorKind, Box<HirExpr>),
     Tensor(Vec<Vec<HirExpr>>),
     Cell(Vec<Vec<HirExpr>>),
+    StructLiteral(Vec<(MemberName, HirExpr)>),
+    ObjectLiteral {
+        class_name: QualifiedName,
+        fields: Vec<(MemberName, HirExpr)>,
+    },
     Range(Box<HirExpr>, Option<Box<HirExpr>>, Box<HirExpr>),
     Colon,
     End,

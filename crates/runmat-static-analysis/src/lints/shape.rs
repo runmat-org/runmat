@@ -180,6 +180,26 @@ impl ShapeLintContext {
                 elements,
                 ..
             } => self.infer_mir_aggregate(body, span, kind, *rows, elements),
+            runmat_mir::MirRvalue::StructLiteral { fields } => {
+                for (_, value) in fields {
+                    self.infer_mir_operand(body, value);
+                }
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), Some(1)])),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::ObjectLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    self.infer_mir_operand(body, value);
+                }
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), Some(1)])),
+                    number: None,
+                    int_vector: None,
+                }
+            }
             runmat_mir::MirRvalue::Index { base, indexing } => {
                 let base_shape = self.infer_mir_operand(body, base).shape;
                 for component in &indexing.components {

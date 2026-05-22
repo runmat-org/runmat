@@ -953,6 +953,8 @@ impl BytecodeCompiler {
                     // Not yet supported in JIT; require interpreter
                     Instr::IndexSlice(_, _, _, _)
                     | Instr::CreateCell2D(_, _)
+                    | Instr::CreateStructLiteral(_)
+                    | Instr::CreateObjectLiteral { .. }
                     | Instr::IndexCell { .. }
                     | Instr::LoadStaticProperty(_, _)
                     | Instr::EnterTry(_, _)

@@ -11,7 +11,7 @@ use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{IntValue, StructValue, Value};
+use runmat_builtins::{IntValue, ObjectInstance, StructValue, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::{HashMap, HashSet};
@@ -269,6 +269,56 @@ fn create_semantic_future_value(
         .fields
         .insert(FUTURE_ARGS_FIELD.to_string(), Value::OutputList(args));
     Value::Struct(future)
+}
+
+fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
+    if let Some(def) = runmat_builtins::get_class(class_name) {
+        let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        let mut visited = HashSet::new();
+        let mut cursor: Option<String> = Some(def.name.clone());
+        while let Some(name) = cursor {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(class_def) = runmat_builtins::get_class(&name) {
+                chain.push(class_def.clone());
+                cursor = class_def.parent.clone();
+            } else {
+                break;
+            }
+        }
+        chain.reverse();
+        let mut object = ObjectInstance::new(def.name.clone());
+        for class_def in chain {
+            for (property_name, property_def) in class_def.properties {
+                if !property_def.is_static {
+                    if let Some(default_value) = property_def.default_value {
+                        object.properties.insert(property_name, default_value);
+                    }
+                }
+            }
+        }
+        object
+    } else {
+        ObjectInstance::new(class_name.to_string())
+    }
+}
+
+fn pop_aggregate_literal_values(
+    stack: &mut Vec<Value>,
+    field_count: usize,
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(field_count);
+    for _ in 0..field_count {
+        values.push(stack.pop().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow while building aggregate literal",
+            )
+        })?);
+    }
+    values.reverse();
+    Ok(values)
 }
 
 async fn resolve_semantic_future_value(value: Value) -> Result<Value, RuntimeError> {
@@ -1042,6 +1092,28 @@ pub async fn dispatch_instruction(
             }
             elems.reverse();
             stack.push(crate::ops::cells::create_cell_2d(elems, *rows, *cols)?);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateStructLiteral(fields) => {
+            let values = pop_aggregate_literal_values(stack, fields.len())?;
+            let mut struct_value = StructValue::new();
+            for (field, value) in fields.iter().zip(values) {
+                struct_value.fields.insert(field.clone(), value);
+            }
+            stack.push(Value::Struct(struct_value));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateObjectLiteral { class_name, fields } => {
+            let values = pop_aggregate_literal_values(stack, fields.len())?;
+            let mut object = initialize_object_with_defaults(class_name);
+            for (field, value) in fields.iter().zip(values) {
+                object.properties.insert(field.clone(), value);
+            }
+            stack.push(Value::Object(object));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

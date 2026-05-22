@@ -267,6 +267,57 @@ fn class_method_lowers_to_function_referenced_by_class() {
 }
 
 #[test]
+fn struct_aggregate_literal_lowers_with_field_order_and_duplicates() {
+    let assembly = lower_semantic("s = struct{a = 1, a = 2, b = 3};");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .expect("entry function");
+
+    let HirStmtKind::Assign(_, expr, _) = &function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::StructLiteral(fields) = &expr.kind else {
+        panic!("expected struct literal");
+    };
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0].0 .0, "a");
+    assert_eq!(fields[1].0 .0, "a");
+    assert_eq!(fields[2].0 .0, "b");
+}
+
+#[test]
+fn object_aggregate_literal_lowers_to_typed_object_literal() {
+    let assembly = lower_semantic("p = ?Point{x = 1, y = 2};");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .expect("entry function");
+
+    let HirStmtKind::Assign(_, expr, _) = &function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::ObjectLiteral { class_name, fields } = &expr.kind else {
+        panic!("expected object literal");
+    };
+    assert_eq!(
+        class_name
+            .0
+            .iter()
+            .map(|segment| segment.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Point"]
+    );
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].0 .0, "x");
+    assert_eq!(fields[1].0 .0, "y");
+}
+
+#[test]
 fn class_attributes_lower_to_semantic_metadata() {
     let assembly = lower_semantic(
         "classdef C\n properties(Constant, Hidden, Access=private)\n p\n end\n methods(Static, Access=private, Sealed)\n function y = f(x); y = x; end\n end\n end",
@@ -424,6 +475,16 @@ fn lowering_emits_only_fixed_requested_output_counts() {
                     for value in row {
                         walk_expr(value);
                     }
+                }
+            }
+            HirExprKind::StructLiteral(fields) => {
+                for (_, value) in fields {
+                    walk_expr(value);
+                }
+            }
+            HirExprKind::ObjectLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    walk_expr(value);
                 }
             }
             HirExprKind::Index(base, indexing) => {

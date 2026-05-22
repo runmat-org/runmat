@@ -602,6 +602,8 @@ async fn run_interpreter_inner(
             | Instr::DeclarePersistent(_)
             | Instr::DeclarePersistentNamed(_, _)
             | Instr::CreateCell2D(_, _)
+            | Instr::CreateStructLiteral(_)
+            | Instr::CreateObjectLiteral { .. }
             | Instr::Add
             | Instr::Sub
             | Instr::Mul

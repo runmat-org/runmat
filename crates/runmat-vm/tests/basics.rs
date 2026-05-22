@@ -24,6 +24,44 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
+fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
+    let bytecode = compile_semantic_source("s = struct{version = 1, version = 2};")
+        .expect("compile semantic source");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        Instr::CreateStructLiteral(fields)
+            if fields == &vec!["version".to_string(), "version".to_string()]
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic bytecode");
+    let Value::Struct(st) = &vars[0] else {
+        panic!("expected struct value");
+    };
+    assert_eq!(st.fields.len(), 1);
+    assert!(matches!(st.fields.get("version"), Some(Value::Num(v)) if *v == 2.0));
+}
+
+#[test]
+fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
+    let bytecode =
+        compile_semantic_source("p = ?Point{x = 1, y = 2};").expect("compile semantic source");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        Instr::CreateObjectLiteral { class_name, fields }
+            if class_name == "Point"
+                && fields == &vec!["x".to_string(), "y".to_string()]
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic bytecode");
+    let Value::Object(obj) = &vars[0] else {
+        panic!("expected object value");
+    };
+    assert_eq!(obj.class_name, "Point");
+    assert!(matches!(obj.properties.get("x"), Some(Value::Num(v)) if *v == 1.0));
+    assert!(matches!(obj.properties.get("y"), Some(Value::Num(v)) if *v == 2.0));
+}
+
+#[test]
 fn semantic_logical_ops_use_typed_bytecode() {
     let bytecode = compile_semantic_source("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
 

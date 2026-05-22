@@ -195,6 +195,8 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             cols,
             elements,
         } => aggregate_fact(kind, *rows, *cols, elements),
+        MirRvalue::StructLiteral { .. } => scalar_single_fact(TypeFact::Struct),
+        MirRvalue::ObjectLiteral { .. } => scalar_single_fact(TypeFact::Unknown),
         MirRvalue::Binary(_, _, _) | MirRvalue::Unary(_, _) => SimpleValueFact::default(),
         MirRvalue::Range { .. } => SimpleValueFact::default(),
         MirRvalue::Index { .. } => SimpleValueFact {
@@ -651,6 +653,11 @@ fn diagnose_rvalue_reads(
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
                 diagnose_operand_read(element, state, span, diagnostics);
+            }
+        }
+        MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
+            for (_, value) in fields {
+                diagnose_operand_read(value, state, span, diagnostics);
             }
         }
         MirRvalue::Index { base, indexing } => {

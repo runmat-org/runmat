@@ -104,6 +104,11 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                 scan_operand(body, element, reads_captures);
             }
         }
+        MirRvalue::StructLiteral { fields } | MirRvalue::ObjectLiteral { fields, .. } => {
+            for (_, value) in fields {
+                scan_operand(body, value, reads_captures);
+            }
+        }
         MirRvalue::Index { base, indexing } => {
             scan_operand(body, base, reads_captures);
             scan_indexing(body, indexing, reads_captures);

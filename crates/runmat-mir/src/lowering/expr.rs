@@ -64,6 +64,29 @@ pub(crate) fn lower_expr_with_replacements(
             cols: aggregate_col_count(rows),
             elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
+        HirExprKind::StructLiteral(fields) => MirRvalue::StructLiteral {
+            fields: fields
+                .iter()
+                .map(|(name, expr)| {
+                    Ok((
+                        name.clone(),
+                        lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
+                    ))
+                })
+                .collect::<Result<_, SemanticError>>()?,
+        },
+        HirExprKind::ObjectLiteral { class_name, fields } => MirRvalue::ObjectLiteral {
+            class_name: class_name.clone(),
+            fields: fields
+                .iter()
+                .map(|(name, expr)| {
+                    Ok((
+                        name.clone(),
+                        lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
+                    ))
+                })
+                .collect::<Result<_, SemanticError>>()?,
+        },
         HirExprKind::Call(call) => {
             let mut args: Vec<MirCallArg> = call
                 .args

@@ -507,8 +507,24 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `try_execute_external_boundary_single_segment_name_returns_none_without_semantic_resolution`
       - `try_execute_external_boundary_qualified_name_can_use_semantic_resolver`
       - `imported_identity_runtime_name_resolution_policy_rejects_malformed_path_without_semantic_probe`
+  - struct/object aggregate-literal source forms now lower through typed semantic products:
+    - parser source forms in [expr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/src/parser/expr.rs):
+      - `struct{field = expr, ...}` lowers to `Expr::StructLiteral`.
+      - `?Class{field = expr, ...}` lowers to `Expr::ObjectLiteral`.
+    - HIR/MIR products in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs), [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs), [rvalue.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/src/rvalue.rs), and [expr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/src/lowering/expr.rs):
+      - `HirExprKind::{StructLiteral,ObjectLiteral}`.
+      - `MirRvalue::{StructLiteral,ObjectLiteral}`.
+    - typed VM bytecode/runtime construction in [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs), and [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs):
+      - `Instr::CreateStructLiteral`.
+      - `Instr::CreateObjectLiteral`.
+    - direct ratchets:
+      - parser: `parse_struct_aggregate_literal`, `parse_object_aggregate_literal`
+      - HIR: `struct_aggregate_literal_lowers_with_field_order_and_duplicates`, `object_aggregate_literal_lowers_to_typed_object_literal`
+      - MIR: `struct_aggregate_literal_lowers_to_mir_struct_literal`, `object_aggregate_literal_lowers_to_mir_object_literal`
+      - VM compile: `primary_compile_lowers_struct_aggregate_literal_to_typed_instruction`, `primary_compile_lowers_object_aggregate_literal_to_typed_instruction`
+      - VM runtime: `struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates`, `object_aggregate_literal_uses_typed_instruction_and_sets_properties`
 - Gap:
-  - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
+  - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
 ### 4) Manifest-driven composition/entrypoints (`met`)
 

@@ -1880,6 +1880,10 @@ impl Compiler {
                 cols,
                 elements,
             } => self.compile_mir_aggregate(kind, *rows, *cols, elements),
+            MirRvalue::StructLiteral { fields } => self.compile_mir_struct_literal(fields),
+            MirRvalue::ObjectLiteral { class_name, fields } => {
+                self.compile_mir_object_literal(class_name, fields)
+            }
             MirRvalue::Index { base, indexing } => self.compile_mir_index(base, indexing),
             MirRvalue::Member { base, member } => {
                 self.compile_mir_operand(base)?;
@@ -2304,6 +2308,47 @@ impl Compiler {
                 self.emit(Instr::CreateCell2D(rows, cols));
             }
         };
+        Ok(())
+    }
+
+    fn compile_mir_struct_literal(
+        &mut self,
+        fields: &[(runmat_hir::MemberName, MirOperand)],
+    ) -> Result<(), CompileError> {
+        let mut names = Vec::with_capacity(fields.len());
+        for (name, value) in fields {
+            self.compile_mir_operand(value)?;
+            names.push(name.0.clone());
+        }
+        self.emit(Instr::CreateStructLiteral(names));
+        Ok(())
+    }
+
+    fn compile_mir_object_literal(
+        &mut self,
+        class_name: &runmat_hir::QualifiedName,
+        fields: &[(runmat_hir::MemberName, MirOperand)],
+    ) -> Result<(), CompileError> {
+        let class_name = class_name
+            .0
+            .iter()
+            .map(|segment| segment.0.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        if class_name.trim().is_empty() {
+            return Err(self
+                .compile_error("MIR object literal class name cannot be empty")
+                .with_identifier(IDENT_MIR_CALL_TARGET_NAME_INVALID));
+        }
+        let mut names = Vec::with_capacity(fields.len());
+        for (name, value) in fields {
+            self.compile_mir_operand(value)?;
+            names.push(name.0.clone());
+        }
+        self.emit(Instr::CreateObjectLiteral {
+            class_name,
+            fields: names,
+        });
         Ok(())
     }
 

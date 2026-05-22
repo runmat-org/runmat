@@ -645,6 +645,12 @@ fn first_unlowered_await<'a>(
             .iter()
             .flat_map(|row| row.iter())
             .find_map(|expr| first_unlowered_await(expr, await_replacements)),
+        HirExprKind::StructLiteral(fields) => fields
+            .iter()
+            .find_map(|(_, value)| first_unlowered_await(value, await_replacements)),
+        HirExprKind::ObjectLiteral { fields, .. } => fields
+            .iter()
+            .find_map(|(_, value)| first_unlowered_await(value, await_replacements)),
         HirExprKind::Range(start, step, end) => first_unlowered_await(start, await_replacements)
             .or_else(|| {
                 step.as_ref()
