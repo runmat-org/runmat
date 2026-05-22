@@ -46,9 +46,13 @@ pub struct FunctionBytecode {
     pub input_slots: Vec<usize>,
     #[serde(default)]
     pub varargin_slot: Option<usize>,
+    #[serde(default)]
+    pub implicit_nargin_slot: Option<usize>,
     pub output_slots: Vec<usize>,
     #[serde(default)]
     pub varargout_slot: Option<usize>,
+    #[serde(default)]
+    pub implicit_nargout_slot: Option<usize>,
     pub capture_slots: Vec<usize>,
 }
 

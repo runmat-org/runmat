@@ -132,7 +132,10 @@ impl Parser {
                 }
                 (false, Token::RBracket) => {
                     i += 1;
-                    return matches!(self.tokens.get(i).map(|info| &info.token), Some(Token::Assign));
+                    return matches!(
+                        self.tokens.get(i).map(|info| &info.token),
+                        Some(Token::Assign)
+                    );
                 }
                 _ => return false,
             }

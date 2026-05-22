@@ -6,7 +6,7 @@ use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlan};
 use runmat_builtins::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "native-accel")]
 use std::sync::Arc;
 
@@ -27,6 +27,7 @@ pub struct InterpreterState {
     pub imports: Vec<(Vec<String>, bool)>,
     pub global_aliases: HashMap<usize, String>,
     pub persistent_aliases: HashMap<usize, String>,
+    pub missing_input_slots: HashSet<usize>,
     pub current_function_name: String,
     pub call_counts: Vec<(usize, usize)>,
     #[cfg(feature = "native-accel")]
@@ -88,6 +89,7 @@ impl InterpreterState {
             imports: Vec::new(),
             global_aliases: HashMap::new(),
             persistent_aliases: HashMap::new(),
+            missing_input_slots: HashSet::new(),
             vars,
             pc: 0,
             call_counts,

@@ -198,9 +198,10 @@ fn test_matrix_literal_semicolon_preservation() {
 /// as normal expressions, not as malformed assignment target syntax.
 #[test]
 fn test_bracketed_call_list_expression_statement_parses() {
-    let program =
-        parse("x = logspace(0, 2, 50); loglog(x, x.^2); ax = gca; [get(ax, 'XScale'), get(ax, 'YScale')]")
-            .unwrap();
+    let program = parse(
+        "x = logspace(0, 2, 50); loglog(x, x.^2); ax = gca; [get(ax, 'XScale'), get(ax, 'YScale')]",
+    )
+    .unwrap();
     assert_eq!(program.body.len(), 4);
 
     match &program.body[3] {

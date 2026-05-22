@@ -19,6 +19,7 @@ use runmat_runtime::{
     RuntimeError,
 };
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -99,15 +100,6 @@ pub async fn invoke_semantic_function_value(
         return Err(mex("SemanticFunctionArity", &message));
     }
     let runtime_arg_count = args.len() - func.capture_slots.len();
-    if runtime_arg_count < func.input_slots.len() {
-        let message = format!(
-            "semantic function {} expected {} inputs, got {}",
-            func.display_name,
-            func.input_slots.len(),
-            runtime_arg_count
-        );
-        return Err(mex("NotEnoughInputs", &message));
-    }
     if runtime_arg_count > func.input_slots.len() && func.varargin_slot.is_none() {
         let message = format!(
             "semantic function {} expected {} inputs, got {}",
@@ -128,6 +120,7 @@ pub async fn invoke_semantic_function_value(
     }
 
     let mut vars = vec![Value::Num(0.0); func.var_count];
+    let mut missing_input_slots = HashSet::new();
     for (slot, value) in func.capture_slots.iter().zip(args.iter()) {
         if *slot < vars.len() {
             vars[*slot] = value.clone();
@@ -136,10 +129,16 @@ pub async fn invoke_semantic_function_value(
     for (slot, value) in func
         .input_slots
         .iter()
+        .take(runtime_arg_count)
         .zip(args.iter().skip(func.capture_slots.len()))
     {
         if *slot < vars.len() {
             vars[*slot] = value.clone();
+        }
+    }
+    if runtime_arg_count < func.input_slots.len() {
+        for slot in func.input_slots.iter().skip(runtime_arg_count) {
+            missing_input_slots.insert(*slot);
         }
     }
     if let Some(slot) = func.varargin_slot {
@@ -156,6 +155,23 @@ pub async fn invoke_semantic_function_value(
             vars[slot] = Value::Cell(cell);
         }
     }
+    if let Some(slot) = func.varargout_slot {
+        if slot < vars.len() {
+            let cell = CellArray::new(Vec::new(), 1, 0)
+                .map_err(|err| mex("VarargoutPack", &format!("varargout: {err}")))?;
+            vars[slot] = Value::Cell(cell);
+        }
+    }
+    if let Some(slot) = func.implicit_nargin_slot {
+        if slot < vars.len() {
+            vars[slot] = Value::Num(runtime_arg_count as f64);
+        }
+    }
+    if let Some(slot) = func.implicit_nargout_slot {
+        if slot < vars.len() {
+            vars[slot] = Value::Num(requested_outputs as f64);
+        }
+    }
 
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
@@ -168,6 +184,7 @@ pub async fn invoke_semantic_function_value(
         &func.display_name,
         requested_outputs,
         runtime_arg_count,
+        missing_input_slots,
     )
     .await?;
     let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
@@ -290,6 +307,7 @@ async fn run_interpreter_inner(
         mut imports,
         mut global_aliases,
         mut persistent_aliases,
+        mut missing_input_slots,
         current_function_name,
         call_counts,
         #[cfg(feature = "native-accel")]
@@ -451,6 +469,7 @@ async fn run_interpreter_inner(
         let dispatch_result = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
+                instructions: &bytecode.instructions,
                 var_names: &bytecode.var_names,
                 function_registry: &function_registry,
                 source_id: bytecode.source_id,
@@ -467,6 +486,7 @@ async fn run_interpreter_inner(
                 imports: &mut imports,
                 global_aliases: &mut global_aliases,
                 persistent_aliases: &mut persistent_aliases,
+                missing_input_slots: &mut missing_input_slots,
                 pc: &mut pc,
             },
             interp_dispatch::DispatchHooks {
@@ -689,7 +709,7 @@ pub async fn interpret_function(
     bytecode: &Bytecode,
     vars: Vec<Value>,
 ) -> Result<Vec<Value>, RuntimeError> {
-    interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0).await
+    interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0, HashSet::new()).await
 }
 
 pub async fn interpret_function_with_counts(
@@ -698,12 +718,16 @@ pub async fn interpret_function_with_counts(
     name: &str,
     out_count: usize,
     in_count: usize,
+    missing_input_slots: HashSet<usize>,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vars;
     CALL_COUNTS.with(|cc| {
         cc.borrow_mut().push((in_count, out_count));
     });
-    let res = Box::pin(interpret_with_vars(bytecode, &mut vars, Some(name))).await;
+    let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+    let mut state = InterpreterState::new(bytecode.clone(), &mut vars, Some(name), call_counts);
+    state.missing_input_slots = missing_input_slots;
+    let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
     CALL_COUNTS.with(|cc| {
         cc.borrow_mut().pop();
     });
@@ -761,8 +785,10 @@ mod tests {
             var_count: 1,
             input_slots: Vec::new(),
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: Vec::new(),
             varargout_slot,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         }
     }

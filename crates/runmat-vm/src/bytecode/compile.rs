@@ -787,6 +787,7 @@ fn compile_semantic_functions(
                     .map(|slot| slot.0)
                     .collect(),
                 varargin_slot: function_layout.frame_abi.varargin.map(|slot| slot.0),
+                implicit_nargin_slot: function_layout.frame_abi.implicit_nargin.map(|slot| slot.0),
                 output_slots: function_layout
                     .frame_abi
                     .fixed_outputs
@@ -795,6 +796,10 @@ fn compile_semantic_functions(
                     .map(|slot| slot.0)
                     .collect(),
                 varargout_slot: function_layout.frame_abi.varargout.map(|slot| slot.0),
+                implicit_nargout_slot: function_layout
+                    .frame_abi
+                    .implicit_nargout
+                    .map(|slot| slot.0),
                 capture_slots: function_layout
                     .captures
                     .iter()

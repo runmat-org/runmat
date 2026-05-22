@@ -44,6 +44,7 @@ pub enum DispatchHandled {
 
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
+    pub instructions: &'a [Instr],
     pub var_names: &'a HashMap<usize, String>,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
@@ -61,6 +62,7 @@ pub struct DispatchState<'a> {
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
     pub global_aliases: &'a mut HashMap<usize, String>,
     pub persistent_aliases: &'a mut HashMap<usize, String>,
+    pub missing_input_slots: &'a mut HashSet<usize>,
     pub pc: &'a mut usize,
 }
 
@@ -716,6 +718,7 @@ pub async fn dispatch_instruction(
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     let DispatchMeta {
         instr,
+        instructions,
         var_names,
         function_registry,
         source_id,
@@ -732,6 +735,7 @@ pub async fn dispatch_instruction(
         imports,
         global_aliases,
         persistent_aliases,
+        missing_input_slots,
         pc,
     } = state;
     let DispatchHooks {
@@ -812,12 +816,20 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVar(index) => {
+            if missing_input_slots.contains(index) {
+                return Err(crate::interpreter::errors::mex(
+                    "NotEnoughInputs",
+                    "Not enough input arguments.",
+                ));
+            }
             if let (Some(false), Some(slot_name), Some(var_name)) = (
                 workspace_slot_assigned(*index),
                 workspace_slot_name(*index),
                 var_names.get(index),
             ) {
-                if slot_name == *var_name {
+                if slot_name == *var_name
+                    && !loaded_var_will_store_back_via_index_assignment(instructions, *pc, *index)
+                {
                     return Err(crate::interpreter::errors::mex(
                         "UndefinedVariable",
                         &format!("Undefined variable: {slot_name}"),
@@ -867,6 +879,7 @@ pub async fn dispatch_instruction(
                 store_var_before_overwrite,
                 store_var_after_store,
             )?;
+            missing_input_slots.remove(index);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -926,6 +939,7 @@ pub async fn dispatch_instruction(
                         store_local_after_fallback_store("<main>", stored_index, stored_value);
                     },
                 )?;
+                missing_input_slots.remove(offset);
             } else {
                 store_local(
                     stack,
@@ -1500,6 +1514,36 @@ pub async fn dispatch_instruction(
         }
         _ => Ok(None),
     }
+}
+
+fn loaded_var_will_store_back_via_index_assignment(
+    instructions: &[Instr],
+    load_pc: usize,
+    var_index: usize,
+) -> bool {
+    let mut saw_index_store = false;
+    for instr in instructions.iter().skip(load_pc + 1).take(32) {
+        match instr {
+            Instr::StoreIndex(_)
+            | Instr::StoreIndexDelete(_)
+            | Instr::StoreIndexCell { .. }
+            | Instr::StoreIndexCellDelete { .. }
+            | Instr::StoreSlice(_, _, _, _)
+            | Instr::StoreSliceDelete(_, _, _, _)
+            | Instr::StoreSliceExpr { .. }
+            | Instr::StoreSliceExprDelete { .. } => {
+                saw_index_store = true;
+            }
+            Instr::StoreVar(index) if *index == var_index => {
+                return saw_index_store;
+            }
+            Instr::Jump(_) | Instr::JumpIfFalse(_) | Instr::Return | Instr::ReturnValue => {
+                return false
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(test)]

@@ -147,10 +147,13 @@ pub async fn assign_tensor_scalar(
     if indices.len() == 1 {
         let total = t.rows * t.cols;
         let idx = indices[0];
-        if idx == 0 || idx > total {
+        if idx == 0 {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         if delete {
+            if idx > total {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
             if !is_empty_tensor(rhs) {
                 return Err(mex(
                     "DeletionRequiresEmptyRhs",
@@ -163,6 +166,21 @@ pub async fn assign_tensor_scalar(
             return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
         let val = rhs_to_real_scalar(rhs).await?;
+        if idx > total {
+            if !(t.rows == 1 || t.cols == 1) {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            let target_len = idx;
+            if t.rows == 1 {
+                t.data.resize(target_len, 0.0);
+                t.cols = target_len;
+                t.shape = vec![1, t.cols];
+            } else {
+                t.data.resize(target_len, 0.0);
+                t.rows = target_len;
+                t.shape = vec![t.rows, 1];
+            }
+        }
         t.data[idx - 1] = val;
         Ok(Value::Tensor(t))
     } else if indices.len() == 2 {
@@ -209,10 +227,13 @@ pub async fn assign_complex_scalar(
     if indices.len() == 1 {
         let total = t.rows * t.cols;
         let idx = indices[0];
-        if idx == 0 || idx > total {
+        if idx == 0 {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         if delete {
+            if idx > total {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
             if !is_empty_tensor(rhs) {
                 return Err(mex(
                     "DeletionRequiresEmptyRhs",
@@ -222,6 +243,21 @@ pub async fn assign_complex_scalar(
             return delete_complex_linear(t, idx);
         }
         let val = rhs_to_complex_scalar(rhs).await?;
+        if idx > total {
+            if !(t.rows == 1 || t.cols == 1) {
+                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+            }
+            let target_len = idx;
+            if t.rows == 1 {
+                t.data.resize(target_len, (0.0, 0.0));
+                t.cols = target_len;
+                t.shape = vec![1, t.cols];
+            } else {
+                t.data.resize(target_len, (0.0, 0.0));
+                t.rows = target_len;
+                t.shape = vec![t.rows, 1];
+            }
+        }
         t.data[idx - 1] = val;
         Ok(Value::ComplexTensor(t))
     } else if indices.len() == 2 {

@@ -1218,6 +1218,79 @@ fn nargin_nargout_in_user_functions() {
 }
 
 #[test]
+fn missing_fixed_input_can_be_guarded_with_nargin() {
+    let program = r#"
+        r = f(1, 2);
+        function y = f(a,b,c)
+            if nargin < 3
+                c = 0;
+            end
+            y = a + b + c + nargout;
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-4.0).abs()<1e-9)));
+}
+
+#[test]
+fn bare_nargin_counts_varargin_inputs() {
+    let program = r#"
+        a = greet("Alice");
+        b = greet("Bob", 1, 2, 3);
+        function out = greet(name, varargin)
+            if nargin > 1
+                out = length(varargin);
+            else
+                out = 0;
+            end
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-0.0).abs()<1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
+}
+
+#[test]
+fn varargout_indexed_fill_respects_nargout_loop() {
+    let program = r#"
+        [a, b] = mysize([1 2; 3 4]);
+        function varargout = mysize(A)
+            s = size(A);
+            for k = 1:nargout
+                varargout{k} = s(k);
+            end
+        end
+    "#;
+    let vars = execute_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-2.0).abs()<1e-9)));
+}
+
+#[test]
+fn implicit_array_creation_from_linear_index_assignment() {
+    let program = r#"
+        x(3) = 10;
+        w(1) = 0;
+    "#;
+    let vars = execute_source(program);
+    assert!(vars.iter().any(|v| matches!(
+        v,
+        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 3] && t.data == vec![0.0, 0.0, 10.0]
+    )));
+    assert!(vars.iter().any(|v| matches!(
+        v,
+        runmat_builtins::Value::Tensor(t) if t.shape == vec![1, 1] && t.data == vec![0.0]
+    )));
+}
+
+#[test]
 fn not_enough_and_too_many_inputs_fixed_arity() {
     // not enough inputs
     let program = r#"
