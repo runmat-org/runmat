@@ -1,15 +1,13 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use test_helpers::execute_semantic_source;
+use test_helpers::execute_source;
 
 #[test]
 fn reshape_and_index_3d_element() {
     // Build a 2x3x2 tensor of values 1..12 and test a specific element
-    let vars = execute_semantic_source(
-        "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); x = A(1,2,2);",
-    )
-    .unwrap();
+    let vars = execute_source("A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); x = A(1,2,2);")
+        .unwrap();
     // A(1,2,2) with column-major reshape(2,3,2) is 9 in MATLAB semantics
     assert!(vars
         .iter()
@@ -19,7 +17,7 @@ fn reshape_and_index_3d_element() {
 /// MATLAB only drops *trailing* singleton dimensions. A(:, 2, :) on 3×4×5 → [3, 1, 5].
 #[test]
 fn slice_3d_non_trailing_singleton_shape() {
-    let vars = execute_semantic_source("A = reshape(1:60, 3, 4, 5); S = A(:, 2, :);").unwrap();
+    let vars = execute_source("A = reshape(1:60, 3, 4, 5); S = A(:, 2, :);").unwrap();
     let runmat_builtins::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
@@ -33,7 +31,7 @@ fn slice_3d_non_trailing_singleton_shape() {
 /// A(1, 1, :) on 3×4×5 → [1, 1, 5], not [5, 1].
 #[test]
 fn slice_3d_leading_scalars_shape() {
-    let vars = execute_semantic_source("A = reshape(1:60, 3, 4, 5); S = A(1, 1, :);").unwrap();
+    let vars = execute_source("A = reshape(1:60, 3, 4, 5); S = A(1, 1, :);").unwrap();
     let runmat_builtins::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
@@ -46,7 +44,7 @@ fn slice_3d_leading_scalars_shape() {
 
 #[test]
 fn slice_3d_trailing_singleton_dropped_for_vector_index() {
-    let vars = execute_semantic_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
+    let vars = execute_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
     let runmat_builtins::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
@@ -59,7 +57,7 @@ fn slice_3d_trailing_singleton_dropped_for_vector_index() {
 
 #[test]
 fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
-    let vars = execute_semantic_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, 2);").unwrap();
+    let vars = execute_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, 2);").unwrap();
     let runmat_builtins::Value::Tensor(t) = &vars[1] else {
         panic!("expected S tensor, got {:?}", vars[1]);
     };
@@ -72,7 +70,7 @@ fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
 
 #[test]
 fn mixed_selectors_basic_2d_range() {
-    let vars = execute_semantic_source("A=[1 2 3; 4 5 6; 7 8 9]; sub = A(1:2, 2);").unwrap();
+    let vars = execute_source("A=[1 2 3; 4 5 6; 7 8 9]; sub = A(1:2, 2);").unwrap();
     // Should select first two rows of column 2: [2;5]
     let runmat_builtins::Value::Tensor(t) = &vars[1] else {
         panic!("expected sub tensor, got {:?}", vars[1]);
@@ -82,8 +80,7 @@ fn mixed_selectors_basic_2d_range() {
 
 #[test]
 fn logical_mask_rows_select() {
-    let vars =
-        execute_semantic_source("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
+    let vars = execute_source("A=[1 2; 3 4; 5 6]; sel = A([true false true], :);").unwrap();
     // Expect rows 1 and 3 selected. In column-major storage, resulting 2x2 has data [1 5 2 6].
     let sel = vars
         .iter()
@@ -99,14 +96,14 @@ fn logical_mask_rows_select() {
 #[test]
 fn slice_assignment_column_and_row() {
     let src = "A=[1 2 3; 4 5 6]; A(:,2) = [8;9]; A(1,:) = [7 7 7];";
-    let vars = execute_semantic_source(src).unwrap();
+    let vars = execute_source(src).unwrap();
     // Final A should be [7 7 7; 4 9 6] -> column-major data [7 4 7 9 7 6]
     assert!(vars.iter().any(|value| matches!(value, runmat_builtins::Value::Tensor(tensor) if tensor.data == vec![7.0, 4.0, 7.0, 9.0, 7.0, 6.0])));
 }
 
 #[test]
 fn slice_assignment_3d_entire_slice() {
-    let vars = execute_semantic_source("A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); Z = reshape([0 0 0 0 0 0], 2, 3); A(:, :, 1) = Z;").unwrap();
+    let vars = execute_source("A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); Z = reshape([0 0 0 0 0 0], 2, 3); A(:, :, 1) = Z;").unwrap();
     // After assignment, first 2x3 slice zeros; the second slice remains [7..12]
     // Pick the 3D tensor (A), not the 2D Z
     let a = vars
@@ -143,10 +140,9 @@ fn slice_assignment_3d_entire_slice() {
 #[test]
 fn gpu_slice_assignment_and_range_indexing() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let vars = execute_semantic_source(
-        "A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));",
-    )
-    .expect("execute");
+    let vars =
+        execute_source("A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));")
+            .expect("execute");
     let b_tensor = vars
         .into_iter()
         .filter_map(|value| match value {
@@ -162,9 +158,8 @@ fn gpu_slice_assignment_and_range_indexing() {
 #[test]
 fn gpu_range_end_indexing() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let vars =
-        execute_semantic_source("A = gpuArray([1 2 3; 4 5 6; 7 8 9]); B = gather(A(1:end-1, 2));")
-            .expect("execute");
+    let vars = execute_source("A = gpuArray([1 2 3; 4 5 6; 7 8 9]); B = gather(A(1:end-1, 2));")
+        .expect("execute");
 
     let b_tensor = vars
         .into_iter()
@@ -181,8 +176,8 @@ fn gpu_range_end_indexing() {
 #[test]
 fn gpu_range_end_assignment() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let vars = execute_semantic_source("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);")
-        .expect("execute");
+    let vars =
+        execute_source("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);").expect("execute");
 
     let b_tensor = vars
         .into_iter()

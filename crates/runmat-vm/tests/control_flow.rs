@@ -1,8 +1,8 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use test_helpers::compile_semantic_source;
-use test_helpers::execute_semantic_source;
+use test_helpers::compile_source;
+use test_helpers::execute_source;
 
 fn has_num(vars: &[runmat_builtins::Value], expected: f64) -> bool {
     vars.iter()
@@ -10,14 +10,12 @@ fn has_num(vars: &[runmat_builtins::Value], expected: f64) -> bool {
 }
 
 fn execute_semantic_error(source: &str) -> runmat_runtime::RuntimeError {
-    execute_semantic_source(source)
-        .err()
-        .expect("expected error")
+    execute_source(source).err().expect("expected error")
 }
 
 #[test]
 fn break_and_continue() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x=0;
             while 1;
@@ -33,7 +31,7 @@ fn break_and_continue() {
 
 #[test]
 fn elseif_executes_correct_branch() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x=2;
             if x-2;
@@ -52,7 +50,7 @@ fn elseif_executes_correct_branch() {
 #[test]
 fn switch_case_otherwise_executes_correct_branch() {
     // The parser expects line-based case/otherwise; use newlines
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x=2;
             y=0;
@@ -72,7 +70,7 @@ fn switch_case_otherwise_executes_correct_branch() {
 
 #[test]
 fn try_catch_executes_try_body_when_no_error() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x=0;
             try;
@@ -89,7 +87,7 @@ fn try_catch_executes_try_body_when_no_error() {
 #[test]
 fn try_catch_catches_error_and_binds_identifier() {
     // Unknown builtin should raise; catch should bind 'e' and execute catch body
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x=0;
             try;
@@ -106,7 +104,7 @@ fn try_catch_catches_error_and_binds_identifier() {
 
 #[test]
 fn try_catch_catches_error_from_semantic_function_call() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x = 0;
             try;
@@ -127,7 +125,7 @@ fn try_catch_catches_error_from_semantic_function_call() {
 
 #[test]
 fn nested_break_and_continue_scopes() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             x=0;
             for i=1:3;
@@ -150,7 +148,7 @@ fn nested_break_and_continue_scopes() {
 
 #[test]
 fn for_loop_over_matrix_iterates_columns() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             A = [1 2 3; 10 20 30];
             top_sum = 0;
@@ -168,14 +166,13 @@ fn for_loop_over_matrix_iterates_columns() {
 
 #[test]
 fn undefined_variable_raises_mex() {
-    let err = compile_semantic_source("y = x + 1;").err().unwrap();
+    let err = compile_source("y = x + 1;").err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
 fn block_comment_is_ignored() {
-    let vars = execute_semantic_source("a = 1; %{ this is a\n block comment %} b = 2; c = a + b;")
-        .unwrap();
+    let vars = execute_source("a = 1; %{ this is a\n block comment %} b = 2; c = a + b;").unwrap();
     // Expect c = 3 somewhere
     assert!(vars
         .iter()
@@ -185,7 +182,7 @@ fn block_comment_is_ignored() {
 #[test]
 fn apostrophe_is_transpose_when_adjacent() {
     // Adjacent apostrophe after value is transpose
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             A = [1 2; 3 4];
             B = A';
@@ -202,7 +199,7 @@ fn apostrophe_is_transpose_when_adjacent() {
 #[test]
 fn apostrophe_starts_char_array_when_not_adjacent() {
     // Non-adjacent apostrophe starts a char array, not transpose
-    let vars = execute_semantic_source("A = [1 2]; \n s = 'hi';").unwrap();
+    let vars = execute_source("A = [1 2]; \n s = 'hi';").unwrap();
     // Expect a CharArray or String present
     let has_text = vars.iter().any(|v| {
         matches!(
@@ -215,7 +212,7 @@ fn apostrophe_starts_char_array_when_not_adjacent() {
 
 #[test]
 fn apostrophe_conjugates_complex() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         r#"
             z = sqrt(-1);
             A = [1 z; 0 1];

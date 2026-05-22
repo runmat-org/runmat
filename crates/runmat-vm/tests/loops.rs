@@ -3,12 +3,12 @@ mod test_helpers;
 
 use runmat_vm::Instr;
 use std::convert::TryInto;
-use test_helpers::compile_semantic_source;
+use test_helpers::compile_source;
 use test_helpers::interpret;
 
 fn execute_program(source: &str) -> Vec<runmat_builtins::Value> {
-    let bytecode = compile_semantic_source(source).expect("compile semantic source");
-    interpret(&bytecode).expect("execute semantic bytecode")
+    let bytecode = compile_source(source).expect("compile source");
+    interpret(&bytecode).expect("execute bytecode")
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn stochastic_evolution_loop_emits_instruction() {
         S = S .* exp(drift + scale .* Z);
     end
     ";
-    let bytecode = compile_semantic_source(source).unwrap();
+    let bytecode = compile_source(source).unwrap();
     assert!(bytecode
         .instructions
         .iter()

@@ -128,7 +128,7 @@ fn test_gc_with_interpreter_integration() {
         end
     "#;
 
-        fn compile_semantic_source(
+        fn compile_source(
             source: &str,
         ) -> std::result::Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
             let ast = parse(source).map_err(|err| runmat_vm::CompileError::new(err.to_string()))?;
@@ -147,8 +147,7 @@ fn test_gc_with_interpreter_integration() {
 
         // Run the program multiple times to stress the GC
         for run in 0..50 {
-            let bytecode =
-                compile_semantic_source(program).expect("semantic compile should succeed");
+            let bytecode = compile_source(program).expect("semantic compile should succeed");
             let vars = block_on(runmat_vm::interpret(&bytecode)).expect("execution should succeed");
 
             // Verify the result is consistent

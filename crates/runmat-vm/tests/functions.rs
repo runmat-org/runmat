@@ -3,18 +3,18 @@ mod test_helpers;
 
 use std::convert::TryFrom;
 use std::thread;
-use test_helpers::compile_semantic_source;
+use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_semantic_source(source: &str) -> Vec<runmat_builtins::Value> {
-    let bytecode = compile_semantic_source(source).expect("compile semantic source");
-    interpret(&bytecode).expect("execute semantic bytecode")
+fn execute_source(source: &str) -> Vec<runmat_builtins::Value> {
+    let bytecode = compile_source(source).expect("compile source");
+    interpret(&bytecode).expect("execute bytecode")
 }
 
-fn execute_semantic_source_result(
+fn execute_source_result(
     source: &str,
 ) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
-    let bytecode = compile_semantic_source(source).expect("compile semantic source");
+    let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode)
 }
 
@@ -60,7 +60,7 @@ fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
 
 #[test]
 fn unresolved_external_function_handle_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result("h = @definitely_missing_callback; y = feval(h, 1);")
+    let err = execute_source_result("h = @definitely_missing_callback; y = feval(h, 1);")
         .expect_err("unresolved external callback should fail");
     assert_eq!(
         err.identifier(),
@@ -72,7 +72,7 @@ fn unresolved_external_function_handle_fails_without_legacy_fallback() {
 
 #[test]
 fn unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result("h = @definitely_missing_callback; feval(h, 1);")
+    let err = execute_source_result("h = @definitely_missing_callback; feval(h, 1);")
         .expect_err("unresolved external callback should fail");
     assert_eq!(
         err.identifier(),
@@ -84,9 +84,8 @@ fn unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fa
 
 #[test]
 fn unresolved_external_function_handle_multi_output_feval_fails_without_legacy_fallback() {
-    let err =
-        execute_semantic_source_result("h = @definitely_missing_callback; [a,b] = feval(h, 1);")
-            .expect_err("unresolved external callback should fail");
+    let err = execute_source_result("h = @definitely_missing_callback; [a,b] = feval(h, 1);")
+        .expect_err("unresolved external callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -97,7 +96,7 @@ fn unresolved_external_function_handle_multi_output_feval_fails_without_legacy_f
 
 #[test]
 fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "h = @definitely_missing_callback; C = deal(1,2); y = feval(h, C{:});",
     )
     .expect_err("unresolved external expanded callback should fail");
@@ -111,10 +110,9 @@ fn unresolved_external_function_handle_expand_feval_fails_without_legacy_fallbac
 
 #[test]
 fn unresolved_external_function_handle_expand_zero_output_feval_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
-        "h = @definitely_missing_callback; C = deal(1,2); feval(h, C{:});",
-    )
-    .expect_err("unresolved external expanded callback should fail");
+    let err =
+        execute_source_result("h = @definitely_missing_callback; C = deal(1,2); feval(h, C{:});")
+            .expect_err("unresolved external expanded callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -125,7 +123,7 @@ fn unresolved_external_function_handle_expand_zero_output_feval_fails_without_le
 
 #[test]
 fn unresolved_external_function_handle_expand_multi_output_feval_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "h = @definitely_missing_callback; C = deal(1,2); [a,b] = feval(h, C{:});",
     )
     .expect_err("unresolved external expanded callback should fail");
@@ -139,7 +137,7 @@ fn unresolved_external_function_handle_expand_multi_output_feval_fails_without_l
 
 #[test]
 fn unresolved_qualified_external_function_handle_uses_external_handle_instruction() {
-    let bytecode = compile_semantic_source("h = @pkg.remote_inc; y = feval(h, 1);")
+    let bytecode = compile_source("h = @pkg.remote_inc; y = feval(h, 1);")
         .expect("qualified handle source should compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -159,7 +157,7 @@ fn unresolved_qualified_external_function_handle_uses_external_handle_instructio
 #[test]
 fn unresolved_qualified_external_handle_zero_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; feval(h, 1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -179,7 +177,7 @@ fn unresolved_qualified_external_handle_zero_output_feval_uses_typed_instruction
 #[test]
 fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; [a,b] = feval(h, 1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -200,7 +198,7 @@ fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instructio
 #[test]
 fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); feval(h, C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -223,7 +221,7 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
 #[test]
 fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); y = feval(h, C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle expanded feval source should compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -245,7 +243,7 @@ fn unresolved_qualified_external_handle_expand_feval_uses_typed_instruction() {
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = feval(h, C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output feval source should compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -268,8 +266,7 @@ fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_ins
 #[test]
 fn unresolved_nested_qualified_external_handle_feval_uses_external_handle_instruction() {
     let source = "h = @pkg.sub.remote; y = feval(h, 1);";
-    let bytecode =
-        compile_semantic_source(source).expect("nested qualified external handle feval compiles");
+    let bytecode = compile_source(source).expect("nested qualified external handle feval compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
     ));
@@ -289,7 +286,7 @@ fn unresolved_nested_qualified_external_handle_feval_uses_external_handle_instru
 #[test]
 fn unresolved_nested_qualified_external_handle_zero_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; feval(h, 1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -310,7 +307,7 @@ fn unresolved_nested_qualified_external_handle_zero_output_feval_uses_typed_inst
 #[test]
 fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; [a,b] = feval(h, 1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle multi-output feval compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -331,7 +328,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_feval_uses_typed_ins
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; C = deal(1,2); feval(h, C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output feval compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -355,7 +352,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_feval_uses_typ
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; C = deal(1,2); y = feval(h, C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded single-output feval compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -379,8 +376,8 @@ fn unresolved_nested_qualified_external_handle_expand_single_output_feval_uses_t
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = feval(h, C{:});";
-    let bytecode = compile_semantic_source(source)
-        .expect("nested qualified external handle expanded feval compiles");
+    let bytecode =
+        compile_source(source).expect("nested qualified external handle expanded feval compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
     ));
@@ -402,8 +399,7 @@ fn unresolved_nested_qualified_external_handle_expand_feval_uses_typed_instructi
 #[test]
 fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction() {
     let source = "h = @pkg.remote_inc; y = h(1);";
-    let bytecode =
-        compile_semantic_source(source).expect("qualified external handle direct call compiles");
+    let bytecode = compile_source(source).expect("qualified external handle direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
     ));
@@ -427,8 +423,8 @@ fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruc
 #[test]
 fn unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; h(1);";
-    let bytecode = compile_semantic_source(source)
-        .expect("qualified external handle zero-output direct call compiles");
+    let bytecode =
+        compile_source(source).expect("qualified external handle zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
     ));
@@ -448,7 +444,7 @@ fn unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instr
 #[test]
 fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; [a,b] = h(1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -469,7 +465,7 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
 #[test]
 fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -492,8 +488,8 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
 #[test]
 fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); y = h(C{:});";
-    let bytecode = compile_semantic_source(source)
-        .expect("qualified external handle expanded direct call compiles");
+    let bytecode =
+        compile_source(source).expect("qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
     ));
@@ -515,7 +511,7 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
 #[test]
 fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
@@ -538,8 +534,8 @@ fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typ
 #[test]
 fn unresolved_nested_qualified_external_handle_direct_call_uses_external_handle_instruction() {
     let source = "h = @pkg.sub.remote; y = h(1);";
-    let bytecode = compile_semantic_source(source)
-        .expect("nested qualified external handle direct call compiles");
+    let bytecode =
+        compile_source(source).expect("nested qualified external handle direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
     ));
@@ -563,7 +559,7 @@ fn unresolved_nested_qualified_external_handle_direct_call_uses_external_handle_
 #[test]
 fn unresolved_nested_qualified_external_handle_zero_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; h(1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -585,7 +581,7 @@ fn unresolved_nested_qualified_external_handle_zero_output_direct_call_uses_type
 #[test]
 fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; [a,b] = h(1);";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -608,7 +604,7 @@ fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typ
 fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_uses_typed_instruction(
 ) {
     let source = "h = @pkg.sub.remote; C = deal(1,2); h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded zero-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -632,7 +628,7 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
 #[test]
 fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_instruction() {
     let source = "h = @pkg.sub.remote; C = deal(1,2); y = h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -656,7 +652,7 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
 fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_uses_typed_instruction(
 ) {
     let source = "h = @pkg.sub.remote; C = deal(1,2); [a,b] = h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified external handle expanded multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.sub.remote")
@@ -679,7 +675,7 @@ fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_u
 
 #[test]
 fn unresolved_external_direct_call_fails_without_runtime_name_fallback() {
-    let err = execute_semantic_source_result("y = definitely_missing_callback(1);")
+    let err = execute_source_result("y = definitely_missing_callback(1);")
         .expect_err("unresolved external direct call should fail");
     assert_eq!(
         err.identifier(),
@@ -691,7 +687,7 @@ fn unresolved_external_direct_call_fails_without_runtime_name_fallback() {
 
 #[test]
 fn unresolved_qualified_direct_call_uses_external_boundary_typed_instruction() {
-    let bytecode = compile_semantic_source("a = pkg.remote_inc(7);")
+    let bytecode = compile_source("a = pkg.remote_inc(7);")
         .expect("qualified direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -720,7 +716,7 @@ fn unresolved_qualified_direct_call_uses_external_boundary_typed_instruction() {
 
 #[test]
 fn unresolved_qualified_direct_call_zero_output_uses_external_boundary_typed_instruction() {
-    let bytecode = compile_semantic_source("pkg.remote_inc(7);")
+    let bytecode = compile_source("pkg.remote_inc(7);")
         .expect("qualified zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -750,7 +746,7 @@ fn unresolved_qualified_direct_call_zero_output_uses_external_boundary_typed_ins
 
 #[test]
 fn unresolved_qualified_direct_call_multi_output_uses_external_boundary_typed_instruction() {
-    let bytecode = compile_semantic_source("[a,b] = pkg.remote_inc(7);")
+    let bytecode = compile_source("[a,b] = pkg.remote_inc(7);")
         .expect("qualified multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -781,7 +777,7 @@ fn unresolved_qualified_direct_call_multi_output_uses_external_boundary_typed_in
 #[test]
 fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction() {
     let source = "C = deal(1,2); pkg.remote_inc(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified expanded zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -814,7 +810,7 @@ fn unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_ty
 #[test]
 fn unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction() {
     let source = "C = deal(1,2); [a,b] = pkg.remote_inc(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("qualified expanded multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -846,7 +842,7 @@ fn unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_t
 
 #[test]
 fn unresolved_nested_qualified_direct_call_uses_external_boundary_typed_instruction() {
-    let bytecode = compile_semantic_source("a = pkg.sub.remote(7);")
+    let bytecode = compile_source("a = pkg.sub.remote(7);")
         .expect("nested qualified direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -877,7 +873,7 @@ fn unresolved_nested_qualified_direct_call_uses_external_boundary_typed_instruct
 
 #[test]
 fn unresolved_nested_qualified_direct_call_zero_output_uses_external_boundary_typed_instruction() {
-    let bytecode = compile_semantic_source("pkg.sub.remote(7);")
+    let bytecode = compile_source("pkg.sub.remote(7);")
         .expect("nested qualified zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -908,7 +904,7 @@ fn unresolved_nested_qualified_direct_call_zero_output_uses_external_boundary_ty
 
 #[test]
 fn unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_typed_instruction() {
-    let bytecode = compile_semantic_source("[a,b] = pkg.sub.remote(7);")
+    let bytecode = compile_source("[a,b] = pkg.sub.remote(7);")
         .expect("nested qualified multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -941,7 +937,7 @@ fn unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_t
 fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction(
 ) {
     let source = "C = deal(1,2); pkg.sub.remote(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified expanded zero-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -976,7 +972,7 @@ fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boun
 fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_boundary_typed_instruction(
 ) {
     let source = "C = deal(1,2); a = pkg.sub.remote(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified expanded single-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -1011,7 +1007,7 @@ fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_bo
 fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction(
 ) {
     let source = "C = deal(1,2); [a,b] = pkg.sub.remote(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("nested qualified expanded multi-output direct call source should compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -1044,10 +1040,8 @@ fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_bou
 
 #[test]
 fn unresolved_external_cellfun_callback_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
-        "xs = {1, 2}; ys = cellfun(@definitely_missing_callback, xs);",
-    )
-    .expect_err("unresolved external cellfun callback should fail");
+    let err = execute_source_result("xs = {1, 2}; ys = cellfun(@definitely_missing_callback, xs);")
+        .expect_err("unresolved external cellfun callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -1058,7 +1052,7 @@ fn unresolved_external_cellfun_callback_fails_without_legacy_fallback() {
 
 #[test]
 fn unresolved_external_cellfun_str2func_callback_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "xs = {1, 2}; h = str2func('definitely_missing_callback'); ys = cellfun(h, xs);",
     )
     .expect_err("unresolved external cellfun str2func callback should fail");
@@ -1072,10 +1066,9 @@ fn unresolved_external_cellfun_str2func_callback_fails_without_legacy_fallback()
 
 #[test]
 fn unresolved_external_arrayfun_callback_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
-        "xs = [1, 2]; ys = arrayfun(@definitely_missing_callback, xs);",
-    )
-    .expect_err("unresolved external arrayfun callback should fail");
+    let err =
+        execute_source_result("xs = [1, 2]; ys = arrayfun(@definitely_missing_callback, xs);")
+            .expect_err("unresolved external arrayfun callback should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -1086,7 +1079,7 @@ fn unresolved_external_arrayfun_callback_fails_without_legacy_fallback() {
 
 #[test]
 fn unresolved_external_arrayfun_str2func_callback_fails_without_legacy_fallback() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "xs = [1, 2]; h = str2func('definitely_missing_callback'); ys = arrayfun(h, xs);",
     )
     .expect_err("unresolved external arrayfun str2func callback should fail");
@@ -1100,7 +1093,7 @@ fn unresolved_external_arrayfun_str2func_callback_fails_without_legacy_fallback(
 
 #[test]
 fn function_handle_selector_colon_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("f = @sin; y = f(:);")
+    let err = execute_source_result("f = @sin; y = f(:);")
         .expect_err("function-handle colon selector should fail");
     assert_eq!(
         err.identifier(),
@@ -1112,7 +1105,7 @@ fn function_handle_selector_colon_errors_with_identifier_contract() {
 
 #[test]
 fn function_handle_scalar_assignment_selector_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("f = @sin; f(1) = 2;")
+    let err = execute_source_result("f = @sin; f(1) = 2;")
         .expect_err("function-handle scalar assignment selector should fail");
     assert_eq!(
         err.identifier(),
@@ -1124,7 +1117,7 @@ fn function_handle_scalar_assignment_selector_errors_with_identifier_contract() 
 
 #[test]
 fn function_handle_slice_assignment_selector_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("f = @sin; f(:) = 2;")
+    let err = execute_source_result("f = @sin; f(:) = 2;")
         .expect_err("function-handle slice assignment selector should fail");
     assert_eq!(
         err.identifier(),
@@ -1136,7 +1129,7 @@ fn function_handle_slice_assignment_selector_errors_with_identifier_contract() {
 
 #[test]
 fn function_handle_brace_selector_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("f = @sin; y = f{1};")
+    let err = execute_source_result("f = @sin; y = f{1};")
         .expect_err("function-handle brace selector should fail");
     assert_eq!(
         err.identifier(),
@@ -1148,7 +1141,7 @@ fn function_handle_brace_selector_errors_with_identifier_contract() {
 
 #[test]
 fn function_handle_brace_assignment_selector_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("f = @sin; f{1} = 2;")
+    let err = execute_source_result("f = @sin; f{1} = 2;")
         .expect_err("function-handle brace assignment selector should fail");
     assert_eq!(
         err.identifier(),
@@ -1160,8 +1153,7 @@ fn function_handle_brace_assignment_selector_errors_with_identifier_contract() {
 
 #[test]
 fn brace_read_on_noncell_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("x = 10{1};")
-        .expect_err("brace read on non-cell should fail");
+    let err = execute_source_result("x = 10{1};").expect_err("brace read on non-cell should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:CellIndexingOnNonCell"),
@@ -1172,7 +1164,7 @@ fn brace_read_on_noncell_errors_with_identifier_contract() {
 
 #[test]
 fn brace_assignment_on_noncell_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("x = 10; x{1} = 2;")
+    let err = execute_source_result("x = 10; x{1} = 2;")
         .expect_err("brace assignment on non-cell should fail");
     assert_eq!(
         err.identifier(),
@@ -1184,7 +1176,7 @@ fn brace_assignment_on_noncell_errors_with_identifier_contract() {
 
 #[test]
 fn brace_expansion_on_noncell_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("y = sin(10{:});")
+    let err = execute_source_result("y = sin(10{:});")
         .expect_err("brace expansion on non-cell should fail");
     assert_eq!(
         err.identifier(),
@@ -1203,7 +1195,7 @@ fn nargin_nargout_in_user_functions() {
         end
         r = f(10, 20);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
@@ -1216,7 +1208,7 @@ fn nargin_nargout_in_user_functions() {
         end
         [u,v] = g(7);
     "#;
-    let vars2 = execute_semantic_source(program2);
+    let vars2 = execute_source(program2);
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
@@ -1234,7 +1226,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
         end
         r = f(1);
     "#;
-    let err = execute_semantic_source_result(program).err().unwrap();
+    let err = execute_source_result(program).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 
     // too many inputs
@@ -1244,7 +1236,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
         end
         r = f(1,2,3);
     "#;
-    let err2 = execute_semantic_source_result(program2).err().unwrap();
+    let err2 = execute_source_result(program2).err().unwrap();
     assert_eq!(err2.identifier(), Some("RunMat:TooManyInputs"));
 }
 
@@ -1257,7 +1249,7 @@ fn inputs_with_varargin_minimum_only() {
         end
         r = f(1);
     "#;
-    let err = execute_semantic_source_result(program_err).err().unwrap();
+    let err = execute_source_result(program_err).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 
     let program_ok = r#"
@@ -1267,7 +1259,7 @@ fn inputs_with_varargin_minimum_only() {
         end
         r = f(1,2,3,4);
     "#;
-    let vars_ok = execute_semantic_source(program_ok);
+    let vars_ok = execute_source(program_ok);
     assert!(vars_ok
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
@@ -1283,17 +1275,17 @@ fn too_many_outputs_and_varargout_mismatch() {
         end
         [x1,x2] = f(3);
     "#;
-    let err_tmo = execute_semantic_source_result(program_tmo).err().unwrap();
+    let err_tmo = execute_source_result(program_tmo).err().unwrap();
     assert_eq!(err_tmo.identifier(), Some("RunMat:TooManyOutputs"));
 
     // Too many outputs from non-call expression should not silently zero-pad.
     let expr_tmo = "[x1,x2] = 1;";
-    let err_expr = execute_semantic_source_result(expr_tmo).err().unwrap();
+    let err_expr = execute_source_result(expr_tmo).err().unwrap();
     assert_eq!(err_expr.identifier(), Some("RunMat:TooManyOutputs"));
 
     // Too many outputs from single-output builtin should error.
     let builtin_tmo = "[x1,x2] = sqrt(9);";
-    let err_builtin = execute_semantic_source_result(builtin_tmo).err().unwrap();
+    let err_builtin = execute_source_result(builtin_tmo).err().unwrap();
     assert_eq!(err_builtin.identifier(), Some("RunMat:TooManyOutputs"));
 
     // Varargout requested more than provided
@@ -1303,7 +1295,7 @@ fn too_many_outputs_and_varargout_mismatch() {
         end
         [x1,x2,x3] = h(5);
     "#;
-    let err_mis = execute_semantic_source_result(program_mis).err().unwrap();
+    let err_mis = execute_source_result(program_mis).err().unwrap();
     assert_eq!(err_mis.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 #[test]
@@ -1312,7 +1304,7 @@ fn nested_function_calls() {
     let handle = thread::Builder::new()
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            let vars = execute_semantic_source(program);
+            let vars = execute_source(program);
             assert!(vars
                 .iter()
                 .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
@@ -1329,7 +1321,7 @@ fn shared_input_output_name_updates_in_place() {
         end
         r = bump(4);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -1344,7 +1336,7 @@ fn shared_input_output_name_multi_output_reads_original_input() {
         end
         [a, b] = bump_and_copy(4);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -1355,7 +1347,7 @@ fn shared_input_output_name_multi_output_reads_original_input() {
 
 #[test]
 fn semantic_user_function_multi_assign_executes() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         r#"
         function [a,b] = g()
             a = 2;
@@ -1375,7 +1367,7 @@ fn semantic_user_function_multi_assign_executes() {
 
 #[test]
 fn semantic_feval_multi_assign_executes() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         r#"
         function [a,b] = g()
             a = 6;
@@ -1404,7 +1396,7 @@ fn semantic_feval_multi_assign_uses_typed_instruction() {
         h = @g;
         [x,y] = feval(h);
     "#;
-    let bytecode = compile_semantic_source(source).expect("compile semantic feval multi-assign");
+    let bytecode = compile_source(source).expect("compile semantic feval multi-assign");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 0 && *out_count == 2
@@ -1420,7 +1412,7 @@ fn semantic_feval_zero_output_uses_typed_instruction() {
         h = @inc;
         feval(h, 2);
     "#;
-    let bytecode = compile_semantic_source(source).expect("compile semantic feval zero-output");
+    let bytecode = compile_source(source).expect("compile semantic feval zero-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0
@@ -1437,7 +1429,7 @@ fn semantic_feval_single_output_uses_typed_instruction() {
         h = @inc;
         z = feval(h, 2);
     "#;
-    let bytecode = compile_semantic_source(source).expect("compile semantic feval single-output");
+    let bytecode = compile_source(source).expect("compile semantic feval single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 1
@@ -1460,8 +1452,7 @@ fn semantic_feval_expand_multi_assign_uses_typed_instruction() {
         [u,v] = feval(h, C{:});
         s = u + v;
     "#;
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic feval expanded multi-assign");
+    let bytecode = compile_source(source).expect("compile semantic feval expanded multi-assign");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
@@ -1485,8 +1476,7 @@ fn semantic_feval_expand_zero_output_uses_typed_instruction() {
         h = @pair;
         feval(h, C{:});
     "#;
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic feval expanded zero-output");
+    let bytecode = compile_source(source).expect("compile semantic feval expanded zero-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
@@ -1506,8 +1496,7 @@ fn semantic_feval_expand_single_output_uses_typed_instruction() {
         h = @pair;
         u = feval(h, C{:});
     "#;
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic feval expanded single-output");
+    let bytecode = compile_source(source).expect("compile semantic feval expanded single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
@@ -1521,7 +1510,7 @@ fn semantic_feval_expand_single_output_uses_typed_instruction() {
 
 #[test]
 fn semantic_size_builtin_multi_assign_executes() {
-    let bytecode = compile_semantic_source("[r,c] = size([1 2; 3 4]); z = r + c;").unwrap();
+    let bytecode = compile_source("[r,c] = size([1 2; 3 4]); z = r + c;").unwrap();
     let vars = interpret(&bytecode).expect("semantic size multi-assign should execute");
 
     assert!(vars
@@ -1531,10 +1520,9 @@ fn semantic_size_builtin_multi_assign_executes() {
 
 #[test]
 fn semantic_min_max_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
-        "[mx,mi] = max([1 3 2]); [mn,ni] = min([4 1 5]); z = mx + mi + mn + ni;",
-    )
-    .unwrap();
+    let bytecode =
+        compile_source("[mx,mi] = max([1 3 2]); [mn,ni] = min([4 1 5]); z = mx + mi + mn + ni;")
+            .unwrap();
     let vars = interpret(&bytecode).expect("semantic min/max multi-assign should execute");
 
     assert!(vars
@@ -1544,7 +1532,7 @@ fn semantic_min_max_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_cummin_cummax_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[mx,mi] = cummax([2 1 3]); [mn,ni] = cummin([2 1 3]); z = sum(mx) + sum(mi) + sum(mn) + sum(ni);",
     )
     .unwrap();
@@ -1557,7 +1545,7 @@ fn semantic_cummin_cummax_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_sort_unique_find_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[s,si] = sort([3 1 2]); [u,ui] = unique([2 1 2]); [fr,fc] = find([0 1; 2 0]); z = sum(s) + sum(si) + sum(u) + sum(ui) + sum(fr) + sum(fc);",
     )
     .unwrap();
@@ -1570,7 +1558,7 @@ fn semantic_sort_unique_find_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_union_ismember_sortrows_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[u,ia,ib] = union([3 1],[2 1]); [tf,loc] = ismember([3 1 2],[2 3]); [sr,idx] = sortrows([2 2; 1 3]); z = u(1) + u(2) + u(3) + ia(1) + ia(2) + ib + loc(1) + loc(2) + loc(3) + sr(1,1) + sr(1,2) + sr(2,1) + sr(2,2) + idx(1) + idx(2);",
     )
     .unwrap();
@@ -1584,8 +1572,7 @@ fn semantic_union_ismember_sortrows_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_chol_builtin_multi_assign_execute() {
-    let bytecode =
-        compile_semantic_source("[r,p] = chol([4 0; 0 9]); z = r(1,1) + r(2,2) + p;").unwrap();
+    let bytecode = compile_source("[r,p] = chol([4 0; 0 9]); z = r(1,1) + r(2,2) + p;").unwrap();
     let vars = interpret(&bytecode).expect("semantic chol multi-assign should execute");
 
     assert!(vars
@@ -1595,7 +1582,7 @@ fn semantic_chol_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_lu_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[l,u,p] = lu([2 0; 0 3]); z = l(1,1) + l(2,2) + u(1,1) + u(2,2) + p(1,1) + p(2,2);",
     )
     .unwrap();
@@ -1608,7 +1595,7 @@ fn semantic_lu_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_qr_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[q,r,p] = qr([2 0; 0 3]); z = q(1,1) + q(2,2) + r(1,1) + r(2,2) + p(1,1) + p(2,2);",
     )
     .unwrap();
@@ -1621,7 +1608,7 @@ fn semantic_qr_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_svd_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[u,s,v] = svd([3 0; 0 2]); z = s(1,1) + s(2,2) + u(1,1) * u(1,1) + v(1,1) * v(1,1);",
     )
     .unwrap();
@@ -1634,7 +1621,7 @@ fn semantic_svd_builtin_multi_assign_execute() {
 
 #[test]
 fn semantic_eig_builtin_multi_assign_execute() {
-    let bytecode = compile_semantic_source(
+    let bytecode = compile_source(
         "[v,d] = eig([3 0; 0 2]); z = d(1,1) + d(2,2) + v(1,1) * v(1,1) + v(2,2) * v(2,2);",
     )
     .unwrap();
@@ -1651,7 +1638,7 @@ fn fprintf_inline_cast_argument_does_not_stack_underflow() {
         x = single(3.14);
         n = fprintf("Value: %.4f\n", double(x));
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(has_num(&vars, 14.0));
 }
 
@@ -1661,7 +1648,7 @@ fn sprintf_inline_cast_argument_formats_value() {
         x = single(3.14);
         s = sprintf("Value: %.4f", double(x));
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars.iter().any(|value| {
         if let runmat_builtins::Value::CharArray(chars) = value {
             let rendered: String = chars.data.iter().collect();
@@ -1675,14 +1662,14 @@ fn sprintf_inline_cast_argument_formats_value() {
 #[test]
 fn member_get_set_and_method_call_skeleton() {
     let input = "obj = new_object('Point'); obj = setfield(obj, 'x', 3); ax = getfield(obj, 'x');";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < f64::EPSILON)));
 
     // call Point.move which exists as example method: dx=1,dy=2
     let input2 = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = call_method(obj, 'move', 1, 2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
-    let vars2 = execute_semantic_source(input2);
+    let vars2 = execute_source(input2);
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < f64::EPSILON)));
@@ -1694,7 +1681,7 @@ fn member_get_set_and_method_call_skeleton() {
 #[test]
 fn implicit_struct_creation_for_root_variable_assignment() {
     let input = "s.x = 10; s.y = 20; v = getfield(s, 'x') + getfield(s, 'y');";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
@@ -1702,7 +1689,7 @@ fn implicit_struct_creation_for_root_variable_assignment() {
 
 #[test]
 fn semantic_member_read_write_executes() {
-    let bytecode = compile_semantic_source("s.x = 10; s.y = 20; v = s.x + s.y;").unwrap();
+    let bytecode = compile_source("s.x = 10; s.y = 20; v = s.x + s.y;").unwrap();
     let vars = interpret(&bytecode).expect("semantic member read/write should succeed");
 
     assert!(vars
@@ -1712,7 +1699,7 @@ fn semantic_member_read_write_executes() {
 
 #[test]
 fn semantic_dynamic_member_read_executes() {
-    let vars = execute_semantic_source("s = struct('x', 9); f = 'x'; y = s.(f);");
+    let vars = execute_source("s = struct('x', 9); f = 'x'; y = s.(f);");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
@@ -1720,7 +1707,7 @@ fn semantic_dynamic_member_read_executes() {
 
 #[test]
 fn semantic_indexed_dynamic_member_read_executes() {
-    let vars = execute_semantic_source("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
+    let vars = execute_source("s = struct('x', {1, 2, 3}); f = 'x'; y = s.(f){2};");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
@@ -1728,7 +1715,7 @@ fn semantic_indexed_dynamic_member_read_executes() {
 
 #[test]
 fn semantic_indexed_member_store_back_executes() {
-    let bytecode = compile_semantic_source("s.a = [1 2 3]; s.a(2) = 9; y = s.a(2);").unwrap();
+    let bytecode = compile_source("s.a = [1 2 3]; s.a(2) = 9; y = s.a(2);").unwrap();
     let vars = interpret(&bytecode).expect("semantic indexed member store-back should succeed");
 
     assert!(vars
@@ -1739,7 +1726,7 @@ fn semantic_indexed_member_store_back_executes() {
 #[test]
 fn semantic_indexed_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; idx = [2 4]; s.a(idx) = 99; y = s.a(4);";
-    let bytecode = compile_semantic_source(source).expect("compile indexed member vector store");
+    let bytecode = compile_source(source).expect("compile indexed member vector store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1766,7 +1753,7 @@ fn semantic_indexed_member_vector_store_back_lowers_to_slice_instruction() {
 #[test]
 fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [1 2 3 4]; mask = logical([1 0 1 0]); s.a(mask) = 0; y = s.a(3);";
-    let bytecode = compile_semantic_source(source).expect("compile indexed member logical store");
+    let bytecode = compile_source(source).expect("compile indexed member logical store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1793,8 +1780,7 @@ fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
 #[test]
 fn semantic_indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s = struct('a', {[10 20 30 40], [1 2 3 4]}); idx = [2 4]; s(2).a(idx) = 99; t = s(2); y = getfield(t, 'a'); z = y(4);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile indexed-base member vector store");
+    let bytecode = compile_source(source).expect("compile indexed-base member vector store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1814,8 +1800,7 @@ fn semantic_indexed_base_member_vector_store_back_lowers_to_slice_instruction() 
 #[test]
 fn semantic_indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
     let source = "s = struct('a', {[1 2 3 4], [5 6 7 8]}); mask = logical([1 0 1 0]); s(2).a(mask) = 0; t = s(2); y = getfield(t, 'a'); z = y(3);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile indexed-base member logical store");
+    let bytecode = compile_source(source).expect("compile indexed-base member logical store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1835,8 +1820,7 @@ fn semantic_indexed_base_member_logical_store_back_lowers_to_slice_instruction()
 #[test]
 fn semantic_indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; f = 'a'; idx = [2 4]; s.(f)(idx) = 99; y = s.(f)(4);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile indexed dynamic member vector store");
+    let bytecode = compile_source(source).expect("compile indexed dynamic member vector store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1864,8 +1848,7 @@ fn semantic_indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction
 fn semantic_indexed_dynamic_member_logical_store_back_lowers_to_slice_instruction() {
     let source =
         "s.a = [1 2 3 4]; f = 'a'; mask = logical([1 0 1 0]); s.(f)(mask) = 0; y = s.(f)(3);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile indexed dynamic member logical store");
+    let bytecode = compile_source(source).expect("compile indexed dynamic member logical store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1891,7 +1874,7 @@ fn semantic_indexed_dynamic_member_logical_store_back_lowers_to_slice_instructio
 
 #[test]
 fn cell_paren_delete_executes_with_semantic_store_back() {
-    let vars = execute_semantic_source("c = {1, 2, 3}; c(2) = []; y = c{2};");
+    let vars = execute_source("c = {1, 2, 3}; c(2) = []; y = c{2};");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -1899,7 +1882,7 @@ fn cell_paren_delete_executes_with_semantic_store_back() {
 
 #[test]
 fn indexed_member_delete_executes_with_semantic_store_back() {
-    let vars = execute_semantic_source("s.a = {1, 2, 3}; s.a(2) = []; y = s.a{2};");
+    let vars = execute_source("s.a = {1, 2, 3}; s.a(2) = []; y = s.a{2};");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -1907,7 +1890,7 @@ fn indexed_member_delete_executes_with_semantic_store_back() {
 
 #[test]
 fn indexed_cell_content_delete_executes_with_semantic_store_back() {
-    let vars = execute_semantic_source("c = {{1, 2, 3}}; c{1}(2) = []; y = c{1}{2};");
+    let vars = execute_source("c = {{1, 2, 3}}; c{1}(2) = []; y = c{1}{2};");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -1915,8 +1898,8 @@ fn indexed_cell_content_delete_executes_with_semantic_store_back() {
 
 #[test]
 fn matrix_delete_reports_unsupported_deletion_identifier_contract() {
-    let err = execute_semantic_source_result("x = [1 2; 3 4]; x(2) = [];")
-        .expect_err("matrix delete should fail");
+    let err =
+        execute_source_result("x = [1 2; 3 4]; x(2) = [];").expect_err("matrix delete should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UnsupportedDeletion"),
@@ -1927,7 +1910,7 @@ fn matrix_delete_reports_unsupported_deletion_identifier_contract() {
 
 #[test]
 fn string_slice_delete_reports_identifier_contract() {
-    let err = execute_semantic_source_result("s = [\"a\" \"b\"]; s(1:1) = [];")
+    let err = execute_source_result("s = [\"a\" \"b\"]; s(1:1) = [];")
         .expect_err("string slice delete should fail");
     assert_eq!(
         err.identifier(),
@@ -1939,7 +1922,7 @@ fn string_slice_delete_reports_identifier_contract() {
 
 #[test]
 fn semantic_cell_member_store_back_executes() {
-    let bytecode = compile_semantic_source("C = {struct()}; C{1}.a = 5; y = C{1}.a;").unwrap();
+    let bytecode = compile_source("C = {struct()}; C{1}.a = 5; y = C{1}.a;").unwrap();
     let vars = interpret(&bytecode).expect("semantic cell member store-back should succeed");
 
     assert!(vars
@@ -1950,8 +1933,7 @@ fn semantic_cell_member_store_back_executes() {
 #[test]
 fn semantic_indexed_cell_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "C = {struct('a', [10 20 30 40])}; idx = [2 4]; C{1}.a(idx) = 99; y = C{1}.a(4);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile indexed cell member vector store");
+    let bytecode = compile_source(source).expect("compile indexed cell member vector store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -1979,8 +1961,7 @@ fn semantic_indexed_cell_member_vector_store_back_lowers_to_slice_instruction() 
 fn semantic_indexed_cell_member_logical_store_back_lowers_to_slice_instruction() {
     let source =
         "C = {struct('a', [1 2 3 4])}; mask = logical([1 0 1 0]); C{1}.a(mask) = 0; y = C{1}.a(3);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile indexed cell member logical store");
+    let bytecode = compile_source(source).expect("compile indexed cell member logical store");
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -2006,10 +1987,9 @@ fn semantic_indexed_cell_member_logical_store_back_lowers_to_slice_instruction()
 
 #[test]
 fn empty_array_member_assignment_assigns_empty_value() {
-    let bytecode = compile_semantic_source(
-        "s = struct('x', {1, 2}); s(2).x = []; t = s(2); y = getfield(t, 'x');",
-    )
-    .expect("compile");
+    let bytecode =
+        compile_source("s = struct('x', {1, 2}); s(2).x = []; t = s(2); y = getfield(t, 'x');")
+            .expect("compile");
     let vars = interpret(&bytecode).expect("member empty assignment should succeed");
 
     assert!(vars.iter().any(|v| {
@@ -2022,7 +2002,7 @@ fn empty_array_member_assignment_assigns_empty_value() {
 
 #[test]
 fn empty_array_cell_content_assignment_assigns_empty_value() {
-    let bytecode = compile_semantic_source("c = {1}; c{1} = []; y = c{1};").expect("compile");
+    let bytecode = compile_source("c = {1}; c{1} = []; y = c{1};").expect("compile");
     let vars = interpret(&bytecode).expect("cell content empty assignment should succeed");
 
     assert!(vars.iter().any(|v| {
@@ -2044,7 +2024,7 @@ fn implicit_struct_creation_for_function_output_variable() {
         x = getfield(s, 'x');
         y = getfield(s, 'y');
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
@@ -2056,7 +2036,7 @@ fn implicit_struct_creation_for_function_output_variable() {
 #[test]
 fn nested_member_assignment_materializes_missing_intermediate_structs() {
     let input = "s = struct(); s.a.b = 1; v = getfield(getfield(s, 'a'), 'b');";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
@@ -2066,7 +2046,7 @@ fn nested_member_assignment_materializes_missing_intermediate_structs() {
 fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
     let input =
         "s = struct(); s.arr = [10 20 30]; x = s.arr(2); y = s.arr(1:2); y1 = y(1); y2 = y(2);";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
@@ -2078,7 +2058,7 @@ fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
 #[test]
 fn dotted_invoke_preserves_object_method_dispatch() {
     let input = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
@@ -2097,7 +2077,7 @@ fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
         s.arr = [10 20 30];
         z = pick(s);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
@@ -2107,7 +2087,7 @@ fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
 fn nested_dynamic_member_assignment_materializes_and_writes_back() {
     let input =
         "s = struct(); f1 = 'a'; f2 = 'b'; s.(f1).(f2) = 3; v = getfield(getfield(s, 'a'), 'b');";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -2116,7 +2096,7 @@ fn nested_dynamic_member_assignment_materializes_and_writes_back() {
 #[test]
 fn mixed_member_cell_and_index_read_chain() {
     let input = "s = struct(); s.arr = {[10 20], [30 40]}; v = s.arr{2}(1);";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
@@ -2125,7 +2105,7 @@ fn mixed_member_cell_and_index_read_chain() {
 #[test]
 fn function_handle_anon_round_trip() {
     let input = "h = @sin; g = make_anon('x', 'x+1');";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::FunctionHandle(_))));
@@ -2136,7 +2116,7 @@ fn function_handle_anon_round_trip() {
 
 #[test]
 fn semantic_builtin_function_handle_feval_executes() {
-    let bytecode = compile_semantic_source("h = @sin; y = feval(h, 0);").unwrap();
+    let bytecode = compile_source("h = @sin; y = feval(h, 0);").unwrap();
     let vars = interpret(&bytecode).expect("semantic builtin handle feval should execute");
 
     assert!(vars
@@ -2146,7 +2126,7 @@ fn semantic_builtin_function_handle_feval_executes() {
 
 #[test]
 fn semantic_anonymous_function_handle_feval_executes() {
-    let bytecode = compile_semantic_source("f = @(x) x + 1; y = feval(f, 4);").unwrap();
+    let bytecode = compile_source("f = @(x) x + 1; y = feval(f, 4);").unwrap();
     let vars = interpret(&bytecode).expect("semantic anonymous handle feval should execute");
 
     assert!(vars
@@ -2157,8 +2137,7 @@ fn semantic_anonymous_function_handle_feval_executes() {
 #[test]
 fn semantic_function_handle_index_call_executes() {
     let bytecode =
-        compile_semantic_source("h = @inc; y = h(2);\nfunction z = inc(x)\n  z = x + 1;\nend")
-            .unwrap();
+        compile_source("h = @inc; y = h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -2183,7 +2162,7 @@ fn semantic_function_handle_index_call_executes() {
 #[test]
 fn semantic_function_handle_index_zero_output_executes() {
     let bytecode =
-        compile_semantic_source("h = @inc; h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();
+        compile_source("h = @inc; h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();
     assert!(
         bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -2203,7 +2182,7 @@ fn semantic_function_handle_index_zero_output_executes() {
 fn semantic_function_handle_index_multi_output_executes() {
     let source =
         "h = @pair; [a,b] = h(2); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
-    let bytecode = compile_semantic_source(source).expect("compile semantic handle multi-output");
+    let bytecode = compile_source(source).expect("compile semantic handle multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
@@ -2220,8 +2199,7 @@ fn semantic_function_handle_index_multi_output_executes() {
 #[test]
 fn semantic_function_handle_expand_single_output_executes() {
     let source = "h = @inc; C = {2}; y = h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic handle expanded single-output");
+    let bytecode = compile_source(source).expect("compile semantic handle expanded single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
@@ -2239,8 +2217,7 @@ fn semantic_function_handle_expand_single_output_executes() {
 #[test]
 fn semantic_function_handle_expand_zero_output_executes() {
     let source = "h = @inc; C = {2}; h(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic handle expanded zero-output");
+    let bytecode = compile_source(source).expect("compile semantic handle expanded zero-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "inc"
@@ -2258,8 +2235,7 @@ fn semantic_function_handle_expand_zero_output_executes() {
 fn semantic_function_handle_expand_multi_output_executes() {
     let source =
         "h = @pair; C = {2}; [a,b] = h(C{:}); s = a + b;\nfunction [u,v] = pair(x)\n  u = x;\n  v = x + 1;\nend";
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic handle expanded multi-output");
+    let bytecode = compile_source(source).expect("compile semantic handle expanded multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name) if name == "pair"
@@ -2277,8 +2253,7 @@ fn semantic_function_handle_expand_multi_output_executes() {
 #[test]
 fn unresolved_external_function_handle_index_call_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; y = h(1);";
-    let bytecode =
-        compile_semantic_source(source).expect("compile unresolved external handle index call");
+    let bytecode = compile_source(source).expect("compile unresolved external handle index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
@@ -2303,8 +2278,8 @@ fn unresolved_external_function_handle_index_call_errors_with_identifier() {
 #[test]
 fn unresolved_external_function_handle_index_zero_output_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; h(1);";
-    let bytecode = compile_semantic_source(source)
-        .expect("compile unresolved external handle zero-output index call");
+    let bytecode =
+        compile_source(source).expect("compile unresolved external handle zero-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
@@ -2327,8 +2302,8 @@ fn unresolved_external_function_handle_index_zero_output_errors_with_identifier(
 #[test]
 fn unresolved_external_function_handle_index_multi_output_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; [a,b] = h(1);";
-    let bytecode = compile_semantic_source(source)
-        .expect("compile unresolved external handle multi-output index call");
+    let bytecode =
+        compile_source(source).expect("compile unresolved external handle multi-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
@@ -2351,8 +2326,8 @@ fn unresolved_external_function_handle_index_multi_output_errors_with_identifier
 #[test]
 fn unresolved_external_function_handle_expand_index_call_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; C = {1,2}; y = h(C{:});";
-    let bytecode = compile_semantic_source(source)
-        .expect("compile unresolved external expanded-handle index call");
+    let bytecode =
+        compile_source(source).expect("compile unresolved external expanded-handle index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc"
@@ -2376,7 +2351,7 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
 #[test]
 fn unresolved_external_function_handle_expand_index_zero_output_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; C = {1,2}; h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("compile unresolved external expanded-handle zero-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -2401,7 +2376,7 @@ fn unresolved_external_function_handle_expand_index_zero_output_errors_with_iden
 #[test]
 fn unresolved_external_function_handle_expand_index_multi_output_errors_with_identifier() {
     let source = "h = @pkg.remote_inc; C = {1,2}; [a,b] = h(C{:});";
-    let bytecode = compile_semantic_source(source)
+    let bytecode = compile_source(source)
         .expect("compile unresolved external expanded-handle multi-output index call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
@@ -2426,7 +2401,7 @@ fn unresolved_external_function_handle_expand_index_multi_output_errors_with_ide
 #[test]
 fn method_syntax_with_semantic_function_callee_executes_directly() {
     let source = "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n  out = receiver + value;\nend";
-    let bytecode = compile_semantic_source(source).expect("semantic method-style call compiles");
+    let bytecode = compile_source(source).expect("semantic method-style call compiles");
     assert!(bytecode
         .instructions
         .iter()
@@ -2441,7 +2416,7 @@ fn method_syntax_with_semantic_function_callee_executes_directly() {
 fn cellfun_upper_function_handle_round_trip() {
     let input =
         "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
 
     let mut found = false;
     for value in vars {
@@ -2467,7 +2442,7 @@ fn cellfun_upper_function_handle_round_trip() {
 
 #[test]
 fn cellfun_str2func_local_semantic_callback_executes() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "function y = inc(x); y = x + 1; end; xs = {1, 2}; ys = cellfun(str2func('inc'), xs); total = sum(ys);",
     );
     assert!(vars
@@ -2477,7 +2452,7 @@ fn cellfun_str2func_local_semantic_callback_executes() {
 
 #[test]
 fn arrayfun_str2func_local_semantic_callback_executes() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "function y = inc(x); y = x + 1; end; xs = [1, 2]; ys = arrayfun(str2func('inc'), xs); total = sum(ys);",
     );
     assert!(vars
@@ -2488,10 +2463,10 @@ fn arrayfun_str2func_local_semantic_callback_executes() {
 #[test]
 fn classes_static_and_inheritance() {
     // Register classes
-    assert!(execute_semantic_source_result("__register_test_classes();").is_ok());
+    assert!(execute_source_result("__register_test_classes();").is_ok());
 
     // Default init and namespaced
-    let vars2 = execute_semantic_source("__register_test_classes(); p = new_object('Point'); ax = getfield(p,'x'); ns = new_object('pkg.PointNS'); nsx = getfield(ns,'x');");
+    let vars2 = execute_source("__register_test_classes(); p = new_object('Point'); ax = getfield(p,'x'); ns = new_object('pkg.PointNS'); nsx = getfield(ns,'x');");
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs()<f64::EPSILON)));
@@ -2500,7 +2475,7 @@ fn classes_static_and_inheritance() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<f64::EPSILON)));
 
     // Static method and property
-    let vars3 = execute_semantic_source("__register_test_classes(); o = classref('Point').origin(); sv = classref('Point').staticValue;");
+    let vars3 = execute_source("__register_test_classes(); o = classref('Point').origin(); sv = classref('Point').staticValue;");
     assert!(vars3
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2509,11 +2484,11 @@ fn classes_static_and_inheritance() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs()<f64::EPSILON)));
 
     // Inheritance override: use feval(getmethod(...))()
-    let vars4 = execute_semantic_source("__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); a = feval(getmethod(c,'area'));");
+    let vars4 = execute_source("__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); a = feval(getmethod(c,'area'));");
     assert!(vars4.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI*4.0).abs() < 1e-9)));
 
     // Access control violations
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');",
     )
     .expect_err("private property get should error");
@@ -2527,7 +2502,7 @@ fn classes_static_and_inheritance() {
 
 #[test]
 fn static_method_via_classref_without_class_registry_is_unresolved() {
-    let err = execute_semantic_source_result("P = classref(\"Point\").origin();")
+    let err = execute_source_result("P = classref(\"Point\").origin();")
         .expect_err("classref static call should be unresolved without class registration");
     assert_eq!(
         err.identifier(),
@@ -2542,7 +2517,7 @@ fn static_method_via_classref_without_class_registry_is_unresolved() {
 fn classes_constructor_and_overloaded_indexing() {
     // Call Ctor constructor; exercise OverIdx subsref/subsasgn
     let program = "__register_test_classes(); c = Ctor(7); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t = call_method(o,'subsref','.', 'k');";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2556,7 +2531,7 @@ fn classes_constructor_and_overloaded_indexing() {
 fn classes_property_access_attributes() {
     // Private get already covered by existing test; ensure private set is rejected with
     // an access-control diagnostic.
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);",
     )
     .expect_err("private property set should error");
@@ -2572,7 +2547,7 @@ fn classes_property_access_attributes() {
 fn import_builtin_resolution_for_static_method() {
     // Register classes and import Point.* so we can call origin() unqualified
     let program = "__register_test_classes(); import Point.*; o = origin();";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2583,7 +2558,7 @@ fn import_specific_resolution_for_builtin() {
     // Use specific import to bring a qualified builtin into scope
     let program =
         "import pkg.missing.*; import Point.origin; __register_test_classes(); o = origin();";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2593,7 +2568,7 @@ fn import_specific_resolution_for_builtin() {
 fn import_ambiguity_specific_conflict_errors() {
     // Two specifics that map the same unqualified name should cause compile-time ambiguity.
     let program = "import PkgF.foo; import PkgG.foo; r = foo();";
-    let err = compile_semantic_source(program).expect_err("expected specific import ambiguity");
+    let err = compile_source(program).expect_err("expected specific import ambiguity");
     assert_import_ambiguity_error(&err);
 }
 
@@ -2601,22 +2576,21 @@ fn import_ambiguity_specific_conflict_errors() {
 fn import_ambiguity_wildcard_conflict_errors() {
     // Two wildcard imports that expose the same unqualified name should be ambiguous.
     let program = "import PkgF.*; import PkgG.*; r = foo();";
-    let err = compile_semantic_source(program).expect_err("expected wildcard import ambiguity");
+    let err = compile_source(program).expect_err("expected wildcard import ambiguity");
     assert_import_ambiguity_error(&err);
 }
 
 #[test]
 fn import_ambiguity_wildcard_handle_conflict_errors() {
     let program = "import PkgF.*; import PkgG.*; h = @foo;";
-    let err =
-        compile_semantic_source(program).expect_err("expected wildcard handle import ambiguity");
+    let err = compile_source(program).expect_err("expected wildcard handle import ambiguity");
     assert_import_ambiguity_error(&err);
 }
 #[test]
 fn import_static_method_via_specific_class_import() {
     // import ClassName.* to allow unqualified static methods and properties
     let program = "__register_test_classes(); import Point.*; p = origin(); v = classref('Point').staticValue;";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2628,12 +2602,11 @@ fn import_static_method_via_specific_class_import() {
 #[test]
 fn import_static_method_function_handle_executes() {
     let program = "__register_test_classes(); import Point.origin; h = @origin; o = feval(h);";
-    let bytecode =
-        compile_semantic_source(program).expect("semantic import function handle compile");
+    let bytecode = compile_source(program).expect("semantic import function handle compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
     ));
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2642,12 +2615,11 @@ fn import_static_method_function_handle_executes() {
 #[test]
 fn import_static_method_function_handle_direct_call_executes() {
     let program = "__register_test_classes(); import Point.origin; h = @origin; o = h();";
-    let bytecode =
-        compile_semantic_source(program).expect("semantic import function handle compile");
+    let bytecode = compile_source(program).expect("semantic import function handle compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
     ));
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2657,11 +2629,11 @@ fn import_static_method_function_handle_direct_call_executes() {
 fn import_wildcard_static_method_function_handle_executes() {
     let program = "__register_test_classes(); import Point.*; h = @origin; o = feval(h);";
     let bytecode =
-        compile_semantic_source(program).expect("semantic wildcard import function handle compile");
+        compile_source(program).expect("semantic wildcard import function handle compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
     ));
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2671,11 +2643,11 @@ fn import_wildcard_static_method_function_handle_executes() {
 fn import_wildcard_static_method_function_handle_direct_call_executes() {
     let program = "__register_test_classes(); import Point.*; h = @origin; o = h();";
     let bytecode =
-        compile_semantic_source(program).expect("semantic wildcard import function handle compile");
+        compile_source(program).expect("semantic wildcard import function handle compile");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
     ));
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2684,15 +2656,15 @@ fn import_wildcard_static_method_function_handle_direct_call_executes() {
 #[test]
 fn qualified_static_method_function_handle_executes() {
     let program = "__register_test_classes(); h = @Point.origin; o = feval(h);";
-    let bytecode = compile_semantic_source(program)
-        .expect("semantic qualified static method function handle compile");
+    let bytecode =
+        compile_source(program).expect("semantic qualified static method function handle compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateExternalFunctionHandle(name)
             | runmat_vm::Instr::CreateFunctionHandle(name)
             if name == "Point.origin"
     )));
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2701,15 +2673,15 @@ fn qualified_static_method_function_handle_executes() {
 #[test]
 fn qualified_static_method_function_handle_direct_call_executes() {
     let program = "__register_test_classes(); h = @Point.origin; o = h();";
-    let bytecode = compile_semantic_source(program)
-        .expect("semantic qualified static method function handle compile");
+    let bytecode =
+        compile_source(program).expect("semantic qualified static method function handle compile");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CreateExternalFunctionHandle(name)
             | runmat_vm::Instr::CreateFunctionHandle(name)
             if name == "Point.origin"
     )));
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -2718,7 +2690,7 @@ fn qualified_static_method_function_handle_direct_call_executes() {
 #[test]
 fn classref_getmethod_static_method_handle_executes() {
     let program = "__register_test_classes(); h = getmethod(classref('Point'), 'origin'); name = func2str(h); o = feval(h);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(
         vars.iter()
             .any(|v| matches!(v, runmat_builtins::Value::String(name) if name == "Point.origin")),
@@ -2734,7 +2706,7 @@ fn classref_getmethod_static_method_handle_executes() {
 #[test]
 fn classref_getmethod_static_method_handle_direct_call_executes() {
     let program = "__register_test_classes(); h = getmethod(classref('Point'), 'origin'); name = func2str(h); o = h();";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(
         vars.iter()
             .any(|v| matches!(v, runmat_builtins::Value::String(name) if name == "Point.origin")),
@@ -2750,7 +2722,7 @@ fn classref_getmethod_static_method_handle_direct_call_executes() {
 #[test]
 fn object_getmethod_instance_method_handle_direct_call_executes() {
     let program = "__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); h = getmethod(c, 'area'); a = h();";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars.iter().any(
         |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI * 4.0).abs() < 1e-9)
     ));
@@ -2758,15 +2730,14 @@ fn object_getmethod_instance_method_handle_direct_call_executes() {
 
 #[test]
 fn classref_nonstatic_method_call_errors_with_identifier_contract() {
-    let err =
-        execute_semantic_source_result("__register_test_classes(); classref('Point').move(1, 2);")
-            .expect_err("classref call to non-static method should fail");
+    let err = execute_source_result("__register_test_classes(); classref('Point').move(1, 2);")
+        .expect_err("classref call to non-static method should fail");
     assert_eq!(err.identifier(), Some("RunMat:MethodNotStatic"));
 }
 
 #[test]
 fn classref_unknown_static_method_call_remains_unresolved_with_identifier_contract() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "__register_test_classes(); classref('Point').definitely_missing(1);",
     )
     .expect_err("classref call to unknown static method should fail");
@@ -2775,21 +2746,21 @@ fn classref_unknown_static_method_call_remains_unresolved_with_identifier_contra
 
 #[test]
 fn addlistener_invalid_target_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("addlistener(1, 'Changed', @sin);")
+    let err = execute_source_result("addlistener(1, 'Changed', @sin);")
         .expect_err("addlistener should reject non-object target");
     assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
 }
 
 #[test]
 fn notify_invalid_target_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("notify(1, 'Changed');")
+    let err = execute_source_result("notify(1, 'Changed');")
         .expect_err("notify should reject non-object target");
     assert_eq!(err.identifier(), Some("RunMat:NotifyTargetInvalid"));
 }
 
 #[test]
 fn call_method_empty_name_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "__register_test_classes(); p = new_object('Point'); call_method(p, '   ');",
     )
     .expect_err("empty call_method name should fail");
@@ -2798,28 +2769,28 @@ fn call_method_empty_name_errors_with_identifier_contract() {
 
 #[test]
 fn call_method_nonobject_receiver_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("call_method(1, 'origin');")
+    let err = execute_source_result("call_method(1, 'origin');")
         .expect_err("non-object call_method receiver should fail");
     assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
 }
 
 #[test]
 fn subsref_nonobject_receiver_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("subsref(1, '()', {1});")
+    let err = execute_source_result("subsref(1, '()', {1});")
         .expect_err("non-object subsref receiver should fail");
     assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
 }
 
 #[test]
 fn subsasgn_nonobject_receiver_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("subsasgn(1, '()', {1}, 2);")
+    let err = execute_source_result("subsasgn(1, '()', {1}, 2);")
         .expect_err("non-object subsasgn receiver should fail");
     assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
 }
 
 #[test]
 fn subsref_missing_protocol_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "__register_test_classes(); p = new_object('Point'); subsref(p, '()', {1});",
     )
     .expect_err("object without subsref protocol should fail");
@@ -2828,7 +2799,7 @@ fn subsref_missing_protocol_errors_with_identifier_contract() {
 
 #[test]
 fn subsasgn_missing_protocol_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result(
+    let err = execute_source_result(
         "__register_test_classes(); p = new_object('Point'); subsasgn(p, '()', {1}, 2);",
     )
     .expect_err("object without subsasgn protocol should fail");
@@ -2837,9 +2808,8 @@ fn subsasgn_missing_protocol_errors_with_identifier_contract() {
 
 #[test]
 fn object_paren_index_missing_subsref_errors_with_identifier_contract() {
-    let err =
-        execute_semantic_source_result("__register_test_classes(); p = new_object('Point'); p(1);")
-            .expect_err("object paren indexing without subsref should fail");
+    let err = execute_source_result("__register_test_classes(); p = new_object('Point'); p(1);")
+        .expect_err("object paren indexing without subsref should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:MissingSubsref"),
@@ -2850,7 +2820,7 @@ fn object_paren_index_missing_subsref_errors_with_identifier_contract() {
 
 #[test]
 fn feval_unsupported_callable_value_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result("x = 1; y = feval(x, 2);")
+    let err = execute_source_result("x = 1; y = feval(x, 2);")
         .expect_err("feval on non-callable value should fail");
     assert_eq!(
         err.identifier(),
@@ -2862,10 +2832,9 @@ fn feval_unsupported_callable_value_errors_with_identifier_contract() {
 
 #[test]
 fn object_paren_assign_missing_subsasgn_errors_with_identifier_contract() {
-    let err = execute_semantic_source_result(
-        "__register_test_classes(); p = new_object('Point'); p(1) = 2;",
-    )
-    .expect_err("object paren assignment without subsasgn should fail");
+    let err =
+        execute_source_result("__register_test_classes(); p = new_object('Point'); p(1) = 2;")
+            .expect_err("object paren assignment without subsasgn should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:MissingSubsasgn"),
@@ -2885,7 +2854,7 @@ fn import_precedence_specific_over_wildcard_and_locals() {
         foo = @() 42;            % local function handle shadowing imports
         b = feval(foo);          % should be 42 (local shadow)
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
@@ -2902,7 +2871,7 @@ fn import_ambiguity_between_specifics_errors() {
         import PkgG.foo;
         y = foo();
     "#;
-    let err = compile_semantic_source(program).expect_err("expected specific import ambiguity");
+    let err = compile_source(program).expect_err("expected specific import ambiguity");
     assert_import_ambiguity_error(&err);
 }
 
@@ -2914,7 +2883,7 @@ fn import_ambiguity_between_wildcards_errors() {
         import PkgG.*;
         y = foo();
     "#;
-    let err = compile_semantic_source(program).expect_err("expected wildcard import ambiguity");
+    let err = compile_source(program).expect_err("expected wildcard import ambiguity");
     assert_import_ambiguity_error(&err);
 }
 
@@ -2928,7 +2897,7 @@ fn import_specific_conflict_with_user_function_prefers_local() {
         end
         a = foo();         % should call local function => 33
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 33.0).abs()<1e-9)));
@@ -2943,7 +2912,7 @@ fn import_static_property_shadowed_by_local_variable() {
         staticValue = 7;   % shadows classref('Point').staticValue (42)
         v = staticValue;
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs()<1e-9)));
@@ -2957,7 +2926,7 @@ fn import_specific_beats_wildcard_for_function_resolution() {
         import PkgG.*;     % wildcard that also provides foo
         y = foo();         % should resolve to PkgF.foo => 10
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
@@ -2973,7 +2942,7 @@ fn import_wildcard_static_method_ambiguity_errors() {
         import PkgG.*;
         z = foo();   % ambiguous via wildcard imports
     "#;
-    let err = compile_semantic_source(program).expect_err("expected wildcard import ambiguity");
+    let err = compile_source(program).expect_err("expected wildcard import ambiguity");
     assert_import_ambiguity_error(&err);
 }
 
@@ -2988,7 +2957,7 @@ fn local_function_shadows_class_static_method_under_class_star() {
         end
         v = origin();   % should call local (123), not Point.origin
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 123.0).abs()<1e-9)));
@@ -3005,7 +2974,7 @@ fn multi_segment_import_builtin_vs_user_function_specific_prefers_user_function(
         end
         a = foo();         % should call the user function -> 77
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 77.0).abs()<1e-9)));
@@ -3018,7 +2987,7 @@ fn unqualified_static_property_without_imports_errors() {
         __register_test_classes();
         v = staticValue;
     "#;
-    let err = compile_semantic_source(program).expect_err("expected missing static property error");
+    let err = compile_source(program).expect_err("expected missing static property error");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
 }
 
@@ -3031,7 +3000,7 @@ fn unqualified_static_property_shadowed_by_local_variable() {
         staticValue = 9;
         v = staticValue;  % picks local, not class static 42
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs()<1e-9)));
@@ -3048,7 +3017,7 @@ fn import_nested_package_class_static_method_resolution() {
         end
         v = origin();          % local function shadows any static method named origin
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs()<1e-9)));
@@ -3064,8 +3033,7 @@ fn class_property_attribute_conflicts_error() {
             end
         end
     "#;
-    let err =
-        compile_semantic_source(program).expect_err("expected class property attribute conflict");
+    let err = compile_source(program).expect_err("expected class property attribute conflict");
     assert_eq!(
         err.identifier(),
         Some("RunMat:ClassPropertyAttributeConflict"),
@@ -3086,8 +3054,7 @@ fn class_method_attribute_conflicts_error() {
             end
         end
     "#;
-    let err =
-        compile_semantic_source(program).expect_err("expected class method attribute conflict");
+    let err = compile_source(program).expect_err("expected class method attribute conflict");
     assert_eq!(
         err.identifier(),
         Some("RunMat:ClassMethodAttributeConflict"),
@@ -3100,7 +3067,7 @@ fn class_method_attribute_conflicts_error() {
 fn metaclass_context_with_imports() {
     // Ensure ?pkg.Class parses and coexists with imports in semantic execution.
     let program = "import pkg.*; ?pkg.Class; x=1;";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
@@ -3109,7 +3076,7 @@ fn metaclass_context_with_imports() {
 #[test]
 fn metaclass_postfix_member_and_method() {
     let program = "__register_test_classes(); v = ?Point.staticValue; o = ?Point.origin();";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(has_num(&vars, 42.0));
     assert!(has_object_class(&vars, "Point"));
     assert!(has_object_num_property(&vars, "Point", "x", 0.0));
@@ -3120,7 +3087,7 @@ fn metaclass_postfix_member_and_method() {
 fn classdef_with_attributes_enforced() {
     // Define class A with private get and public set on property p, then enforce via getfield/setfield
     let src = "classdef A\n  properties(GetAccess=private, SetAccess=public)\n    p\n  end\nend\n a = new_object('A'); a = setfield(a,'p',5); try; v = getfield(a,'p'); catch e; ok=1; end";
-    let vars = execute_semantic_source(src);
+    let vars = execute_source(src);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
@@ -3131,7 +3098,7 @@ fn builtin_call_with_expanded_middle_argument() {
     // Use deal to produce a cell row and index into it to pass as middle arg
     // max(a,b) with b coming from C{1}
     let program = "C = deal(10, 20); r = max(5, C{1});";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Expect 10 as result appears in vars somewhere
     assert!(vars
         .iter()
@@ -3141,7 +3108,7 @@ fn builtin_call_with_expanded_middle_argument() {
 #[test]
 fn builtin_call_with_two_expanded_args() {
     let program = "C = deal(3, 4); D = deal(5, 6); r = max(C{1}, D{1});";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -3150,7 +3117,7 @@ fn builtin_call_with_two_expanded_args() {
 #[test]
 fn user_function_with_two_expanded_args() {
     let program = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); D = deal(11,12); r = sum2(C{2}, D{1});";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 19.0).abs() < 1e-9)));
@@ -3159,7 +3126,7 @@ fn user_function_with_two_expanded_args() {
 #[test]
 fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
-    let bytecode = compile_semantic_source(program).expect("compile expansion error source");
+    let bytecode = compile_source(program).expect("compile expansion error source");
     let err = interpret(&bytecode).expect_err("expansion on non-cell should fail");
     assert_eq!(err.identifier(), Some("RunMat:InvalidExpandTarget"));
 }
@@ -3168,7 +3135,7 @@ fn expansion_on_non_cell_errors() {
 #[test]
 fn object_cell_expansion_via_subsref() {
     let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','{}', {1}, 42); r = max(o{1}, 5);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
@@ -3178,8 +3145,7 @@ fn object_cell_expansion_via_subsref() {
 #[test]
 fn method_expand_multi_output_uses_typed_instruction() {
     let source = "obj = new_object('Point'); C = deal(7, 3); [a,b] = obj.deal(C{:}); s = b;";
-    let bytecode =
-        compile_semantic_source(source).expect("compile method expand multi-output source");
+    let bytecode = compile_source(source).expect("compile method expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
@@ -3197,7 +3163,7 @@ fn expand_all_elements_in_args() {
     // C{:} expands all elements of C into separate arguments
     // max takes two args; here C has more; we only assert no crash and presence of some expected nums
     let program = "C = deal(1,2); a = max(C{:});";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(_))));
@@ -3210,7 +3176,7 @@ fn mixed_cell_colon_expansion_in_call_args() {
         [a,b] = deal(C{:,2});
         z = a + b;
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-6.0).abs()<1e-9)));
@@ -3219,7 +3185,7 @@ fn mixed_cell_colon_expansion_in_call_args() {
 #[test]
 fn builtin_expand_multi_output_uses_typed_instruction() {
     let source = "C = deal(7,3); [a,b] = deal(C{:}); s = a + b;";
-    let bytecode = compile_semantic_source(source).expect("compile builtin expand multi-output");
+    let bytecode = compile_source(source).expect("compile builtin expand multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
@@ -3235,7 +3201,7 @@ fn builtin_expand_multi_output_uses_typed_instruction() {
 #[test]
 fn builtin_expand_single_output_uses_typed_instruction() {
     let source = "C = deal(7,3); a = max(C{:});";
-    let bytecode = compile_semantic_source(source).expect("compile builtin expand single output");
+    let bytecode = compile_source(source).expect("compile builtin expand single output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
@@ -3246,8 +3212,7 @@ fn builtin_expand_single_output_uses_typed_instruction() {
 #[test]
 fn semantic_expand_single_output_uses_typed_instruction() {
     let source = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); r = sum2(C{:});";
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic expand single output source");
+    let bytecode = compile_source(source).expect("compile semantic expand single output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
@@ -3258,8 +3223,7 @@ fn semantic_expand_single_output_uses_typed_instruction() {
 #[test]
 fn semantic_expand_multi_output_uses_typed_instruction() {
     let source = "function [u,v] = pair(a,b); u = a; v = b; end; C = deal(7,8); [x,y] = pair(C{:}); s = x + y;";
-    let bytecode =
-        compile_semantic_source(source).expect("compile semantic expand multi-output source");
+    let bytecode = compile_source(source).expect("compile semantic expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
@@ -3276,8 +3240,7 @@ fn semantic_expand_multi_output_uses_typed_instruction() {
 #[test]
 fn method_expand_single_output_uses_typed_instruction() {
     let source = "obj = new_object('Point'); C = deal(7,3); a = obj.deal(C{:});";
-    let bytecode =
-        compile_semantic_source(source).expect("compile method expand single-output source");
+    let bytecode = compile_source(source).expect("compile method expand single-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
@@ -3288,7 +3251,7 @@ fn method_expand_single_output_uses_typed_instruction() {
 #[test]
 fn builtin_multi_output_uses_typed_instruction() {
     let source = "[a,b] = deal(7,3); s = a + b;";
-    let bytecode = compile_semantic_source(source).expect("compile builtin multi-output");
+    let bytecode = compile_source(source).expect("compile builtin multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallBuiltinMulti(name, argc, out_count)
@@ -3304,7 +3267,7 @@ fn builtin_multi_output_uses_typed_instruction() {
 #[test]
 fn builtin_single_output_uses_typed_instruction() {
     let source = "a = sqrt(9);";
-    let bytecode = compile_semantic_source(source).expect("compile builtin single-output");
+    let bytecode = compile_source(source).expect("compile builtin single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallBuiltinMulti(name, argc, out_count)
@@ -3316,7 +3279,7 @@ fn builtin_single_output_uses_typed_instruction() {
 #[test]
 fn method_multi_output_uses_typed_instruction() {
     let source = "obj = new_object('Point'); [a,b] = obj.deal(7,3); s = b;";
-    let bytecode = compile_semantic_source(source).expect("compile method multi-output");
+    let bytecode = compile_source(source).expect("compile method multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexMulti {
@@ -3336,7 +3299,7 @@ fn method_multi_output_uses_typed_instruction() {
 #[test]
 fn method_single_output_uses_typed_instruction() {
     let source = "obj = new_object('Point'); a = obj.deal(7,3);";
-    let bytecode = compile_semantic_source(source).expect("compile method single-output");
+    let bytecode = compile_source(source).expect("compile method single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallMethodOrMemberIndexMulti {
@@ -3350,7 +3313,7 @@ fn method_single_output_uses_typed_instruction() {
 #[test]
 fn unresolved_function_single_output_uses_typed_instruction() {
     let source = "a = definitely_missing_callback(7);";
-    let bytecode = compile_semantic_source(source).expect("compile unresolved call");
+    let bytecode = compile_source(source).expect("compile unresolved call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionMulti {
@@ -3372,7 +3335,7 @@ fn unresolved_function_single_output_uses_typed_instruction() {
 #[test]
 fn unresolved_function_zero_output_uses_typed_instruction_and_errors() {
     let source = "definitely_missing_callback(7);";
-    let bytecode = compile_semantic_source(source).expect("compile unresolved zero-output call");
+    let bytecode = compile_source(source).expect("compile unresolved zero-output call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionMulti {
@@ -3394,7 +3357,7 @@ fn unresolved_function_zero_output_uses_typed_instruction_and_errors() {
 #[test]
 fn unresolved_function_multi_output_uses_typed_instruction_and_errors() {
     let source = "[a,b] = definitely_missing_callback(7);";
-    let bytecode = compile_semantic_source(source).expect("compile unresolved multi-output call");
+    let bytecode = compile_source(source).expect("compile unresolved multi-output call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionMulti {
@@ -3416,7 +3379,7 @@ fn unresolved_function_multi_output_uses_typed_instruction_and_errors() {
 #[test]
 fn unresolved_function_expand_single_output_uses_typed_instruction() {
     let source = "C = deal(7,3); a = definitely_missing_callback(C{:});";
-    let bytecode = compile_semantic_source(source).expect("compile unresolved expanded call");
+    let bytecode = compile_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
@@ -3440,8 +3403,7 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
 #[test]
 fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
     let source = "C = deal(7,3); definitely_missing_callback(C{:});";
-    let bytecode =
-        compile_semantic_source(source).expect("compile unresolved expanded zero-output call");
+    let bytecode = compile_source(source).expect("compile unresolved expanded zero-output call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
@@ -3465,7 +3427,7 @@ fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
 #[test]
 fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
     let source = "C = deal(7,3); [a,b] = definitely_missing_callback(C{:});";
-    let bytecode = compile_semantic_source(source).expect("compile unresolved expanded call");
+    let bytecode = compile_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
@@ -3489,7 +3451,7 @@ fn unresolved_function_expand_multi_output_uses_typed_instruction_and_errors() {
 #[test]
 fn builtin_vector_index_expansion() {
     let program = "C = deal(9, 2); r = max(C{[1 2]});";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
@@ -3498,7 +3460,7 @@ fn builtin_vector_index_expansion() {
 #[test]
 fn user_function_vector_index_expansion() {
     let program = "function y = sum2(a,b); y = a + b; end; C = deal(3,4); r = sum2(C{[1 2]});";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
@@ -3507,7 +3469,7 @@ fn user_function_vector_index_expansion() {
 #[test]
 fn end_minus_one_1d_slice_collect() {
     let program = "A = [1 2 3]; B = A(1:1:end-1); s = sum(B);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -3516,7 +3478,7 @@ fn end_minus_one_1d_slice_collect() {
 #[test]
 fn end_minus_one_1d_slice_assign_broadcast() {
     let program = "A = [1 2 3 4]; A(2:1:end-1) = 9; r = sum(A);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // A becomes [1 9 9 4] => sum 23
     assert!(vars
         .iter()
@@ -3528,7 +3490,7 @@ fn multidim_range_end_assign() {
     // Assign on second dim using range with end-1
     let program = "A = [1 2 3; 4 5 6]; A(:,2:2:end-1) = 9; s = sum(sum(A));";
     // Original A sum is 21. We set column 2 to 9 across all rows: [1 9 3; 4 9 6] => sum 32
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 32.0).abs() < 1e-9)));
@@ -3539,7 +3501,7 @@ fn multidim_range_end_assign_non_scalar_rhs_broadcast() {
     // 2x3; assign the middle column selection with a 2x1 rhs, which should broadcast along the selection length
     let program = "A = [1 2 3; 4 5 6]; B = [7;8]; A(:,2:2:end-1) = B; s = sum(sum(A));";
     // Becomes [1 7 3; 4 8 6] => sum 29
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 29.0).abs() < 1e-9)));
@@ -3550,7 +3512,7 @@ fn mixed_range_end_assign_vector_broadcast() {
     // 3x4 matrix; select rows 2:end (rows {2,3}) and cols 1:2:end-1 (cols {1,3}); assign 2x1 vector broadcast across selected cols
     let program =
         "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [100;200]; A(2:end, 1:2:end-1) = B; s = sum(sum(A));";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Expected sum 646 (see analysis)
     assert!(vars
         .iter()
@@ -3563,7 +3525,7 @@ fn mixed_range_end_assign_matrix_rhs_exact_shape() {
     let program =
         "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1 3; 2 4]; A(2:end, 1:2:end-1) = B; s = sum(sum(A));";
     // Note: [1 3; 2 4] in MATLAB column-major maps to data [1,2,3,4] in our Tensor internal
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // New values: positions (2,1)=1,(3,1)=2,(2,3)=3,(3,3)=4. Change from original 5,9,7,11 -> delta = (1-5)+(2-9)+(3-7)+(4-11) = -22; sum 78-22=56
     assert!(vars
         .iter()
@@ -3574,8 +3536,8 @@ fn mixed_range_end_assign_matrix_rhs_exact_shape() {
 fn mixed_range_end_assign_shape_mismatch_error() {
     // RHS shape 3x1 does not match rows 2:end (len 2) and cannot broadcast
     let program = "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1;2;3]; A(2:end, 1:2:end-1) = B;";
-    let err = execute_semantic_source_result(program)
-        .expect_err("shape-mismatched range assignment should fail");
+    let err =
+        execute_source_result(program).expect_err("shape-mismatched range assignment should fail");
     assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
@@ -3583,7 +3545,7 @@ fn mixed_range_end_assign_shape_mismatch_error() {
 fn broadcasting_roundtrip_property_like() {
     // After assignment with broadcasted column vector, selected columns equal the vector
     let program = "A = zeros(3,4); v = [7;8;9]; A(:, 1:2:end-1) = v; x = A(:,1); y = A(:,3);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Expect 7,8,9 present for x and y
     let mut count = 0;
     for v in vars {
@@ -3604,7 +3566,7 @@ fn broadcasting_roundtrip_property_like() {
 fn logical_mask_write_scalar_and_vector() {
     // Scalar write via linear logical mask
     let program = "A = [1 2 3 4 5 6]; m = [true false true false true false]; A(m) = 9; s1 = sum(A);\nB = [1 2 3 4 5 6]; idx = [1 3 5]; B(idx) = [7 8 9]; s2 = sum(B);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // After A(m)=9, A becomes [9 2 9 4 9 6] => sum 39
     assert!(vars
         .iter()
@@ -3619,7 +3581,7 @@ fn logical_mask_write_scalar_and_vector() {
 fn gather_scatter_roundtrip_nd() {
     // Gather a slice, scatter it back, tensor must be unchanged
     let program = "A = [1 2 3; 4 5 6; 7 8 9]; S = A(2:3, 1:2); A(2:3, 1:2) = S; t = sum(A(:));";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Sum remains 45
     assert!(vars
         .iter()
@@ -3630,7 +3592,7 @@ fn gather_scatter_roundtrip_nd() {
 fn shape_broadcasting_laws() {
     // Broadcast column vector over selected columns
     let program = "A = zeros(3,4); v = [1;2;3]; A(:, 2:2:4) = v; x = sum(A(:));\nC = zeros(2,3,2); w = [5;6]; C(:,2,:) = w; y = sum(C(:));";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // A has 2 columns set to v => sum = (1+2+3)*2 = 12
     assert!(vars
         .iter()
@@ -3645,7 +3607,7 @@ fn shape_broadcasting_laws() {
 fn column_major_rhs_mapping() {
     // Verify RHS mapping enumerates first-dimension fastest
     let program = "A = zeros(3,3); R = [10 13 16; 11 14 17; 12 15 18]; A(:, [1 3]) = R(:, [1 3]); s = sum(A(:));";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Selected columns are 1 and 3, filled from R(:,[1 3]) which in column-major is [10;11;12;16;17;18] => sum 84
     assert!(vars
         .iter()
@@ -3655,7 +3617,7 @@ fn column_major_rhs_mapping() {
 fn builtin_call_with_function_return_propagation() {
     // g returns two numbers; propagate as args to max
     let program = "function [a,b] = g(); a=9; b=4; end; r = max(g());";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
@@ -3666,7 +3628,7 @@ fn function_call_base_expand_all() {
     let program = r#"
         function y = sum2(a,b); y = a + b; end; r = sum2(deal(5,6){:});
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 11.0).abs() < 1e-9)));
@@ -3676,7 +3638,7 @@ fn function_call_base_expand_all() {
 fn function_return_propagation_in_args() {
     // g returns [a,b]; f takes two inputs; adapt to current semantics by binding outputs, then calling f
     let program = "function [a,b] = g(); a=2; b=3; end; function y = f(x1,x2); y = x1 + x2; end; [u,v] = g(); r = f(u,v);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -3695,7 +3657,7 @@ fn varargin_pack_and_forward() {
         r1 = f(1,2,3);
         r2 = g(4,5,6,7);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-6.0).abs()<1e-9)));
@@ -3715,7 +3677,7 @@ fn feval_expand_multi_forwards_expanded_cell_args() {
         end
         r = g(4,5,6,7);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
@@ -3730,7 +3692,7 @@ fn feval_expand_cell_indices_support_end_offsets() {
         C = {10, 20, 30};
         r = feval(@f, C{end-1}, C{end});
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-50.0).abs()<1e-9)));
@@ -3739,7 +3701,7 @@ fn feval_expand_cell_indices_support_end_offsets() {
 #[test]
 fn feval_expand_cell_indices_end_plus_offset_errors() {
     let program = "C = {10}; r = feval(@max, C{end+1}, 0);";
-    let err = execute_semantic_source_result(program).err().unwrap();
+    let err = execute_source_result(program).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
 }
 
@@ -3752,7 +3714,7 @@ fn feval_expand_cell_indices_support_2d_end_selectors() {
         C = {1, 2; 3, 4};
         r = feval(@f, C{end,1}, C{1,end});
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -3767,7 +3729,7 @@ fn feval_expand_cell_indices_support_2d_end_offsets() {
         C = {1, 2; 3, 4};
         r = feval(@f, C{end-1,1}, C{1,end-1});
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
@@ -3776,21 +3738,21 @@ fn feval_expand_cell_indices_support_2d_end_offsets() {
 #[test]
 fn feval_expand_cell_indices_2d_end_plus_offset_errors() {
     let program = "C = {1, 2; 3, 4}; r = feval(@max, C{end+1,1}, 0);";
-    let err = execute_semantic_source_result(program).err().unwrap();
+    let err = execute_source_result(program).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
 }
 
 #[test]
 fn feval_expand_cell_indices_non_offset_end_expr_compile_error_identifier() {
     let program = "C = {10, 20, 30, 40}; r = feval(@max, C{end/2}, 0);";
-    let err = compile_semantic_source(program).expect_err("compile should fail");
+    let err = compile_source(program).expect_err("compile should fail");
     assert_eq!(err.identifier(), Some("RunMat:MirCellExpandPlanInvalid"));
 }
 
 #[test]
 fn feval_expand_cell_fractional_index_errors() {
     let program = "C = {10, 20}; r = feval(@max, C{1.5}, 0);";
-    let err = execute_semantic_source_result(program).err().unwrap();
+    let err = execute_source_result(program).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
 }
 
@@ -3803,7 +3765,7 @@ fn varargout_expand_into_outer_call() {
         end
         r = max(h(10));
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // max(11,12) = 12
     assert!(vars
         .iter()
@@ -3822,7 +3784,7 @@ fn user_function_consumes_varargout_exact_needed() {
         end
         r = f(g());
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // 1 + 20 + 300 = 321
     assert!(vars
         .iter()
@@ -3835,7 +3797,7 @@ fn operator_overloading_plus_times_lt_eq() {
     let program = format!(
         "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3;"
     );
-    let vars = execute_semantic_source(&program);
+    let vars = execute_source(&program);
     assert!(has_num(&vars, 8.0));
 }
 
@@ -3845,7 +3807,7 @@ fn operator_overloading_elementwise_vs_mtimes_and_mixed() {
     let program = format!(
         "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o; s = a + b + c + d;"
     );
-    let vars = execute_semantic_source(&program);
+    let vars = execute_source(&program);
     assert!(has_num(&vars, 40.0));
 }
 
@@ -3855,7 +3817,7 @@ fn operator_overloading_relational_lt_eq() {
     let program = format!(
         "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o); s = t1 + t2 + t3 + t4;"
     );
-    let vars = execute_semantic_source(&program);
+    let vars = execute_source(&program);
     assert!(has_num(&vars, 1.0));
 }
 
@@ -3882,8 +3844,8 @@ fn operator_overloading_full_grid_basic() {
     for (idx, stmt) in statements.iter().enumerate() {
         program.push_str(stmt);
         program.push('\n');
-        execute_semantic_source_result(&program).unwrap_or_else(|err| {
-            let bc = compile_semantic_source(&program).unwrap();
+        execute_source_result(&program).unwrap_or_else(|err| {
+            let bc = compile_source(&program).unwrap();
             panic!(
                 "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
                 bc.instructions
@@ -3904,7 +3866,7 @@ fn import_precedence_and_class_static_shadowing() {
         a = origin;          % uses local variable, not static
         b = f();             % user function resolves before imports
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9)));
@@ -3921,7 +3883,7 @@ fn static_method_resolution_under_wildcard_import() {
         import Point.*;
         r = origin(); % static method
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(has_object_class(&vars, "Point"));
     assert!(has_object_num_property(&vars, "Point", "x", 0.0));
     assert!(has_object_num_property(&vars, "Point", "y", 0.0));
@@ -3931,7 +3893,7 @@ fn static_method_resolution_under_wildcard_import() {
 fn operator_overloading_numeric_results_and_bitwise_arrays() {
     // Verify explicit numeric outcomes for OverIdx overloads
     let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3; r2 = o .* 2; r3 = o * 4; a = (o < 10); b = (o == 5);";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-9))); // r1 = 5+3
@@ -3951,7 +3913,7 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
 
     // Bitwise and/or on arrays: verify element-wise behavior
     let program2 = "A = [1 0 1; 0 1 0]; B = [1 1 0; 0 0 1]; C = A & B; D = A | B; Sc = sum(C(:)); Sd = sum(D(:));";
-    let vars2 = execute_semantic_source(program2);
+    let vars2 = execute_source(program2);
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
@@ -3966,14 +3928,14 @@ fn operator_overloading_left_division_variants() {
     let program = format!(
         "{setup} a = (o .\\ 2); b = (2 .\\ o); c = (o ./ 2); d = (2 ./ o); s = a + b + c + d;",
     );
-    let vars = execute_semantic_source(&program);
+    let vars = execute_source(&program);
     assert!(has_num(&vars, 5.8));
 }
 
 #[test]
 fn bitwise_or_row_vectors() {
     let program = "f = ([1 0 1] | [0 1 1]);";
-    let bc = compile_semantic_source(program).unwrap();
+    let bc = compile_source(program).unwrap();
     let _ = interpret(&bc).unwrap();
 }
 
@@ -3981,7 +3943,7 @@ fn bitwise_or_row_vectors() {
 fn function_return_propagation_partial_fill() {
     // g returns [1,2,3]; h takes 2 inputs; ensure leftmost two feed h
     let program = "function [a,b,c] = g(); a=1; b=2; c=3; end; function y = h(x1,x2); y = x1*10 + x2; end; r = h(g());";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // 1*10 + 2 = 12
     assert!(vars
         .iter()
@@ -3992,7 +3954,7 @@ fn function_return_propagation_partial_fill() {
 fn nested_function_return_propagation_mixed_with_fixed() {
     // g()->[4,5]; f(x,p,z)=x+p+z; call f(1, g()) => 1+4+5=10
     let program = "function [a,b] = g(); a=4; b=5; end; function y = f(x,p,z); y = x + p + z; end; r = f(1, g());";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
@@ -4021,7 +3983,7 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
             out_id = id; out_msg = msg; out_exc = e;
         end
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Look for the exception object with identifier/message
     let has_exc = vars.iter().any(|v| match v {
         runmat_builtins::Value::MException(me) => {
@@ -4042,7 +4004,7 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
 #[test]
 fn globals_basic_and_shadowing() {
     let prog = "global G; G = 5; function y = f(x); global G; y = G + x; end; a = f(3);";
-    let vars = execute_semantic_source(prog);
+    let vars = execute_source(prog);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-12)));
@@ -4051,7 +4013,7 @@ fn globals_basic_and_shadowing() {
 #[test]
 fn persistents_init_once_across_calls() {
     let prog = "function y = counter(); persistent C; if C==0; C = 0; end; C = C + 1; y = C; end; a = counter(); b = counter(); c = counter();";
-    let vars = execute_semantic_source(prog);
+    let vars = execute_source(prog);
     // Expect last value 3 somewhere in vars
     assert!(vars
         .iter()
@@ -4063,7 +4025,7 @@ fn import_precedence_and_shadowing() {
     // Define user function f; specific import for Point.origin; wildcard import Pkg.* (nonexistent)
     // Local variable named origin should shadow imports; then function should shadow imports.
     let program = "function y = f(); y = 123; end; __register_test_classes(); import Point.origin; import Pkg.*; origin = 7; a = origin; b = f();";
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Expect 7 and 123 present
     assert!(vars
         .iter()
@@ -4088,7 +4050,7 @@ fn class_dependent_property_get_set() {
         % get.p should return p_backing
         v = getfield(d, 'p');
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     let sevens = vars
         .iter()
         .filter(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9))
@@ -4106,7 +4068,7 @@ fn struct_isfield_multi_and_fieldnames() {
         s = struct(); s = setfield(s, 'a', 1); s = setfield(s, 'b', 2);
         c = {'a','x';'b','a'}; r = isfield(s, c); f = fieldnames(s);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Expect r to be 2x2 logical matrix [[1,0];[1,1]] in column-major data [1,1,0,1]
     let mut found_r_ok = false;
     let mut found_f_ok = false;
@@ -4136,7 +4098,7 @@ fn struct_isfield_string_array_names() {
         names = ["a" "b"; "x" "a"];
         r = isfield(s, names);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // Expect r to be 2x2 logical matrix [[1,0];[0,1]] in column-major data [1,0,0,1]
     assert!(vars.iter().any(|v| matches!(
         v,
@@ -4161,7 +4123,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
             ok = 1;
         end
     "#;
-    let res = execute_semantic_source_result(prog);
+    let res = execute_source_result(prog);
     if let Ok(vars) = res {
         assert!(vars
             .iter()
@@ -4182,7 +4144,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
             ok=2;
         end
     "#;
-    let res2 = execute_semantic_source_result(prog2);
+    let res2 = execute_source_result(prog2);
     if let Ok(vars2) = res2 {
         assert!(vars2
             .iter()
@@ -4196,7 +4158,7 @@ fn containers_map_parenthesis_indexing() {
         fruit = containers.Map({'apple'}, {99});
         energy = fruit('apple');
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
@@ -4210,7 +4172,7 @@ fn containers_map_dot_properties() {
         value_type = m.ValueType;
         count = m.Count;
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
 
     assert!(vars.iter().any(|v| match v {
         runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "char",
@@ -4235,7 +4197,7 @@ fn string_array_literal_concat_index_and_compare() {
         e1 = (A == "a");                % logical mask 2x2
         e2 = (A ~= "bb");               % logical mask 2x2
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     let mut saw_a = false;
     let mut saw_x = false;
     let mut saw_b = false;
@@ -4290,7 +4252,7 @@ fn string_literal_and_num2str_horzcat_promotes_and_runs() {
         wn = 6;
         label = ["wn = ", num2str(wn), " rad/s"];
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     let mut saw_label = false;
     for value in vars {
         if let runmat_builtins::Value::StringArray(sa) = value {
@@ -4313,7 +4275,7 @@ fn computed_integer_indices_work_for_column_slice_read_and_assign() {
         B(:, j) = [7; 9];
         d = B(:, j);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
 
     let mut saw_read = false;
     let mut saw_assign = false;
@@ -4344,7 +4306,7 @@ fn import_deep_multiseg_package_specific_vs_wildcard() {
 		import pkg.PointNS.*; % wildcard unrelated (should not affect foo)
 		a = foo();            % resolves to PkgF.foo => 10
 	"#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
@@ -4364,7 +4326,7 @@ fn import_shadowing_matrix_locals_user_specific_wildcard_classstar() {
 		b = bar();            % 33 (user function)
 		c = origin();         % static method via Class.* (no shadowing by foo)
 	"#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-77.0).abs()<1e-9)));
@@ -4386,7 +4348,7 @@ fn import_wildcard_vs_classstar_ambiguity_for_static_method() {
 		import Point.*;   % duplicate
 		r = origin();
 	"#;
-    let err = compile_semantic_source(program).expect_err("expected duplicate classstar import");
+    let err = compile_source(program).expect_err("expected duplicate classstar import");
     assert_eq!(
         err.identifier(),
         Some("RunMat:ImportDuplicate"),
@@ -4402,7 +4364,7 @@ fn import_specific_vs_wildcard_same_name_prefers_specific_under_nesting() {
 		import PkgG.*;     % wildcard also has foo
 		y = foo();         % should call specific -> 10
 	"#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
@@ -4415,7 +4377,7 @@ fn type_class_static_method_zeros() {
         A = double.zeros(2, 3);
         s = size(A);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // The result should be a 2x3 matrix of zeros
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
@@ -4432,7 +4394,7 @@ fn type_class_static_method_logical_zeros() {
     let program = r#"
         A = logical.zeros(2, 2);
     "#;
-    let vars = execute_semantic_source(program);
+    let vars = execute_source(program);
     // The result should be a 2x2 logical array of zeros
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::LogicalArray(l) = v {

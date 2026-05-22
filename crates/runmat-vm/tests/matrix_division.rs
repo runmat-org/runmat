@@ -3,11 +3,11 @@ mod test_helpers;
 
 use runmat_builtins::Value;
 use runmat_vm::Instr;
-use test_helpers::{compile_semantic_source, interpret};
+use test_helpers::{compile_source, interpret};
 
 fn execute_program(source: &str) -> Vec<Value> {
-    let bytecode = compile_semantic_source(source).expect("compile semantic source");
-    interpret(&bytecode).expect("execute semantic bytecode")
+    let bytecode = compile_source(source).expect("compile source");
+    interpret(&bytecode).expect("execute bytecode")
 }
 
 fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {
@@ -39,8 +39,7 @@ fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
 
 #[test]
 fn matrix_and_elementwise_division_lower_to_distinct_instructions() {
-    let bytecode =
-        compile_semantic_source("a = 6 / 2; b = 6 \\ 2; c = 6 ./ 2; d = 6 .\\ 2;").unwrap();
+    let bytecode = compile_source("a = 6 / 2; b = 6 \\ 2; c = 6 ./ 2; d = 6 .\\ 2;").unwrap();
     assert!(
         bytecode
             .instructions

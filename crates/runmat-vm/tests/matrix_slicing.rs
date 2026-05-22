@@ -2,12 +2,12 @@
 mod test_helpers;
 
 use runmat_builtins::Value;
-use test_helpers::execute_semantic_source;
+use test_helpers::execute_source;
 
 #[test]
 fn basic_matrix_and_slices() {
     // A(:)
-    let vars = execute_semantic_source("A=[1,2;3,4]; v=A(:)").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; v=A(:)").unwrap();
     if let Value::Tensor(v) = &vars[1] {
         assert_eq!(v.rows(), 4);
         assert_eq!(v.cols(), 1);
@@ -17,7 +17,7 @@ fn basic_matrix_and_slices() {
     }
 
     // A(:,2)
-    let vars = execute_semantic_source("A=[1,2;3,4]; c=A(:,2)").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; c=A(:,2)").unwrap();
     if let Value::Tensor(c) = &vars[1] {
         assert_eq!(c.rows(), 2);
         assert_eq!(c.cols(), 1);
@@ -27,7 +27,7 @@ fn basic_matrix_and_slices() {
     }
 
     // A(2,:)
-    let vars = execute_semantic_source("A=[1,2;3,4]; r=A(2,:)").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; r=A(2,:)").unwrap();
     if let Value::Tensor(r) = &vars[1] {
         assert_eq!(r.rows(), 1);
         assert_eq!(r.cols(), 2);
@@ -37,7 +37,7 @@ fn basic_matrix_and_slices() {
     }
 
     // A(:,:)
-    let vars = execute_semantic_source("A=[1,2;3,4]; B=A(:,:)").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; B=A(:,:)").unwrap();
     if let Value::Tensor(b) = &vars[1] {
         assert_eq!(b.rows(), 2);
         assert_eq!(b.cols(), 2);
@@ -50,7 +50,7 @@ fn basic_matrix_and_slices() {
 
 #[test]
 fn empty_slice_from_two_arg_colon() {
-    let vars = execute_semantic_source("A = [10 20 30]; B = A(1:0); sz = size(B);").unwrap();
+    let vars = execute_source("A = [10 20 30]; B = A(1:0); sz = size(B);").unwrap();
     if let Value::Tensor(b) = &vars[1] {
         assert_eq!(b.rows(), 1);
         assert_eq!(b.cols(), 0);
@@ -69,7 +69,7 @@ fn empty_slice_from_two_arg_colon() {
 
 #[test]
 fn empty_slice_rows_and_columns() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "
         M = reshape(1:12, 3, 4);
         R = M(1:0, :);
@@ -95,7 +95,7 @@ fn empty_slice_rows_and_columns() {
 
 #[test]
 fn range_to_plain_end_column_slice() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "
         M = reshape(1:12, 3, 4);
         C = M(:, 4:end);
@@ -113,7 +113,7 @@ fn range_to_plain_end_column_slice() {
 
 #[test]
 fn mixed_end_bounded_and_plain_ranges_gather() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "
         M = reshape(1:20, 4, 5);
         S = M(2:end-1, 3:4);
@@ -131,7 +131,7 @@ fn mixed_end_bounded_and_plain_ranges_gather() {
 
 #[test]
 fn mixed_end_minus_and_plain_end_ranges_gather() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "
         M = reshape(1:20, 4, 5);
         S = M(2:end-1, 4:end);
@@ -149,7 +149,7 @@ fn mixed_end_minus_and_plain_end_ranges_gather() {
 
 #[test]
 fn linear_index_preserves_numeric_index_shape() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "
         A = reshape(1:9, 3, 3);
         rowIdx = [1 3 5];

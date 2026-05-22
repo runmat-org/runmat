@@ -1,12 +1,12 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use test_helpers::execute_semantic_source;
+use test_helpers::execute_source;
 
 #[test]
 fn error_identifier_and_catch() {
     // Emit the message and ensure identifier/message are preserved exactly.
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "try; error(\"RunMat:domainError\", \"bad\"); catch e; id = getfield(e, 'identifier'); msg = getfield(e, 'message'); out_exc = e; end",
     )
     .unwrap();
@@ -28,7 +28,7 @@ fn error_identifier_and_catch() {
 
 #[test]
 fn nested_try_catch_rethrow() {
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "try; try; error('RunMat:oops','x'); catch e; rethrow(e); end; catch f; g=1; end",
     )
     .unwrap();
@@ -40,7 +40,7 @@ fn nested_try_catch_rethrow() {
 #[test]
 fn catch_and_multi_assign_propagation() {
     // Ensure catch-bound exception can be read and subsequent assignments proceed
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "A=[1 2]; try; x=A(10); catch e; [m,id,ok] = deal(getfield(e,'message'), getfield(e,'identifier'), 1); end",
     )
     .unwrap();
@@ -57,10 +57,9 @@ fn catch_and_multi_assign_propagation() {
 fn dot_access_identifier_and_message() {
     // err.identifier and err.message via dot syntax (LoadMember, not getfield);
     // use an index-out-of-bounds error so the try body always fires from the VM directly.
-    let vars = execute_semantic_source(
-        "A=[1 2]; try; x=A(10); catch e; id=e.identifier; msg=e.message; ok=1; end",
-    )
-    .unwrap();
+    let vars =
+        execute_source("A=[1 2]; try; x=A(10); catch e; id=e.identifier; msg=e.message; ok=1; end")
+            .unwrap();
     let catch_ran = vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9));
@@ -84,7 +83,7 @@ fn dot_access_identifier_and_message() {
 #[test]
 fn catch_index_error_and_continue() {
     // Index out of bounds on tensor, caught by try/catch
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "A = [1 2;3 4]; try; x = A(10); catch e; id = getfield(e,'identifier'); msg = getfield(e,'message'); ok=1; end",
     )
     .unwrap();

@@ -3,12 +3,12 @@ mod test_helpers;
 
 use runmat_builtins::Value;
 use runmat_vm::Instr;
-use test_helpers::compile_semantic_source;
-use test_helpers::execute_semantic_source;
+use test_helpers::compile_source;
+use test_helpers::execute_source;
 
 #[test]
 fn colon_range_produces_row_vector() {
-    let vars = execute_semantic_source("v = -2:0.08:2;").unwrap();
+    let vars = execute_source("v = -2:0.08:2;").unwrap();
     let v = vars
         .iter()
         .find_map(|val| match val {
@@ -21,7 +21,7 @@ fn colon_range_produces_row_vector() {
 
 #[test]
 fn meshgrid_accepts_colon_ranges() {
-    let vars = execute_semantic_source("[X, Y] = meshgrid(-2:0.08:2, -2:0.08:2);").unwrap();
+    let vars = execute_source("[X, Y] = meshgrid(-2:0.08:2, -2:0.08:2);").unwrap();
     let mut tensors: Vec<&runmat_builtins::Tensor> = vars
         .iter()
         .filter_map(|v| match v {
@@ -43,14 +43,14 @@ fn meshgrid_accepts_colon_ranges() {
 #[test]
 fn meshgrid_accepts_precomputed_ranges() {
     let source = "a = -2:0.08:2; b = -2:0.08:2; [X, Y] = meshgrid(a, b);";
-    let bytecode = compile_semantic_source(source).unwrap();
+    let bytecode = compile_source(source).unwrap();
     assert!(bytecode.instructions.iter().any(|instr| {
         matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "meshgrid")
             || matches!(instr, Instr::CallBuiltinMulti(name, 2, 2) if name == "meshgrid")
             || matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
                 if name == "meshgrid" && *out_count == 1 && specs.len() == 2)
     }));
-    let vars = execute_semantic_source(source).unwrap();
+    let vars = execute_source(source).unwrap();
     let shapes: Vec<Vec<usize>> = vars
         .iter()
         .filter_map(|v| match v {
@@ -66,7 +66,7 @@ fn meshgrid_accepts_precomputed_ranges() {
 
 #[test]
 fn two_colon_ranges_remain_vectors() {
-    let vars = execute_semantic_source("a = -2:0.08:2; b = -2:0.08:2;").unwrap();
+    let vars = execute_source("a = -2:0.08:2; b = -2:0.08:2;").unwrap();
     // Variable order for this program should be [a, b].
     let a = match &vars[0] {
         Value::Tensor(t) => t,
@@ -83,7 +83,7 @@ fn two_colon_ranges_remain_vectors() {
 #[test]
 fn meshgrid_failure_does_not_mutate_inputs() {
     // Even if meshgrid errors, the input vectors should remain vectors.
-    let vars = execute_semantic_source(
+    let vars = execute_source(
         "a = -2:0.08:2; b = -2:0.08:2; try; [X, Y] = meshgrid(a, b); catch e; end; A = a;",
     )
     .unwrap();

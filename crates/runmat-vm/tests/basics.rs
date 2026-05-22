@@ -5,18 +5,18 @@ use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
-use test_helpers::compile_semantic_source;
+use test_helpers::compile_source;
 use test_helpers::interpret;
 
-fn execute_semantic_source(source: &str) -> Vec<Value> {
-    let bytecode = compile_semantic_source(source).expect("compile semantic source");
-    interpret(&bytecode).expect("execute semantic bytecode")
+fn execute_source(source: &str) -> Vec<Value> {
+    let bytecode = compile_source(source).expect("compile source");
+    interpret(&bytecode).expect("execute bytecode")
 }
 
 #[test]
 fn arithmetic_and_assignment() {
     let input = "x = 1 + 2; y = x * x";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     let x: f64 = (&vars[0]).try_into().unwrap();
     let y: f64 = (&vars[1]).try_into().unwrap();
     assert_eq!(x, 3.0);
@@ -25,15 +25,14 @@ fn arithmetic_and_assignment() {
 
 #[test]
 fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
-    let bytecode = compile_semantic_source("s = struct{version = 1, version = 2};")
-        .expect("compile semantic source");
+    let bytecode = compile_source("s = struct{version = 1, version = 2};").expect("compile source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         Instr::CreateStructLiteral(fields)
             if fields == &vec!["version".to_string(), "version".to_string()]
     )));
 
-    let vars = interpret(&bytecode).expect("execute semantic bytecode");
+    let vars = interpret(&bytecode).expect("execute bytecode");
     let Value::Struct(st) = &vars[0] else {
         panic!("expected struct value");
     };
@@ -43,8 +42,7 @@ fn struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates() {
 
 #[test]
 fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
-    let bytecode =
-        compile_semantic_source("p = ?Point{x = 1, y = 2};").expect("compile semantic source");
+    let bytecode = compile_source("p = ?Point{x = 1, y = 2};").expect("compile source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         Instr::CreateObjectLiteral { class_name, fields }
@@ -52,7 +50,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
                 && fields == &vec!["x".to_string(), "y".to_string()]
     )));
 
-    let vars = interpret(&bytecode).expect("execute semantic bytecode");
+    let vars = interpret(&bytecode).expect("execute bytecode");
     let Value::Object(obj) = &vars[0] else {
         panic!("expected object value");
     };
@@ -63,7 +61,7 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
 
 #[test]
 fn semantic_logical_ops_use_typed_bytecode() {
-    let bytecode = compile_semantic_source("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
+    let bytecode = compile_source("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
 
     assert!(bytecode
         .instructions
@@ -86,7 +84,7 @@ fn semantic_logical_ops_use_typed_bytecode() {
 #[test]
 fn nextpow2_supports_common_fft_zero_padding_pattern() {
     let input = "x = [1 2 3 4 5 6 7 8 9]; N = 2^nextpow2(length(x));";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     let n: f64 = (&vars[1]).try_into().unwrap();
     assert_eq!(n, 16.0);
 }
@@ -94,7 +92,7 @@ fn nextpow2_supports_common_fft_zero_padding_pattern() {
 #[test]
 fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
     let input = "disp('hi'); x = 42;";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
     assert_eq!(x, 42.0);
 }
@@ -103,7 +101,7 @@ fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
 fn array_construct_like_and_size_vector_inference() {
     // zeros('like', A)
     let src_like = "A = rand(3,4); B = zeros('like', A);";
-    let bytecode_like = compile_semantic_source(src_like).expect("compile semantic like");
+    let bytecode_like = compile_source(src_like).expect("compile semantic like");
     if let Some(graph_like) = bytecode_like.accel_graph.as_ref() {
         let last_like = graph_like.nodes.last().expect("node");
         let out_id = *last_like.outputs.first().unwrap();
@@ -122,7 +120,7 @@ fn array_construct_like_and_size_vector_inference() {
             0,
             "accel graph should only be omitted for non-fusion-signal programs"
         );
-        let vars_like = execute_semantic_source(src_like);
+        let vars_like = execute_source(src_like);
         let Value::Tensor(tensor_like) = &vars_like[1] else {
             panic!("expected tensor result for zeros('like', A)");
         };
@@ -131,7 +129,7 @@ fn array_construct_like_and_size_vector_inference() {
 
     // zeros([5,6]) via size vector
     let src_sz = "sz = [5,6]; B = zeros(sz);";
-    let bytecode_sz = compile_semantic_source(src_sz).expect("compile semantic sz");
+    let bytecode_sz = compile_source(src_sz).expect("compile semantic sz");
     if let Some(graph_sz) = bytecode_sz.accel_graph.as_ref() {
         let last_sz = graph_sz.nodes.last().expect("node");
         let out_id_sz = *last_sz.outputs.first().unwrap();
@@ -147,7 +145,7 @@ fn array_construct_like_and_size_vector_inference() {
             bytecode_sz.semantic_fusion_metadata.mir_fusion_signal_count, 0,
             "accel graph should only be omitted for non-fusion-signal programs"
         );
-        let vars_sz = execute_semantic_source(src_sz);
+        let vars_sz = execute_source(src_sz);
         let Value::Tensor(tensor_sz) = &vars_sz[1] else {
             panic!("expected tensor result for zeros(sz)");
         };
@@ -158,7 +156,7 @@ fn array_construct_like_and_size_vector_inference() {
 #[test]
 fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
     let input = "A = [1+2i 3-4j];";
-    let bytecode = compile_semantic_source(input).unwrap();
+    let bytecode = compile_source(input).unwrap();
     assert!(
         bytecode
             .instructions
@@ -178,8 +176,7 @@ fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
 #[test]
 fn semantic_logical_slice_read_and_write_execute() {
     let bytecode =
-        compile_semantic_source("A = [1 2 3 4]; mask = A > 2; B = A(mask); A(mask) = 9; C = A;")
-            .unwrap();
+        compile_source("A = [1 2 3 4]; mask = A > 2; B = A(mask); A(mask) = 9; C = A;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
 
     let Value::Tensor(selected) = &vars[2] else {
@@ -196,8 +193,7 @@ fn semantic_logical_slice_read_and_write_execute() {
 #[test]
 fn semantic_call_result_slice_index_executes() {
     let bytecode =
-        compile_semantic_source("A = [1 2 3 4]; idx = find(A > 2); B = A(idx); A(idx) = 9; C = A;")
-            .unwrap();
+        compile_source("A = [1 2 3 4]; idx = find(A > 2); B = A(idx); A(idx) = 9; C = A;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
 
     let Value::Tensor(selected) = &vars[2] else {
@@ -213,8 +209,7 @@ fn semantic_call_result_slice_index_executes() {
 
 #[test]
 fn semantic_scalar_call_result_index_assignment_executes() {
-    let bytecode =
-        compile_semantic_source("A = [1 2 3]; idx = length(A); A(idx) = 9; B = A;").unwrap();
+    let bytecode = compile_source("A = [1 2 3]; idx = length(A); A(idx) = 9; B = A;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
 
     let Value::Tensor(updated) = &vars[2] else {
@@ -225,7 +220,7 @@ fn semantic_scalar_call_result_index_assignment_executes() {
 
 #[test]
 fn semantic_scalar_value_index_assignment_executes() {
-    let bytecode = compile_semantic_source("x = 1; x(1) = 2; y = x;").unwrap();
+    let bytecode = compile_source("x = 1; x(1) = 2; y = x;").unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
     let updated = vars.last().expect("expected final variable");
     match updated {
@@ -240,7 +235,7 @@ fn semantic_scalar_value_index_assignment_executes() {
 
 #[test]
 fn semantic_string_array_scalar_index_assignment_executes() {
-    let bytecode = compile_semantic_source(r#"S = ["a" "b"]; S(2) = "z"; T = S;"#).unwrap();
+    let bytecode = compile_source(r#"S = ["a" "b"]; S(2) = "z"; T = S;"#).unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();
     let updated = vars.last().expect("expected final variable");
     let Value::StringArray(sa) = updated else {
@@ -253,7 +248,7 @@ fn semantic_string_array_scalar_index_assignment_executes() {
 #[test]
 fn complex_literal_matrix_executes() {
     let input = "A = [1+2i 3-4j];";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
@@ -266,7 +261,7 @@ fn complex_literal_matrix_executes() {
 #[test]
 fn leading_dot_complex_literals_execute() {
     let input = "A = [.1i .5e-2j];";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
@@ -279,7 +274,7 @@ fn leading_dot_complex_literals_execute() {
 #[test]
 fn matrix_literal_with_leading_dot_entries_executes() {
     let input = "A = [1 .2 .3];";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
@@ -292,7 +287,7 @@ fn matrix_literal_with_leading_dot_entries_executes() {
 #[test]
 fn elementwise_division_accepts_leading_dot_rhs() {
     let input = "A = [1 2 3]; B = A./.5;";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     match &vars[1] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
@@ -305,7 +300,7 @@ fn elementwise_division_accepts_leading_dot_rhs() {
 #[test]
 fn chol_multiassign_reports_failure() {
     let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
-    let bytecode = compile_semantic_source(input).expect("compile chol multi-assign");
+    let bytecode = compile_source(input).expect("compile chol multi-assign");
     assert!(
         bytecode
             .instructions
@@ -313,7 +308,7 @@ fn chol_multiassign_reports_failure() {
             .any(|instr| matches!(instr, Instr::CallBuiltinMulti(name, 1, 2) if name == "chol")),
         "expected semantic multi-output chol call shape in bytecode"
     );
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     let p: f64 = (&vars[2]).try_into().unwrap();
     assert_eq!(p, 2.0);
     match &vars[1] {
@@ -327,7 +322,7 @@ fn chol_multiassign_reports_failure() {
 #[test]
 fn uint16_cast_is_callable_in_vm() {
     let input = "A = uint16([3.49 -2 70000]);";
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
@@ -345,7 +340,7 @@ fn atan2_with_rhs_expression_executes_without_stack_underflow() {
         Vd_drop = 0.3;
         delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     let delta: f64 = (&vars[3]).try_into().expect("convert delta_g0 to f64");
     assert!((delta - 1.2f64.atan2(2.7)).abs() < 1e-12);
 }
@@ -353,7 +348,7 @@ fn atan2_with_rhs_expression_executes_without_stack_underflow() {
 #[test]
 fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
     let input = "Vq_drop = 1; V_pcc = 2; Vd_drop = 3; delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);";
-    let bytecode = compile_semantic_source(input).expect("compile atan2 lowering script");
+    let bytecode = compile_source(input).expect("compile atan2 lowering script");
 
     let add_index = bytecode
         .instructions
@@ -380,11 +375,11 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
         end
         x = atan2(g());
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
-    let bytecode = compile_semantic_source(input).expect("compile atan2 multi-output script");
+    let bytecode = compile_source(input).expect("compile atan2 multi-output script");
     let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
         matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
             if name == "atan2"
@@ -417,7 +412,7 @@ fn fft_output_supports_scalar_and_range_indexing() {
         ra = real(a);
         ia = imag(a);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, Value::Num(n) if (*n - 4.0).abs() < 1e-12)));
@@ -437,7 +432,7 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
         h = Y(1:end/2);
         ok = (numel(h) == 4);
     "#;
-    let bytecode = compile_semantic_source(input).expect("compile semantic fft end range script");
+    let bytecode = compile_source(input).expect("compile semantic fft end range script");
     assert!(
         bytecode
             .instructions
@@ -464,7 +459,7 @@ fn fft2_output_supports_two_dimensional_indexing() {
         col = F(:,1);
         n = numel(col);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, Value::Num(n) if (*n - 2.0).abs() < 1e-12)));
@@ -482,7 +477,7 @@ fn fft_output_accepts_gpu_backed_range_selector() {
         Y = X(1:k);
         ok = (numel(Y) == 513);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -499,7 +494,7 @@ fn fft_output_supports_scalar_end_div_indexing() {
         a = Y(end/2);
         ok = (abs(real(a) + 4) < 1e-12) && (imag(a) > 1.6) && (imag(a) < 1.7);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -514,7 +509,7 @@ fn scalar_end_div_indexing_rejects_fractional_result() {
         x = [10 20 30 40 50];
         y = x(end/2);
     "#;
-    let bytecode = compile_semantic_source(input).expect("compile semantic end-div script");
+    let bytecode = compile_source(input).expect("compile semantic end-div script");
     let err = interpret(&bytecode).expect_err("fractional end/2 scalar index must fail");
     assert_eq!(
         err.identifier(),
@@ -534,7 +529,7 @@ fn fft_output_supports_complex_range_assignment_with_end_div() {
         b = Y(4);
         ok = (real(a) == 1) && (imag(a) == 2) && (real(b) == 1) && (imag(b) == 2);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -551,7 +546,7 @@ fn fft2_output_supports_complex_multidim_end_ranges() {
         S = F(1:end/2, 1:end);
         ok = (numel(S) == 2);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -569,7 +564,7 @@ fn fft_end_arithmetic_supports_general_scalar_and_range_forms() {
         h = Y(2:(end*1 - 1/2));
         ok = (abs(real(a) + 4) < 1e-12) && (numel(h) == 6);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -585,8 +580,7 @@ fn fft_end_arithmetic_out_of_bounds_raises_error() {
         Y = fft(x);
         z = Y(end + 1);
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic end arithmetic oob script");
+    let bytecode = compile_source(input).expect("compile semantic end arithmetic oob script");
     let err = interpret(&bytecode).expect_err("end+1 should be out-of-bounds");
     assert_eq!(
         err.identifier(),
@@ -603,7 +597,7 @@ fn scalar_slice_with_nonnumeric_selector_errors() {
         idx = "a";
         y = x(idx);
     "#;
-    let bytecode = compile_semantic_source(input).expect("compile semantic scalar slice script");
+    let bytecode = compile_source(input).expect("compile semantic scalar slice script");
     let err = interpret(&bytecode).expect_err("scalar slice with nonnumeric selector must error");
     assert_eq!(
         err.identifier(),
@@ -619,7 +613,7 @@ fn string_slice_assignment_on_scalar_string_reports_slice_non_tensor() {
         x = "abc";
         x(1:1) = "z";
     "#;
-    let bytecode = compile_semantic_source(input).expect("compile semantic string slice assign");
+    let bytecode = compile_source(input).expect("compile semantic string slice assign");
     let err = interpret(&bytecode).expect_err("string scalar slice assignment must error");
     assert_eq!(
         err.identifier(),
@@ -635,8 +629,7 @@ fn numeric_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifie
         x = [1 2];
         x([1 2]) = "z";
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic numeric linear slice assign");
+    let bytecode = compile_source(input).expect("compile semantic numeric linear slice assign");
     let err =
         interpret(&bytecode).expect_err("numeric linear slice assignment must reject string rhs");
     assert_eq!(
@@ -653,8 +646,7 @@ fn numeric_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() 
         x = [1 2; 3 4];
         x(:, 1) = "z";
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic numeric nd slice assign");
+    let bytecode = compile_source(input).expect("compile semantic numeric nd slice assign");
     let err = interpret(&bytecode).expect_err("numeric nd slice assignment must reject string rhs");
     assert_eq!(
         err.identifier(),
@@ -670,8 +662,7 @@ fn complex_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifie
         x = [1 + 2i, 3 + 4i];
         x([1 2]) = "z";
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic complex linear slice assign");
+    let bytecode = compile_source(input).expect("compile semantic complex linear slice assign");
     let err =
         interpret(&bytecode).expect_err("complex linear slice assignment must reject string rhs");
     assert_eq!(
@@ -688,8 +679,7 @@ fn complex_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() 
         x = [1 + 2i, 3 + 4i; 5 + 6i, 7 + 8i];
         x(:, 1) = "z";
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic complex nd slice assign");
+    let bytecode = compile_source(input).expect("compile semantic complex nd slice assign");
     let err = interpret(&bytecode).expect_err("complex nd slice assignment must reject string rhs");
     assert_eq!(
         err.identifier(),
@@ -705,8 +695,7 @@ fn string_linear_slice_assignment_with_numeric_rhs_reports_invalid_rhs_identifie
         x = ["a", "b"];
         x(1) = 1;
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic string linear slice assign");
+    let bytecode = compile_source(input).expect("compile semantic string linear slice assign");
     let err =
         interpret(&bytecode).expect_err("string linear slice assignment must reject numeric rhs");
     assert_eq!(
@@ -723,7 +712,7 @@ fn string_nd_slice_assignment_with_numeric_rhs_reports_invalid_rhs_identifier() 
         x = ["a", "b"; "c", "d"];
         x(:, 1) = 1;
     "#;
-    let bytecode = compile_semantic_source(input).expect("compile semantic string nd slice assign");
+    let bytecode = compile_source(input).expect("compile semantic string nd slice assign");
     let err = interpret(&bytecode).expect_err("string nd slice assignment must reject numeric rhs");
     assert_eq!(
         err.identifier(),
@@ -739,8 +728,7 @@ fn logical_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifie
         x = [1 0] > 0;
         x([1 2]) = "z";
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic logical linear slice assign");
+    let bytecode = compile_source(input).expect("compile semantic logical linear slice assign");
     let err =
         interpret(&bytecode).expect_err("logical linear slice assignment must reject string rhs");
     assert_eq!(
@@ -757,8 +745,7 @@ fn logical_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier() 
         x = [1 0; 0 1] > 0;
         x(:, 1) = "z";
     "#;
-    let bytecode =
-        compile_semantic_source(input).expect("compile semantic logical nd slice assign");
+    let bytecode = compile_source(input).expect("compile semantic logical nd slice assign");
     let err = interpret(&bytecode).expect_err("logical nd slice assignment must reject string rhs");
     assert_eq!(
         err.identifier(),
@@ -775,7 +762,7 @@ fn logical_slice_assignment_executes_and_coerces_numeric_rhs() {
         x([2]) = 2;
         s = sum(x);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
@@ -793,7 +780,7 @@ fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
         F(:, 1) = 9 + 10i;
         ok = (real(Y(1)) == 1) && (imag(Y(1)) == 2) && (real(F(2,1)) == 9) && (imag(F(2,1)) == 10);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -811,7 +798,7 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
         r = o(1);
         ok = (r == 99);
     "#;
-    let bytecode = compile_semantic_source(input).expect("compile object end-range assignment");
+    let bytecode = compile_source(input).expect("compile object end-range assignment");
     assert!(
         bytecode.instructions.iter().any(|instr| {
             matches!(
@@ -833,7 +820,7 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
         }),
         "expected StoreSliceExpr to preserve rich end arithmetic payload for object indexing"
     );
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -850,7 +837,7 @@ fn object_range_end_indexing_accepts_mixed_string_selector_payload() {
         r = o(1:(end*1 - 1/2), "key");
         ok = (r == 99);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -868,7 +855,7 @@ fn object_range_end_assignment_accepts_mixed_string_selector_payload() {
         r = o.last;
         ok = (r == 7);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -887,7 +874,7 @@ fn fft_end_arithmetic_supports_pow_round_floor_fix_and_leftdiv() {
         c = Y(fix(2 \ end));
         ok = (abs(real(a) - real(b)) < 1e-12) && (abs(real(c) - real(Y(2))) < 1e-12);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -906,7 +893,7 @@ fn fft_end_arithmetic_supports_variable_offsets() {
         h = Y(1:(end - k));
         ok = (abs(real(a) + 4) < 1e-12) && (numel(h) == 6);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -923,7 +910,7 @@ fn end_expression_supports_builtin_calls_in_index_context() {
         b = x(max(end-6, 2));
         ok = (a == 50) && (b == 20);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -942,7 +929,7 @@ fn end_expression_supports_user_function_calls_in_index_context() {
         a = x(pick(end-3));
         ok = (a == 50);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -960,7 +947,7 @@ fn fftn_and_ifftn_execute_with_size_vector_and_indexing() {
         B = ifftn(F, [2 2 2]);
         ok = (numel(s) == 4) && (round(real(B(1))) == 1);
     "#;
-    let vars = execute_semantic_source(input);
+    let vars = execute_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)

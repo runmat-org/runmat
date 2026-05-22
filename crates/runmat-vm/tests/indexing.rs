@@ -2,12 +2,12 @@
 mod test_helpers;
 
 use runmat_builtins::Value;
-use test_helpers::execute_semantic_source;
+use test_helpers::execute_source;
 
 #[test]
 fn linear_index_and_end_keyword() {
     // v = A(end) and A(1) linear indexing
-    let vars = execute_semantic_source("A=[1,2;3,4]; v1=A(1); v2=A(end);").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; v1=A(1); v2=A(end);").unwrap();
     if let Value::Num(v1) = &vars[1] {
         assert_eq!(*v1, 1.0);
     } else {
@@ -23,7 +23,7 @@ fn linear_index_and_end_keyword() {
 #[test]
 fn logical_mask_indexing() {
     // A(logical([1 0 1 0])) over linearized A
-    let vars = execute_semantic_source("A=[1,2;3,4]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
     // MATLAB uses column-major linearization: A(:) = [1;3;2;4], mask [1 0 1 0] selects [1,2]
     if let Value::Tensor(v) = &vars[2] {
         // MATLAB logical linear indexing returns a column vector.
@@ -36,8 +36,7 @@ fn logical_mask_indexing() {
 
 #[test]
 fn logical_mask_linear_indexing_row_vector_returns_column() {
-    let vars =
-        execute_semantic_source("A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
+    let vars = execute_source("A=[10,20,30,40]; idx=logical([1,0,1,0]); v=A(idx);").unwrap();
     if let Value::Tensor(v) = &vars[2] {
         assert_eq!(v.shape, vec![2, 1]);
         assert_eq!(v.data, vec![10.0, 30.0]);
@@ -48,7 +47,7 @@ fn logical_mask_linear_indexing_row_vector_returns_column() {
 
 #[test]
 fn logical_mask_linear_indexing_matrix_mask_returns_column() {
-    let vars = execute_semantic_source("A=[1,2;3,4]; idx=logical([1,0;0,1]); v=A(idx);").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; idx=logical([1,0;0,1]); v=A(idx);").unwrap();
     // mask selects A(1,1) and A(2,2) in column-major linear order
     if let Value::Tensor(v) = &vars[2] {
         assert_eq!(v.shape, vec![2, 1]);
@@ -60,7 +59,7 @@ fn logical_mask_linear_indexing_matrix_mask_returns_column() {
 
 #[test]
 fn logical_mask_linear_indexing_all_false_returns_empty_column() {
-    let vars = execute_semantic_source("A=[1,2;3,4]; idx=logical([0,0,0,0]); v=A(idx);").unwrap();
+    let vars = execute_source("A=[1,2;3,4]; idx=logical([0,0,0,0]); v=A(idx);").unwrap();
     if let Value::Tensor(v) = &vars[2] {
         assert_eq!(v.shape, vec![0, 1]);
         assert!(v.data.is_empty());
@@ -71,8 +70,7 @@ fn logical_mask_linear_indexing_all_false_returns_empty_column() {
 
 #[test]
 fn host_linear_indexing_accepts_gpu_backed_range_selector() {
-    let vars =
-        execute_semantic_source("a=length(1:10); k=floor(a/2)+1; x=(1:10)'; y=x(1:k);").unwrap();
+    let vars = execute_source("a=length(1:10); k=floor(a/2)+1; x=(1:10)'; y=x(1:k);").unwrap();
     if let Value::Tensor(v) = &vars[3] {
         assert_eq!(v.shape, vec![1, 6]);
         assert_eq!(v.data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
@@ -83,7 +81,7 @@ fn host_linear_indexing_accepts_gpu_backed_range_selector() {
 
 #[test]
 fn cell_paren_scalar_index_returns_cell_container() {
-    let vars = execute_semantic_source("C={10,20,30}; D=C(2); x=D{1};").unwrap();
+    let vars = execute_source("C={10,20,30}; D=C(2); x=D{1};").unwrap();
     let mut saw_container = false;
     let mut saw_unwrapped = false;
     for value in vars {
@@ -109,7 +107,7 @@ fn cell_paren_scalar_index_returns_cell_container() {
 
 #[test]
 fn cell_paren_range_index_returns_cell_subset() {
-    let vars = execute_semantic_source("C={1,2,3,4}; D=C(2:3); x=D{1}; y=D{2};").unwrap();
+    let vars = execute_source("C={1,2,3,4}; D=C(2:3); x=D{1}; y=D{2};").unwrap();
     let mut saw_subset = false;
     let mut saw_x = false;
     let mut saw_y = false;
@@ -141,49 +139,49 @@ fn cell_paren_range_index_returns_cell_subset() {
 
 #[test]
 fn range_start_selector_rejects_non_numeric_value() {
-    let err = execute_semantic_source("A=1:5; s='x'; y=A(s:end);")
+    let err = execute_source("A=1:5; s='x'; y=A(s:end);")
         .expect_err("non-numeric range start selector should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
 
 #[test]
 fn range_step_selector_rejects_non_numeric_value() {
-    let err = execute_semantic_source("A=1:10; st='x'; y=A(1:st:end);")
+    let err = execute_source("A=1:10; st='x'; y=A(1:st:end);")
         .expect_err("non-numeric range step selector should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
 
 #[test]
 fn scalar_store_index_rejects_negative_index() {
-    let err = execute_semantic_source("A=[1,2,3]; A(-1)=0;")
-        .expect_err("negative scalar store index should fail");
+    let err =
+        execute_source("A=[1,2,3]; A(-1)=0;").expect_err("negative scalar store index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
 fn scalar_store_index_rejects_zero_index() {
-    let err = execute_semantic_source("A=[1,2,3]; A(0)=0;")
-        .expect_err("zero scalar store index should fail");
+    let err =
+        execute_source("A=[1,2,3]; A(0)=0;").expect_err("zero scalar store index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
 fn cell_paren_read_rejects_zero_index() {
-    let err = execute_semantic_source("C={10,20,30}; D=C(0);")
-        .expect_err("zero cell paren index should fail");
+    let err =
+        execute_source("C={10,20,30}; D=C(0);").expect_err("zero cell paren index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
 fn cell_paren_read_rejects_negative_index() {
-    let err = execute_semantic_source("C={10,20,30}; D=C(-1);")
+    let err = execute_source("C={10,20,30}; D=C(-1);")
         .expect_err("negative cell paren index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
 fn cell_brace_scalar_tensor_index_reads_value() {
-    let vars = execute_semantic_source("C={10,20,30}; k=[2]; v=C{k};")
+    let vars = execute_source("C={10,20,30}; k=[2]; v=C{k};")
         .expect("scalar tensor cell index should execute");
     if let Value::Num(v) = &vars[2] {
         assert_eq!(*v, 20.0);
@@ -194,42 +192,42 @@ fn cell_brace_scalar_tensor_index_reads_value() {
 
 #[test]
 fn fractional_range_start_index_rejects_non_integer_selector() {
-    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(1.5:4);")
+    let err = execute_source("A=[10,20,30,40,50]; y=A(1.5:4);")
         .expect_err("fractional range start should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
 
 #[test]
 fn fractional_range_step_index_rejects_non_integer_selector() {
-    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(1:1.5:5);")
+    let err = execute_source("A=[10,20,30,40,50]; y=A(1:1.5:5);")
         .expect_err("fractional range step should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
 
 #[test]
 fn fractional_range_end_expression_rejects_non_integer_selector() {
-    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(1:end/2);")
+    let err = execute_source("A=[10,20,30,40,50]; y=A(1:end/2);")
         .expect_err("fractional range end expression should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
 
 #[test]
 fn fractional_range_end_expression_with_step_rejects_non_integer_selector() {
-    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(1:2:end/2);")
+    let err = execute_source("A=[10,20,30,40,50]; y=A(1:2:end/2);")
         .expect_err("fractional range end expression with step should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
 
 #[test]
 fn positive_range_index_rejects_upper_out_of_bounds_element() {
-    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(4:6);")
+    let err = execute_source("A=[10,20,30,40,50]; y=A(4:6);")
         .expect_err("range containing upper out-of-bounds index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }
 
 #[test]
 fn positive_range_index_rejects_lower_out_of_bounds_element() {
-    let err = execute_semantic_source("A=[10,20,30,40,50]; y=A(0:2);")
+    let err = execute_source("A=[10,20,30,40,50]; y=A(0:2);")
         .expect_err("range containing lower out-of-bounds index should fail");
     assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
 }

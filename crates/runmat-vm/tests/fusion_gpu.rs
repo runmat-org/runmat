@@ -45,7 +45,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
 
 fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
-    test_helpers::compile_semantic_source(source).expect("compile semantic source")
+    test_helpers::compile_source(source).expect("compile source")
 }
 
 fn graph_for_fusion_test(
