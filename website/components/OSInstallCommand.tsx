@@ -166,7 +166,19 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
     >
-      Inspect this script
+      View source on GitHub
+      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+    </a>
+  );
+
+  const releaseHistoryLink = (
+    <a
+      href="https://github.com/runmat-org/runmat/releases"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+    >
+      View release history, binaries and checksums
       <ExternalLink className="h-3 w-3" aria-hidden="true" />
     </a>
   );
@@ -200,14 +212,17 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
             >5.x</button>
           </div>
         )}
-        <div className="mt-2 flex justify-end">{inspectLink}</div>
+        <div className="flex flex-col justify-between gap-3">
+          <div className="mt-2 justify-end">{inspectLink}</div>
+          <div className="mt-2 justify-end">{releaseHistoryLink}</div>
+        </div>
       </div>
     );
   }
 
   return (
     <Card className={`border-border bg-card ${className}`}>
-      <CardContent className="p-5 sm:p-6">
+      <CardContent className="p-2 sm:px-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <Icon className={`h-4 w-4 ${meta.iconColor}`} aria-hidden="true" />
@@ -221,12 +236,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           ariaLabel={`Install command for ${meta.title}. Click to copy.`}
         />
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs text-muted-foreground">
-            {selectedOS === 'windows'
-              ? 'Runs in PowerShell. ~30 seconds.'
-              : 'Runs in your terminal. ~30 seconds.'}
-          </div>
+        <div className="mt-3 flex flex-col flex-wrap justify-between gap-3">
           <div className="flex items-center gap-3">
             {selectedOS === 'windows' && (
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -243,7 +253,10 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                 >5.x</button>
               </div>
             )}
+          </div>
+          <div className="flex flex-col justify-between gap-3">
             {inspectLink}
+            {releaseHistoryLink}
           </div>
         </div>
       </CardContent>

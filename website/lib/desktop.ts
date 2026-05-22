@@ -31,6 +31,7 @@ export interface WorkspaceLaunchPayload {
   id: string;
   files: WorkspaceFile[];
   openPath?: string;
+  agentPrompt?: string;
   metadata?: WorkspaceLaunchMetadata;
   createdAt: number;
   expiresAt: number;
@@ -39,6 +40,7 @@ export interface WorkspaceLaunchPayload {
 export interface WorkspaceLaunchOptions {
   targetPath?: string;
   openPath?: string;
+  agentPrompt?: string;
   metadata?: WorkspaceLaunchMetadata;
   ttlMs?: number;
   useHash?: boolean;
@@ -69,6 +71,7 @@ export function prepareWorkspaceLaunch(files: WorkspaceFile[], options?: Workspa
     id,
     files: sanitizedFiles,
     openPath: options?.openPath,
+    agentPrompt: normalizeOptionalText(options?.agentPrompt),
     metadata: options?.metadata,
     createdAt,
     expiresAt: createdAt + ttl
@@ -154,6 +157,11 @@ function normalizePath(path: string): string {
     return "/untitled.m";
   }
   return path.startsWith("/") ? path : `/${path}`;
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function normalizeTargetPath(targetPath: string): string {
