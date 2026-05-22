@@ -163,15 +163,12 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
 }
 
 fn find_trailing_property_start(args: &[Value]) -> usize {
-    let mut idx = args.len();
-    while idx >= 2 {
-        if is_string_like(&args[idx - 2]) || super::patch::is_property_name(&args[idx - 2]) {
-            idx -= 2;
-        } else {
-            break;
+    for idx in (4..=args.len()).step_by(4) {
+        if args[idx..].iter().step_by(2).all(is_string_like) {
+            return idx;
         }
     }
-    idx
+    args.len()
 }
 
 fn is_string_like(value: &Value) -> bool {
@@ -322,5 +319,20 @@ mod tests {
         ];
 
         assert_eq!(find_trailing_property_start(&args), 4);
+    }
+
+    #[test]
+    fn fill3_string_color_before_dangling_property_reports_pair_error() {
+        let err = fill3_builtin(vec![
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+            tensor(3, 1, &[0.25, 0.5, 0.75]),
+            Value::String("r".into()),
+            Value::String("EdgeColor".into()),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("property/value arguments must come in pairs"));
     }
 }
