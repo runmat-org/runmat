@@ -166,7 +166,7 @@ pub struct Bytecode {
     #[serde(default)]
     pub layout: Option<VmAssemblyLayout>,
     #[serde(default)]
-    pub semantic_async_metadata: AsyncMetadata,
+    pub async_metadata: AsyncMetadata,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -175,7 +175,7 @@ pub struct Bytecode {
     pub fusion_groups: Vec<FusionGroup>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
-    pub semantic_fusion_metadata: FusionMetadata,
+    pub fusion_metadata: FusionMetadata,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -229,7 +229,7 @@ pub struct FusionMetadata {
     pub mir_fusion_candidate_groups: Vec<FusionCandidateGroup>,
     pub semantic_instruction_window_count: usize,
     #[serde(default)]
-    pub semantic_instruction_windows: Vec<FusionInstructionWindow>,
+    pub instruction_windows: Vec<FusionInstructionWindow>,
 }
 
 #[cfg(feature = "native-accel")]
@@ -290,13 +290,13 @@ impl Bytecode {
             var_types: Vec::new(),
             var_names: HashMap::new(),
             layout: None,
-            semantic_async_metadata: AsyncMetadata::default(),
+            async_metadata: AsyncMetadata::default(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]
             fusion_groups: Vec::new(),
             #[cfg(feature = "native-accel")]
-            semantic_fusion_metadata: FusionMetadata::default(),
+            fusion_metadata: FusionMetadata::default(),
         }
     }
 
@@ -321,41 +321,23 @@ impl Bytecode {
 
     #[cfg(feature = "native-accel")]
     pub fn runtime_fusion_groups(&self) -> Vec<FusionGroup> {
-        let semantic_metadata_present = self.semantic_fusion_metadata.mir_fusion_signal_count > 0
-            || self
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count
-                > 0
-            || !self
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_groups
-                .is_empty()
-            || self
-                .semantic_fusion_metadata
-                .semantic_instruction_window_count
-                > 0
-            || !self
-                .semantic_fusion_metadata
-                .semantic_instruction_windows
-                .is_empty();
+        let semantic_metadata_present = self.fusion_metadata.mir_fusion_signal_count > 0
+            || self.fusion_metadata.mir_fusion_candidate_group_count > 0
+            || !self.fusion_metadata.mir_fusion_candidate_groups.is_empty()
+            || self.fusion_metadata.semantic_instruction_window_count > 0
+            || !self.fusion_metadata.instruction_windows.is_empty();
 
         if !semantic_metadata_present {
             return self.fusion_groups.clone();
         }
 
-        if self
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count
-            == 0
-            || self
-                .semantic_fusion_metadata
-                .semantic_instruction_windows
-                .is_empty()
+        if self.fusion_metadata.mir_fusion_candidate_group_count == 0
+            || self.fusion_metadata.instruction_windows.is_empty()
         {
             return Vec::new();
         }
-        self.semantic_fusion_metadata
-            .semantic_instruction_windows
+        self.fusion_metadata
+            .instruction_windows
             .iter()
             .enumerate()
             .map(|(id, window)| FusionGroup {
@@ -406,12 +388,7 @@ impl Bytecode {
         &self,
         runtime_groups: &[FusionGroup],
     ) -> (Option<AccelGraph>, RuntimeAccelGraphSource) {
-        if runtime_groups.is_empty()
-            || self
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count
-                == 0
-        {
+        if runtime_groups.is_empty() || self.fusion_metadata.mir_fusion_candidate_group_count == 0 {
             return (None, RuntimeAccelGraphSource::NotMaterialized);
         }
         (
@@ -430,12 +407,8 @@ mod tests {
     #[test]
     fn runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty() {
         let mut bytecode = Bytecode::empty();
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 4 },
             kind: FusionInstructionKind::Elementwise,
         }];
@@ -463,12 +436,8 @@ mod tests {
             pattern: None,
             stack_layout: None,
         }];
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 10, end: 20 },
             kind: FusionInstructionKind::Elementwise,
         }];
@@ -493,10 +462,8 @@ mod tests {
             pattern: None,
             stack_layout: None,
         }];
-        bytecode.semantic_fusion_metadata.mir_fusion_signal_count = 2;
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 0;
+        bytecode.fusion_metadata.mir_fusion_signal_count = 2;
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 0;
 
         let groups = bytecode.runtime_fusion_groups();
         assert!(
@@ -535,12 +502,8 @@ mod tests {
             runmat_builtins::Type::Num,
             runmat_builtins::Type::Num,
         ];
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 0, end: 0 },
             kind: FusionInstructionKind::Elementwise,
         }];
@@ -574,12 +537,8 @@ mod tests {
             &bytecode.instructions,
             &bytecode.var_types,
         ));
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
             kind: FusionInstructionKind::Elementwise,
         }];
@@ -619,12 +578,8 @@ mod tests {
             &bytecode.var_types,
         );
         bytecode.accel_graph = Some(stale_graph);
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
             kind: FusionInstructionKind::Elementwise,
         }];

@@ -114,10 +114,7 @@ fn array_construct_like_and_size_vector_inference() {
         }
     } else {
         assert_eq!(
-            bytecode_like
-                .semantic_fusion_metadata
-                .mir_fusion_signal_count,
-            0,
+            bytecode_like.fusion_metadata.mir_fusion_signal_count, 0,
             "accel graph should only be omitted for non-fusion-signal programs"
         );
         let vars_like = execute_source(src_like);
@@ -142,7 +139,7 @@ fn array_construct_like_and_size_vector_inference() {
         }
     } else {
         assert_eq!(
-            bytecode_sz.semantic_fusion_metadata.mir_fusion_signal_count, 0,
+            bytecode_sz.fusion_metadata.mir_fusion_signal_count, 0,
             "accel graph should only be omitted for non-fusion-signal programs"
         );
         let vars_sz = execute_source(src_sz);

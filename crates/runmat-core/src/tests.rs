@@ -197,7 +197,7 @@ roots = ["."]
     assert!(
         prepared
             .lowering()
-            .semantic_index
+            .hir_index
             .calls
             .iter()
             .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
@@ -382,7 +382,7 @@ roots = ["."]
     assert!(
         prepared
             .lowering()
-            .semantic_index
+            .hir_index
             .calls
             .iter()
             .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
@@ -479,7 +479,7 @@ roots = ["."]
     assert!(
         !prepared
             .lowering()
-            .semantic_index
+            .hir_index
             .calls
             .iter()
             .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
@@ -521,7 +521,7 @@ roots = ["."]
     assert!(
         !prepared
             .lowering()
-            .semantic_index
+            .hir_index
             .calls
             .iter()
             .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),

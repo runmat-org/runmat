@@ -213,12 +213,9 @@ impl RunMatSession {
             &runtime_groups,
             &prepared
                 .bytecode
-                .semantic_fusion_metadata
+                .fusion_metadata
                 .mir_fusion_candidate_groups,
-            &prepared
-                .bytecode
-                .semantic_fusion_metadata
-                .semantic_instruction_windows,
+            &prepared.bytecode.fusion_metadata.instruction_windows,
             Some(FusionPlannerMetadata {
                 source: "semantic-mir-analysis".to_string(),
                 accel_graph_state: if runtime_graph.is_some() {
@@ -232,17 +229,14 @@ impl RunMatSession {
                     &prepared.lowering.assembly,
                 ),
                 mir_diagnostic_count: prepared.analysis.diagnostics.len(),
-                mir_fusion_signal_count: prepared
-                    .bytecode
-                    .semantic_fusion_metadata
-                    .mir_fusion_signal_count,
+                mir_fusion_signal_count: prepared.bytecode.fusion_metadata.mir_fusion_signal_count,
                 mir_fusion_candidate_group_count: prepared
                     .bytecode
-                    .semantic_fusion_metadata
+                    .fusion_metadata
                     .mir_fusion_candidate_group_count,
                 mir_semantic_instruction_window_count: prepared
                     .bytecode
-                    .semantic_fusion_metadata
+                    .fusion_metadata
                     .semantic_instruction_window_count,
             }),
         ))

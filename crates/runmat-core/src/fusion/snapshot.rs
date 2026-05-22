@@ -8,8 +8,8 @@ use super::{
 
 pub(crate) fn build_fusion_snapshot(
     groups: &[FusionGroup],
-    semantic_candidate_groups: &[runmat_vm::FusionCandidateGroup],
-    semantic_instruction_windows: &[runmat_vm::FusionInstructionWindow],
+    candidate_groups: &[runmat_vm::FusionCandidateGroup],
+    instruction_windows: &[runmat_vm::FusionInstructionWindow],
     planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
     let planner = planner.unwrap_or_default();
@@ -22,13 +22,13 @@ pub(crate) fn build_fusion_snapshot(
         if planner.mir_fusion_signal_count == 0 && planner.mir_fusion_candidate_group_count == 0 {
             return None;
         }
-        if !semantic_candidate_groups.is_empty() {
+        if !candidate_groups.is_empty() {
             let mut nodes = Vec::new();
             let mut edges = Vec::new();
             let mut shaders = Vec::new();
             let mut decisions = Vec::new();
             append_semantic_candidate_artifacts(
-                semantic_candidate_groups,
+                candidate_groups,
                 "bytecode-groups=0",
                 accel_graph_state,
                 &mut nodes,
@@ -37,7 +37,7 @@ pub(crate) fn build_fusion_snapshot(
                 &mut decisions,
             );
             append_semantic_window_artifacts(
-                semantic_instruction_windows,
+                instruction_windows,
                 "bytecode-groups=0",
                 accel_graph_state,
                 &mut nodes,
@@ -126,7 +126,7 @@ pub(crate) fn build_fusion_snapshot(
     }
 
     append_semantic_candidate_artifacts(
-        semantic_candidate_groups,
+        candidate_groups,
         &format!("bytecode-groups={}", groups.len()),
         accel_graph_state,
         &mut nodes,
@@ -135,7 +135,7 @@ pub(crate) fn build_fusion_snapshot(
         &mut decisions,
     );
     append_semantic_window_artifacts(
-        semantic_instruction_windows,
+        instruction_windows,
         &format!("bytecode-groups={}", groups.len()),
         accel_graph_state,
         &mut nodes,
@@ -162,7 +162,7 @@ fn shape_info(shape: &ShapeInfo) -> Vec<usize> {
 }
 
 fn append_semantic_candidate_artifacts(
-    semantic_candidate_groups: &[runmat_vm::FusionCandidateGroup],
+    candidate_groups: &[runmat_vm::FusionCandidateGroup],
     bytecode_group_state: &str,
     accel_graph_state: &str,
     nodes: &mut Vec<FusionPlanNode>,
@@ -170,7 +170,7 @@ fn append_semantic_candidate_artifacts(
     shaders: &mut Vec<FusionPlanShader>,
     decisions: &mut Vec<FusionPlanDecision>,
 ) {
-    for (index, group) in semantic_candidate_groups.iter().enumerate() {
+    for (index, group) in candidate_groups.iter().enumerate() {
         let node_id = format!("semantic-candidate-{}", group.id);
         nodes.push(FusionPlanNode {
             id: node_id.clone(),
@@ -207,7 +207,7 @@ fn append_semantic_candidate_artifacts(
             )),
             thresholds: None,
         });
-        if let Some(next) = semantic_candidate_groups.get(index + 1) {
+        if let Some(next) = candidate_groups.get(index + 1) {
             edges.push(FusionPlanEdge {
                 from: node_id,
                 to: format!("semantic-candidate-{}", next.id),
@@ -218,7 +218,7 @@ fn append_semantic_candidate_artifacts(
 }
 
 fn append_semantic_window_artifacts(
-    semantic_instruction_windows: &[runmat_vm::FusionInstructionWindow],
+    instruction_windows: &[runmat_vm::FusionInstructionWindow],
     bytecode_group_state: &str,
     accel_graph_state: &str,
     nodes: &mut Vec<FusionPlanNode>,
@@ -226,7 +226,7 @@ fn append_semantic_window_artifacts(
     shaders: &mut Vec<FusionPlanShader>,
     decisions: &mut Vec<FusionPlanDecision>,
 ) {
-    for (index, window) in semantic_instruction_windows.iter().enumerate() {
+    for (index, window) in instruction_windows.iter().enumerate() {
         let node_id = format!("semantic-window-{index}");
         nodes.push(FusionPlanNode {
             id: node_id.clone(),
@@ -257,7 +257,7 @@ fn append_semantic_window_artifacts(
             )),
             thresholds: None,
         });
-        if index + 1 < semantic_instruction_windows.len() {
+        if index + 1 < instruction_windows.len() {
             edges.push(FusionPlanEdge {
                 from: node_id,
                 to: format!("semantic-window-{}", index + 1),

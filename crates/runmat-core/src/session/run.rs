@@ -420,12 +420,8 @@ impl RunMatSession {
                 bytecode.runtime_accel_graph_for_fusion_with_source(&runtime_groups);
             build_fusion_snapshot(
                 &runtime_groups,
-                &bytecode
-                    .semantic_fusion_metadata
-                    .mir_fusion_candidate_groups,
-                &bytecode
-                    .semantic_fusion_metadata
-                    .semantic_instruction_windows,
+                &bytecode.fusion_metadata.mir_fusion_candidate_groups,
+                &bytecode.fusion_metadata.instruction_windows,
                 Some(crate::fusion::FusionPlannerMetadata {
                     source: "semantic-mir-analysis-runtime".to_string(),
                     accel_graph_state: if runtime_graph.is_some() {
@@ -439,14 +435,12 @@ impl RunMatSession {
                         &lowering.assembly,
                     ),
                     mir_diagnostic_count: analysis.diagnostics.len(),
-                    mir_fusion_signal_count: bytecode
-                        .semantic_fusion_metadata
-                        .mir_fusion_signal_count,
+                    mir_fusion_signal_count: bytecode.fusion_metadata.mir_fusion_signal_count,
                     mir_fusion_candidate_group_count: bytecode
-                        .semantic_fusion_metadata
+                        .fusion_metadata
                         .mir_fusion_candidate_group_count,
                     mir_semantic_instruction_window_count: bytecode
-                        .semantic_fusion_metadata
+                        .fusion_metadata
                         .semantic_instruction_window_count,
                 }),
             )

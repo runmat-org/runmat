@@ -389,13 +389,13 @@ r = max(pair(3));
     );
 
     assert!(
-        result.semantic_index.calls.iter().any(|call| {
+        result.hir_index.calls.iter().any(|call| {
             call.name.0[0].0 == "pair"
                 && matches!(call.requested_outputs, RequestedOutputCount::Exactly(2))
         }),
         "calls: {:?}",
         result
-            .semantic_index
+            .hir_index
             .calls
             .iter()
             .map(|call| (call.name.display_name(), call.requested_outputs.clone()))
@@ -415,13 +415,13 @@ r = cat(g());
     );
 
     assert!(
-        result.semantic_index.calls.iter().any(|call| {
+        result.hir_index.calls.iter().any(|call| {
             call.name.0[0].0 == "g"
                 && matches!(call.requested_outputs, RequestedOutputCount::Exactly(2))
         }),
         "calls: {:?}",
         result
-            .semantic_index
+            .hir_index
             .calls
             .iter()
             .map(|call| (call.name.display_name(), call.requested_outputs.clone()))
@@ -940,21 +940,21 @@ fn semantic_index_records_bindings_functions_imports_and_calls() {
     let function_id = result.assembly.modules[0].top_level_functions[0];
 
     assert!(result
-        .semantic_index
+        .hir_index
         .imports
         .iter()
         .any(|import| import.import.path.0[0].0 == "pkg" && import.import.wildcard));
     assert!(result
-        .semantic_index
+        .hir_index
         .bindings
         .iter()
         .any(|binding| binding.name.0 == "x"));
     assert!(result
-        .semantic_index
+        .hir_index
         .functions
         .iter()
         .any(|function| function.name.0 == "f" && function.function == function_id));
-    assert!(result.semantic_index.calls.iter().any(|call| {
+    assert!(result.hir_index.calls.iter().any(|call| {
         matches!(call.kind, CallKind::DirectFunction(id) if id == function_id)
             && matches!(call.requested_outputs, RequestedOutputCount::One)
     }));
@@ -964,7 +964,7 @@ fn semantic_index_records_bindings_functions_imports_and_calls() {
 fn semantic_index_records_unresolved_calls_explicitly() {
     let result = lower_result("x = definitely_missing(1);");
 
-    assert!(result.semantic_index.calls.iter().any(|call| {
+    assert!(result.hir_index.calls.iter().any(|call| {
         call.name.0[0].0 == "definitely_missing"
             && matches!(call.callee, HirCallableRef::Unresolved(_))
             && matches!(call.kind, CallKind::Dynamic)
@@ -975,7 +975,7 @@ fn semantic_index_records_unresolved_calls_explicitly() {
 fn indexed_assignment_to_undefined_root_records_creation_policy() {
     let result = lower_result("x(3) = 10;");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::Index(_, _)))
@@ -1000,7 +1000,7 @@ fn indexed_assignment_to_undefined_root_records_creation_policy() {
 fn assignment_indexing_preserves_colon_and_end_components() {
     let result = lower_result("A(:, end) = 0;");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::Index(_, _)))
@@ -1017,7 +1017,7 @@ fn assignment_indexing_preserves_colon_and_end_components() {
 fn empty_array_index_assignment_records_deletion_target() {
     let result = lower_result("A(2) = [];");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::Index(_, _)))
@@ -1041,7 +1041,7 @@ fn empty_array_index_assignment_records_deletion_target() {
 fn empty_array_indexed_member_assignment_records_deletion_target() {
     let result = lower_result("s.a = {1, 2, 3}; s.a(2) = [];");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| {
@@ -1069,7 +1069,7 @@ fn empty_array_indexed_member_assignment_records_deletion_target() {
 fn empty_array_indexed_cell_content_assignment_records_deletion_target() {
     let result = lower_result("c = {{1, 2, 3}}; c{1}(2) = [];");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| {
@@ -1106,7 +1106,7 @@ fn empty_array_indexed_cell_content_assignment_records_deletion_target() {
 fn empty_array_indexed_dynamic_member_assignment_records_deletion_target() {
     let result = lower_result("s.a = {1, 2, 3}; f = 'a'; s.(f)(2) = [];");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| {
@@ -1134,7 +1134,7 @@ fn empty_array_indexed_dynamic_member_assignment_records_deletion_target() {
 fn empty_array_member_assignment_is_not_marked_as_delete() {
     let result = lower_result("s = struct('x', {1, 2}); s(2).x = [];");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::Member(_, _)))
@@ -1161,7 +1161,7 @@ fn empty_array_member_assignment_is_not_marked_as_delete() {
 fn empty_array_cell_content_assignment_is_not_marked_as_delete() {
     let result = lower_result("c = {1}; c{1} = [];");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::IndexCell(_, _)))
@@ -1185,7 +1185,7 @@ fn empty_array_cell_content_assignment_is_not_marked_as_delete() {
 fn struct_field_path_assignment_records_member_creation_policy() {
     let result = lower_result("s.a.b = 1;");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::Member(_, _)))
@@ -1202,7 +1202,7 @@ fn struct_field_path_assignment_records_member_creation_policy() {
 fn member_assignment_indexed_base_uses_assignment_target_context() {
     let result = lower_result("s = struct('x', {1, 2}); s(2).x = 9;");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::Member(_, _)))
@@ -1224,7 +1224,7 @@ fn member_assignment_indexed_base_uses_assignment_target_context() {
 fn dynamic_member_assignment_indexed_base_uses_assignment_target_context() {
     let result = lower_result("s = struct('x', {1, 2}); f = 'x'; s(2).(f) = 9;");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::MemberDynamic(_, _)))
@@ -1246,7 +1246,7 @@ fn dynamic_member_assignment_indexed_base_uses_assignment_target_context() {
 fn dynamic_member_assignment_cell_indexed_base_uses_assignment_target_context() {
     let result = lower_result("c = {struct('x', 1)}; f = 'x'; c{1}.(f) = 9;");
     let mutation = result
-        .semantic_index
+        .hir_index
         .mutations
         .iter()
         .find(|mutation| matches!(mutation.place, HirPlace::MemberDynamic(_, _)))

@@ -47,18 +47,17 @@ pub fn compile(
         .find(|candidate| candidate.id == entrypoint)
         .map(|candidate| candidate.target);
     #[cfg(feature = "native-accel")]
-    let mut semantic_fusion_metadata = derive_semantic_fusion_metadata(mir, entrypoint_target);
-    let semantic_instruction_windows = derive_semantic_fusion_instruction_windows(
+    let mut fusion_metadata = derive_semantic_fusion_metadata(mir, entrypoint_target);
+    let instruction_windows = derive_semantic_fusion_instruction_windows(
         &c.instructions,
         &c.instr_spans,
-        &semantic_fusion_metadata.mir_fusion_candidate_groups,
+        &fusion_metadata.mir_fusion_candidate_groups,
     );
-    semantic_fusion_metadata.semantic_instruction_window_count = semantic_instruction_windows.len();
-    semantic_fusion_metadata.semantic_instruction_windows = semantic_instruction_windows.clone();
+    fusion_metadata.semantic_instruction_window_count = instruction_windows.len();
+    fusion_metadata.instruction_windows = instruction_windows.clone();
     #[cfg(feature = "native-accel")]
-    let (accel_graph, fusion_groups) = if semantic_fusion_metadata.mir_fusion_candidate_group_count
-        == 0
-        || semantic_instruction_windows.is_empty()
+    let (accel_graph, fusion_groups) = if fusion_metadata.mir_fusion_candidate_group_count == 0
+        || instruction_windows.is_empty()
     {
         (None, Vec::new())
     } else {
@@ -66,7 +65,7 @@ pub fn compile(
         // Compile-time ownership is semantic-window scaffolding only; runtime fusion plan
         // preparation performs node reconciliation against the accel graph.
         let mut fusion_groups =
-            derive_semantic_fusion_groups_from_instruction_windows(&semantic_instruction_windows);
+            derive_semantic_fusion_groups_from_instruction_windows(&instruction_windows);
         if !fusion_groups.is_empty() {
             annotate_fusion_groups_with_stack_layout(
                 &c.instructions,
@@ -77,7 +76,7 @@ pub fn compile(
                 fusion_group_within_semantic_candidate_spans(
                     group,
                     &c.instr_spans,
-                    &semantic_fusion_metadata.mir_fusion_candidate_groups,
+                    &fusion_metadata.mir_fusion_candidate_groups,
                 )
             });
         }
@@ -86,7 +85,7 @@ pub fn compile(
         // recover groups from semantic windows when compile groups are empty.
         (Some(accel_graph), fusion_groups)
     };
-    let semantic_async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
+    let async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
     Ok(Bytecode {
         instructions: c.instructions,
@@ -99,13 +98,13 @@ pub fn compile(
         var_types: c.var_types,
         var_names,
         layout: c.layout,
-        semantic_async_metadata,
+        async_metadata,
         #[cfg(feature = "native-accel")]
         accel_graph,
         #[cfg(feature = "native-accel")]
         fusion_groups,
         #[cfg(feature = "native-accel")]
-        semantic_fusion_metadata,
+        fusion_metadata,
     })
 }
 
@@ -173,7 +172,7 @@ fn derive_semantic_fusion_metadata(
         mir_fusion_candidate_group_count: mir_fusion_candidate_groups.len(),
         mir_fusion_candidate_groups,
         semantic_instruction_window_count: 0,
-        semantic_instruction_windows: Vec::new(),
+        instruction_windows: Vec::new(),
     }
 }
 
@@ -283,9 +282,9 @@ fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> boo
 fn semantic_candidates_touch_accel_capable_instruction(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_groups: &[crate::bytecode::FusionCandidateGroup],
+    candidate_groups: &[crate::bytecode::FusionCandidateGroup],
 ) -> bool {
-    if instructions.is_empty() || instr_spans.is_empty() || semantic_candidate_groups.is_empty() {
+    if instructions.is_empty() || instr_spans.is_empty() || candidate_groups.is_empty() {
         return false;
     }
     instructions
@@ -294,7 +293,7 @@ fn semantic_candidates_touch_accel_capable_instruction(
         .filter(|(index, _)| *index < instr_spans.len())
         .any(|(index, instr)| {
             let span = instr_spans[index];
-            semantic_candidate_groups
+            candidate_groups
                 .iter()
                 .any(|candidate| source_span_contains(candidate.source_span, span))
                 && instr_is_accel_capable(instr)
@@ -348,7 +347,7 @@ fn instr_is_accel_capable(instr: &Instr) -> bool {
 fn fusion_group_within_semantic_candidate_spans(
     group: &runmat_accelerate::fusion::FusionGroup,
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_groups: &[crate::bytecode::FusionCandidateGroup],
+    candidate_groups: &[crate::bytecode::FusionCandidateGroup],
 ) -> bool {
     if instr_spans.is_empty()
         || group.span.start > group.span.end
@@ -357,7 +356,7 @@ fn fusion_group_within_semantic_candidate_spans(
         return false;
     }
     let end = group.span.end.min(instr_spans.len().saturating_sub(1));
-    let candidate_spans: Vec<_> = semantic_candidate_groups
+    let candidate_spans: Vec<_> = candidate_groups
         .iter()
         .map(|group| group.source_span)
         .collect();
@@ -370,13 +369,13 @@ fn fusion_group_within_semantic_candidate_spans(
 
 #[cfg(all(feature = "native-accel", test))]
 fn derive_semantic_fusion_groups_from_candidates(
-    semantic_instruction_windows: &[crate::bytecode::FusionInstructionWindow],
+    instruction_windows: &[crate::bytecode::FusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
     let mut groups = Vec::new();
     let mut assigned_nodes = HashSet::new();
 
-    for window in semantic_instruction_windows {
+    for window in instruction_windows {
         let nodes = accel_nodes_for_instruction_window(accel_graph, &window, &assigned_nodes);
         if nodes.is_empty() {
             continue;
@@ -401,13 +400,13 @@ fn derive_semantic_fusion_groups_from_candidates(
 
 #[cfg(all(feature = "native-accel", test))]
 fn derive_semantic_fusion_groups_preserving_unmapped_windows(
-    semantic_instruction_windows: &[crate::bytecode::FusionInstructionWindow],
+    instruction_windows: &[crate::bytecode::FusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
     let mut groups = Vec::new();
     let mut assigned_nodes = HashSet::new();
 
-    for window in semantic_instruction_windows {
+    for window in instruction_windows {
         let nodes = accel_nodes_for_instruction_window(accel_graph, window, &assigned_nodes);
         for node_id in &nodes {
             assigned_nodes.insert(*node_id);
@@ -428,9 +427,9 @@ fn derive_semantic_fusion_groups_preserving_unmapped_windows(
 
 #[cfg(feature = "native-accel")]
 fn derive_semantic_fusion_groups_from_instruction_windows(
-    semantic_instruction_windows: &[crate::bytecode::FusionInstructionWindow],
+    instruction_windows: &[crate::bytecode::FusionInstructionWindow],
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
-    semantic_instruction_windows
+    instruction_windows
         .iter()
         .enumerate()
         .map(|(id, window)| runmat_accelerate::fusion::FusionGroup {
@@ -555,16 +554,16 @@ fn instruction_within_semantic_candidate_span(
 fn derive_semantic_fusion_instruction_windows(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
-    semantic_candidate_groups: &[crate::bytecode::FusionCandidateGroup],
+    candidate_groups: &[crate::bytecode::FusionCandidateGroup],
 ) -> Vec<crate::bytecode::FusionInstructionWindow> {
-    if instructions.is_empty() || instr_spans.is_empty() || semantic_candidate_groups.is_empty() {
+    if instructions.is_empty() || instr_spans.is_empty() || candidate_groups.is_empty() {
         return Vec::new();
     }
 
     let mut windows = Vec::new();
     let mut assigned_instructions = HashSet::new();
 
-    for candidate in semantic_candidate_groups {
+    for candidate in candidate_groups {
         let mut run_start: Option<usize> = None;
         let mut run_kind: Option<crate::bytecode::FusionInstructionKind> = None;
         for (index, instr) in instructions.iter().enumerate() {
@@ -871,26 +870,23 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert!(
-            bytecode.semantic_fusion_metadata.mir_fusion_signal_count > 0,
+            bytecode.fusion_metadata.mir_fusion_signal_count > 0,
             "expected non-zero MIR fusion signal count"
         );
         assert!(
-            bytecode
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count
-                > 0,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count > 0,
             "expected non-zero MIR fusion candidate group count"
         );
         assert!(
             !bytecode
-                .semantic_fusion_metadata
+                .fusion_metadata
                 .mir_fusion_candidate_groups
                 .is_empty(),
             "expected non-empty MIR fusion candidate groups"
         );
         assert!(
             bytecode
-                .semantic_fusion_metadata
+                .fusion_metadata
                 .mir_fusion_candidate_groups
                 .iter()
                 .all(|group| group.stmt_end > group.stmt_start),
@@ -898,33 +894,25 @@ mod tests {
         );
         assert!(
             bytecode
-                .semantic_fusion_metadata
+                .fusion_metadata
                 .mir_fusion_candidate_groups
                 .iter()
                 .all(|group| group.source_span.end > group.source_span.start),
             "expected candidate groups to carry non-empty source spans"
         );
         assert!(
-            bytecode
-                .semantic_fusion_metadata
-                .semantic_instruction_window_count
-                > 0,
+            bytecode.fusion_metadata.semantic_instruction_window_count > 0,
             "expected non-zero semantic instruction window count"
         );
         assert_eq!(
-            bytecode
-                .semantic_fusion_metadata
-                .semantic_instruction_window_count,
-            bytecode
-                .semantic_fusion_metadata
-                .semantic_instruction_windows
-                .len(),
+            bytecode.fusion_metadata.semantic_instruction_window_count,
+            bytecode.fusion_metadata.instruction_windows.len(),
             "window count should match serialized semantic instruction window entries"
         );
         assert!(
             bytecode
-                .semantic_fusion_metadata
-                .semantic_instruction_windows
+                .fusion_metadata
+                .instruction_windows
                 .iter()
                 .all(|window| window.span.end >= window.span.start),
             "expected semantic instruction windows to carry valid instruction spans"
@@ -966,9 +954,7 @@ mod tests {
         let runtime_plan = prepare_fusion_plan(
             runtime_graph.as_ref(),
             &runtime_groups,
-            bytecode
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count,
         )
         .expect("runtime fusion planning should reconcile executable groups");
         assert!(
@@ -1013,9 +999,7 @@ mod tests {
         let runtime_plan = prepare_fusion_plan(
             runtime_graph.as_ref(),
             &runtime_groups,
-            bytecode
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count,
         )
         .expect("runtime fusion planning should reconcile executable groups");
         assert!(
@@ -1039,10 +1023,7 @@ mod tests {
             bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert_eq!(
-            bytecode
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count,
-            0,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count, 0,
             "expected no semantic fusion candidate groups"
         );
         assert!(
@@ -1067,14 +1048,11 @@ mod tests {
             bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert!(
-            bytecode.semantic_fusion_metadata.mir_fusion_signal_count > 0,
+            bytecode.fusion_metadata.mir_fusion_signal_count > 0,
             "expected non-zero fusion signal count for arithmetic operation"
         );
         assert_eq!(
-            bytecode
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count,
-            0,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count, 0,
             "expected no semantic candidate groups for a single-operation run"
         );
         assert!(
@@ -1100,10 +1078,7 @@ mod tests {
             bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert!(
-            bytecode
-                .semantic_fusion_metadata
-                .mir_fusion_candidate_group_count
-                > 0,
+            bytecode.fusion_metadata.mir_fusion_candidate_group_count > 0,
             "logical chain should still produce semantic candidate groups"
         );
         assert!(
@@ -1281,12 +1256,12 @@ mod tests {
             bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert_eq!(
-            bytecode.semantic_fusion_metadata.mir_fusion_signal_count, 0,
+            bytecode.fusion_metadata.mir_fusion_signal_count, 0,
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion signal metadata"
         );
         assert_eq!(
             bytecode
-                .semantic_fusion_metadata
+                .fusion_metadata
                 .mir_fusion_candidate_group_count,
             0,
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion candidate metadata"
@@ -1482,7 +1457,7 @@ mod tests {
             runmat_hir::Span { start: 10, end: 11 },
             runmat_hir::Span { start: 11, end: 12 },
         ];
-        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
@@ -1495,7 +1470,7 @@ mod tests {
         let windows = super::derive_semantic_fusion_instruction_windows(
             &[Instr::Add, Instr::ElemMul],
             &instr_spans,
-            &semantic_candidates,
+            &candidates,
         );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert_eq!(groups.len(), 1, "expected one semantic-driven fusion group");
@@ -2054,7 +2029,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
-        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2067,7 +2042,7 @@ mod tests {
         let windows = super::derive_semantic_fusion_instruction_windows(
             &[Instr::Add],
             &instr_spans,
-            &semantic_candidates,
+            &candidates,
         );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert_eq!(groups.len(), 1, "expected one semantic fusion group");
@@ -2119,7 +2094,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
-        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2132,7 +2107,7 @@ mod tests {
         let windows = super::derive_semantic_fusion_instruction_windows(
             &[Instr::Transpose],
             &instr_spans,
-            &semantic_candidates,
+            &candidates,
         );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert_eq!(
@@ -2264,7 +2239,7 @@ mod tests {
             runmat_hir::Span { start: 11, end: 12 },
             runmat_hir::Span { start: 12, end: 13 },
         ];
-        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 3,
             function: runmat_hir::FunctionId(0),
@@ -2277,7 +2252,7 @@ mod tests {
         let windows = super::derive_semantic_fusion_instruction_windows(
             &instructions,
             &instr_spans,
-            &semantic_candidates,
+            &candidates,
         );
         assert_eq!(
             windows.len(),
@@ -2331,7 +2306,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
-        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2347,7 +2322,7 @@ mod tests {
         let windows = super::derive_semantic_fusion_instruction_windows(
             &[Instr::Add],
             &instr_spans,
-            &semantic_candidates,
+            &candidates,
         );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -2397,7 +2372,7 @@ mod tests {
             node_bindings: std::collections::HashMap::new(),
         };
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-        let semantic_candidates = vec![crate::bytecode::FusionCandidateGroup {
+        let candidates = vec![crate::bytecode::FusionCandidateGroup {
             id: 0,
             signal_count: 1,
             function: runmat_hir::FunctionId(0),
@@ -2410,7 +2385,7 @@ mod tests {
         let windows = super::derive_semantic_fusion_instruction_windows(
             &[Instr::Add],
             &instr_spans,
-            &semantic_candidates,
+            &candidates,
         );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
@@ -2429,39 +2404,39 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert!(
-            bytecode.semantic_async_metadata.mir_spawn_site_count > 0,
+            bytecode.async_metadata.mir_spawn_site_count > 0,
             "expected non-zero spawn site count"
         );
         assert!(
-            !bytecode.semantic_async_metadata.mir_spawn_sites.is_empty(),
+            !bytecode.async_metadata.mir_spawn_sites.is_empty(),
             "expected spawn site metadata entries"
         );
         assert_eq!(
-            bytecode.semantic_async_metadata.mir_spawn_site_count,
-            bytecode.semantic_async_metadata.mir_spawn_sites.len(),
+            bytecode.async_metadata.mir_spawn_site_count,
+            bytecode.async_metadata.mir_spawn_sites.len(),
             "spawn site count should match listed sites"
         );
         let unique_sites = bytecode
-            .semantic_async_metadata
+            .async_metadata
             .mir_spawn_sites
             .iter()
             .map(|site| (site.function, site.block, site.stmt_index))
             .collect::<std::collections::HashSet<_>>();
         assert!(
-            unique_sites.len() == bytecode.semantic_async_metadata.mir_spawn_sites.len(),
+            unique_sites.len() == bytecode.async_metadata.mir_spawn_sites.len(),
             "spawn site metadata entries should be distinct"
         );
         assert_eq!(
-            bytecode.semantic_async_metadata.runtime_model,
+            bytecode.async_metadata.runtime_model,
             crate::bytecode::program::AsyncRuntimeModel::LazyFutureDescriptorLane,
             "semantic async metadata should surface the current lazy-future runtime model"
         );
         assert_eq!(
-            bytecode.semantic_async_metadata.mir_await_site_count, 0,
+            bytecode.async_metadata.mir_await_site_count, 0,
             "spawn-only program should not report await sites"
         );
         assert!(
-            bytecode.semantic_async_metadata.mir_await_sites.is_empty(),
+            bytecode.async_metadata.mir_await_sites.is_empty(),
             "spawn-only program should have an empty await-site list"
         );
     }
@@ -2476,16 +2451,16 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert_eq!(
-            bytecode.semantic_async_metadata.mir_spawn_site_count,
+            bytecode.async_metadata.mir_spawn_site_count,
             0,
             "spawn sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
         );
         assert!(
-            bytecode.semantic_async_metadata.mir_spawn_sites.is_empty(),
+            bytecode.async_metadata.mir_spawn_sites.is_empty(),
             "spawn site list should be empty when only helper bodies contain spawn expressions"
         );
         assert_eq!(
-            bytecode.semantic_async_metadata.mir_await_site_count, 0,
+            bytecode.async_metadata.mir_await_site_count, 0,
             "program without entrypoint await should not report await sites"
         );
     }
@@ -2501,30 +2476,30 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert!(
-            bytecode.semantic_async_metadata.mir_await_site_count > 0,
+            bytecode.async_metadata.mir_await_site_count > 0,
             "expected non-zero await site count"
         );
         assert!(
-            !bytecode.semantic_async_metadata.mir_await_sites.is_empty(),
+            !bytecode.async_metadata.mir_await_sites.is_empty(),
             "expected await site metadata entries"
         );
         assert_eq!(
-            bytecode.semantic_async_metadata.mir_await_site_count,
-            bytecode.semantic_async_metadata.mir_await_sites.len(),
+            bytecode.async_metadata.mir_await_site_count,
+            bytecode.async_metadata.mir_await_sites.len(),
             "await site count should match listed sites"
         );
         let unique_sites = bytecode
-            .semantic_async_metadata
+            .async_metadata
             .mir_await_sites
             .iter()
             .map(|site| (site.function, site.block, site.resume))
             .collect::<std::collections::HashSet<_>>();
         assert!(
-            unique_sites.len() == bytecode.semantic_async_metadata.mir_await_sites.len(),
+            unique_sites.len() == bytecode.async_metadata.mir_await_sites.len(),
             "await site metadata entries should be distinct"
         );
         assert_eq!(
-            bytecode.semantic_async_metadata.runtime_model,
+            bytecode.async_metadata.runtime_model,
             crate::bytecode::program::AsyncRuntimeModel::LazyFutureDescriptorLane,
             "semantic async metadata should surface the current lazy-future runtime model"
         );
@@ -2540,12 +2515,12 @@ mod tests {
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
 
         assert_eq!(
-            bytecode.semantic_async_metadata.mir_await_site_count,
+            bytecode.async_metadata.mir_await_site_count,
             0,
             "await sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
         );
         assert!(
-            bytecode.semantic_async_metadata.mir_await_sites.is_empty(),
+            bytecode.async_metadata.mir_await_sites.is_empty(),
             "await site list should be empty when only helper bodies contain await expressions"
         );
     }

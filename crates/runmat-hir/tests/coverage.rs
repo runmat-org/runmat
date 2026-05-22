@@ -161,7 +161,7 @@ z = f(3)
         .iter()
         .any(|function| function.name.0 == "f"));
     assert!(result
-        .semantic_index
+        .hir_index
         .calls
         .iter()
         .any(|call| matches!(call.kind, CallKind::DirectFunction(_))));
@@ -279,7 +279,7 @@ fn imported_call_lowers_to_package_function_identity() {
     let src = "import Point.origin; __register_test_classes(); o = origin();";
     let ast = parse(src).unwrap();
     let result = lower(&ast, &LoweringContext::empty()).unwrap();
-    assert!(result.semantic_index.calls.iter().any(|call| matches!(
+    assert!(result.hir_index.calls.iter().any(|call| matches!(
         &call.kind,
         CallKind::PackageFunction(path)
             if path.module.display_name().as_deref() == Some("Point.origin")
@@ -293,7 +293,7 @@ fn wildcard_import_non_builtin_call_lowers_to_dynamic_identity() {
     let ast = parse(src).unwrap();
     let result = lower(&ast, &LoweringContext::empty()).unwrap();
     assert!(result
-        .semantic_index
+        .hir_index
         .calls
         .iter()
         .any(|call| matches!(&call.kind, CallKind::Dynamic)));

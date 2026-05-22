@@ -1098,7 +1098,7 @@ pub struct StringLiteral(pub String);
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,
-    pub semantic_index: HirIndex,
+    pub hir_index: HirIndex,
 }
 
 #[cfg(test)]

@@ -42,7 +42,7 @@ struct ScopeFrame {
 
 struct LoweringCtx {
     assembly: HirAssembly,
-    semantic_index: HirIndex,
+    hir_index: HirIndex,
     module: ModuleId,
     next_expr: usize,
     next_stmt: usize,
@@ -61,11 +61,11 @@ struct LoweringCtx {
 }
 
 pub fn lower(prog: &AstProgram, context: &LoweringContext<'_>) -> Result<LoweringResult, HirError> {
-    let (assembly, semantic_index) = LoweringCtx::lower_program(prog, context)?;
+    let (assembly, hir_index) = LoweringCtx::lower_program(prog, context)?;
 
     Ok(LoweringResult {
         assembly,
-        semantic_index,
+        hir_index,
     })
 }
 
@@ -120,7 +120,7 @@ impl LoweringCtx {
     ) -> Result<(HirAssembly, HirIndex), HirError> {
         let mut ctx = Self {
             assembly: HirAssembly::default(),
-            semantic_index: HirIndex::default(),
+            hir_index: HirIndex::default(),
             module: ModuleId(0),
             next_expr: 0,
             next_stmt: 0,
@@ -173,7 +173,7 @@ impl LoweringCtx {
                     wildcard: *wildcard,
                     span: stmt.span(),
                 };
-                ctx.semantic_index.imports.push(ImportResolution {
+                ctx.hir_index.imports.push(ImportResolution {
                     import: import.clone(),
                 });
                 ctx.assembly.modules[ctx.module.0].imports.push(import);
@@ -274,7 +274,7 @@ impl LoweringCtx {
             }
         }
 
-        Ok((ctx.assembly, ctx.semantic_index))
+        Ok((ctx.assembly, ctx.hir_index))
     }
 
     fn reserve_function_name(&mut self, name: &str) -> FunctionId {
@@ -398,7 +398,7 @@ impl LoweringCtx {
             workspace_visibility,
             declared_span: span,
         });
-        self.semantic_index.bindings.push(BindingResolution {
+        self.hir_index.bindings.push(BindingResolution {
             name: BindingName(name.to_string()),
             binding: id,
             owner: BindingOwner::Function(owner),
@@ -410,7 +410,7 @@ impl LoweringCtx {
     fn binding_for_read(&mut self, name: &str, span: Span) -> Option<BindingId> {
         let binding = self.lookup_binding(name)?;
         self.record_capture_if_outer(binding);
-        self.semantic_index.references.push(ReferenceResolution {
+        self.hir_index.references.push(ReferenceResolution {
             name: SymbolName(name.to_string()),
             kind: ReferenceKind::Binding(binding),
             span,
@@ -618,7 +618,7 @@ impl LoweringCtx {
                     .with_identifier(IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED)
                     .with_span(span));
                 }
-                ctx.semantic_index.functions.push(FunctionResolution {
+                ctx.hir_index.functions.push(FunctionResolution {
                     name: FunctionName(name.to_string()),
                     function: id,
                     parent,
@@ -810,7 +810,7 @@ impl LoweringCtx {
         }
 
         let qualified = QualifiedName(vec![SymbolName(name.to_string())]);
-        self.semantic_index.classes.push(ClassResolution {
+        self.hir_index.classes.push(ClassResolution {
             name: qualified.clone(),
             class: class_id,
             span,
@@ -1150,7 +1150,7 @@ impl LoweringCtx {
         creation_policy: AssignmentCreationPolicy,
         shape_policy: AssignmentShapePolicy,
     ) {
-        self.semantic_index.mutations.push(PlaceMutation {
+        self.hir_index.mutations.push(PlaceMutation {
             place,
             kind,
             creation_policy,
@@ -1758,7 +1758,7 @@ impl LoweringCtx {
                 CallKind::Dynamic,
             )
         };
-        self.semantic_index.calls.push(CallResolution {
+        self.hir_index.calls.push(CallResolution {
             name: qualified_call_name,
             callee: callee.clone(),
             kind,

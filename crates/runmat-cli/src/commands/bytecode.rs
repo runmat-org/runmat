@@ -190,7 +190,7 @@ roots = ["."]
 
         assert!(
             lowering
-                .semantic_index
+                .hir_index
                 .calls
                 .iter()
                 .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),

@@ -46,14 +46,14 @@ impl InterpreterState {
         if vars.len() < bytecode.var_count {
             vars.resize(bytecode.var_count, Value::Num(0.0));
         }
-        if bytecode.semantic_async_metadata.mir_spawn_site_count > 0
-            || bytecode.semantic_async_metadata.mir_await_site_count > 0
+        if bytecode.async_metadata.mir_spawn_site_count > 0
+            || bytecode.async_metadata.mir_await_site_count > 0
         {
             debug!(
                 "async semantics: compiled bytecode carries {} MIR spawn site(s) and {} MIR await site(s); runtime model={} with explicit spawn/await bytecode boundaries",
-                bytecode.semantic_async_metadata.mir_spawn_site_count,
-                bytecode.semantic_async_metadata.mir_await_site_count,
-                bytecode.semantic_async_metadata.runtime_model.as_str()
+                bytecode.async_metadata.mir_spawn_site_count,
+                bytecode.async_metadata.mir_await_site_count,
+                bytecode.async_metadata.runtime_model.as_str()
             );
         }
         #[cfg(feature = "native-accel")]
@@ -70,9 +70,7 @@ impl InterpreterState {
             let fusion_plan = prepare_fusion_plan(
                 runtime_graph.as_ref(),
                 &runtime_groups,
-                bytecode
-                    .semantic_fusion_metadata
-                    .mir_fusion_candidate_group_count,
+                bytecode.fusion_metadata.mir_fusion_candidate_group_count,
             );
             (fusion_plan, runtime_graph)
         };
@@ -124,12 +122,8 @@ mod tests {
             runmat_builtins::Type::Num,
             runmat_builtins::Type::Num,
         ];
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
             kind: FusionInstructionKind::Elementwise,
         }];
@@ -168,12 +162,8 @@ mod tests {
             &bytecode.var_types,
         );
         bytecode.accel_graph = Some(stale_graph);
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![FusionInstructionWindow {
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
             span: InstrSpan { start: 2, end: 2 },
             kind: FusionInstructionKind::Elementwise,
         }];
