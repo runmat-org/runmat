@@ -272,10 +272,13 @@ impl PlotRenderer {
     fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
         match plot {
             crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
-            crate::plots::figure::PlotElement::Patch(patch) => patch
-                .vertices()
-                .iter()
-                .any(|point| point.z.abs() > PATCH_3D_Z_EPSILON),
+            crate::plots::figure::PlotElement::Patch(patch) => {
+                patch.force_3d()
+                    || patch
+                        .vertices()
+                        .iter()
+                        .any(|point| point.z.abs() > PATCH_3D_Z_EPSILON)
+            }
             crate::plots::figure::PlotElement::Line3(_) => true,
             crate::plots::figure::PlotElement::Scatter3(_) => true,
             _ => false,

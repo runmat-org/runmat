@@ -48,6 +48,8 @@ pub(crate) mod drawnow;
 pub(crate) mod errorbar;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
+#[path = "ops/fill3.rs"]
+pub(crate) mod fill3;
 #[path = "ops/gca.rs"]
 pub(crate) mod gca;
 #[path = "ops/gcf.rs"]
