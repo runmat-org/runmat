@@ -665,7 +665,7 @@ impl AccelProvider for TestProvider {
                     output_shape,
                     &tmp_values,
                 )
-                    .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
+                .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
                 tmp_values[slot] = Some(value);
             }
             let result = evaluate_expression(
@@ -676,7 +676,7 @@ impl AccelProvider for TestProvider {
                 output_shape,
                 &tmp_values,
             )
-                .with_context(|| format!("evaluating output expression for idx {idx}"))?;
+            .with_context(|| format!("evaluating output expression for idx {idx}"))?;
             out.push(result);
         }
 
@@ -751,7 +751,7 @@ impl AccelProvider for TestProvider {
                     output_shape,
                     &tmp_values,
                 )
-                    .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
+                .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
                 tmp_values[slot] = Some(value);
             }
             for (k, out_expr) in parsed.output_exprs.iter().enumerate() {
@@ -763,7 +763,7 @@ impl AccelProvider for TestProvider {
                     output_shape,
                     &tmp_values,
                 )
-                    .with_context(|| format!("evaluating output{k} expression for idx {idx}"))?;
+                .with_context(|| format!("evaluating output{k} expression for idx {idx}"))?;
                 per_output[k].push(result);
             }
         }

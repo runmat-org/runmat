@@ -365,6 +365,14 @@ async fn export_touched_figures(
     exports
 }
 
+fn outcome_error_code(outcome: &ExecutionOutcome) -> Option<String> {
+    outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.code.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::resolve_script_input;
@@ -484,12 +492,4 @@ function = "main"
             "unexpected error message: {message}"
         );
     }
-}
-
-fn outcome_error_code(outcome: &ExecutionOutcome) -> Option<String> {
-    outcome
-        .diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
-        .map(|diagnostic| diagnostic.code.clone())
 }

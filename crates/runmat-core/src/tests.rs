@@ -16,8 +16,7 @@ fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool
         | EndExpr::Div(lhs, rhs)
         | EndExpr::LeftDiv(lhs, rhs)
         | EndExpr::Pow(lhs, rhs) => {
-            end_expr_contains_display_name(lhs, name)
-                || end_expr_contains_display_name(rhs, name)
+            end_expr_contains_display_name(lhs, name) || end_expr_contains_display_name(rhs, name)
         }
         EndExpr::Neg(inner)
         | EndExpr::Pos(inner)
@@ -148,7 +147,6 @@ fn execute_request_honors_top_level_await_host_policy() {
         compatibility: CompatMode::Matlab,
         host_policy: abi::HostExecutionPolicy {
             top_level_await: false,
-            ..abi::HostExecutionPolicy::default()
         },
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(11)),
@@ -924,16 +922,12 @@ fn range_slice_uses_semantic_vm() {
         "range slice should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::IndexSlice(..) | runmat_vm::Instr::IndexSliceExpr { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::IndexSlice(..) | runmat_vm::Instr::IndexSliceExpr { .. }
+            )
+        }),
         "range indexing should lower to slice bytecode"
     );
 
@@ -1090,16 +1084,12 @@ fn range_assignment_uses_semantic_vm() {
         "range assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+            )
+        }),
         "range assignment should lower to slice store bytecode"
     );
     assert!(
@@ -1132,16 +1122,12 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
         "range vector assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+            )
+        }),
         "range vector assignment should lower to slice store bytecode"
     );
     assert!(
@@ -1174,17 +1160,13 @@ fn range_deletion_uses_semantic_vm() {
         "range deletion should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::StoreSliceDelete(..)
-                        | runmat_vm::Instr::StoreSliceExprDelete { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::StoreSliceDelete(..)
+                    | runmat_vm::Instr::StoreSliceExprDelete { .. }
+            )
+        }),
         "range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -1351,16 +1333,12 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
         "cell range paren assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+            )
+        }),
         "cell range paren assignment should lower to slice store bytecode"
     );
     assert!(
@@ -1393,17 +1371,13 @@ fn cell_range_deletion_uses_semantic_vm() {
         "cell range deletion should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::StoreSliceDelete(..)
-                        | runmat_vm::Instr::StoreSliceExprDelete { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::StoreSliceDelete(..)
+                    | runmat_vm::Instr::StoreSliceExprDelete { .. }
+            )
+        }),
         "cell range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -2362,16 +2336,12 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
         "indexed member slice assignment should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared
-            .bytecode
-            .instructions
-            .iter()
-            .any(|instr| {
-                matches!(
-                    instr,
-                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
-                )
-            }),
+        prepared.bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+            )
+        }),
         "indexed member slice assignment should lower to typed slice store bytecode"
     );
 

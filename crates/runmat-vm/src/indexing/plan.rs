@@ -352,14 +352,14 @@ where
     let mut selectors: Vec<ExprSel> = Vec::with_capacity(spec.dims);
     let mut linear_output_shape: Option<Vec<usize>> = None;
     let mut num_iter = 0usize;
-    for d in 0..spec.dims {
+    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
         let is_colon = selector_mask_has_dim(spec.colon_mask, d);
         let is_end = selector_mask_has_dim(spec.end_mask, d);
         if is_colon {
             selectors.push(ExprSel::Colon);
         } else if is_end {
             selectors.push(ExprSel::Scalar(*full_shape.get(d).unwrap_or(&1)));
-        } else if let Some(pos) = range_pos_by_dim[d] {
+        } else if let Some(pos) = *range_pos {
             let (raw_st, raw_sp) = spec.range_params[pos];
             let dim_len = *full_shape.get(d).unwrap_or(&1);
             let st = if let Some(expr) = &spec.range_start_exprs[pos] {

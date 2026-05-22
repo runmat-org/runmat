@@ -368,6 +368,26 @@ pub fn handle_create_semantic_closure(
     Ok(MethodHandling::Completed)
 }
 
+pub fn handle_load_static_property(
+    stack: &mut Vec<Value>,
+    class_name: &str,
+    prop: &str,
+) -> Result<MethodHandling, RuntimeError> {
+    let value = obj_resolve::load_static_member(class_name, prop)?;
+    stack.push(value);
+    Ok(MethodHandling::Completed)
+}
+
+pub fn handle_register_class(
+    name: String,
+    super_class: Option<String>,
+    properties: Vec<(String, bool, String, String)>,
+    methods: Vec<(String, String, bool, String)>,
+) -> Result<MethodHandling, RuntimeError> {
+    obj_class_def::register_class(name, super_class, properties, methods)?;
+    Ok(MethodHandling::Completed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{handle_builtin_outcome, normalize_requested_outputs, ExceptionRouteContext};
@@ -418,24 +438,4 @@ mod tests {
         assert_eq!(err.identifier(), Some("RunMat:AmbiguousBuiltinImport"));
         assert!(err.message().contains("ambiguous builtin via imports"));
     }
-}
-
-pub fn handle_load_static_property(
-    stack: &mut Vec<Value>,
-    class_name: &str,
-    prop: &str,
-) -> Result<MethodHandling, RuntimeError> {
-    let value = obj_resolve::load_static_member(class_name, prop)?;
-    stack.push(value);
-    Ok(MethodHandling::Completed)
-}
-
-pub fn handle_register_class(
-    name: String,
-    super_class: Option<String>,
-    properties: Vec<(String, bool, String, String)>,
-    methods: Vec<(String, String, bool, String)>,
-) -> Result<MethodHandling, RuntimeError> {
-    obj_class_def::register_class(name, super_class, properties, methods)?;
-    Ok(MethodHandling::Completed)
 }

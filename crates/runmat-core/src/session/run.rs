@@ -655,7 +655,9 @@ impl RunMatSession {
                                     if !is_semicolon_suppressed {
                                         result_value = Some(assignment_value);
                                         if self.verbose {
-                                            debug!("Interpreter assignment result: {result_value:?}");
+                                            debug!(
+                                                "Interpreter assignment result: {result_value:?}"
+                                            );
                                         }
                                     } else {
                                         suppressed_value = Some(assignment_value);
@@ -909,32 +911,31 @@ impl RunMatSession {
                 || display_context.single_assign_var.is_some()
                 || (is_expression_stmt
                     && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)))
+            && runmat_runtime::console::take_last_value_output().is_none()
         {
-            if runmat_runtime::console::take_last_value_output().is_none() {
-                if display_var_ids.is_empty() {
-                    if let Some(value) = result_value.as_ref() {
-                        let label = last_emit_var_index(&bytecode)
-                            .and_then(|var_id| id_to_name.get(&var_id).cloned())
-                            .or_else(|| {
-                                determine_display_label_from_context(
-                                    display_context.single_assign_var,
-                                    &id_to_name,
-                                    is_expression_stmt,
-                                    display_context.single_stmt_non_assign,
-                                )
-                            });
-                        runmat_runtime::console::record_value_output(label.as_deref(), value);
-                    }
-                } else {
-                    for var_id in display_var_ids {
-                        if let (Some(label), Some(display_value)) =
-                            (id_to_name.get(&var_id), self.variable_array.get(var_id))
-                        {
-                            runmat_runtime::console::record_value_output(
-                                Some(label.as_str()),
-                                display_value,
-                            );
-                        }
+            if display_var_ids.is_empty() {
+                if let Some(value) = result_value.as_ref() {
+                    let label = last_emit_var_index(&bytecode)
+                        .and_then(|var_id| id_to_name.get(&var_id).cloned())
+                        .or_else(|| {
+                            determine_display_label_from_context(
+                                display_context.single_assign_var,
+                                &id_to_name,
+                                is_expression_stmt,
+                                display_context.single_stmt_non_assign,
+                            )
+                        });
+                    runmat_runtime::console::record_value_output(label.as_deref(), value);
+                }
+            } else {
+                for var_id in display_var_ids {
+                    if let (Some(label), Some(display_value)) =
+                        (id_to_name.get(&var_id), self.variable_array.get(var_id))
+                    {
+                        runmat_runtime::console::record_value_output(
+                            Some(label.as_str()),
+                            display_value,
+                        );
                     }
                 }
             }

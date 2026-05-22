@@ -13,9 +13,9 @@ fn execute_source(source: &str) -> Vec<runmat_builtins::Value> {
 
 fn execute_source_result(
     source: &str,
-) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
+) -> Result<Vec<runmat_builtins::Value>, Box<runmat_runtime::RuntimeError>> {
     let bytecode = compile_source(source).expect("compile source");
-    interpret(&bytecode)
+    interpret(&bytecode).map_err(Box::new)
 }
 
 fn has_num(values: &[runmat_builtins::Value], expected: f64) -> bool {
@@ -2502,10 +2502,9 @@ fn classes_static_and_inheritance() {
 
 #[test]
 fn static_method_via_classref_without_class_registry_is_unresolved() {
-    let err = execute_source_result(
-        "P = classref(\"UnregisteredClassForStaticMethodTest\").origin();",
-    )
-        .expect_err("classref static call should be unresolved without class registration");
+    let err =
+        execute_source_result("P = classref(\"UnregisteredClassForStaticMethodTest\").origin();")
+            .expect_err("classref static call should be unresolved without class registration");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),

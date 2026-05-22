@@ -579,7 +579,7 @@ impl Callable {
                         return result;
                     }
                     return Err(cellfun_error_with_identifier(
-                        &format!(
+                        format!(
                             "cellfun: semantic closure '{}' ({function}) is unavailable",
                             c.function_name
                         ),

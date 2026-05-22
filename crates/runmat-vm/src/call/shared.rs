@@ -186,6 +186,20 @@ pub(crate) struct ObjectIndexDescriptor {
     rhs: Option<Value>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObjectParenExprSelectorSpec<'a> {
+    pub dims: usize,
+    pub colon_mask: u32,
+    pub end_mask: u32,
+    pub range_dims: &'a [usize],
+    pub range_params: &'a [(f64, f64)],
+    pub range_start_exprs: &'a [Option<EndExpr>],
+    pub range_step_exprs: &'a [Option<EndExpr>],
+    pub range_end_exprs: &'a [EndExpr],
+    pub end_numeric_exprs: &'a [(usize, EndExpr)],
+    pub numeric: &'a [Value],
+}
+
 impl ObjectIndexDescriptor {
     pub(crate) fn subsref_paren(base: Value, selector: ObjectIndexSelector) -> Self {
         Self {
@@ -259,30 +273,10 @@ impl ObjectIndexDescriptor {
 
     pub(crate) fn subsasgn_paren_from_expr_slice(
         base: Value,
-        dims: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        range_dims: &[usize],
-        range_params: &[(f64, f64)],
-        range_start_exprs: &[Option<EndExpr>],
-        range_step_exprs: &[Option<EndExpr>],
-        range_end_exprs: &[EndExpr],
-        end_numeric_exprs: &[(usize, EndExpr)],
-        numeric: &[Value],
+        spec: ObjectParenExprSelectorSpec<'_>,
         rhs: Value,
     ) -> Result<Self, RuntimeError> {
-        let values = build_object_paren_expr_selector_values(
-            dims,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_params,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            numeric,
-        )?;
+        let values = build_object_paren_expr_selector_values(spec)?;
         Ok(Self::subsasgn_paren(
             base,
             ObjectIndexSelector::IndexValues { values },
@@ -292,29 +286,9 @@ impl ObjectIndexDescriptor {
 
     pub(crate) fn subsref_paren_from_expr_slice(
         base: Value,
-        dims: usize,
-        colon_mask: u32,
-        end_mask: u32,
-        range_dims: &[usize],
-        range_params: &[(f64, f64)],
-        range_start_exprs: &[Option<EndExpr>],
-        range_step_exprs: &[Option<EndExpr>],
-        range_end_exprs: &[EndExpr],
-        end_numeric_exprs: &[(usize, EndExpr)],
-        numeric: &[Value],
+        spec: ObjectParenExprSelectorSpec<'_>,
     ) -> Result<Self, RuntimeError> {
-        let values = build_object_paren_expr_selector_values(
-            dims,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_params,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            end_numeric_exprs,
-            numeric,
-        )?;
+        let values = build_object_paren_expr_selector_values(spec)?;
         Ok(Self::subsref_paren(
             base,
             ObjectIndexSelector::IndexValues { values },
@@ -744,30 +718,21 @@ pub(crate) fn build_object_paren_selector_values(
 }
 
 pub(crate) fn build_object_paren_expr_selector_values(
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    range_dims: &[usize],
-    range_params: &[(f64, f64)],
-    range_start_exprs: &[Option<EndExpr>],
-    range_step_exprs: &[Option<EndExpr>],
-    range_end_exprs: &[EndExpr],
-    end_numeric_exprs: &[(usize, EndExpr)],
-    numeric: &[Value],
+    spec: ObjectParenExprSelectorSpec<'_>,
 ) -> Result<Vec<Value>, RuntimeError> {
-    validate_object_selector_masks(dims, colon_mask, end_mask)?;
+    validate_object_selector_masks(spec.dims, spec.colon_mask, spec.end_mask)?;
     let range_pos_by_dim = validate_object_range_selector_plan(
-        dims,
-        range_dims,
-        range_params,
-        range_start_exprs,
-        range_step_exprs,
-        range_end_exprs,
+        spec.dims,
+        spec.range_dims,
+        spec.range_params,
+        spec.range_start_exprs,
+        spec.range_step_exprs,
+        spec.range_end_exprs,
     )?;
-    for d in 0..dims {
-        if range_pos_by_dim[d].is_some() {
-            let is_colon = object_selector_mask_has_dim(colon_mask, d);
-            let is_end = object_selector_mask_has_dim(end_mask, d);
+    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
+        if range_pos.is_some() {
+            let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
+            let is_end = object_selector_mask_has_dim(spec.end_mask, d);
             if is_colon || is_end {
                 return Err(crate::interpreter::errors::mex(
                     "InvalidRangeSelectorPlan",
@@ -776,20 +741,20 @@ pub(crate) fn build_object_paren_expr_selector_values(
             }
         }
     }
-    let slot_count = (0..dims)
+    let slot_count = (0..spec.dims)
         .filter(|&d| {
-            let is_colon = object_selector_mask_has_dim(colon_mask, d);
-            let is_end = object_selector_mask_has_dim(end_mask, d);
+            let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
+            let is_end = object_selector_mask_has_dim(spec.end_mask, d);
             !is_colon && !is_end && range_pos_by_dim[d].is_none()
         })
         .count();
     let end_expr_by_slot =
-        validate_object_end_numeric_selector_plan(slot_count, end_numeric_exprs)?;
-    let mut values = Vec::with_capacity(dims);
+        validate_object_end_numeric_selector_plan(slot_count, spec.end_numeric_exprs)?;
+    let mut values = Vec::with_capacity(spec.dims);
     let mut num_iter = 0usize;
-    for d in 0..dims {
-        let is_colon = object_selector_mask_has_dim(colon_mask, d);
-        let is_end = object_selector_mask_has_dim(end_mask, d);
+    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
+        let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
+        let is_end = object_selector_mask_has_dim(spec.end_mask, d);
         if is_colon {
             values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
             continue;
@@ -798,19 +763,19 @@ pub(crate) fn build_object_paren_expr_selector_values(
             values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
             continue;
         }
-        if let Some(pos) = range_pos_by_dim[d] {
-            let (raw_st, raw_sp) = range_params[pos];
-            let st = if let Some(expr) = &range_start_exprs[pos] {
+        if let Some(pos) = *range_pos {
+            let (raw_st, raw_sp) = spec.range_params[pos];
+            let st = if let Some(expr) = &spec.range_start_exprs[pos] {
                 encode_end_expr_value(expr)?
             } else {
                 Value::Num(raw_st)
             };
-            let sp = if let Some(expr) = &range_step_exprs[pos] {
+            let sp = if let Some(expr) = &spec.range_step_exprs[pos] {
                 encode_end_expr_value(expr)?
             } else {
                 Value::Num(raw_sp)
             };
-            let off = &range_end_exprs[pos];
+            let off = &spec.range_end_exprs[pos];
             values.push(build_end_range_descriptor(st, sp, off)?);
             continue;
         }
@@ -819,7 +784,8 @@ pub(crate) fn build_object_paren_expr_selector_values(
             num_iter += 1;
             continue;
         }
-        let selector = numeric
+        let selector = spec
+            .numeric
             .get(num_iter)
             .ok_or(crate::interpreter::errors::mex(
                 "MissingNumericIndex",
@@ -828,7 +794,7 @@ pub(crate) fn build_object_paren_expr_selector_values(
         num_iter += 1;
         values.push(normalize_object_numeric_selector(selector)?);
     }
-    if num_iter != numeric.len() {
+    if num_iter != spec.numeric.len() {
         return Err(crate::interpreter::errors::mex(
             "UnexpectedNumericIndex",
             "unexpected extra numeric index values",
@@ -930,9 +896,9 @@ mod tests {
     use super::{
         build_expanded_args_from_specs, build_object_paren_expr_selector_values,
         build_object_paren_selector_values, ObjectIndexDescriptor, ObjectIndexOp,
-        ObjectIndexSelector, OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE,
-        OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF,
-        OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
+        ObjectIndexSelector, ObjectParenExprSelectorSpec, OBJECT_END_RANGE_TAG,
+        OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN,
+        OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
     };
     use crate::bytecode::ArgSpec;
     use crate::bytecode::EndExpr;
@@ -944,6 +910,35 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    macro_rules! build_object_paren_expr_selector_values_from_parts {
+        (
+            $dims:expr,
+            $colon_mask:expr,
+            $end_mask:expr,
+            $range_dims:expr,
+            $range_params:expr,
+            $range_start_exprs:expr,
+            $range_step_exprs:expr,
+            $range_end_exprs:expr,
+            $end_numeric_exprs:expr,
+            $numeric:expr
+            $(,)?
+        ) => {
+            build_object_paren_expr_selector_values(ObjectParenExprSelectorSpec {
+                dims: $dims,
+                colon_mask: $colon_mask,
+                end_mask: $end_mask,
+                range_dims: $range_dims,
+                range_params: $range_params,
+                range_start_exprs: $range_start_exprs,
+                range_step_exprs: $range_step_exprs,
+                range_end_exprs: $range_end_exprs,
+                end_numeric_exprs: $end_numeric_exprs,
+                numeric: $numeric,
+            })
+        };
+    }
 
     fn unique_class_name(prefix: &str) -> String {
         let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -1202,7 +1197,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_encode_end_expression_range_descriptors() {
-        let selectors = build_object_paren_expr_selector_values(
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
             2,
             0,
             0,
@@ -1239,7 +1234,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_end_call_without_callable_name() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,
@@ -1261,7 +1256,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_malformed_external_end_call_name() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,
@@ -1287,7 +1282,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_invalid_range_plan_metadata() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             2,
             0,
             0,
@@ -1305,7 +1300,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_range_dim_conflicting_with_colon_mask() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             2,
             0b01,
             0,
@@ -1323,7 +1318,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_range_dim_conflicting_with_end_mask() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             2,
             0,
             0b01,
@@ -1341,7 +1336,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_out_of_bounds_mask_bits() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0b10,
             0,
@@ -1359,16 +1354,26 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_overlapping_colon_end_mask_bits() {
-        let err =
-            build_object_paren_expr_selector_values(1, 0b1, 0b1, &[], &[], &[], &[], &[], &[], &[])
-                .expect_err("overlapping selector mask bits should fail");
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0b1,
+            0b1,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[]
+        )
+        .expect_err("overlapping selector mask bits should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
     }
 
     #[test]
     fn object_paren_expr_selector_values_support_dims_beyond_mask_width() {
         let numeric: Vec<Value> = (0..32).map(|v| Value::Num((v + 1) as f64)).collect();
-        let selectors = build_object_paren_expr_selector_values(
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
             33,
             0,
             0,
@@ -1395,7 +1400,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_duplicate_range_dims() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             2,
             0,
             0,
@@ -1413,7 +1418,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_out_of_bounds_range_dim() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,
@@ -1431,7 +1436,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_unsupported_numeric_selector_type() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,
@@ -1452,7 +1457,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_accept_string_selector_in_mixed_plan() {
-        let selectors = build_object_paren_expr_selector_values(
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
             2,
             0,
             0,
@@ -1473,7 +1478,7 @@ mod tests {
     fn object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan() {
         let key_cell = runmat_builtins::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
             .expect("key cell");
-        let selectors = build_object_paren_expr_selector_values(
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
             2,
             0,
             0,
@@ -1492,7 +1497,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_encode_numeric_end_expressions() {
-        let selectors = build_object_paren_expr_selector_values(
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,
@@ -1519,7 +1524,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_duplicate_numeric_end_expr_positions() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,
@@ -1546,7 +1551,7 @@ mod tests {
 
     #[test]
     fn object_paren_expr_selector_values_reject_out_of_bounds_numeric_end_expr_positions() {
-        let err = build_object_paren_expr_selector_values(
+        let err = build_object_paren_expr_selector_values_from_parts!(
             1,
             0,
             0,

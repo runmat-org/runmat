@@ -2,7 +2,7 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
-const CELL_END_PLUS_TAG_MASK: u64 = 0x7ff8_0000_0000_0000;
+const CELL_END_PLUS_TAG_MASK: u64 = 0xffff_ffff_0000_0000;
 const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
 const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
 

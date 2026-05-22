@@ -110,13 +110,8 @@ async fn call_member_index_on_object_like(
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
         let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
-        return call_identity_with_policy(
-            identity,
-            full_args,
-            requested_outputs,
-            fallback_policy,
-        )
-        .await;
+        return call_identity_with_policy(identity, full_args, requested_outputs, fallback_policy)
+            .await;
     }
 
     let mut method_args = Vec::with_capacity(1 + args.len());
@@ -158,13 +153,8 @@ async fn call_member_index_on_object_like(
         Err(err) => return Err(err),
     }
 
-    match call_identity_with_policy(
-        name_identity,
-        method_args,
-        requested_outputs,
-        name_fallback,
-    )
-    .await
+    match call_identity_with_policy(name_identity, method_args, requested_outputs, name_fallback)
+        .await
     {
         Ok(v) => return Ok(v),
         Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
@@ -283,13 +273,7 @@ pub async fn call_method_or_member_index_with_outputs(
             ),
         )
     })?;
-    call_method_or_member_index_named_with_outputs(
-        base,
-        name,
-        args,
-        requested_outputs,
-    )
-    .await
+    call_method_or_member_index_named_with_outputs(base, name, args, requested_outputs).await
 }
 
 pub(crate) async fn call_method_or_member_index_named_with_outputs(
@@ -356,6 +340,15 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
         }
         other => call_getfield_with_indices(other, name, args, requested_outputs).await,
     }
+}
+
+pub fn collect_method_args(
+    stack: &mut Vec<Value>,
+    arg_count: usize,
+) -> Result<(Value, Vec<Value>), RuntimeError> {
+    let args = pop_args(stack, arg_count)?;
+    let base = pop_value(stack)?;
+    Ok((base, args))
 }
 
 #[cfg(test)]
@@ -535,13 +528,4 @@ mod tests {
         .expect_err("unknown static method should fail during method-handle load");
         assert_eq!(err.identifier(), Some("RunMat:UnknownStaticMethod"));
     }
-}
-
-pub fn collect_method_args(
-    stack: &mut Vec<Value>,
-    arg_count: usize,
-) -> Result<(Value, Vec<Value>), RuntimeError> {
-    let args = pop_args(stack, arg_count)?;
-    let base = pop_value(stack)?;
-    Ok((base, args))
 }

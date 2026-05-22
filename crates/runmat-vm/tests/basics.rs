@@ -351,10 +351,10 @@ fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
         .instructions
         .iter()
         .position(|instr| matches!(instr, Instr::Add));
-    let atan2_index = bytecode.instructions.iter().position(|instr| {
-        matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
-            || matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
-    });
+    let atan2_index = bytecode
+        .instructions
+        .iter()
+        .position(|instr| matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2"));
 
     assert!(
         matches!((add_index, atan2_index), (Some(add), Some(atan2)) if add < atan2),

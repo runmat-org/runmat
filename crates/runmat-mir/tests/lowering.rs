@@ -31,7 +31,7 @@ fn first_local_of_kind(body: &MirBody, kind: MirLocalKind) -> runmat_mir::MirLoc
         .id
 }
 
-fn first_call<'a>(body: &'a MirBody) -> &'a runmat_mir::MirCall {
+fn first_call(body: &MirBody) -> &runmat_mir::MirCall {
     body.blocks
         .iter()
         .flat_map(|block| block.statements.iter())
@@ -50,7 +50,7 @@ fn first_call<'a>(body: &'a MirBody) -> &'a runmat_mir::MirCall {
         .expect("expected at least one lowered call")
 }
 
-fn first_indexing<'a>(body: &'a MirBody) -> &'a runmat_mir::MirIndexing {
+fn first_indexing(body: &MirBody) -> &runmat_mir::MirIndexing {
     body.blocks
         .iter()
         .flat_map(|block| block.statements.iter())
@@ -257,8 +257,8 @@ fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
     let mir = lower_mir("function y = f(x); y = x; end");
     let body = mir.bodies.values().next().unwrap();
     let store = analyze_assembly(&mir);
-    let param = first_local_of_kind(&body, MirLocalKind::Parameter);
-    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let param = first_local_of_kind(body, MirLocalKind::Parameter);
+    let output = first_local_of_kind(body, MirLocalKind::Output);
 
     assert!(store.mir_locals.contains_key(&MirLocalKey {
         function: body.function,
@@ -279,7 +279,7 @@ fn dataflow_joins_branch_assignment_as_maybe_assigned() {
     let mir = lower_mir("function y = f(c); if c; y = 1; end; end");
     let body = mir.bodies.values().next().unwrap();
     let store = analyze_assembly(&mir);
-    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let output = first_local_of_kind(body, MirLocalKind::Output);
 
     assert!(store.mir_locals.contains_key(&MirLocalKey {
         function: body.function,
@@ -617,7 +617,7 @@ fn dataflow_widens_loop_assignment_as_maybe_assigned() {
     let mir = lower_mir("function y = f(c); while c; y = 1; end; end");
     let body = mir.bodies.values().next().unwrap();
     let store = analyze_assembly(&mir);
-    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let output = first_local_of_kind(body, MirLocalKind::Output);
 
     assert!(store.mir_locals.contains_key(&MirLocalKey {
         function: body.function,
@@ -975,7 +975,7 @@ fn dataflow_marks_await_assignment_output_definitely_assigned() {
     let mir = lower_mir("async function y = f(g); y = await(g); end");
     let body = mir.bodies.values().next().unwrap();
     let store = analyze_assembly(&mir);
-    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let output = first_local_of_kind(body, MirLocalKind::Output);
 
     assert!(store.mir_locals.contains_key(&MirLocalKey {
         function: body.function,

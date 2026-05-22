@@ -429,9 +429,10 @@ fn fminbnd_returns_optional_function_value() {
 
 #[test]
 fn fminbnd_accepts_optimset_options() {
-    let vars =
-        execute_source("opts = optimset('TolX', 1e-10, 'Display', 'off'); x = fminbnd(@cos, 0, pi, opts);")
-            .unwrap();
+    let vars = execute_source(
+        "opts = optimset('TolX', 1e-10, 'Display', 'off'); x = fminbnd(@cos, 0, pi, opts);",
+    )
+    .unwrap();
     assert!(vars.iter().any(
         |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI).abs() < 1e-3)
     ));

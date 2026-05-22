@@ -376,7 +376,7 @@ fn derive_semantic_fusion_groups_from_candidates(
     let mut assigned_nodes = HashSet::new();
 
     for window in instruction_windows {
-        let nodes = accel_nodes_for_instruction_window(accel_graph, &window, &assigned_nodes);
+        let nodes = accel_nodes_for_instruction_window(accel_graph, window, &assigned_nodes);
         if nodes.is_empty() {
             continue;
         }
@@ -3151,13 +3151,15 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Index(_, indexing) = place {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                            indexing.components = vec![MirIndexComponent::Colon];
-                            patched = true;
-                            break;
-                        }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Index(_, indexing),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                        indexing.components = vec![MirIndexComponent::Colon];
+                        patched = true;
+                        break;
                     }
                 }
             }
@@ -3203,13 +3205,15 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Index(_, indexing) = place {
-                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
-                            patched = true;
-                            break;
-                        }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Index(_, indexing),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                        indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+                        patched = true;
+                        break;
                     }
                 }
             }
@@ -3241,15 +3245,16 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Member(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::ReadSingle;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Member(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3282,15 +3287,17 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Member(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::DeletionTarget;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Member(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                            indexing.result_context =
+                                runmat_hir::IndexResultContext::DeletionTarget;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3323,15 +3330,16 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Member(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::ReadSingle;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Member(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
+                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3364,15 +3372,17 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Member(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::DeletionTarget;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Member(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
+                            indexing.result_context =
+                                runmat_hir::IndexResultContext::DeletionTarget;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3428,15 +3438,16 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::DynamicMember(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::ReadSingle;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::DynamicMember(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
+                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3470,15 +3481,17 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::DynamicMember(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::DeletionTarget;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::DynamicMember(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Paren) {
+                            indexing.result_context =
+                                runmat_hir::IndexResultContext::DeletionTarget;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3534,15 +3547,16 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::DynamicMember(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::ReadSingle;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::DynamicMember(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3576,15 +3590,17 @@ mod tests {
         let mut patched = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::DynamicMember(base, _) = place {
-                        if let MirPlace::Index(_, indexing) = base.as_mut() {
-                            if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
-                                indexing.result_context =
-                                    runmat_hir::IndexResultContext::DeletionTarget;
-                                patched = true;
-                                break;
-                            }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::DynamicMember(base, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    if let MirPlace::Index(_, indexing) = base.as_mut() {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                            indexing.result_context =
+                                runmat_hir::IndexResultContext::DeletionTarget;
+                            patched = true;
+                            break;
                         }
                     }
                 }
@@ -3891,10 +3907,10 @@ mod tests {
             .iter()
             .flat_map(|block| block.statements.iter())
             .find_map(|stmt| match &stmt.kind {
-                MirStmtKind::Assign { place, .. } => match place {
-                    MirPlace::Index(base, _) => Some((**base).clone()),
-                    _ => None,
-                },
+                MirStmtKind::Assign {
+                    place: MirPlace::Index(base, _),
+                    ..
+                } => Some((**base).clone()),
                 _ => None,
             })
             .expect("expected indexed delete assignment target");
@@ -3950,11 +3966,12 @@ mod tests {
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
                 match &mut stmt.kind {
-                    MirStmtKind::Assign { place, .. } => {
-                        if let MirPlace::Index(_, indexing) = place {
-                            indexing.kind = runmat_hir::IndexKind::Brace;
-                            patched_assign = true;
-                        }
+                    MirStmtKind::Assign {
+                        place: MirPlace::Index(_, indexing),
+                        ..
+                    } => {
+                        indexing.kind = runmat_hir::IndexKind::Brace;
+                        patched_assign = true;
                     }
                     MirStmtKind::PlaceMutation(mutation) => {
                         if let MirPlace::Index(_, indexing) = &mut mutation.place {
@@ -3996,11 +4013,12 @@ mod tests {
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
                 match &mut stmt.kind {
-                    MirStmtKind::Assign { place, .. } => {
-                        if let MirPlace::Index(_, indexing) = place {
-                            indexing.result_context = IndexResultContext::AssignmentTarget;
-                            patched_assign = true;
-                        }
+                    MirStmtKind::Assign {
+                        place: MirPlace::Index(_, indexing),
+                        ..
+                    } => {
+                        indexing.result_context = IndexResultContext::AssignmentTarget;
+                        patched_assign = true;
                     }
                     MirStmtKind::PlaceMutation(mutation) => {
                         if let MirPlace::Index(_, indexing) = &mut mutation.place {
@@ -4040,12 +4058,14 @@ mod tests {
         let mut patched_assign = false;
         for block in &mut body.blocks {
             for stmt in &mut block.statements {
-                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
-                    if let MirPlace::Index(_, indexing) = place {
-                        indexing.result_context = IndexResultContext::DeletionTarget;
-                        patched_assign = true;
-                        break;
-                    }
+                if let MirStmtKind::Assign {
+                    place: MirPlace::Index(_, indexing),
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.result_context = IndexResultContext::DeletionTarget;
+                    patched_assign = true;
+                    break;
                 }
             }
             if patched_assign {
@@ -6089,7 +6109,7 @@ mod tests {
                     num_indices: 2,
                     end_offsets,
                     ..
-                } if end_offsets.iter().any(|entry| *entry == (1, 1))
+                } if end_offsets.contains(&(1, 1))
             )
         }));
         let layout = bytecode.layout.as_ref().expect("layout");

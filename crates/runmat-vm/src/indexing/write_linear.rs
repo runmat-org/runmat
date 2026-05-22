@@ -138,23 +138,6 @@ pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeErr
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{map_acceleration_error, map_assignment_shape_error};
-
-    #[test]
-    fn assignment_shape_error_mapping_reports_identifier() {
-        let err = map_assignment_shape_error("invalid shape");
-        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
-    }
-
-    #[test]
-    fn assignment_acceleration_error_mapping_reports_identifier() {
-        let err = map_acceleration_error("gather rhs", "provider failed");
-        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
-    }
-}
-
 pub async fn assign_tensor_scalar(
     mut t: Tensor,
     indices: &[usize],
@@ -301,4 +284,21 @@ pub async fn assign_gpu_scalar(
         .upload(&view)
         .map_err(|e| map_acceleration_error("reupload after assignment", e))?;
     Ok(Value::GpuTensor(new_h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_acceleration_error, map_assignment_shape_error};
+
+    #[test]
+    fn assignment_shape_error_mapping_reports_identifier() {
+        let err = map_assignment_shape_error("invalid shape");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn assignment_acceleration_error_mapping_reports_identifier() {
+        let err = map_acceleration_error("gather rhs", "provider failed");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
+    }
 }

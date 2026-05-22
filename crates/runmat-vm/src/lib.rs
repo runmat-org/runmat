@@ -47,6 +47,11 @@ pub async fn call_method_or_member_index_named_with_outputs(
     requested_outputs: usize,
     _fallback_policy: runmat_hir::CallableFallbackPolicy,
 ) -> Result<runmat_builtins::Value, runmat_runtime::RuntimeError> {
-    call::closures::call_method_or_member_index_named_with_outputs(base, name, args, requested_outputs)
-        .await
+    call::closures::call_method_or_member_index_named_with_outputs(
+        base,
+        name,
+        args,
+        requested_outputs,
+    )
+    .await
 }

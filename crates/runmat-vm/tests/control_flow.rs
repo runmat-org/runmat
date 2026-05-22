@@ -10,7 +10,7 @@ fn has_num(vars: &[runmat_builtins::Value], expected: f64) -> bool {
 }
 
 fn execute_semantic_error(source: &str) -> runmat_runtime::RuntimeError {
-    execute_source(source).err().expect("expected error")
+    execute_source(source).expect_err("expected error")
 }
 
 #[test]

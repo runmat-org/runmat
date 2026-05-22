@@ -60,6 +60,19 @@ struct LoweringCtx {
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
 
+struct LowerFunctionSpec<'a> {
+    id: FunctionId,
+    name: &'a str,
+    params: &'a [String],
+    outputs: &'a [String],
+    body: &'a [AstStmt],
+    span: Span,
+    kind: FunctionKind,
+    modifiers: FunctionModifiers,
+    parent: Option<FunctionId>,
+    enclosing_class: Option<ClassId>,
+}
+
 pub fn lower(prog: &AstProgram, context: &LoweringContext<'_>) -> Result<LoweringResult, HirError> {
     let (assembly, hir_index) = LoweringCtx::lower_program(prog, context)?;
 
@@ -244,21 +257,21 @@ impl LoweringCtx {
                     span,
                 } => {
                     let id = ctx.function_names[name];
-                    let function = ctx.lower_function(
+                    let function = ctx.lower_function(LowerFunctionSpec {
                         id,
                         name,
                         params,
                         outputs,
                         body,
-                        *span,
-                        FunctionKind::Named,
-                        FunctionModifiers {
+                        span: *span,
+                        kind: FunctionKind::Named,
+                        modifiers: FunctionModifiers {
                             isolated: *isolated,
                             is_async: *is_async,
                         },
-                        None,
-                        None,
-                    )?;
+                        parent: None,
+                        enclosing_class: None,
+                    })?;
                     ctx.assembly.functions.push(function);
                 }
                 AstStmt::ClassDef {
@@ -514,19 +527,19 @@ impl LoweringCtx {
             .collect()
     }
 
-    fn lower_function(
-        &mut self,
-        id: FunctionId,
-        name: &str,
-        params: &[String],
-        outputs: &[String],
-        body: &[AstStmt],
-        span: Span,
-        kind: FunctionKind,
-        modifiers: FunctionModifiers,
-        parent: Option<FunctionId>,
-        enclosing_class: Option<ClassId>,
-    ) -> Result<HirFunction, HirError> {
+    fn lower_function(&mut self, spec: LowerFunctionSpec<'_>) -> Result<HirFunction, HirError> {
+        let LowerFunctionSpec {
+            id,
+            name,
+            params,
+            outputs,
+            body,
+            span,
+            kind,
+            modifiers,
+            parent,
+            enclosing_class,
+        } = spec;
         self.with_scope(
             id,
             WorkspaceVisibility::Hidden,
@@ -591,21 +604,21 @@ impl LoweringCtx {
                     } = stmt
                     {
                         let nested_id = ctx.function_names[name];
-                        let nested = ctx.lower_function(
-                            nested_id,
+                        let nested = ctx.lower_function(LowerFunctionSpec {
+                            id: nested_id,
                             name,
                             params,
                             outputs,
                             body,
-                            *span,
-                            FunctionKind::Named,
-                            FunctionModifiers {
+                            span: *span,
+                            kind: FunctionKind::Named,
+                            modifiers: FunctionModifiers {
                                 isolated: *isolated,
                                 is_async: *is_async,
                             },
-                            Some(id),
+                            parent: Some(id),
                             enclosing_class,
-                        )?;
+                        })?;
                         ctx.assembly.functions.push(nested);
                     }
                 }
@@ -722,21 +735,21 @@ impl LoweringCtx {
                         } = stmt
                         {
                             let function_id = self.take_function_id();
-                            let function = self.lower_function(
-                                function_id,
-                                method_name,
+                            let function = self.lower_function(LowerFunctionSpec {
+                                id: function_id,
+                                name: method_name,
                                 params,
                                 outputs,
                                 body,
-                                *span,
-                                FunctionKind::ClassMethod { is_static },
-                                FunctionModifiers {
+                                span: *span,
+                                kind: FunctionKind::ClassMethod { is_static },
+                                modifiers: FunctionModifiers {
                                     isolated: *isolated,
                                     is_async: *is_async,
                                 },
-                                None,
-                                Some(class_id),
-                            )?;
+                                parent: None,
+                                enclosing_class: Some(class_id),
+                            })?;
                             self.assembly.functions.push(function);
                             if !method_names.insert(method_name.clone()) {
                                 return Err(HirError::new(format!(

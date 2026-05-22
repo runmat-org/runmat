@@ -88,30 +88,18 @@ fn impulse_returns_siso_response_through_vm_dispatch() {
     assert!(vars
         .iter()
         .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
-    assert!(
-        vars.iter().any(
-            |value| match value {
-                Value::Num(n) => (*n - 20.0).abs() < 1.0e-8,
-                _ => false,
-            }
-        )
-    );
-    assert!(
-        vars.iter().any(
-            |value| match value {
-                Value::Num(n) => (*n - (20.0 * (-0.5f64).exp())).abs() < 1.0e-8,
-                _ => false,
-            }
-        )
-    );
-    assert!(
-        vars.iter().any(
-            |value| match value {
-                Value::Num(n) => (*n - 0.2).abs() < 1.0e-12,
-                _ => false,
-            }
-        )
-    );
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 20.0).abs() < 1.0e-8,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - (20.0 * (-0.5f64).exp())).abs() < 1.0e-8,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 0.2).abs() < 1.0e-12,
+        _ => false,
+    }));
 }
 
 #[test]
@@ -131,30 +119,18 @@ fn impulse_discrete_response_through_vm_dispatch() {
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if n.abs() < 1.0e-12)));
-    assert!(
-        vars.iter().any(
-            |value| match value {
-                Value::Num(n) => (*n - 10.0).abs() < 1.0e-12,
-                _ => false,
-            }
-        )
-    );
-    assert!(
-        vars.iter().any(
-            |value| match value {
-                Value::Num(n) => (*n - 0.625).abs() < 1.0e-12,
-                _ => false,
-            }
-        )
-    );
-    assert!(
-        vars.iter().any(
-            |value| match value {
-                Value::Num(n) => (*n - 0.5).abs() < 1.0e-12,
-                _ => false,
-            }
-        )
-    );
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 10.0).abs() < 1.0e-12,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 0.625).abs() < 1.0e-12,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 0.5).abs() < 1.0e-12,
+        _ => false,
+    }));
 }
 
 #[test]

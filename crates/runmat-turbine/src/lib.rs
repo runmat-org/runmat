@@ -277,9 +277,7 @@ pub struct TurbineEngine {
     compiler: BytecodeCompiler,
     runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
-    runmat_call_semantic_function_value_id: FuncId,
     runmat_call_semantic_function_values_id: FuncId,
-    runmat_call_semantic_function_expanded_value_id: FuncId,
     runmat_call_semantic_function_expanded_values_id: FuncId,
     runmat_call_feval_expanded_values_id: FuncId,
     runmat_call_builtin_expanded_values_id: FuncId,
@@ -441,11 +439,11 @@ impl TurbineEngine {
         let runmat_call_semantic_function_id = declare_host_semantic_call_in_module(&mut module);
         let runmat_call_semantic_function_outputs_id =
             declare_host_semantic_call_outputs_in_module(&mut module);
-        let runmat_call_semantic_function_value_id =
+        let _runmat_call_semantic_function_value_id =
             declare_host_semantic_value_call_in_module(&mut module);
         let runmat_call_semantic_function_values_id =
             declare_host_semantic_value_outputs_in_module(&mut module);
-        let runmat_call_semantic_function_expanded_value_id =
+        let _runmat_call_semantic_function_expanded_value_id =
             declare_host_semantic_expanded_value_call_in_module(&mut module);
         let runmat_call_semantic_function_expanded_values_id =
             declare_host_semantic_expanded_value_outputs_in_module(&mut module);
@@ -467,9 +465,7 @@ impl TurbineEngine {
             compiler: BytecodeCompiler::new(),
             runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
-            runmat_call_semantic_function_value_id,
             runmat_call_semantic_function_values_id,
-            runmat_call_semantic_function_expanded_value_id,
             runmat_call_semantic_function_expanded_values_id,
             runmat_call_feval_expanded_values_id,
             runmat_call_builtin_expanded_values_id,
@@ -537,22 +533,28 @@ impl TurbineEngine {
             sig.clone(),
         );
 
-        self.compiler.compile_instructions(
-            &bytecode.instructions,
-            &mut func,
-            bytecode.var_count,
-            &bytecode.function_registry(),
-            &mut self.module,
-            self.runmat_call_semantic_function_id,
-            self.runmat_call_semantic_function_outputs_id,
-            self.runmat_call_semantic_function_value_id,
-            self.runmat_call_semantic_function_values_id,
-            self.runmat_call_semantic_function_expanded_value_id,
-            self.runmat_call_semantic_function_expanded_values_id,
-            self.runmat_call_feval_expanded_values_id,
-            self.runmat_call_builtin_expanded_values_id,
-            self.runmat_call_method_member_expanded_values_id,
-        )?;
+        self.compiler
+            .compile_instructions(CompileInstructionParams {
+                instructions: &bytecode.instructions,
+                func: &mut func,
+                var_count: bytecode.var_count,
+                function_registry: &bytecode.function_registry(),
+                module: &mut self.module,
+                runtime_call_ids: RuntimeCallIds {
+                    runmat_call_semantic_function_id: self.runmat_call_semantic_function_id,
+                    runmat_call_semantic_function_outputs_id: self
+                        .runmat_call_semantic_function_outputs_id,
+                    runmat_call_semantic_function_values_id: self
+                        .runmat_call_semantic_function_values_id,
+                    runmat_call_semantic_function_expanded_values_id: self
+                        .runmat_call_semantic_function_expanded_values_id,
+                    runmat_call_feval_expanded_values_id: self.runmat_call_feval_expanded_values_id,
+                    runmat_call_builtin_expanded_values_id: self
+                        .runmat_call_builtin_expanded_values_id,
+                    runmat_call_method_member_expanded_values_id: self
+                        .runmat_call_method_member_expanded_values_id,
+                },
+            })?;
 
         // Compile to machine code
         self.ctx.func = func;

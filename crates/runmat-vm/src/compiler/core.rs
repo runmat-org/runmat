@@ -20,6 +20,10 @@ type ClassRegistration = (
     Vec<(String, bool, String, String)>,
     Vec<(String, String, bool, String)>,
 );
+type MirCellEndOffsets = Vec<(usize, isize)>;
+type MirCellEndExprs = Vec<(usize, EndExpr)>;
+type MirCellSelectorCompileResult = (usize, bool, MirCellEndOffsets, MirCellEndExprs);
+type MirCellIndexCompileResult = (MirCellEndOffsets, MirCellEndExprs);
 
 pub struct Compiler {
     pub instructions: Vec<Instr>,
@@ -1180,7 +1184,7 @@ impl Compiler {
     fn compile_mir_cell_selector_operands(
         &mut self,
         indexing: &MirIndexing,
-    ) -> Result<(usize, bool, Vec<(usize, isize)>, Vec<(usize, EndExpr)>), CompileError> {
+    ) -> Result<MirCellSelectorCompileResult, CompileError> {
         let expand_all = indexing.cell_expand_all;
         let mut index_count = 0usize;
         let mut end_offsets = Vec::new();
@@ -2476,7 +2480,7 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
         expected_context: IndexResultContext,
-    ) -> Result<(Vec<(usize, isize)>, Vec<(usize, EndExpr)>), CompileError> {
+    ) -> Result<MirCellIndexCompileResult, CompileError> {
         if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
             return Err(self
                 .compile_error("MIR cell index lowering received mismatched index result context")

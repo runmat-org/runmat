@@ -136,8 +136,11 @@ mod tests {
     fn hamming_supports_periodic_overload() {
         let _guard = test_support::accel_test_lock();
         let periodic = test_support::gather(
-            block_on(hamming_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
-                .expect("hamming periodic"),
+            block_on(hamming_builtin(
+                Value::Num(4.0),
+                vec![Value::from("periodic")],
+            ))
+            .expect("hamming periodic"),
         )
         .expect("gather hamming periodic");
         assert_eq!(periodic.shape, vec![4, 1]);

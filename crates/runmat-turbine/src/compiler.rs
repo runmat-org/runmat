@@ -26,10 +26,38 @@ struct CompileContext<'a> {
     runmat_call_method_member_expanded_values_id: FuncId,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct RuntimeCallIds {
+    pub runmat_call_semantic_function_id: FuncId,
+    pub runmat_call_semantic_function_outputs_id: FuncId,
+    pub runmat_call_semantic_function_values_id: FuncId,
+    pub runmat_call_semantic_function_expanded_values_id: FuncId,
+    pub runmat_call_feval_expanded_values_id: FuncId,
+    pub runmat_call_builtin_expanded_values_id: FuncId,
+    pub runmat_call_method_member_expanded_values_id: FuncId,
+}
+
+pub(crate) struct CompileInstructionParams<'a> {
+    pub instructions: &'a [Instr],
+    pub func: &'a mut codegen::ir::Function,
+    pub var_count: usize,
+    pub function_registry: &'a FunctionRegistry,
+    pub module: &'a mut JITModule,
+    pub runtime_call_ids: RuntimeCallIds,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct StackEntry {
     num: Value,
     value_ptr: Option<Value>,
+}
+
+struct MethodMemberExpandedCall<'a> {
+    identity: &'a runmat_hir::CallableIdentity,
+    fallback_policy: runmat_hir::CallableFallbackPolicy,
+    args: &'a [StackEntry],
+    specs: &'a [ArgSpec],
+    out_count: usize,
 }
 
 /// Stack simulation for tracking values during compilation  
@@ -230,21 +258,16 @@ impl BytecodeCompiler {
     /// Function signature: fn(*mut Value, usize) -> i32
     pub(crate) fn compile_instructions(
         &mut self,
-        instructions: &[Instr],
-        func: &mut codegen::ir::Function,
-        _var_count: usize,
-        function_registry: &FunctionRegistry,
-        module: &mut JITModule,
-        runmat_call_semantic_function_id: FuncId,
-        runmat_call_semantic_function_outputs_id: FuncId,
-        _runmat_call_semantic_function_value_id: FuncId,
-        runmat_call_semantic_function_values_id: FuncId,
-        _runmat_call_semantic_function_expanded_value_id: FuncId,
-        runmat_call_semantic_function_expanded_values_id: FuncId,
-        runmat_call_feval_expanded_values_id: FuncId,
-        runmat_call_builtin_expanded_values_id: FuncId,
-        runmat_call_method_member_expanded_values_id: FuncId,
+        params: CompileInstructionParams<'_>,
     ) -> Result<()> {
+        let CompileInstructionParams {
+            instructions,
+            func,
+            var_count: _var_count,
+            function_registry,
+            module,
+            runtime_call_ids,
+        } = params;
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
 
@@ -276,13 +299,19 @@ impl BytecodeCompiler {
             vars_ptr,
             function_registry,
             module,
-            runmat_call_semantic_function_id,
-            runmat_call_semantic_function_outputs_id,
-            runmat_call_semantic_function_values_id,
-            runmat_call_semantic_function_expanded_values_id,
-            runmat_call_feval_expanded_values_id,
-            runmat_call_builtin_expanded_values_id,
-            runmat_call_method_member_expanded_values_id,
+            runmat_call_semantic_function_id: runtime_call_ids.runmat_call_semantic_function_id,
+            runmat_call_semantic_function_outputs_id: runtime_call_ids
+                .runmat_call_semantic_function_outputs_id,
+            runmat_call_semantic_function_values_id: runtime_call_ids
+                .runmat_call_semantic_function_values_id,
+            runmat_call_semantic_function_expanded_values_id: runtime_call_ids
+                .runmat_call_semantic_function_expanded_values_id,
+            runmat_call_feval_expanded_values_id: runtime_call_ids
+                .runmat_call_feval_expanded_values_id,
+            runmat_call_builtin_expanded_values_id: runtime_call_ids
+                .runmat_call_builtin_expanded_values_id,
+            runmat_call_method_member_expanded_values_id: runtime_call_ids
+                .runmat_call_method_member_expanded_values_id,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -934,13 +963,14 @@ impl BytecodeCompiler {
                                 Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
                             Self::call_method_member_expanded_values_jit(
                                 builder,
-                                ctx.module,
-                                ctx.runmat_call_method_member_expanded_values_id,
-                                identity,
-                                *fallback_policy,
-                                &args,
-                                specs,
-                                *out_count,
+                                ctx,
+                                MethodMemberExpandedCall {
+                                    identity,
+                                    fallback_policy: *fallback_policy,
+                                    args: &args,
+                                    specs,
+                                    out_count: *out_count,
+                                },
                             )?
                         };
                         for result in results {
@@ -1676,15 +1706,10 @@ impl BytecodeCompiler {
 
     fn call_method_member_expanded_values_jit(
         builder: &mut FunctionBuilder,
-        module: &mut JITModule,
-        runmat_call_method_member_expanded_values_id: FuncId,
-        identity: &runmat_hir::CallableIdentity,
-        fallback_policy: runmat_hir::CallableFallbackPolicy,
-        args: &[StackEntry],
-        specs: &[ArgSpec],
-        out_count: usize,
+        ctx: &mut CompileContext<'_>,
+        call_spec: MethodMemberExpandedCall<'_>,
     ) -> Result<Vec<Value>> {
-        let name = Self::method_member_identity_name(identity).ok_or_else(|| {
+        let name = Self::method_member_identity_name(call_spec.identity).ok_or_else(|| {
             execution_error("method/member expanded call missing callable name for JIT bridge")
         })?;
         let name_ptr = Self::store_utf8_bytes(builder, name.as_bytes())
@@ -1692,24 +1717,30 @@ impl BytecodeCompiler {
         let name_len = builder.ins().iconst(types::I32, name.len() as i64);
         let fallback_value = builder.ins().iconst(
             types::I32,
-            Self::encode_callable_fallback_policy(fallback_policy) as i64,
+            Self::encode_callable_fallback_policy(call_spec.fallback_policy) as i64,
         );
-        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
+        let args_ptr = Self::store_turbine_value_arg_entries(builder, call_spec.args)
             .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
-        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
+        let specs_ptr = Self::store_turbine_arg_specs(builder, call_spec.specs)
             .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
-        let runtime_fn =
-            module.declare_func_in_func(runmat_call_method_member_expanded_values_id, builder.func);
+        let runtime_fn = ctx.module.declare_func_in_func(
+            ctx.runmat_call_method_member_expanded_values_id,
+            builder.func,
+        );
         let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
-            (out_count.max(1) * 16) as u32,
+            (call_spec.out_count.max(1) * 16) as u32,
             8,
         ));
         let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
-        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
-        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
-        let out_count_value = builder.ins().iconst(types::I32, out_count as i64);
-        let call = builder.ins().call(
+        let arg_count = builder
+            .ins()
+            .iconst(types::I32, call_spec.args.len() as i64);
+        let spec_count = builder
+            .ins()
+            .iconst(types::I32, call_spec.specs.len() as i64);
+        let out_count_value = builder.ins().iconst(types::I32, call_spec.out_count as i64);
+        let call_inst = builder.ins().call(
             runtime_fn,
             &[
                 name_ptr,
@@ -1723,8 +1754,8 @@ impl BytecodeCompiler {
                 result_ptr,
             ],
         );
-        let status = builder.inst_results(call)[0];
-        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
+        let status = builder.inst_results(call_inst)[0];
+        Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, call_spec.out_count)
     }
 
     fn load_turbine_value_payloads_or_zero(

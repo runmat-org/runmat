@@ -286,6 +286,39 @@ where
     store_member(base, name, rhs, allow_init, on_write).await
 }
 
+async fn load_graphics_member(base: Value, field: &str) -> Result<Value, RuntimeError> {
+    runmat_runtime::call_builtin_async("get", &[base, Value::String(field.to_string())]).await
+}
+
+async fn store_graphics_member(
+    base: Value,
+    field: &str,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    runmat_runtime::call_builtin_async(
+        "set",
+        &[base.clone(), Value::String(field.to_string()), rhs],
+    )
+    .await?;
+    Ok(base)
+}
+
+fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    text.contains("unsupported or invalid plotting handle")
+        || text.contains("invalid plotting handle")
+        || text.contains("invalid figure handle")
+        || text.contains("invalid axes handle")
+}
+
+fn is_possible_graphics_handle_value(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v > 0.0,
+        Value::Int(i) => i.to_f64() > 0.0,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{load_member, load_static_member, store_member};
@@ -497,38 +530,5 @@ mod tests {
             panic!("expected object result from inherited subsasgn");
         };
         assert_eq!(obj.properties.get("missing"), Some(&Value::Num(13.0)));
-    }
-}
-
-async fn load_graphics_member(base: Value, field: &str) -> Result<Value, RuntimeError> {
-    runmat_runtime::call_builtin_async("get", &[base, Value::String(field.to_string())]).await
-}
-
-async fn store_graphics_member(
-    base: Value,
-    field: &str,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    runmat_runtime::call_builtin_async(
-        "set",
-        &[base.clone(), Value::String(field.to_string()), rhs],
-    )
-    .await?;
-    Ok(base)
-}
-
-fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
-    let text = err.to_string().to_ascii_lowercase();
-    text.contains("unsupported or invalid plotting handle")
-        || text.contains("invalid plotting handle")
-        || text.contains("invalid figure handle")
-        || text.contains("invalid axes handle")
-}
-
-fn is_possible_graphics_handle_value(value: &Value) -> bool {
-    match value {
-        Value::Num(v) => v.is_finite() && *v > 0.0,
-        Value::Int(i) => i.to_f64() > 0.0,
-        _ => false,
     }
 }

@@ -339,7 +339,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     }
     let boundaries = analyze_assembly_spawn_boundaries(assembly);
     for boundaries in boundaries.values() {
-        store.diagnostics.extend(diagnose_spawn_safety(&boundaries));
+        store.diagnostics.extend(diagnose_spawn_safety(boundaries));
     }
     store
 }
@@ -552,11 +552,13 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
         MirTerminatorKind::For { binding, .. } => {
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
-        MirTerminatorKind::Await { result, .. } => {
-            if let Some(place) = result {
-                mark_place_assigned(place, &mut state);
-            }
+        MirTerminatorKind::Await {
+            result: Some(place),
+            ..
+        } => {
+            mark_place_assigned(place, &mut state);
         }
+        MirTerminatorKind::Await { result: None, .. } => {}
         _ => {}
     }
     state

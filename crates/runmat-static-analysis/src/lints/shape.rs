@@ -563,9 +563,9 @@ impl ShapeLintContext {
             return None;
         }
         let mut out = vec![Some(1); rank];
-        for idx in 0..rank {
+        for (idx, out_dim) in out.iter_mut().enumerate().take(rank) {
             if idx == axis {
-                out[idx] = shapes
+                *out_dim = shapes
                     .iter()
                     .map(|shape| shape.0.get(idx).copied().flatten())
                     .try_fold(0usize, |sum, dim| dim.map(|dim| sum + dim));
@@ -585,7 +585,7 @@ impl ShapeLintContext {
                 }
                 expected = expected.or(dim);
             }
-            out[idx] = expected;
+            *out_dim = expected;
         }
         Some(Shape(out))
     }
@@ -639,7 +639,7 @@ fn number_to_int(value: f64) -> Option<usize> {
 
 fn mir_parse_dim(value: &MirShapeValue) -> Dim {
     match value.number {
-        Some(value) if value == -1.0 => Dim::Infer,
+        Some(-1.0) => Dim::Infer,
         Some(value) => number_to_int(value).map(Dim::Known).unwrap_or(Dim::Unknown),
         None => Dim::Unknown,
     }

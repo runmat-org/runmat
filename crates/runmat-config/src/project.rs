@@ -203,7 +203,7 @@ pub enum ProjectCompositionError {
     RootManifestLoad {
         path: PathBuf,
         #[source]
-        source: ProjectManifestLoadError,
+        source: Box<ProjectManifestLoadError>,
     },
     #[error("dependency `{dependency}` in package `{package}` points to missing manifest {path}")]
     MissingDependencyManifest {
@@ -219,13 +219,13 @@ pub enum ProjectCompositionError {
         dependency: String,
         path: PathBuf,
         #[source]
-        source: ProjectManifestLoadError,
+        source: Box<ProjectManifestLoadError>,
     },
     #[error("failed to build source index for package `{package}`: {source}")]
     SourceIndex {
         package: String,
         #[source]
-        source: ProjectSourceIndexError,
+        source: Box<ProjectSourceIndexError>,
     },
     #[error("duplicate package name `{package}` found in {first_manifest} and {second_manifest}")]
     DuplicatePackageName {
@@ -253,7 +253,7 @@ pub enum DiscoverProjectEntrypointError {
     Composition {
         manifest_path: PathBuf,
         #[source]
-        source: ProjectCompositionError,
+        source: Box<ProjectCompositionError>,
     },
     #[error("project composition for {manifest_path} is missing root package `{package}`")]
     MissingRootPackage {
@@ -285,7 +285,7 @@ pub enum DiscoverProjectSymbolsError {
     Composition {
         manifest_path: PathBuf,
         #[source]
-        source: ProjectCompositionError,
+        source: Box<ProjectCompositionError>,
     },
     #[error("project composition for {manifest_path} is missing root package `{package}`")]
     MissingRootPackage {
@@ -303,7 +303,7 @@ pub enum ResolveProjectSourceInputError {
         cwd: PathBuf,
         entrypoint: String,
         #[source]
-        source: DiscoverProjectEntrypointError,
+        source: Box<DiscoverProjectEntrypointError>,
     },
 }
 
@@ -315,7 +315,7 @@ enum DiscoverProjectCompositionError {
     Composition {
         manifest_path: PathBuf,
         #[source]
-        source: ProjectCompositionError,
+        source: Box<ProjectCompositionError>,
     },
     #[error("project composition for {manifest_path} is missing root package `{package}`")]
     MissingRootPackage {
@@ -774,7 +774,7 @@ pub fn resolve_project_source_input_from(
             ResolveProjectSourceInputError::EntrypointResolve {
                 cwd: cwd.to_path_buf(),
                 entrypoint: entrypoint_name.clone(),
-                source,
+                source: Box::new(source),
             }
         })?
     else {
@@ -818,7 +818,7 @@ fn discover_project_composition_from(
     let composition = build_project_composition_graph(&manifest_path).map_err(|source| {
         DiscoverProjectCompositionError::Composition {
             manifest_path: manifest_path.clone(),
-            source,
+            source: Box::new(source),
         }
     })?;
     let root_package = composition.root_package.clone();
@@ -917,7 +917,7 @@ impl CompositionGraphLoader {
             load_project_manifest(&manifest_path).map_err(|source| {
                 ProjectCompositionError::RootManifestLoad {
                     path: manifest_path.clone(),
-                    source,
+                    source: Box::new(source),
                 }
             })?
         } else {
@@ -927,7 +927,7 @@ impl CompositionGraphLoader {
                     package: package.to_string(),
                     dependency: dependency.to_string(),
                     path: manifest_path.clone(),
-                    source,
+                    source: Box::new(source),
                 }
             })?
         };
@@ -941,7 +941,7 @@ impl CompositionGraphLoader {
             build_project_source_index(&project_root, &manifest).map_err(|source| {
                 ProjectCompositionError::SourceIndex {
                     package: package_name.clone(),
-                    source,
+                    source: Box::new(source),
                 }
             })?;
 

@@ -142,16 +142,22 @@ mod tests {
     fn blackman_supports_periodic_and_single_overloads() {
         let _guard = test_support::accel_test_lock();
         let periodic = test_support::gather(
-            block_on(blackman_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
-                .expect("blackman periodic"),
+            block_on(blackman_builtin(
+                Value::Num(4.0),
+                vec![Value::from("periodic")],
+            ))
+            .expect("blackman periodic"),
         )
         .expect("gather blackman periodic");
         assert_eq!(periodic.shape, vec![4, 1]);
         assert!((periodic.data[1] - 0.34).abs() < 1e-12);
 
         let single = test_support::gather(
-            block_on(blackman_builtin(Value::Num(4.0), vec![Value::from("single")]))
-                .expect("blackman single"),
+            block_on(blackman_builtin(
+                Value::Num(4.0),
+                vec![Value::from("single")],
+            ))
+            .expect("blackman single"),
         )
         .expect("gather blackman single");
         assert_eq!(single.dtype, runmat_builtins::NumericDType::F32);

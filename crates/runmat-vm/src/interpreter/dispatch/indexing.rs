@@ -3,6 +3,7 @@ use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, Cal
 use crate::call::shared::{
     call_object_index_descriptor_method, class_defines_member_subsasgn,
     class_defines_member_subsref, expand_brace_values, ObjectIndexDescriptor, ObjectIndexOp,
+    ObjectParenExprSelectorSpec,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -772,43 +773,20 @@ async fn resolve_range_end_value(
 }
 
 async fn build_expr_slice_plan(
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    range_dims: &[usize],
-    range_params: &[(f64, f64)],
-    range_start_exprs: &[Option<EndExpr>],
-    range_step_exprs: &[Option<EndExpr>],
-    range_end_exprs: &[EndExpr],
-    numeric: &[Value],
-    shape: &[usize],
+    spec: ExprPlanSpec<'_>,
     vars: &[Value],
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    build_expr_index_plan(
-        ExprPlanSpec {
-            dims,
-            colon_mask,
-            end_mask,
-            range_dims,
-            range_params,
-            range_start_exprs,
-            range_step_exprs,
-            range_end_exprs,
-            numeric,
-            shape,
-        },
-        |dim_len, expr| {
-            let expr = expr.clone();
-            async move { resolve_range_end_value(dim_len, &expr, vars).await }
-        },
-    )
+    build_expr_index_plan(spec, |dim_len, expr| {
+        let expr = expr.clone();
+        async move { resolve_range_end_value(dim_len, &expr, vars).await }
+    })
     .await
 }
 
 pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
     _clear_value_residency: impl FnMut(&Value),
@@ -1623,16 +1601,18 @@ pub async fn dispatch_indexing(
             }
             if let Value::GpuTensor(handle) = &base {
                 let vm_plan = build_expr_slice_plan(
-                    *dims,
-                    *colon_mask,
-                    *end_mask,
-                    range_dims,
-                    &range_params,
-                    range_start_exprs,
-                    range_step_exprs,
-                    range_end_exprs,
-                    &numeric,
-                    &handle.shape,
+                    ExprPlanSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        numeric: &numeric,
+                        shape: &handle.shape,
+                    },
                     vars,
                 )
                 .await?;
@@ -1668,16 +1648,18 @@ pub async fn dispatch_indexing(
                     }
                     let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
                         Value::Object(obj),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        end_numeric_exprs,
-                        &numeric,
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
                     )?;
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
@@ -1690,31 +1672,35 @@ pub async fn dispatch_indexing(
                     }
                     let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
                         Value::HandleObject(handle),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        end_numeric_exprs,
-                        &numeric,
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
                     )?;
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::ComplexTensor(t) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1722,16 +1708,18 @@ pub async fn dispatch_indexing(
                 }
                 Value::Tensor(t) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1739,16 +1727,18 @@ pub async fn dispatch_indexing(
                 }
                 Value::StringArray(sa) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &sa.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &sa.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1756,16 +1746,18 @@ pub async fn dispatch_indexing(
                 }
                 Value::Cell(ca) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &ca.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &ca.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1901,16 +1893,18 @@ pub async fn dispatch_indexing(
             match base {
                 Value::ComplexTensor(mut t) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1931,16 +1925,18 @@ pub async fn dispatch_indexing(
                 }
                 Value::Tensor(t) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1952,16 +1948,18 @@ pub async fn dispatch_indexing(
                 }
                 Value::GpuTensor(h) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &h.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &h.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -1981,16 +1979,18 @@ pub async fn dispatch_indexing(
                     }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
                         Value::Object(obj),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        end_numeric_exprs,
-                        &numeric,
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
                         rhs,
                     )?;
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
@@ -2004,16 +2004,18 @@ pub async fn dispatch_indexing(
                     }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
                         Value::HandleObject(handle),
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        end_numeric_exprs,
-                        &numeric,
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
                         rhs,
                     )?;
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
@@ -2026,16 +2028,18 @@ pub async fn dispatch_indexing(
                         ));
                     }
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &sa.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &sa.shape,
+                        },
                         vars,
                     )
                     .await?;
@@ -2050,16 +2054,18 @@ pub async fn dispatch_indexing(
                 }
                 Value::Cell(ca) => {
                     let vm_plan = build_expr_slice_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &ca.shape,
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &ca.shape,
+                        },
                         vars,
                     )
                     .await?;

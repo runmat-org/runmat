@@ -718,7 +718,7 @@ impl Callable {
                     {
                         return result;
                     }
-                    return Err(arrayfun_flow(&format!(
+                    return Err(arrayfun_flow(format!(
                         "arrayfun: semantic closure '{}' ({function}) is unavailable",
                         c.function_name
                     )));
