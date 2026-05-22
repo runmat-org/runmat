@@ -58,7 +58,8 @@ export default function LazyVideo({
       ([entry]) => {
         if (entry.isIntersecting) {
           if (deferPosterUntilVisible) {
-            setActivePoster(mobilePoster ?? poster);
+            const media = window.matchMedia(mobileMediaQuery);
+            setActivePoster(media.matches && mobilePoster ? mobilePoster : poster);
           }
           el.play().catch(() => {});
           observer.disconnect();
@@ -69,7 +70,7 @@ export default function LazyVideo({
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [deferPosterUntilVisible, mobilePoster, poster]);
+  }, [deferPosterUntilVisible, mobilePoster, mobileMediaQuery, poster]);
 
   return <video ref={ref} preload="none" poster={activePoster} {...props} />;
 }

@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SandboxCta } from "@/components/SandboxCta";
 import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
 import { TryInBrowserButton } from "@/components/TryInBrowserButton";
+import LazyVideo from "@/components/LazyVideo";
 import {
   Cpu,
   FlaskConical,
@@ -402,18 +403,17 @@ export default function AgentPage() {
                 data-ph-capture-attribute-cta="try-runmat-agent"
                 aria-label="Open the RunMat sandbox"
               >
-                <video
+                <LazyVideo
                   className="w-full h-auto rounded-lg"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  preload="none"
+                  initialPosterVariant="poster"
                   poster={heroPosterSrc}
                   aria-label="RunMat 3D wave surface simulation"
                 >
                   <source src={heroVideoSrc} type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
           </div>

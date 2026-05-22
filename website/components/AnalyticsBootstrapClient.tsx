@@ -1,8 +1,8 @@
 "use client";
 
 if (typeof window !== "undefined") {
-  import("@/lib/instrumentation-client").catch(() => {
-    // ignore
+  import("@/lib/instrumentation-client").catch((err) => {
+    console.error("Instrumentation bootstrap failed", err);
   });
 }
 

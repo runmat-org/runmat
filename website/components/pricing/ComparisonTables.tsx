@@ -16,19 +16,19 @@ const productRows: ProductRow[] = [
   ["GPU acceleration (Metal/Vulkan/DX12)", "check", "check", "check", "Automatic GPU offload with Metal, Vulkan, and DirectX 12 support."],
   ["GPU fusion", "check", "check", "check", "Fuses ops into fewer GPU steps and keeps arrays on device (residency) for less memory traffic and fewer launches."],
   ["Cross-platform (macOS/Linux/Windows)", "check", "check", "check", "Run the same code on macOS, Linux, and Windows."],
-  ["Browser sandbox", "check", "check", "check", "Run code in the browser with zero install via the sandbox."],
-  ["Desktop app (coming soon)", "check", "check", "check", "Full desktop IDE with local file access and offline use. Coming soon."],
+  ["Browser sandbox", "check", "check", "check", "Run code in the browser with zero install via the free sandbox."],
+  ["Desktop app", "check", "check", "check", "Full desktop IDE with local file access and offline use."],
   ["Code editor and file explorer", "check", "check", "check", "Integrated editor and project file browser."],
   ["Interactive 2D/3D plotting", "check", "check", "check", "Interactive plots you can rotate, zoom, and inspect.", "compare-plotting"],
   ["Type and shape diagnostics", "check", "check", "check", "Real-time type and matrix shape tracking with dimension errors."],
-  ["File storage", "x", "check", "check", "Persist and sync projects in the cloud."],
+  ["File storage", "x", "check", "check", "Persist and sync projects in RunMat App."],
   ["Project sharing", "x", "check", "check", "Share projects with editors in your organization. Each editor is billed as a seat on App plans."],
   ["Team workspaces", "x", "check", "check", "Organize projects under your team's organization. Created automatically when you sign up."],
   ["Collaborators", "x", "Paid per seat", "Included", "Each editor in your organization is billed as a seat on App plans."],
   ["File versioning", "x", "check", "check", "Built-in version history on all App tiers; counts toward storage.", "compare-versioning"],
   ["Cloud storage", "x", "100 MB (Hobby); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is shared across your organization. Hobby: 100 MB. Pro: 10 GB included. Team: 100 GB included. Need more? Add storage from your account. Version history counts toward storage.", "compare-storage"],
   ["LLM token credits", "x", "Pro: $10/mo; Team: $50/mo", "Included", "Hosted LLM-enabled features include monthly token credits on paid App tiers.", "compare-llm"],
-  ["SOC 2 compliance", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q4 2026."],
+  ["SOC 2 readiness", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q4 2026."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],
   ["Air-gapped deployment", "x", "x", "check", "Deploy RunMat Enterprise in isolated networks."],
@@ -135,15 +135,15 @@ export function CompareProductsTable() {
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">Runtime</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">GPU-accelerated math runtime</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Open-source runtime</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">App</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">High-performance computing platform</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Cloud projects and collaboration</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">Enterprise</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Enterprise deployment</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Self-hosted App deployment</div>
                 </th>
               </tr>
             </thead>

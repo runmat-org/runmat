@@ -15,6 +15,27 @@ const jsonLd = {
   "@context": "https://schema.org",
   "@graph": [
     {
+      "@type": "Organization",
+      "@id": "https://runmat.com/#organization",
+      "name": "RunMat",
+      "url": "https://runmat.com",
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://runmat.com/#website",
+      "url": "https://runmat.com",
+      "name": "RunMat",
+      "publisher": { "@id": "https://runmat.com/#organization" },
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://runmat.com/#software",
+      "name": "RunMat",
+      "applicationCategory": "ScientificApplication",
+      "operatingSystem": ["Windows", "macOS", "Linux", "Browser"],
+      "publisher": { "@id": "https://runmat.com/#organization" },
+    },
+    {
       "@type": "WebPage",
       "@id": "https://runmat.com/#webpage",
       "url": "https://runmat.com",
