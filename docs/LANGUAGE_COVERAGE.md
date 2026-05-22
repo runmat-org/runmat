@@ -76,6 +76,16 @@ This document tracks current coverage and compares it to GNU Octave where helpfu
 - Imports and precedence: Specific imports shadow wildcard; locals and user functions take precedence; `Class.*` static resolution participates last; ambiguities are surfaced with clear diagnostics.
 - Metaclass: `?pkg.Class` produces a class reference enabling static property/method access and works with import resolution.
 
+## Porting checklist
+
+If you're bringing an existing MATLAB script into RunMat:
+
+1. **Check for toolbox dependencies.** RunMat doesn't ship full add-on toolboxes, but many commonly used functions from toolboxes like Statistics (`mean`, `std`, `var`, `median`, `hist`, etc.) and Image Processing (`image`, `imagesc`, `imshow`) are already available as builtins. Check the [Compatibility](/docs/compatibility) toolbox table and the [Function Reference](/docs/matlab-function-reference) to see what's covered. Functions that aren't available can often be replaced with RunMat primitives or a small local helper.
+2. **Check the function reference.** Browse the [Built-in Function Reference](/docs/matlab-function-reference) for the full list of 400+ supported functions. If a function isn't listed, it may still be expressible using existing builtins — the agent can help with this (see step 5).
+3. **Choose a compatibility mode.** `runmat` (default) and `matlab` accept command-style syntax; `strict` requires explicit parenthesized calls. See [Language Compatibility Modes](/docs/language) for details.
+4. **Run in the sandbox or CLI.** Paste your `.m` file in the [browser sandbox](https://runmat.com/sandbox) or run it with the CLI. Errors and diagnostics will show what needs attention.
+5. **Use the agent for mechanical rewrites.** The built-in agent can run your script, read the diagnostics, and propose reviewable edits — replacing unsupported calls, converting command-form syntax to explicit form, and adapting toolbox-adjacent patterns where feasible. See [Agent-assisted migration](/docs/compatibility#agent-assisted-migration).
+
 ## Nuanced examples (advanced features)
 
 ### 1) Varargin/varargout with precise output arity

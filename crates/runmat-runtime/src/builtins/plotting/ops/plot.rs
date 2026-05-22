@@ -576,6 +576,10 @@ pub(crate) mod tests {
         }
     }
 
+    fn tensor_with_shape(data: &[f64], shape: Vec<usize>) -> Tensor {
+        Tensor::new(data.to_vec(), shape).unwrap()
+    }
+
     fn assert_plotting_unavailable(err: &RuntimeError) {
         let lower = err.to_string().to_lowercase();
         assert!(
@@ -607,6 +611,34 @@ pub(crate) mod tests {
         ]));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
+        }
+    }
+
+    #[test]
+    fn plot_builtin_accepts_matching_numel_vectors_with_different_shapes() {
+        let _guard = setup_plot_tests();
+        let cases = [
+            (
+                tensor_with_shape(&[1.0, 2.0, 3.0, 4.0], vec![1, 4]),
+                tensor_with_shape(&[10.0, 20.0, 30.0, 40.0], vec![4, 1]),
+            ),
+            (
+                tensor_with_shape(&[1.0, 2.0, 3.0, 4.0], vec![4, 1]),
+                tensor_with_shape(&[10.0, 20.0, 30.0, 40.0], vec![1, 4]),
+            ),
+        ];
+
+        for (x, y) in cases {
+            let _ = clear_figure(None);
+            block_on(plot_builtin(vec![Value::Tensor(x), Value::Tensor(y)]))
+                .expect("plot should accept row/column vector pairs with matching numel");
+
+            let fig = clone_figure(current_figure_handle()).expect("figure exists");
+            let PlotElement::Line(line) = fig.plots().next().expect("plot created") else {
+                panic!("expected line plot");
+            };
+            assert_eq!(line.x_data, vec![1.0, 2.0, 3.0, 4.0]);
+            assert_eq!(line.y_data, vec![10.0, 20.0, 30.0, 40.0]);
         }
     }
 

@@ -51,7 +51,7 @@ async fn hamming_builtin(
     varargin: Vec<runmat_builtins::Value>,
 ) -> crate::BuiltinResult<runmat_builtins::Value> {
     let options = parse_window_options(BUILTIN_NAME, n, &varargin, false)?;
-    if provider_precision_matches(options.output_type) {
+    if options.len > 1 && provider_precision_matches(options.output_type) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.hamming_window(
                 options.len,

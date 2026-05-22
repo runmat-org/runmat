@@ -265,6 +265,18 @@ pub(crate) fn last_emit_var_index(bytecode: &runmat_vm::Bytecode) -> Option<usiz
     None
 }
 
+pub(crate) fn last_store_var_index(bytecode: &runmat_vm::Bytecode) -> Option<usize> {
+    for instr in bytecode.instructions.iter().rev() {
+        match instr {
+            runmat_vm::Instr::StoreVar(var_index) | runmat_vm::Instr::StoreLocal(var_index) => {
+                return Some(*var_index);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 pub(crate) fn workspace_entry(name: &str, value: &Value) -> WorkspaceEntry {
     let dtype = numeric_dtype_label(value).map(|label| label.to_string());
     let preview = preview_numeric_values(value, WORKSPACE_PREVIEW_LIMIT)

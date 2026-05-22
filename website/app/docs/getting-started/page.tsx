@@ -3,14 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   Download, 
-  Terminal, 
   FileText,
   ArrowRight,
   Zap,
   ExternalLink,
   BarChart3,
+  BookOpen,
   Check,
   X,
+  GitCompareArrows,
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
@@ -18,7 +19,7 @@ import { GettingStartedTabs } from "@/components/GettingStartedTabs";
 
 const pageTitle = "Getting Started | Docs";
 const pageDescription =
-  "Get started with RunMat: interactive plotting, real-time diagnostics, and GPU acceleration for MATLAB-style code. Browser or CLI.";
+  "Get started with RunMat: run MATLAB-syntax code with GPU acceleration, interactive plotting, and a built-in agent that helps adapt your scripts. Browser or CLI.";
 
 export const metadata: Metadata = {
   title: pageTitle,
@@ -63,7 +64,7 @@ const jsonLd = {
       name: pageTitle,
       description: pageDescription,
       inLanguage: "en",
-      dateModified: "2026-03-05",
+      dateModified: "2026-05-14",
       isPartOf: { "@id": "https://runmat.com/#website" },
       author: { "@id": "https://runmat.com/#organization" },
       publisher: { "@id": "https://runmat.com/#organization" },
@@ -78,6 +79,12 @@ const jsonLd = {
           name: "Try RunMat in your browser",
           text: "Visit runmat.com/sandbox to open the browser-based IDE. No installation or account required.",
           url: "https://runmat.com/sandbox",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Bring your existing MATLAB scripts",
+          text: "Paste a .m script and use the built-in agent to adapt unsupported functions.",
+          url: "https://runmat.com/docs/compatibility#agent-assisted-migration",
         },
         {
           "@type": "HowToStep",
@@ -114,6 +121,7 @@ export default function GettingStartedPage() {
           </h1>
           <p className="text-base text-foreground leading-relaxed mb-6">
             Get up and running in minutes. Try RunMat in your browser with no installation, or install the CLI for the terminal and local scripts.
+            Have existing <code className="rounded bg-muted px-1 py-0.5">.m</code> files? Paste them in the sandbox and run them. The built-in agent can suggest fixes for unsupported functions.
           </p>
           {/* Try RunMat Now — primary CTA */}
           <Button
@@ -165,7 +173,7 @@ export default function GettingStartedPage() {
                       <div className="text-xs font-normal text-muted-foreground/70 mt-0.5">No account</div>
                     </th>
                     <th className="text-center py-3 px-4 w-[22%]">
-                      <div className="text-sm font-medium text-muted-foreground">Sandbox + Cloud</div>
+                      <div className="text-sm font-medium text-muted-foreground">Sandbox + App</div>
                       <div className="text-xs font-normal text-muted-foreground/70 mt-0.5">Signed in</div>
                     </th>
                   </tr>
@@ -178,11 +186,12 @@ export default function GettingStartedPage() {
                     ["Interactive IDE", "no", "yes", "yes"],
                     ["Interactive plotting", "yes-text:GUI window", "yes-text:In-editor", "yes-text:In-editor"],
                     ["Variable inspector", "no", "yes", "yes"],
-                    ["File storage", "text:Local filesystem", "text:In-memory (cleared on tab close)", "text:Cloud (persists across sessions)"],
+                    ["File storage", "text:Local filesystem", "text:In-memory (cleared on tab close)", "text:App (persists across sessions)"],
                     ["File versioning", "text:No (use git)", "no", "yes-text:Automatic"],
                     ["Project sharing", "no", "no", "text:Paid plans"],
                     ["Jupyter support", "yes", "no", "no"],
                     ["Offline support", "yes", "no", "no"],
+                    ["Built-in agent", "no", "yes", "yes"],
                   ] as [string, string, string, string][]).map(([feature, cli, sandbox, cloud]) => (
                     <tr key={feature} className="border-b border-border transition-colors">
                       <td className="py-3 px-4 text-foreground">{feature}</td>
@@ -279,17 +288,17 @@ export default function GettingStartedPage() {
             <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Terminal className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
-                  Explore examples
+                  <GitCompareArrows className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
+                  MATLAB compatibility
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-4">
-                  See RunMat in action with real-world examples.
+                  What works, what doesn&apos;t, and how the agent can help with migration.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/benchmarks" className="flex items-center justify-center">
-                    Benchmarks
+                  <Link href="/docs/compatibility" className="flex items-center justify-center">
+                    Compatibility guide
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
@@ -319,17 +328,17 @@ export default function GettingStartedPage() {
             <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Zap className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
-                  Understand the design
+                  <BookOpen className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
+                  Function reference
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-4">
-                  Learn why RunMat keeps a slim core and package-first model.
+                  Browse 400+ supported built-in functions.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/docs/design-philosophy" className="flex items-center justify-center">
-                    Design philosophy
+                  <Link href="/docs/matlab-function-reference" className="flex items-center justify-center">
+                    Built-in functions
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>

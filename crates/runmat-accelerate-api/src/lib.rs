@@ -1546,6 +1546,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_sin not supported by provider")
     }
+    fn unary_sinc<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_sinc not supported by provider")
+    }
     fn unary_gamma<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

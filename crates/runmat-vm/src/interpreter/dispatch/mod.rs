@@ -9,7 +9,9 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
-use crate::runtime::workspace::refresh_workspace_state;
+use crate::runtime::workspace::{
+    refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
+};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{IntValue, ObjectInstance, StructValue, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
@@ -810,6 +812,18 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVar(index) => {
+            if let (Some(false), Some(slot_name), Some(var_name)) = (
+                workspace_slot_assigned(*index),
+                workspace_slot_name(*index),
+                var_names.get(index),
+            ) {
+                if slot_name == *var_name {
+                    return Err(crate::interpreter::errors::mex(
+                        "UndefinedVariable",
+                        &format!("Undefined variable: {slot_name}"),
+                    ));
+                }
+            }
             let value = vars[*index].clone();
             debug::trace_load_var(*pc, *index, &value);
             load_var(stack, vars, *index);
@@ -901,15 +915,28 @@ pub async fn dispatch_instruction(
                     );
                 }
             }
-            store_local(
-                stack,
-                context,
-                vars,
-                *offset,
-                store_local_before_local_overwrite,
-                store_local_before_var_overwrite,
-                store_local_after_fallback_store,
-            )?;
+            if context.call_stack.last().is_none() {
+                store_var(
+                    stack,
+                    vars,
+                    *offset,
+                    var_names,
+                    store_local_before_var_overwrite,
+                    |stored_index, stored_value| {
+                        store_local_after_fallback_store("<main>", stored_index, stored_value);
+                    },
+                )?;
+            } else {
+                store_local(
+                    stack,
+                    context,
+                    vars,
+                    *offset,
+                    store_local_before_local_overwrite,
+                    store_local_before_var_overwrite,
+                    store_local_after_fallback_store,
+                )?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

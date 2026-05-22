@@ -123,6 +123,212 @@ fn clear_followed_by_assignments_shows_vars_in_workspace() {
 }
 
 #[test]
+fn untaken_branch_assignments_do_not_emit_workspace_updates() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("untaken = 1;")).unwrap();
+
+    let result = block_on(engine.execute("if 0; untaken = 2; else; taken = 3; end;")).unwrap();
+    assert!(result.error.is_none());
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"taken"),
+        "taken branch assignment should be emitted; got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"untaken"),
+        "untaken branch assignment should not be emitted as a workspace update; got: {names:?}"
+    );
+}
+
+#[test]
+fn jit_fallback_preserves_workspace_tracking_after_preflight_failure() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("textValue = \"hello\";")).unwrap();
+    for _ in 0..12 {
+        let result = block_on(engine.execute("jitFallbackTarget = 1;")).unwrap();
+        assert!(result.error.is_none());
+    }
+
+    let clear_result = block_on(engine.execute("clear jitFallbackTarget;")).unwrap();
+    assert!(clear_result.error.is_none());
+
+    let result = block_on(engine.execute("jitFallbackTarget = 2;")).unwrap();
+    assert!(result.error.is_none());
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"jitFallbackTarget"),
+        "interpreter fallback after JIT preflight failure should still publish assignments; got: {names:?}"
+    );
+}
+
+#[test]
+fn clearvars_command_clears_workspace_state() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("x = 1; y = 2;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars;")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+    assert!(result.workspace.values.is_empty());
+
+    let err = block_on(engine.execute("x")).unwrap_err();
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
+fn clearvars_named_variable_removes_only_that_binding() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("x = 1; y = 2;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars x;")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+    assert_eq!(result.workspace.values.len(), 1);
+    assert_eq!(result.workspace.values[0].name, "y");
+
+    let err = block_on(engine.execute("x")).unwrap_err();
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
+fn clearvars_multiple_named_variables_accepts_multiple_inputs() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("a = 1; b = 2; c = 3;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars a b;")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+    assert_eq!(result.workspace.values.len(), 1);
+    assert_eq!(result.workspace.values[0].name, "c");
+}
+
+#[test]
+fn clearvars_except_keeps_named_bindings() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("drop1 = 1; keep = 2; drop2 = 3;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars -except keep;")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+    assert_eq!(result.workspace.values.len(), 1);
+    assert_eq!(result.workspace.values[0].name, "keep");
+
+    let value = block_on(engine.execute("keep")).unwrap();
+    assert!(value.error.is_none());
+    assert_eq!(
+        value.value.as_ref().map(|v| v.to_string()),
+        Some("2".to_string())
+    );
+}
+
+#[test]
+fn clearvars_selected_names_with_except_preserves_exclusions() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("a = 1; b = 2; c = 3; untouched = 4;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars a b c -except b;")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(!names.contains(&"a"), "a should have been cleared");
+    assert!(names.contains(&"b"), "b should have been preserved");
+    assert!(!names.contains(&"c"), "c should have been cleared");
+    assert!(
+        names.contains(&"untouched"),
+        "variables outside the selected clear set should remain"
+    );
+}
+
+#[test]
+fn clearvars_function_call_selected_names_with_except_preserves_exclusions() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("a = 1; b = 2; c = 3; untouched = 4;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars('a', 'b', 'c', '-except', 'b');")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(!names.contains(&"a"), "a should have been cleared");
+    assert!(names.contains(&"b"), "b should have been preserved");
+    assert!(!names.contains(&"c"), "c should have been cleared");
+    assert!(
+        names.contains(&"untouched"),
+        "variables outside the selected clear set should remain"
+    );
+}
+
+#[test]
+fn clearvars_named_variable_is_undefined_later_in_same_execution() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = block_on(engine.execute("x = 7; clearvars x; disp(x);")).unwrap();
+    let err = result.error.expect("expected cleared x to be undefined");
+    assert!(err.to_string().contains("Undefined variable: x"));
+}
+
+#[test]
+fn clear_named_variable_is_undefined_later_in_same_execution() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = block_on(engine.execute("x = 7; clear x; disp(x);")).unwrap();
+    let err = result.error.expect("expected cleared x to be undefined");
+    assert!(err.to_string().contains("Undefined variable: x"));
+}
+
+#[test]
+fn clearvars_repro_with_clc_and_close_all_executes() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = block_on(engine.execute("clearvars; clc; close all\nx = 5;\ndisp(x);")).unwrap();
+    assert!(result.error.is_none());
+    assert!(
+        result
+            .streams
+            .iter()
+            .any(|entry| entry.stream == ExecutionStreamKind::ClearScreen),
+        "expected clc to emit a clear-screen control event"
+    );
+}
+
+#[test]
 fn clc_emits_clear_screen_control_stream() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 

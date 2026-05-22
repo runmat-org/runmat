@@ -1,0 +1,87 @@
+{
+  "title": "rad2deg",
+  "category": "math/trigonometry",
+  "keywords": [
+    "rad2deg",
+    "radians",
+    "degrees",
+    "angle",
+    "trigonometry",
+    "elementwise"
+  ],
+  "summary": "Convert angles from radians to degrees.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs can be gathered to the host for the reference implementation. Fusion can keep compatible elementwise expressions on the active provider."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::trigonometry::rad2deg::tests",
+    "integration": null
+  },
+  "description": "`d = rad2deg(r)` converts each angle in `r` from radians to degrees using `r*180/pi`.",
+  "behaviors": [
+    "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
+    "Integer and logical inputs are promoted to double precision before conversion.",
+    "Complex inputs are scaled component-wise, matching ordinary multiplication by `180/pi`.",
+    "Output shape matches the input shape.",
+    "String inputs are unsupported and raise a builtin-scoped error."
+  ],
+  "examples": [
+    {
+      "description": "Converting a scalar angle",
+      "input": "d = rad2deg(pi)",
+      "output": "d = 180"
+    },
+    {
+      "description": "Converting a vector of angles",
+      "input": "angles = [0 pi/6 pi/4 pi/3 pi/2];\nd = rad2deg(angles)",
+      "output": "d = [0 30 45 60 90]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is `rad2deg(x)` equivalent to `x*180/pi`?",
+      "answer": "Yes. The builtin exists for readability and MATLAB compatibility."
+    },
+    {
+      "question": "Does `rad2deg` preserve array shape?",
+      "answer": "Yes. Each element is converted independently and the original shape is preserved."
+    }
+  ],
+  "links": [
+    {
+      "label": "deg2rad",
+      "url": "./deg2rad"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/rad2deg.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/rad2deg.rs"
+  }
+}

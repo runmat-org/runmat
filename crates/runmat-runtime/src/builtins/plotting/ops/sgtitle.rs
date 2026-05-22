@@ -20,20 +20,27 @@ use crate::builtins::plotting::{
     builtin_path = "crate::builtins::plotting::sgtitle"
 )]
 pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (target, rest) = split_figure_target("sgtitle", &args)?;
+    sgtitle_impl("sgtitle", args)
+}
+
+pub(super) fn sgtitle_impl(builtin: &'static str, args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let (target, rest) = split_figure_target(builtin, &args)?;
     if rest.is_empty() {
-        return Err(plotting_error("sgtitle", "sgtitle: expected text input"));
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected text input"),
+        ));
     }
     let text = super::op_common::value_as_text_string(&rest[0])
         .or_else(|| format_num_as_title_text(&rest[0]))
         .ok_or_else(|| {
             plotting_error(
-                "sgtitle",
-                "sgtitle: expected text as char array, string, string array, or cell array of strings",
+                builtin,
+                format!("{builtin}: expected text as char array, string, string array, or cell array of strings"),
             )
         })?;
-    let style = parse_text_style_pairs("sgtitle", &rest[1..])?;
-    set_sg_title_for_figure(target, &text, style).map_err(|err| map_figure_error("sgtitle", err))
+    let style = parse_text_style_pairs(builtin, &rest[1..])?;
+    set_sg_title_for_figure(target, &text, style).map_err(|err| map_figure_error(builtin, err))
 }
 
 fn split_figure_target<'a>(

@@ -1653,7 +1653,7 @@ fn test_jit_mixed_execution_patterns() {
         function,
         FunctionBytecode {
             function,
-            display_name: "square".to_string(),
+            display_name: "my_square".to_string(),
             source_id: None,
             instructions: vec![
                 Instr::LoadVar(0),
@@ -1685,9 +1685,9 @@ fn test_jit_mixed_execution_patterns() {
                 Instr::LoadConst(3.0),
                 Instr::Add,
                 Instr::StoreVar(1),
-                // Function call: z = square(y) = 64
+                // Function call: z = my_square(y) = 64
                 Instr::LoadVar(1),
-                named_call_instr("square", 1, 1),
+                named_call_instr("my_square", 1, 1),
                 Instr::StoreVar(2),
                 // JIT-able: result = z + 10 = 74
                 Instr::LoadVar(2),
@@ -1708,7 +1708,7 @@ fn test_jit_mixed_execution_patterns() {
     // Verify results
     assert_eq!(vars[0], Value::Num(5.0), "x should be 5");
     assert_eq!(vars[1], Value::Num(8.0), "y should be 8");
-    assert_eq!(vars[2], Value::Num(64.0), "z should be square(8) = 64");
+    assert_eq!(vars[2], Value::Num(64.0), "z should be my_square(8) = 64");
     assert_eq!(vars[3], Value::Num(74.0), "result should be 64 + 10 = 74");
 }
 

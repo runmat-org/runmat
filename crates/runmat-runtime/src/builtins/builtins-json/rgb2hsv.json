@@ -1,0 +1,55 @@
+{
+  "title": "rgb2hsv",
+  "category": "image/color",
+  "keywords": [
+    "rgb2hsv",
+    "rgb",
+    "hsv",
+    "color",
+    "image",
+    "colormap"
+  ],
+  "summary": "Convert RGB image or colormap values to HSV.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/rgb2hsv.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Host implementation; float GPU providers are tracked separately."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::color::rgb2hsv::tests"
+  },
+  "description": "`rgb2hsv(RGB)` converts MxNx3 image data or an Nx3 colormap from RGB to HSV values.",
+  "behaviors": [
+    "Accepts MxNx3 truecolor images and Nx3 colormaps.",
+    "Integer RGB inputs are scaled into [0,1] before conversion."
+  ],
+  "examples": [
+    {
+      "description": "RGB To HSV",
+      "input": "HSV = rgb2hsv(RGB);",
+      "output": "% HSV has the same shape as RGB"
+    }
+  ],
+  "links": [
+    {
+      "label": "hsv2rgb",
+      "url": "./hsv2rgb"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/image/color/rgb2hsv.rs",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/rgb2hsv.rs"
+  }
+}

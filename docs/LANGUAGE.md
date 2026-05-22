@@ -62,6 +62,10 @@ RunMat supports command-style invocation for the verbs below when `compat = "mat
 - Hosts can override at runtime: the wasm bindings expose `session.setLanguageCompat("strict")` / `"matlab" / "runmat"`, and the LSP accepts `initializationOptions.language.compat`. When no explicit override is provided, the LSP will auto-discover the closest `.runmat*` file under the workspace root and mirror that value.
 - Because the parser itself understands the compat mode, downstream passes (HIR lowering, fusion planning, Monaco semantic tokens, etc.) all see the same explicit AST without needing ad-hoc rewrites.
 
+### Source-level migration toward `strict`
+
+The parser normalizes command-style calls internally, so code like `hold on` runs correctly under `runmat` and `matlab` modes today. For teams that want their source code to match the explicit form — for clarity, static analysis, or preparation for `strict` mode — RunMat's built-in agent can convert command-form calls in your scripts to their parenthesized equivalents (e.g., `hold on` → `hold("on")`, `axis tight` → `axis("tight")`). Every proposed edit is a reviewable diff. See [Agent-assisted migration](/docs/compatibility#agent-assisted-migration) for more on how the agent helps adapt existing scripts.
+
 ### Future compatibility surfaces
 - New divergences or compat shims (e.g., potential Julia-inspired interop/syntax in the future) will be documented here as they are added.
 
@@ -70,5 +74,6 @@ RunMat supports command-style invocation for the verbs below when `compat = "mat
 ## Related
 
 - [Language Coverage](/docs/language-coverage) -- MATLAB feature compatibility with an Octave comparison.
+- [Compatibility](/docs/compatibility) -- what works, what doesn't, agent-assisted migration.
 - [Plotting](/docs/plotting) -- GPU-first plotting with MATLAB-familiar API.
 - [Configuration](/docs/configuration) -- configure RunMat files, environment overrides, and precedence.

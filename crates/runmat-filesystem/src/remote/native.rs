@@ -1257,6 +1257,9 @@ impl Seek for RemoteFileHandle {
     }
 }
 
+#[async_trait(?Send)]
+impl FileHandle for RemoteFileHandle {}
+
 impl Drop for RemoteFileHandle {
     fn drop(&mut self) {
         if self.dirty {

@@ -139,9 +139,6 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
     let handle = registry::take_handle(fid)
         .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let mut file = handle
-        .lock()
-        .map_err(|_| fread_error("fread: failed to lock file handle (poisoned mutex)"))?;
 
     let arg_refs: Vec<&Value> = rest.iter().collect();
     let (size_arg, precision_arg, skip_arg, machine_arg, like_arg) =
@@ -172,8 +169,15 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
         &info.machinefmt,
     ))?;
 
+    let mut guard = handle
+        .lock()
+        .map_err(|_| fread_error("fread: failed to lock file handle (poisoned mutex)"))?;
+    let file = guard
+        .as_mut()
+        .ok_or_else(|| fread_error(format!("fread: {INVALID_IDENTIFIER_MESSAGE}")))?;
+
     let mut eval = map_string_result(read_from_handle(
-        &mut file,
+        file,
         &size_spec,
         &precision,
         skip_bytes,

@@ -388,11 +388,13 @@ async fn build_grayscale_image_surface(
         }
     };
     let grid = tensor_to_image_grid(tensor, x_axis.len(), y_axis.len())?;
+    let color_grid = grayscale_color_grid(&grid, color_limits);
     Ok(SurfacePlot::new(x_axis, y_axis, grid)
         .map_err(|err| imshow_error(format!("imshow: {err}")))?
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_colormap(ColorMap::Gray)
+        .with_color_grid(color_grid)
         .with_shading(ShadingMode::None)
         .with_color_limits(Some(color_limits)))
 }
@@ -417,6 +419,31 @@ fn tensor_to_image_grid(
         }
     }
     Ok(grid)
+}
+
+fn grayscale_color_grid(grid: &[Vec<f64>], color_limits: (f64, f64)) -> Vec<Vec<glam::Vec4>> {
+    grid.iter()
+        .map(|col| {
+            col.iter()
+                .map(|&value| {
+                    let gray = grayscale_level(value, color_limits);
+                    glam::Vec4::new(gray, gray, gray, 1.0)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn grayscale_level(value: f64, color_limits: (f64, f64)) -> f32 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    let (lo, hi) = color_limits;
+    let denom = hi - lo;
+    if denom <= 0.0 || !denom.is_finite() {
+        return 0.0;
+    }
+    ((value - lo) / denom).clamp(0.0, 1.0) as f32
 }
 
 async fn tensor_from_image_file(path: &str) -> crate::BuiltinResult<Tensor> {
@@ -622,6 +649,8 @@ mod tests {
         assert!(surface.image_mode);
         assert_eq!(surface.colormap, ColorMap::Gray);
         assert_eq!(surface.color_limits, Some((0.0, 1.0)));
+        let grid = surface.color_grid.as_ref().expect("grayscale color grid");
+        assert_eq!(grid[0][0], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
             Value::String("image".into())
@@ -687,6 +716,15 @@ mod tests {
             panic!("expected surface");
         };
         assert_eq!(surface.color_limits, Some((0.0, 255.0)));
+        let grid = surface.color_grid.as_ref().expect("grayscale color grid");
+        assert_eq!(grid.len(), 2);
+        assert_eq!(grid[0].len(), 2);
+        assert_eq!(grid[0][0], glam::Vec4::new(0.0, 0.0, 0.0, 1.0));
+        assert_eq!(grid[1][1], glam::Vec4::new(1.0, 1.0, 1.0, 1.0));
+        let mid = grid[0][1];
+        assert_eq!(mid.x, mid.y);
+        assert_eq!(mid.y, mid.z);
+        assert!((mid.x - (128.0 / 255.0)).abs() < f32::EPSILON);
     }
 
     #[test]

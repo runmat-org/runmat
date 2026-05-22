@@ -51,7 +51,8 @@ pub use event::{
 };
 pub use plots::{
     AreaPlot, ContourFillPlot, ContourPlot, Figure, Line3Plot, LinePlot, PieChart, QuiverPlot,
-    Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+    ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot,
+    SurfacePlot,
 };
 
 // High-level API

@@ -1,0 +1,56 @@
+{
+  "title": "im2double",
+  "category": "image/color",
+  "keywords": [
+    "im2double",
+    "image",
+    "double",
+    "uint8",
+    "uint16",
+    "convert"
+  ],
+  "summary": "Convert image data to double precision, scaling integer images into [0,1].",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/im2double.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "GPU inputs gather to host so integer image class scaling is preserved."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::color::im2double::tests"
+  },
+  "description": "`im2double(I)` returns double image data. uint8 images are divided by 255 and uint16 images by 65535.",
+  "behaviors": [
+    "uint8 and uint16 tensors are scaled into [0,1].",
+    "Floating-point tensors keep their numeric values and become double host tensors.",
+    "Logical images convert to 0 and 1."
+  ],
+  "examples": [
+    {
+      "description": "Convert Read Image",
+      "input": "I = im2double(imread(\"photo.png\"));",
+      "output": "% I is double image data in [0,1] for integer inputs"
+    }
+  ],
+  "links": [
+    {
+      "label": "im2uint8",
+      "url": "./im2uint8"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/image/color/im2double.rs",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/im2double.rs"
+  }
+}

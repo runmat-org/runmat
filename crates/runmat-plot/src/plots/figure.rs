@@ -6,8 +6,9 @@
 use crate::core::{BoundingBox, GpuPackContext, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{
-    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Line3Plot, LinePlot, PieChart,
-    QuiverPlot, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Line3Plot, LinePlot, PatchPlot,
+    PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot,
+    StairsPlot, StemPlot, SurfacePlot,
 };
 use glam::Vec4;
 use log::trace;
@@ -125,6 +126,8 @@ pub struct AxesMetadata {
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub z_label: Option<String>,
+    pub x_tick_labels: Option<Vec<String>>,
+    pub y_tick_labels: Option<Vec<String>>,
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
@@ -167,10 +170,12 @@ pub enum PlotElement {
     Quiver(QuiverPlot),
     Pie(PieChart),
     Surface(SurfacePlot),
+    Patch(PatchPlot),
     Line3(Line3Plot),
     Scatter3(Scatter3Plot),
     Contour(ContourPlot),
     ContourFill(ContourFillPlot),
+    ReferenceLine(ReferenceLine),
 }
 
 /// Legend entry for a plot
@@ -200,10 +205,12 @@ pub enum PlotType {
     Quiver,
     Pie,
     Surface,
+    Patch,
     Line3,
     Scatter3,
     Contour,
     ContourFill,
+    ReferenceLine,
 }
 
 impl Figure {
@@ -497,6 +504,20 @@ impl Figure {
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_tick_labels(
+        &mut self,
+        axes_index: usize,
+        x_labels: Option<Vec<String>>,
+        y_labels: Option<Vec<String>>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_tick_labels = x_labels;
+            meta.y_tick_labels = y_labels;
         }
         self.dirty = true;
     }
@@ -832,6 +853,10 @@ impl Figure {
         self.push_plot(PlotElement::Line(plot), axes_index)
     }
 
+    pub fn add_reference_line_on_axes(&mut self, plot: ReferenceLine, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::ReferenceLine(plot), axes_index)
+    }
+
     /// Add a scatter plot to the figure
     pub fn add_scatter_plot(&mut self, plot: ScatterPlot) -> usize {
         self.add_scatter_plot_on_axes(plot, 0)
@@ -909,6 +934,14 @@ impl Figure {
 
     pub fn add_surface_plot_on_axes(&mut self, plot: SurfacePlot, axes_index: usize) -> usize {
         self.push_plot(PlotElement::Surface(plot), axes_index)
+    }
+
+    pub fn add_patch_plot(&mut self, plot: PatchPlot) -> usize {
+        self.add_patch_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_patch_plot_on_axes(&mut self, plot: PatchPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Patch(plot), axes_index)
     }
 
     pub fn add_line3_plot(&mut self, plot: Line3Plot) -> usize {
@@ -1022,9 +1055,14 @@ impl Figure {
         }
 
         let mut combined_bounds = None;
+        let mut reference_lines = Vec::new();
 
         for plot in &mut self.plots {
             if !plot.is_visible() {
+                continue;
+            }
+            if let PlotElement::ReferenceLine(reference_line) = plot {
+                reference_lines.push(reference_line.clone());
                 continue;
             }
 
@@ -1033,6 +1071,33 @@ impl Figure {
             combined_bounds = match combined_bounds {
                 None => Some(plot_bounds),
                 Some(existing) => Some(existing.union(&plot_bounds)),
+            };
+        }
+
+        for line in reference_lines {
+            let mut point_bounds = line.coordinate_bounds();
+            if let Some(existing) = combined_bounds {
+                match line.orientation {
+                    ReferenceLineOrientation::Vertical => {
+                        point_bounds.min.y = existing.min.y;
+                        point_bounds.max.y = existing.max.y;
+                    }
+                    ReferenceLineOrientation::Horizontal => {
+                        point_bounds.min.x = existing.min.x;
+                        point_bounds.max.x = existing.max.x;
+                    }
+                }
+            } else {
+                let (x_range, y_range) =
+                    Self::reference_line_ranges(self.x_limits, self.y_limits, None, None, &line);
+                point_bounds.min.x = x_range.0 as f32;
+                point_bounds.max.x = x_range.1 as f32;
+                point_bounds.min.y = y_range.0 as f32;
+                point_bounds.max.y = y_range.1 as f32;
+            }
+            combined_bounds = match combined_bounds {
+                None => Some(point_bounds),
+                Some(existing) => Some(existing.union(&point_bounds)),
             };
         }
 
@@ -1086,6 +1151,7 @@ impl Figure {
             }
         }
 
+        let reference_base_bounds = self.reference_base_bounds_by_axes();
         let mut out = Vec::new();
         for (plot_idx, p) in self.plots.iter_mut().enumerate() {
             if !p.is_visible() {
@@ -1165,10 +1231,84 @@ impl Figure {
                             .or(viewport_px),
                     ),
                 )),
+                PlotElement::ReferenceLine(plot) => {
+                    let (x_range, y_range) = Self::reference_line_ranges(
+                        self.x_limits,
+                        self.y_limits,
+                        self.axes_metadata.get(axes_index),
+                        reference_base_bounds.get(axes_index).copied().flatten(),
+                        plot,
+                    );
+                    out.push((
+                        axes_index,
+                        plot.render_data_with_range(
+                            x_range,
+                            y_range,
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
+                    ));
+                }
+                PlotElement::Patch(plot) => {
+                    out.push((axes_index, plot.render_data()));
+                    if let Some(edge_data) = plot.edge_render_data() {
+                        out.push((axes_index, edge_data));
+                    }
+                }
                 _ => out.push((axes_index, p.render_data())),
             }
         }
         out
+    }
+
+    fn reference_base_bounds_by_axes(&mut self) -> Vec<Option<BoundingBox>> {
+        let axes_count = self.total_axes().max(1);
+        let mut bounds: Vec<Option<BoundingBox>> = vec![None; axes_count];
+        for (plot_idx, plot) in self.plots.iter_mut().enumerate() {
+            if !plot.is_visible() || matches!(plot, PlotElement::ReferenceLine(_)) {
+                continue;
+            }
+            let axes_index = self
+                .plot_axes_indices
+                .get(plot_idx)
+                .copied()
+                .unwrap_or(0)
+                .min(axes_count - 1);
+            let plot_bounds = plot.bounds();
+            bounds[axes_index] = Some(match bounds[axes_index] {
+                None => plot_bounds,
+                Some(existing) => existing.union(&plot_bounds),
+            });
+        }
+        bounds
+    }
+
+    fn reference_line_ranges(
+        x_limits: Option<(f64, f64)>,
+        y_limits: Option<(f64, f64)>,
+        meta: Option<&AxesMetadata>,
+        base: Option<BoundingBox>,
+        line: &ReferenceLine,
+    ) -> ((f64, f64), (f64, f64)) {
+        let x_range = x_limits
+            .or_else(|| meta.and_then(|m| m.x_limits))
+            .or_else(|| base.map(|b| (b.min.x as f64, b.max.x as f64)))
+            .unwrap_or(match line.orientation {
+                ReferenceLineOrientation::Vertical => (line.value - 0.5, line.value + 0.5),
+                ReferenceLineOrientation::Horizontal => (0.0, 1.0),
+            });
+        let y_range = y_limits
+            .or_else(|| meta.and_then(|m| m.y_limits))
+            .or_else(|| base.map(|b| (b.min.y as f64, b.max.y as f64)))
+            .unwrap_or(match line.orientation {
+                ReferenceLineOrientation::Vertical => (0.0, 1.0),
+                ReferenceLineOrientation::Horizontal => (line.value - 0.5, line.value + 0.5),
+            });
+        (
+            normalize_reference_range(x_range),
+            normalize_reference_range(y_range),
+        )
     }
 
     /// Get legend entries for all labeled plots
@@ -1340,6 +1480,18 @@ impl Figure {
         None
     }
 
+    pub fn x_axis_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_tick_labels.clone())
+    }
+
+    pub fn y_axis_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_tick_labels.clone())
+    }
+
     pub fn histogram_axis_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
         for (plot_idx, plot) in self.plots.iter().enumerate() {
             let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
@@ -1363,6 +1515,21 @@ impl Default for Figure {
     }
 }
 
+fn normalize_reference_range(range: (f64, f64)) -> (f64, f64) {
+    let (mut lo, mut hi) = range;
+    if !lo.is_finite() || !hi.is_finite() {
+        return (0.0, 1.0);
+    }
+    if hi < lo {
+        std::mem::swap(&mut lo, &mut hi);
+    }
+    if (hi - lo).abs() < f64::EPSILON {
+        let pad = lo.abs().max(1.0) * 0.5;
+        return (lo - pad, hi + pad);
+    }
+    (lo, hi)
+}
+
 impl PlotElement {
     /// Check if the plot is visible
     pub fn is_visible(&self) -> bool {
@@ -1377,10 +1544,12 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.visible,
             PlotElement::Pie(plot) => plot.visible,
             PlotElement::Surface(plot) => plot.visible,
+            PlotElement::Patch(plot) => plot.is_visible(),
             PlotElement::Line3(plot) => plot.visible,
             PlotElement::Scatter3(plot) => plot.visible,
             PlotElement::Contour(plot) => plot.visible,
             PlotElement::ContourFill(plot) => plot.visible,
+            PlotElement::ReferenceLine(plot) => plot.visible,
         }
     }
 
@@ -1397,10 +1566,12 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.label.clone(),
             PlotElement::Pie(plot) => plot.label.clone(),
             PlotElement::Surface(plot) => plot.label.clone(),
+            PlotElement::Patch(plot) => plot.label().map(str::to_string),
             PlotElement::Line3(plot) => plot.label.clone(),
             PlotElement::Scatter3(plot) => plot.label.clone(),
             PlotElement::Contour(plot) => plot.label.clone(),
             PlotElement::ContourFill(plot) => plot.label.clone(),
+            PlotElement::ReferenceLine(plot) => plot.label_for_legend(),
         }
     }
 
@@ -1417,10 +1588,12 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.label = label,
             PlotElement::Pie(plot) => plot.label = label,
             PlotElement::Surface(plot) => plot.label = label,
+            PlotElement::Patch(plot) => plot.set_label(label),
             PlotElement::Line3(plot) => plot.label = label,
             PlotElement::Scatter3(plot) => plot.label = label,
             PlotElement::Contour(plot) => plot.label = label,
             PlotElement::ContourFill(plot) => plot.label = label,
+            PlotElement::ReferenceLine(plot) => plot.label = label,
         }
     }
 
@@ -1437,10 +1610,12 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.color,
             PlotElement::Pie(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::Surface(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Patch(plot) => plot.effective_face_color(),
             PlotElement::Line3(plot) => plot.color,
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
             PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::ContourFill(_plot) => Vec4::new(0.9, 0.9, 0.9, 1.0),
+            PlotElement::ReferenceLine(plot) => plot.color,
         }
     }
 
@@ -1457,10 +1632,12 @@ impl PlotElement {
             PlotElement::Quiver(_) => PlotType::Quiver,
             PlotElement::Pie(_) => PlotType::Pie,
             PlotElement::Surface(_) => PlotType::Surface,
+            PlotElement::Patch(_) => PlotType::Patch,
             PlotElement::Line3(_) => PlotType::Line3,
             PlotElement::Scatter3(_) => PlotType::Scatter3,
             PlotElement::Contour(_) => PlotType::Contour,
             PlotElement::ContourFill(_) => PlotType::ContourFill,
+            PlotElement::ReferenceLine(_) => PlotType::ReferenceLine,
         }
     }
 
@@ -1477,10 +1654,12 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.bounds(),
             PlotElement::Pie(plot) => plot.bounds(),
             PlotElement::Surface(plot) => plot.bounds(),
+            PlotElement::Patch(plot) => plot.bounds(),
             PlotElement::Line3(plot) => plot.bounds(),
             PlotElement::Scatter3(plot) => plot.bounds(),
             PlotElement::Contour(plot) => plot.bounds(),
             PlotElement::ContourFill(plot) => plot.bounds(),
+            PlotElement::ReferenceLine(plot) => plot.coordinate_bounds(),
         }
     }
 
@@ -1497,10 +1676,14 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.render_data(),
             PlotElement::Pie(plot) => plot.render_data(),
             PlotElement::Surface(plot) => plot.render_data(),
+            PlotElement::Patch(plot) => plot.render_data(),
             PlotElement::Line3(plot) => plot.render_data(),
             PlotElement::Scatter3(plot) => plot.render_data(),
             PlotElement::Contour(plot) => plot.render_data(),
             PlotElement::ContourFill(plot) => plot.render_data(),
+            PlotElement::ReferenceLine(plot) => {
+                plot.render_data_with_range((0.0, 1.0), (0.0, 1.0), None)
+            }
         }
     }
 
@@ -1517,10 +1700,12 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.estimated_memory_usage(),
             PlotElement::Pie(plot) => plot.estimated_memory_usage(),
             PlotElement::Surface(_plot) => 0,
+            PlotElement::Patch(plot) => plot.estimated_memory_usage(),
             PlotElement::Line3(plot) => plot.estimated_memory_usage(),
             PlotElement::Scatter3(plot) => plot.estimated_memory_usage(),
             PlotElement::Contour(plot) => plot.estimated_memory_usage(),
             PlotElement::ContourFill(plot) => plot.estimated_memory_usage(),
+            PlotElement::ReferenceLine(plot) => plot.estimated_memory_usage(),
         }
     }
 }
@@ -1763,6 +1948,58 @@ mod tests {
         assert!(bounds.max.x >= 4.0);
         assert!(bounds.min.y <= -2.0);
         assert!(bounds.max.y >= 5.0);
+    }
+
+    #[test]
+    fn test_reference_line_only_bounds_use_default_span() {
+        let mut vertical_figure = Figure::new();
+        vertical_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Vertical, 2.0).unwrap(),
+            0,
+        );
+        let vertical_bounds = vertical_figure.bounds();
+        assert_eq!(vertical_bounds.min.x, 1.5);
+        assert_eq!(vertical_bounds.max.x, 2.5);
+        assert_eq!(vertical_bounds.min.y, 0.0);
+        assert_eq!(vertical_bounds.max.y, 1.0);
+
+        let mut horizontal_figure = Figure::new();
+        horizontal_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Horizontal, 3.0).unwrap(),
+            0,
+        );
+        let horizontal_bounds = horizontal_figure.bounds();
+        assert_eq!(horizontal_bounds.min.x, 0.0);
+        assert_eq!(horizontal_bounds.max.x, 1.0);
+        assert_eq!(horizontal_bounds.min.y, 2.5);
+        assert_eq!(horizontal_bounds.max.y, 3.5);
+    }
+
+    #[test]
+    fn test_reference_line_render_data_prefers_figure_limits() {
+        let mut horizontal_figure = Figure::new().with_limits((-2.0, 8.0), (-10.0, 10.0));
+        horizontal_figure.axes_metadata[0].x_limits = Some((0.0, 1.0));
+        horizontal_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Horizontal, 3.0).unwrap(),
+            0,
+        );
+        let horizontal_bounds = horizontal_figure.render_data()[0].bounds.unwrap();
+        assert_eq!(horizontal_bounds.min.x, -2.0);
+        assert_eq!(horizontal_bounds.max.x, 8.0);
+        assert_eq!(horizontal_bounds.min.y, 3.0);
+        assert_eq!(horizontal_bounds.max.y, 3.0);
+
+        let mut vertical_figure = Figure::new().with_limits((-2.0, 8.0), (-10.0, 10.0));
+        vertical_figure.axes_metadata[0].y_limits = Some((0.0, 1.0));
+        vertical_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Vertical, 4.0).unwrap(),
+            0,
+        );
+        let vertical_bounds = vertical_figure.render_data()[0].bounds.unwrap();
+        assert_eq!(vertical_bounds.min.x, 4.0);
+        assert_eq!(vertical_bounds.max.x, 4.0);
+        assert_eq!(vertical_bounds.min.y, -10.0);
+        assert_eq!(vertical_bounds.max.y, 10.0);
     }
 
     #[test]

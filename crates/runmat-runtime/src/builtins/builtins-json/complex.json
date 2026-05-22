@@ -1,0 +1,146 @@
+{
+  "title": "complex",
+  "category": "math/elementwise",
+  "keywords": [
+    "complex",
+    "complex constructor",
+    "real part",
+    "imaginary part",
+    "complex storage",
+    "MATLAB complex"
+  ],
+  "summary": "Construct complex double values from real and imaginary parts.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/complex.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "scalar-only",
+    "notes": "Complex tensors are currently host-resident in RunMat. GPU tensor inputs are not accepted by this constructor until native complex GPU buffers are wired through the runtime."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::elementwise::complex::tests"
+  },
+  "description": "`z = complex(a, b)` constructs `a + 1i*b` from real-valued inputs. `z = complex(a)` returns `a` using complex storage with a zero imaginary part, and existing complex inputs pass through unchanged.",
+  "behaviors": [
+    "With two inputs, `a` and `b` must be real numeric values. Complex inputs raise an error.",
+    "Two non-scalar inputs must have the same size. If either input is scalar, it expands across the other input.",
+    "Integer and logical inputs are promoted to double precision before constructing the complex result.",
+    "String and character inputs are rejected because the constructor accepts numeric inputs only.",
+    "Unary `complex(a)` preserves existing complex scalars and complex tensors. Real inputs become complex values with zero imaginary parts.",
+    "Empty real tensors preserve their empty shape and return empty complex tensors."
+  ],
+  "examples": [
+    {
+      "description": "Constructing a complex scalar from real and imaginary parts",
+      "input": "z = complex(3, 4)",
+      "output": "z = 3+4i"
+    },
+    {
+      "description": "Constructing a complex row vector from matching real arrays",
+      "input": "re = [1 2 3];\nim = [4 5 6];\nz = complex(re, im)",
+      "output": "z = [1+4i 2+5i 3+6i]"
+    },
+    {
+      "description": "Expanding a scalar imaginary part across an array",
+      "input": "re = [1 2 3];\nz = complex(re, -1)",
+      "output": "z = [1-1i 2-1i 3-1i]"
+    },
+    {
+      "description": "Forcing complex storage with a zero imaginary part",
+      "input": "z = complex(12);\ntf = isreal(z)",
+      "output": "z = 12+0i\n\ntf =\n     0"
+    },
+    {
+      "description": "Leaving an existing complex value unchanged",
+      "input": "z = complex(1 + 2i)",
+      "output": "z = 1+2i"
+    },
+    {
+      "description": "Rejecting non-scalar implicit expansion",
+      "input": "z = complex([1 2 3], [10; 20])",
+      "output": "error: complex: real and imaginary parts must have the same size, unless one input is scalar"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `complex(a, b)` use MATLAB implicit expansion?",
+      "answer": "Only scalar expansion is supported for this constructor. Two non-scalar operands must have identical sizes, matching MATLAB's documented `complex` size rules."
+    },
+    {
+      "question": "Can I pass complex values to `complex(a, b)`?",
+      "answer": "No. The two-argument constructor requires real numeric inputs for both the real and imaginary parts. Use `real`, `imag`, or arithmetic if you need to transform existing complex values."
+    },
+    {
+      "question": "What does unary `complex(a)` do?",
+      "answer": "It forces real input into complex storage with a zero imaginary part. If `a` is already complex, RunMat returns it unchanged."
+    },
+    {
+      "question": "Why does `isreal(complex(5))` return false?",
+      "answer": "`complex(5)` stores the value as complex double data with an explicit zero imaginary part. MATLAB and RunMat define `isreal` by storage, so it returns `false`."
+    },
+    {
+      "question": "Does `complex` accept logical inputs?",
+      "answer": "Yes. RunMat promotes logical values to doubles (`true` becomes `1`, `false` becomes `0`) before constructing the complex output."
+    },
+    {
+      "question": "Does `complex` accept strings or character arrays?",
+      "answer": "No. Strings and character arrays are rejected because the constructor is limited to numeric inputs."
+    },
+    {
+      "question": "Can `complex` run on GPU arrays?",
+      "answer": "Not yet. RunMat's complex tensor representation is currently host-resident, so this builtin does not accept `gpuArray` inputs."
+    }
+  ],
+  "links": [
+    {
+      "label": "real",
+      "url": "./real"
+    },
+    {
+      "label": "imag",
+      "url": "./imag"
+    },
+    {
+      "label": "isreal",
+      "url": "./isreal"
+    },
+    {
+      "label": "conj",
+      "url": "./conj"
+    },
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "double",
+      "url": "./double"
+    },
+    {
+      "label": "single",
+      "url": "./single"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/elementwise/complex.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/complex.rs"
+  },
+  "gpu_residency": "No. `complex` returns host-resident `Value::Complex` or `Value::ComplexTensor` values today. Use `gather` before construction if values are currently device-resident.",
+  "gpu_behavior": [
+    "RunMat rejects `gpuArray` inputs for `complex` today because the active GPU providers expose real-valued tensor buffers, while this constructor creates complex storage. Native complex GPU residency can be added later without changing the public call forms."
+  ]
+}

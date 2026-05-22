@@ -1,6 +1,8 @@
 # MATLAB Compatibility
 
-RunMat is a high-performance runtime for MATLAB code. It supports ~99% of core MATLAB language syntax, 400+ built-in functions, and full `classdef` OOP — with automatic GPU acceleration across all major vendors. No license required.
+RunMat is a high-performance runtime for MATLAB-syntax code. It covers the core MATLAB language — variables, operators, control flow, functions, N-D indexing, full `classdef` OOP, packages, imports, and exceptions — along with 400+ built-in functions and automatic GPU acceleration across all major vendors. No license required.
+
+**What "compatible" means here:** RunMat targets the core language grammar and built-in functions that engineers use daily. Many `.m` scripts run without changes. Scripts that depend on MATLAB toolboxes, Simulink, MEX/Java/Python interop, or specialized file formats (.slx, .mlapp) are outside this scope. Where a script uses a function RunMat doesn't ship yet, the built-in agent can often help adapt the code — see [Agent-assisted migration](#agent-assisted-migration) below.
 
 This page summarizes what works, what doesn't, and where to look for details. For the full feature-by-feature matrix, see [Language Coverage](/docs/language-coverage). For individual functions, see the [Built-in Function Reference](/docs/matlab-function-reference).
 
@@ -32,7 +34,7 @@ Browse the complete list: [Built-in Function Reference](/docs/matlab-function-re
 
 RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D camera, theming, and scene persistence.
 
-**2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`
+**2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`, `heatmap`
 
 **3D chart types:** `plot3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3`
 
@@ -44,7 +46,7 @@ RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D c
 
 Rendering is GPU-first: vertex buffers are built on-device and rendered through WebGPU in the browser or Metal/Vulkan/DX12 natively. Interactive 3D camera supports rotate, pan, and zoom with reversed-Z depth.
 
-Advanced/specialized chart types (`polar`, `heatmap`, `geobubble`, `wordcloud`, `stackedplot`, `swarmchart`) and full annotation objects are not yet supported.
+Advanced/specialized chart types (`polar`, `geobubble`, `wordcloud`, `stackedplot`, `swarmchart`) and full annotation objects are not yet supported.
 
 ## Toolbox coverage
 
@@ -56,9 +58,9 @@ RunMat focuses on core MATLAB — the language, operators, data types, and gener
 | Simulink | ❌ | RunMat is script-based only; no block-diagram modeling |
 | Signal Processing | ❌ | Not implemented |
 | Control System | ❌ | Not implemented |
-| Image Processing | ❌ | Basic array ops and `image`/`imagesc`/`imshow` work on image data |
+| Image Processing | ❌ | `imread`, `imshow`, `image`, `imagesc`, and color conversion (`rgb2gray`, `im2double`, `im2uint8`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, `lab2rgb`) are available as builtins |
 | Statistics & Machine Learning | ❌ | Core stats functions (`mean`, `std`, `var`, `median`, `sort`, `hist`, etc.) are available as builtins |
-| Optimization | ❌ | Not implemented |
+| Optimization | ❌ | `fzero`, `fsolve`, and `optimset` are available as builtins |
 | Symbolic Math | ❌ | Not implemented |
 | Parallel Computing | ⚠️ | Different model — RunMat provides automatic GPU acceleration without explicit `gpuArray` or `parfor` |
 
@@ -96,9 +98,21 @@ Details: [Language Reference](/docs/language)
 - **No Simulink** — RunMat is a script/function runtime, not a block-diagram simulation environment
 - **No GUI frameworks** — GUIDE and App Designer are not supported
 - **No MATLAB toolboxes** — Signal Processing, Control System, Image Processing, etc. are not included (see table above)
-- **Plotting gaps** — specialized chart types (`polar`, `heatmap`, etc.) and full Handle Graphics property coverage are still being added
+- **Plotting gaps** — specialized chart types (`polar`, `geobubble`, etc.) and full Handle Graphics property coverage are still being added
 - **File I/O** — core functions (`load`, `save`, `fopen`, `fclose`, `fprintf`, `fscanf`, `fread`, `fwrite`, `readmatrix`, `writematrix`) are available; some advanced I/O functions are not yet implemented
 - **MEX / Java / Python interop** — not supported
+
+## Agent-assisted migration
+
+RunMat includes a built-in agent that connects to the same runtime session you're working in. When migrating existing `.m` scripts, the agent can help in three ways:
+
+1. **Diagnostics and unsupported calls.** Run your script, let it fail, and ask the agent to look at the errors. It can read the diagnostics, identify which functions are missing, and propose replacements using RunMat's existing built-ins or a small local helper.
+2. **Command-form cleanup.** For teams moving toward `strict` compatibility mode, the agent can convert command-style calls (`hold on`, `axis tight`) to their explicit parenthesized form (`hold("on")`, `axis("tight")`).
+3. **Toolbox-adjacent patterns.** Some toolbox functions have straightforward equivalents in core MATLAB math. The agent can often rewrite these calls using RunMat primitives (e.g., reimplementing a simple signal processing function from its mathematical definition).
+
+Every proposed edit is a reviewable diff — you accept, reject, or accept in part. The agent does not silently modify your files.
+
+**What the agent cannot do:** It cannot add Simulink support, MEX/Java/Python interop, or GUI frameworks. Scripts that depend heavily on these will need manual porting or are outside RunMat's scope.
 
 ## Performance
 
@@ -118,6 +132,6 @@ The fastest way to find out:
 2. Paste your `.m` script
 3. Hit Run — no install, no account, no upload
 
-Your code stays local. Nothing is sent to a server.
+Code execution happens locally in your browser — nothing is uploaded to run your script. If you sign in for cloud storage or use the built-in agent, data is sent to RunMat's servers and the configured LLM provider respectively.
 
 If something doesn't work, [open an issue](https://github.com/runmat-org/runmat/issues) with a minimal reproducer and we'll add a conformance test.

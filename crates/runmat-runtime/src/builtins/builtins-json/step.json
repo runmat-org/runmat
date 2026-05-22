@@ -1,0 +1,115 @@
+{
+  "title": "step",
+  "category": "control",
+  "keywords": [
+    "step",
+    "step response",
+    "control system",
+    "transfer function",
+    "tf"
+  ],
+  "summary": "Compute or plot the step response of a SISO transfer-function model.",
+  "references": [
+    "title: \"MATLAB step documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`step` simulates host-side transfer-function metadata. GPU inputs are not part of the initial `tf` object response path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`step` is not fused; it simulates a dynamic system and may render a plot."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::step::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`step(sys)` plots the unit-step response of a SISO transfer-function object created by `tf`. `[y, tOut] = step(sys)` returns sampled response data and the time vector. `step(sys, tFinal)` uses a scalar final time, while `step(sys, t)` evaluates at an explicit time vector.",
+  "behaviors": [
+    "Supports SISO `tf` objects with real coefficients.",
+    "Returns the response `y` as a column vector for single-output calls.",
+    "Returns `[y, tOut]` for two-output calls.",
+    "Plots the response for no-output calls.",
+    "Chooses an automatic time vector when no time input is supplied.",
+    "Accepts a positive finite scalar final time.",
+    "Accepts a finite, nonnegative, nondecreasing explicit time vector.",
+    "Discrete-time models use the stored `Ts` sample time."
+  ],
+  "examples": [
+    {
+      "description": "Returning response data for a first-order system",
+      "input": "sys = tf(1, [1 1]);\n[y, t] = step(sys);",
+      "output": "y and t are column vectors."
+    },
+    {
+      "description": "Using a scalar final time",
+      "input": "sys = tf(1, [1 1]);\n[y, t] = step(sys, 5);",
+      "output": "t(end) = 5"
+    },
+    {
+      "description": "Using an explicit time vector",
+      "input": "sys = tf(1, [1 1]);\nt = 0:0.5:2;\ny = step(sys, t);",
+      "output": "y is sampled at the values in t."
+    },
+    {
+      "description": "Plotting the step response",
+      "input": "sys = tf(1, [1 1]);\nstep(sys);",
+      "output": "A step-response plot is rendered."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `step` support MIMO models?",
+      "answer": "Not yet. This implementation starts with SISO transfer-function objects."
+    },
+    {
+      "question": "Does `step` support state-space models?",
+      "answer": "Not yet. The initial implementation supports transfer-function objects produced by `tf`."
+    },
+    {
+      "question": "Can transfer-function coefficients be complex?",
+      "answer": "Not in this first implementation. Complex coefficients return a clear unsupported-input error."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/step.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/step.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "step(sys)\ny = step(sys)\n[y, tOut] = step(sys)\n[y, tOut] = step(sys, tFinal)\n[y, tOut] = step(sys, t)",
+      "output": "Response data is returned when outputs are requested; otherwise a plot is rendered."
+    },
+    "points": [
+      "`sys` must be a SISO `tf` object.",
+      "`tFinal` is a positive finite scalar final time.",
+      "`t` is a finite, nonnegative, nondecreasing numeric time vector."
+    ]
+  },
+  "validation": {
+    "summary": "`step` validates object class, coefficient type, properness, sample time, and time-vector inputs before simulation. Unit and integration tests cover first-order response values, scalar final time, explicit vectors, discrete sample-time behavior, multi-output ordering, and VM dispatch.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/step.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/step.rs"
+    }
+  },
+  "gpu_residency": "`step` computes on the host from `tf` metadata and returns host tensors."
+}

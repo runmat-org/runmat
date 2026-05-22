@@ -1,6 +1,58 @@
 # RunMat Changelog
 
-_What's new across the RunMat runtime, cloud, and sandbox. For technical runtime details and commit diffs, see [GitHub Releases](https://github.com/runmat-org/runmat/releases) (runtime only)._
+_What's new across the RunMat runtime, app, and sandbox. For technical runtime details and commit diffs, see [GitHub Releases](https://github.com/runmat-org/runmat/releases) (runtime only)._
+
+---
+
+## [v0.4.8](https://github.com/runmat-org/runmat/compare/v0.4.6...v0.4.8)
+
+_May 15, 2026_
+
+### Runtime
+
+#### Added
+- Add `tf` — scalar-input scalar-output transfer-function objects now support numeric, logical, integer, complex, row-vector, and column-vector coefficient inputs, continuous and discrete sample-time defaults, `Variable`, `Ts`/`SampleTime`, `Numerator`, `Denominator`, `InputDelay`, and `OutputDelay` properties, and `class(H) == "tf"`
+- Add angle conversion builtins — `deg2rad` and `rad2deg` now operate element-wise on scalars, vectors, matrices, N-D tensors, complex values, integer/logical inputs, and GPU-resident inputs, with fusion support for compatible element-wise expressions
+- Add reference-line plotting — `xline` and `yline` now draw vertical and horizontal reference lines with scalar or vector coordinates, line-style strings, labels, `LineWidth`, `Color`, `LabelOrientation`, `Visible`, returned graphics handles, and `get`/`set`/dot-property integration
+
+#### Changed
+- Track workspace assignments through the VM and Turbine JIT so interpreter fallback, compiled stores, `clear`, and `clearvars` publish only the variables assigned or removed by the current execution
+- Route browser-backed file handles through async open and flush paths so `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgets`, `fprintf`, and `frewind` share consistent registry and provider behavior across native and WASM hosts
+- Expand plotting metadata and property handling for reference-line handles, including reference-line render data, legend labels, `Value`, style properties, and preservation of existing axis labels when reference lines are appended
+
+#### Fixed
+- Fix native session result handling for repeated multi-statement execution so final assignment values and workspace previews stay numeric after JIT compilation and fallback
+- Fix parser diagnostic locations for malformed calls, expected identifiers, and member access after `.`, reporting the offending token instead of a stale source position
+- Fix WGPU fused-kernel preflight checks to reject storage-buffer, bind-group, and arithmetic binding-count overflows before creating invalid WebGPU layouts
+- Fix browser/WASM file close behavior so async flush failures keep the file registered, concurrent `fclose` calls close a file only once, and dirty buffers are restored if async write-back fails
+- Fix `plot(x, y)` compatibility for matching row-vector and column-vector pairs with the same number of elements
+- Fix `fft` default-dimension output for row vectors so row orientation is preserved
+- Fix single-point `hann`, `hamming`, and `blackman` windows by using the host path instead of provider paths that expect longer window lengths
+
+### Sandbox
+
+#### Changed
+- Move the browser filesystem provider to async JavaScript filesystem operations for open, read, write, metadata, directory, rename, removal, and permission updates
+- Avoid unnecessary initial file reads for write-create-truncate opens while preserving `create_new`, read, and append semantics
+
+---
+
+## [v0.4.6](https://github.com/runmat-org/runmat/compare/v0.4.5...v0.4.6)
+
+_May 8, 2026_
+
+### Runtime
+
+#### Added
+- Add ODE solvers — `ode23`, `ode45`, and `ode15s` now solve scalar, vector, and matrix-valued initial-value problems with adaptive stepping, requested `tspan` output points, and `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep` options
+- Add random distribution builtins — `exprnd`, `normrnd`, and `unifrnd`, including scalar and shaped outputs, deterministic host RNG behavior, parameter validation, and WGPU-backed generation when the active provider supports it
+- Add image color and class conversion builtins — `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, and `lab2rgb`
+- Add `heatmap` plot support with matrix CData input, optional row and column labels, returned graphics handles, colorbar support, and `get`/`set`/dot-property integration
+- Add `clearvars` with explicit variable clearing and `-except` exclusions
+
+#### Changed
+- Split WGPU random distribution execution into dedicated provider code and add parameterized kernels for exponential, normal, and uniform distributions
+- Reuse the shared value-to-string conversion path for graphics labels and property handling
 
 ---
 
@@ -64,7 +116,7 @@ _April 24, 2026_
 - Reorganize the browser/WASM runtime into dedicated API, plotting, session, stream, filesystem, GPU, snapshot, state, and wire-format modules
 - Improve replay smoke coverage and GPU gradient coverage for the WASM target
 
-### Cloud
+### App
 
 #### Changed
 - Update remote-project CLI documentation around authentication, project selection, filesystem history, snapshots, git sync, retention policies, and `remote run`
@@ -95,7 +147,7 @@ _April 15, 2026_
 - Fix workspace/variable display after `clear()` — variables assigned later in the same execution block now reappear correctly in workspace snapshots
 - Fix browser `input()` handling after session resets — reinitializing the WASM session now preserves the installed async input handler
 
-### Cloud
+### App
 
 #### Added
 - Expand the public API with project git import, project import status, usage notices, upgrade requests, chunk upload targets, data manifest access, run indexes, storage summaries, storage-category deletion, telemetry ingest, and web intake submission endpoints
@@ -183,7 +235,7 @@ Other:
 - Improve Auth0 email login flow
 - Improve stdout deduplication and clear event handling
 
-### Cloud
+### App
 
 #### Added
 - Add durable persistence and replay for run artifacts
@@ -235,7 +287,7 @@ _March 24, 2026_
 - Show struct values before tensor values in the output panel
 - Improve variable inspector layout
 
-### Cloud
+### App
 
 #### Added
 - Add organizations, projects, and team memberships

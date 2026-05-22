@@ -51,8 +51,8 @@ export function CLITabContent() {
             <div className="text-white/60">$ runmat script.m</div>
           </div>
           <p className="text-foreground text-sm">
-            RunMat fuses operations and keeps data on the GPU automatically. Most MATLAB/Octave scripts run with few or no changes—see the{" "}
-            <Link href="/docs/language-coverage" className="text-primary underline underline-offset-4">compatibility guide</Link>.
+            RunMat fuses operations and keeps data on the GPU automatically. Most MATLAB/Octave scripts run with few or no changes. For scripts that use functions RunMat doesn&apos;t ship yet, the built-in agent can propose changes — see the{" "}
+            <Link href="/docs/compatibility" className="text-primary underline underline-offset-4">compatibility guide</Link>.
           </p>
         </CardContent>
       </Card>

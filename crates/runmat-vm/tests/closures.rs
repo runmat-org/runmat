@@ -391,6 +391,53 @@ fn fzero_accepts_optimset_options() {
 }
 
 #[test]
+fn integral_accepts_anonymous_function() {
+    let vars = execute_source("q = integral(@(x) x.^2, 0, 1);").unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - (1.0 / 3.0)).abs() < 1e-8)));
+}
+
+#[test]
+fn integral_accepts_named_function_handle() {
+    let vars = execute_source("q = integral(@sin, 0, pi);").unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-7)));
+}
+
+#[test]
+fn fminbnd_accepts_anonymous_function() {
+    let vars = execute_source("x = fminbnd(@(x) (x-2).^2, 0, 5);").unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-3)));
+}
+
+#[test]
+fn fminbnd_returns_optional_function_value() {
+    let vars = execute_source("[x, fval] = fminbnd(@(x) (x-3).^2 + 1, 0, 5);").unwrap();
+    let x_ok = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-3));
+    let fval_ok = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-5));
+    assert!(x_ok, "expected x ≈ 3 in {vars:?}");
+    assert!(fval_ok, "expected fval ≈ 1 in {vars:?}");
+}
+
+#[test]
+fn fminbnd_accepts_optimset_options() {
+    let vars =
+        execute_source("opts = optimset('TolX', 1e-10, 'Display', 'off'); x = fminbnd(@cos, 0, pi, opts);")
+            .unwrap();
+    assert!(vars.iter().any(
+        |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI).abs() < 1e-3)
+    ));
+}
+
+#[test]
 fn fsolve_accepts_anonymous_vector_function() {
     let vars =
         execute_source("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);")

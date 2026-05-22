@@ -96,9 +96,12 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
 
     let handle = registry::take_handle(fid)
         .ok_or_else(|| frewind_error(format!("frewind: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let mut file = handle
+    let mut guard = handle
         .lock()
         .map_err(|_| frewind_error("frewind: failed to lock file handle (poisoned mutex)"))?;
+    let file = guard
+        .as_mut()
+        .ok_or_else(|| frewind_error(format!("frewind: {INVALID_IDENTIFIER_MESSAGE}")))?;
 
     file.seek(SeekFrom::Start(0)).map_err(|err| {
         build_runtime_error(format!("frewind: failed to rewind file: {err}"))

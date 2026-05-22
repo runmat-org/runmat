@@ -95,6 +95,17 @@ fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64
 }
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 
+fn sinc_scalar_host(value: f64) -> f64 {
+    if value == 0.0 {
+        return 1.0;
+    }
+    if value.is_finite() && value.fract() == 0.0 {
+        return 0.0;
+    }
+    let scaled = std::f64::consts::PI * value;
+    scaled.sin() / scaled
+}
+
 fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
@@ -2867,6 +2878,27 @@ impl AccelProvider for InProcessProvider {
                 .get(&a.buffer_id)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.sin()).collect();
+            drop(guard);
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let mut guard2 = registry().lock().unwrap();
+            guard2.insert(id, out);
+            Ok(GpuTensorHandle {
+                shape: a.shape.clone(),
+                device_id: 0,
+                buffer_id: id,
+            })
+        })
+    }
+    fn unary_sinc<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf.iter().copied().map(sinc_scalar_host).collect();
             drop(guard);
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             let mut guard2 = registry().lock().unwrap();

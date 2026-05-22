@@ -22,7 +22,8 @@ export type BuiltinDocBlock =
   | { type: 'link-grid'; items: { label: string; href: string; thumbnail?: string }[] }
   | { type: 'divider' }
   | { type: 'section'; children: BuiltinDocBlock[]; className?: string }
-  | { type: 'columns'; cols: BuiltinDocBlock[][]; className?: string };
+  | { type: 'columns'; cols: BuiltinDocBlock[][]; className?: string }
+  | { type: 'faq'; items: { question: BuiltinDocInlineNode[]; answerBlocks: BuiltinDocBlock[] }[] };
 
 type BuiltinDocRendererProps = {
   blocks: BuiltinDocBlock[];
@@ -169,6 +170,31 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
           ))}
         </div>
       );
+    case 'faq':
+      return (
+        <div className="grid max-w-5xl gap-4 my-4">
+          {block.items.map((item) => (
+            <details
+              key={inlineNodesToString(item.question)}
+              className="group self-start rounded-xl border border-border/60 bg-card shadow-sm"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
+                <span className="text-sm font-medium">{renderInlineNodes(item.question)}</span>
+                <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0">
+                  ⌄
+                </span>
+              </summary>
+              <div className="px-6 pb-4 text-sm text-foreground leading-relaxed">
+                {item.answerBlocks.map((child, j) => (
+                  <React.Fragment key={`${child.type}-${j}`}>
+                    {renderBlock(child)}
+                  </React.Fragment>
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      );
     default:
       return null;
   }
@@ -237,6 +263,18 @@ function renderCodeBlock(block: Extract<BuiltinDocBlock, { type: 'code' }>) {
       </pre>
     </div>
   );
+}
+
+function inlineNodesToString(nodes: BuiltinDocInlineNode[]): string {
+  return nodes.map(n => {
+    switch (n.type) {
+      case 'text': return n.value;
+      case 'code': return n.value;
+      case 'link': return inlineNodesToString(n.label);
+      case 'strong': return inlineNodesToString(n.content);
+      default: return '';
+    }
+  }).join('');
 }
 
 function renderInlineNodes(nodes: BuiltinDocInlineNode[]): React.ReactNode[] {

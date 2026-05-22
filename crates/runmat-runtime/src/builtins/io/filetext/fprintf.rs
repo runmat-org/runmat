@@ -1,7 +1,6 @@
 //! MATLAB-compatible `fprintf` builtin enabling formatted text output to files and standard streams.
 
 use std::io::Write;
-use std::sync::{Arc, Mutex as StdMutex};
 
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -13,10 +12,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::io::filetext::registry::{self, FileInfo};
+use crate::builtins::io::filetext::registry::{self, FileInfo, SharedFileHandle};
 use crate::console::{record_console_output, ConsoleStream};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-use runmat_filesystem::File;
 
 const INVALID_IDENTIFIER_MESSAGE: &str =
     "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
@@ -260,7 +258,7 @@ enum OutputTarget {
     Stdout,
     Stderr,
     File {
-        handle: Arc<StdMutex<File>>,
+        handle: SharedFileHandle,
         encoding: String,
     },
 }
@@ -287,8 +285,10 @@ impl OutputTarget {
                 let mut guard = handle.lock().map_err(|_| {
                     "fprintf: failed to lock file handle (poisoned mutex)".to_string()
                 })?;
-                guard
-                    .write_all(bytes)
+                let file = guard
+                    .as_mut()
+                    .ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+                file.write_all(bytes)
                     .map_err(|err| format!("fprintf: failed to write to file ({err})"))
             }
         }

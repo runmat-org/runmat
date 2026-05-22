@@ -178,6 +178,67 @@ pub fn parse_text_style_pairs(builtin: &'static str, args: &[Value]) -> BuiltinR
     Ok(style)
 }
 
+pub fn validate_heatmap_property_pairs(
+    args: &[Value],
+    x_label_len: usize,
+    y_label_len: usize,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if args.is_empty() {
+        return Ok(());
+    }
+    if !args.len().is_multiple_of(2) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: property/value arguments must come in pairs"),
+        ));
+    }
+    for pair in args.chunks_exact(2) {
+        let key = property_name(&pair[0], builtin)?;
+        match key.as_str() {
+            "title" => validate_axes_text_alias(PlotObjectKind::Title, &pair[1], builtin)?,
+            "xlabel" => validate_axes_text_alias(PlotObjectKind::XLabel, &pair[1], builtin)?,
+            "ylabel" => validate_axes_text_alias(PlotObjectKind::YLabel, &pair[1], builtin)?,
+            "colorbar" | "colorbarvisible" => {
+                value_as_bool(&pair[1]).ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: Colorbar must be logical"))
+                })?;
+            }
+            "colormap" => {
+                let name = value_as_string(&pair[1]).ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
+                })?;
+                parse_colormap_name(&name, builtin)?;
+            }
+            "xdisplaylabels" => {
+                let labels = label_strings_from_value(&pair[1], builtin, "labels")?;
+                if labels.len() != x_label_len {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: XDisplayLabels length must match heatmap columns"),
+                    ));
+                }
+            }
+            "ydisplaylabels" => {
+                let labels = label_strings_from_value(&pair[1], builtin, "labels")?;
+                if labels.len() != y_label_len {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: YDisplayLabels length must match heatmap rows"),
+                    ));
+                }
+            }
+            other => {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: unsupported heatmap property `{other}`"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn split_legend_style_pairs<'a>(
     builtin: &'static str,
     args: &'a [Value],
@@ -696,7 +757,11 @@ fn canonical_property_name(name: &str) -> &str {
         "grid" => "grid",
         "axisequal" => "axisequal",
         "colorbar" => "colorbar",
+        "colorbarvisible" => "colorbarvisible",
         "colormap" => "colormap",
+        "xdisplaylabels" => "xdisplaylabels",
+        "ydisplaylabels" => "ydisplaylabels",
+        "colordata" | "cdata" => "colordata",
         "xlim" => "xlim",
         "ylim" => "ylim",
         "zlim" => "zlim",
@@ -1111,11 +1176,17 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::Image(image) => {
             get_image_property(image, property, builtin)
         }
+        super::state::PlotChildHandleState::Heatmap(heatmap) => {
+            get_heatmap_property(heatmap, property, builtin)
+        }
         super::state::PlotChildHandleState::Area(area) => {
             get_area_property(area, property, builtin)
         }
         super::state::PlotChildHandleState::Surface(plot) => {
             get_surface_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Patch(plot) => {
+            get_patch_property(plot, property, builtin)
         }
         super::state::PlotChildHandleState::Line3(plot) => {
             get_line3_property(plot, property, builtin)
@@ -1128,6 +1199,9 @@ fn get_plot_child_property(
         }
         super::state::PlotChildHandleState::ContourFill(plot) => {
             get_contour_fill_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::ReferenceLine(plot) => {
+            get_reference_line_property(plot, property, builtin)
         }
         super::state::PlotChildHandleState::Pie(plot) => get_pie_property(plot, property, builtin),
         super::state::PlotChildHandleState::Text(text) => {
@@ -1170,11 +1244,17 @@ fn apply_plot_child_property(
         super::state::PlotChildHandleState::Image(image) => {
             apply_image_property(image, key, value, builtin)
         }
+        super::state::PlotChildHandleState::Heatmap(heatmap) => {
+            apply_heatmap_property(heatmap, key, value, builtin)
+        }
         super::state::PlotChildHandleState::Area(area) => {
             apply_area_property(area, key, value, builtin)
         }
         super::state::PlotChildHandleState::Surface(plot) => {
             apply_surface_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Patch(plot) => {
+            apply_patch_property(plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Line3(plot) => {
             apply_line3_property(plot, key, value, builtin)
@@ -1187,6 +1267,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::ContourFill(plot) => {
             apply_contour_fill_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::ReferenceLine(plot) => {
+            apply_reference_line_property(plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Pie(plot) => {
             apply_pie_property(plot, key, value, builtin)
@@ -1398,6 +1481,76 @@ fn get_line_property(
     }
 }
 
+fn get_reference_line_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(line_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid reference line handle"),
+        ));
+    };
+    let orientation = match line.orientation {
+        runmat_plot::plots::ReferenceLineOrientation::Vertical => "vertical",
+        runmat_plot::plots::ReferenceLineOrientation::Horizontal => "horizontal",
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("constantline", line_handle.figure, line_handle.axes_index);
+            st.insert("Value", Value::Num(line.value));
+            st.insert("Orientation", Value::String(orientation.into()));
+            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("LineWidth", Value::Num(line.line_width as f64));
+            st.insert(
+                "LineStyle",
+                Value::String(line_style_name(line.line_style).into()),
+            );
+            st.insert(
+                "Label",
+                Value::String(line.label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "LabelOrientation",
+                Value::String(line.label_orientation.clone()),
+            );
+            st.insert(
+                "DisplayName",
+                Value::String(line.display_name.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "Visible",
+                Value::String(if line.visible { "on" } else { "off" }.into()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("constantline".into())),
+        Some("parent") => Ok(child_parent_handle(
+            line_handle.figure,
+            line_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("value") => Ok(Value::Num(line.value)),
+        Some("orientation") => Ok(Value::String(orientation.into())),
+        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+        Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+        Some("label") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some("labelorientation") => Ok(Value::String(line.label_orientation)),
+        Some("displayname") => Ok(Value::String(line.display_name.unwrap_or_default())),
+        Some("visible") => Ok(Value::String(
+            if line.visible { "on" } else { "off" }.into(),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported reference line property `{other}`"),
+        )),
+    }
+}
+
 fn get_stairs_property(
     stairs_handle: &super::state::SimplePlotHandleState,
     property: Option<&str>,
@@ -1584,6 +1737,89 @@ fn get_surface_property(
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported surface property `{other}`"),
+        )),
+    }
+}
+
+fn get_patch_property(
+    patch_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(patch_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid patch handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("patch", patch_handle.figure, patch_handle.axes_index);
+            st.insert("Faces", faces_tensor(patch.faces()));
+            st.insert("Vertices", vertices_tensor(patch.vertices()));
+            st.insert(
+                "XData",
+                tensor_from_vec(patch.vertices().iter().map(|p| p.x as f64).collect()),
+            );
+            st.insert(
+                "YData",
+                tensor_from_vec(patch.vertices().iter().map(|p| p.y as f64).collect()),
+            );
+            st.insert(
+                "ZData",
+                tensor_from_vec(patch.vertices().iter().map(|p| p.z as f64).collect()),
+            );
+            st.insert(
+                "FaceColor",
+                patch_color_property(patch.face_color_mode(), patch.face_color()),
+            );
+            st.insert(
+                "EdgeColor",
+                patch_edge_color_property(patch.edge_color_mode(), patch.edge_color()),
+            );
+            st.insert("FaceAlpha", Value::Num(patch.face_alpha() as f64));
+            st.insert("EdgeAlpha", Value::Num(patch.edge_alpha() as f64));
+            st.insert("LineWidth", Value::Num(patch.line_width() as f64));
+            st.insert("Visible", Value::Bool(patch.is_visible()));
+            if let Some(label) = patch.label() {
+                st.insert("DisplayName", Value::String(label.to_string()));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("patch".into())),
+        Some("parent") => Ok(child_parent_handle(
+            patch_handle.figure,
+            patch_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("faces") => Ok(faces_tensor(patch.faces())),
+        Some("vertices") => Ok(vertices_tensor(patch.vertices())),
+        Some("xdata") => Ok(tensor_from_vec(
+            patch.vertices().iter().map(|p| p.x as f64).collect(),
+        )),
+        Some("ydata") => Ok(tensor_from_vec(
+            patch.vertices().iter().map(|p| p.y as f64).collect(),
+        )),
+        Some("zdata") => Ok(tensor_from_vec(
+            patch.vertices().iter().map(|p| p.z as f64).collect(),
+        )),
+        Some("facecolor") | Some("color") => Ok(patch_color_property(
+            patch.face_color_mode(),
+            patch.face_color(),
+        )),
+        Some("edgecolor") => Ok(patch_edge_color_property(
+            patch.edge_color_mode(),
+            patch.edge_color(),
+        )),
+        Some("facealpha") => Ok(Value::Num(patch.face_alpha() as f64)),
+        Some("edgealpha") => Ok(Value::Num(patch.edge_alpha() as f64)),
+        Some("linewidth") => Ok(Value::Num(patch.line_width() as f64)),
+        Some("displayname") => Ok(Value::String(patch.label().unwrap_or_default().to_string())),
+        Some("visible") => Ok(Value::Bool(patch.is_visible())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported patch property `{other}`"),
         )),
     }
 }
@@ -2079,6 +2315,98 @@ fn get_image_property(
     }
 }
 
+fn get_heatmap_property(
+    heatmap_handle: &super::state::HeatmapHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let figure = super::state::clone_figure(heatmap_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap figure")))?;
+    let plot = figure
+        .plots()
+        .nth(heatmap_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid heatmap handle"),
+        ));
+    };
+    if !surface.image_mode {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: handle does not reference a heatmap plot"),
+        ));
+    }
+    let meta = figure
+        .axes_metadata(heatmap_handle.axes_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap axes")))?;
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("heatmap".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    heatmap_handle.figure,
+                    heatmap_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert(
+                "Title",
+                Value::String(meta.title.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "XLabel",
+                Value::String(meta.x_label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "YLabel",
+                Value::String(meta.y_label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "XDisplayLabels",
+                string_array_from_vec(heatmap_handle.x_labels.clone())?,
+            );
+            st.insert(
+                "YDisplayLabels",
+                string_array_from_vec(heatmap_handle.y_labels.clone())?,
+            );
+            st.insert(
+                "ColorData",
+                Value::Tensor(heatmap_handle.color_data.clone()),
+            );
+            st.insert("ColorbarVisible", Value::Bool(meta.colorbar_enabled));
+            st.insert(
+                "Colormap",
+                Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("heatmap".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("title") => Ok(Value::String(meta.title.clone().unwrap_or_default())),
+        Some("xlabel") => Ok(Value::String(meta.x_label.clone().unwrap_or_default())),
+        Some("ylabel") => Ok(Value::String(meta.y_label.clone().unwrap_or_default())),
+        Some("xdisplaylabels") => string_array_from_vec(heatmap_handle.x_labels.clone()),
+        Some("ydisplaylabels") => string_array_from_vec(heatmap_handle.y_labels.clone()),
+        Some("colordata") => Ok(Value::Tensor(heatmap_handle.color_data.clone())),
+        Some("colorbarvisible") | Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
+        Some("colormap") => Ok(Value::String(
+            format!("{:?}", meta.colormap).to_ascii_lowercase(),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported heatmap property `{other}`"),
+        )),
+    }
+}
+
 fn get_area_property(
     area_handle: &super::state::AreaHandleState,
     property: Option<&str>,
@@ -2365,6 +2693,89 @@ fn apply_image_property(
     Ok(())
 }
 
+fn apply_heatmap_property(
+    heatmap_handle: &super::state::HeatmapHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "title" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "title",
+            value,
+            builtin,
+        ),
+        "xlabel" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "xlabel",
+            value,
+            builtin,
+        ),
+        "ylabel" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "ylabel",
+            value,
+            builtin,
+        ),
+        "colorbar" | "colorbarvisible" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "colorbar",
+            value,
+            builtin,
+        ),
+        "colormap" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "colormap",
+            value,
+            builtin,
+        ),
+        "xdisplaylabels" => {
+            let labels = label_strings_from_value(value, builtin, "labels")?;
+            if labels.len() != heatmap_handle.x_labels.len() {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: XDisplayLabels length must match heatmap columns"),
+                ));
+            }
+            super::state::set_heatmap_display_labels(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                heatmap_handle.plot_index,
+                Some(labels),
+                None,
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
+        "ydisplaylabels" => {
+            let labels = label_strings_from_value(value, builtin, "labels")?;
+            if labels.len() != heatmap_handle.y_labels.len() {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: YDisplayLabels length must match heatmap rows"),
+                ));
+            }
+            super::state::set_heatmap_display_labels(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                heatmap_handle.plot_index,
+                None,
+                Some(labels),
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported heatmap property `{other}`"),
+        )),
+    }
+}
+
 fn apply_area_property(
     area_handle: &super::state::AreaHandleState,
     key: &str,
@@ -2402,6 +2813,68 @@ fn apply_line_property(
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
             apply_line_plot_properties(line, key, value, builtin);
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_reference_line_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot {
+            match key {
+                "value" => {
+                    if let Some(v) = value_as_f64(value) {
+                        if v.is_finite() {
+                            line.value = v;
+                        }
+                    }
+                }
+                "color" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        line.color = c;
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        if v > 0.0 {
+                            line.line_width = v as f32;
+                        }
+                    }
+                }
+                "linestyle" => {
+                    if let Some(s) = value_as_string(value) {
+                        line.line_style = parse_line_style_name_for_props(&s);
+                    }
+                }
+                "label" => {
+                    line.label = value_as_string(value).map(|s| s.to_string());
+                }
+                "labelorientation" => {
+                    if let Some(s) = value_as_string(value) {
+                        line.label_orientation = s.to_ascii_lowercase();
+                    }
+                }
+                "displayname" => {
+                    line.display_name = value_as_string(value).map(|s| s.to_string());
+                }
+                "visible" => {
+                    if let Some(v) = value_as_bool(value) {
+                        line.visible = v;
+                    } else if let Some(s) = value_as_string(value) {
+                        line.visible =
+                            !matches!(s.trim().to_ascii_lowercase().as_str(), "off" | "false");
+                    }
+                }
+                _ => {}
+            }
         }
     })
     .map_err(|err| map_figure_error(builtin, err))?;
@@ -2537,6 +3010,90 @@ fn apply_surface_property(
                 }
                 "displayname" => {
                     surface.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_patch_property(
+    patch_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(patch_handle.figure, patch_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
+            match key {
+                "facecolor" | "color" => {
+                    if let Some(text) = value_as_string(value) {
+                        match text.trim().to_ascii_lowercase().as_str() {
+                            "none" => patch
+                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::None),
+                            "flat" => patch
+                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Flat),
+                            _ => {
+                                if let Ok(c) = parse_color_value(
+                                    &LineStyleParseOptions::generic(builtin),
+                                    value,
+                                ) {
+                                    patch.set_face_color(c);
+                                    patch.set_face_color_mode(
+                                        runmat_plot::plots::PatchFaceColorMode::Color,
+                                    );
+                                }
+                            }
+                        }
+                    } else if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        patch.set_face_color(c);
+                        patch.set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Color);
+                    }
+                }
+                "edgecolor" => {
+                    if let Some(text) = value_as_string(value) {
+                        if text.trim().eq_ignore_ascii_case("none") {
+                            patch.set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::None);
+                        } else if let Ok(c) =
+                            parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                        {
+                            patch.set_edge_color(c);
+                            patch
+                                .set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::Color);
+                        }
+                    } else if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        patch.set_edge_color(c);
+                        patch.set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::Color);
+                    }
+                }
+                "facealpha" => {
+                    if let Some(v) = value_as_f64(value) {
+                        patch.set_face_alpha(v as f32);
+                    }
+                }
+                "edgealpha" => {
+                    if let Some(v) = value_as_f64(value) {
+                        patch.set_edge_alpha(v as f32);
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        patch.set_line_width(v as f32);
+                    }
+                }
+                "displayname" => {
+                    patch.set_label(value_as_string(value).map(|s| s.to_string()));
+                }
+                "visible" => {
+                    if let Some(v) = value_as_bool(value) {
+                        patch.set_visible(v);
+                    }
                 }
                 _ => {}
             }
@@ -2806,6 +3363,31 @@ fn apply_axes_text_alias(
     Ok(())
 }
 
+fn validate_axes_text_alias(
+    kind: PlotObjectKind,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if value_as_string(value).is_some() {
+        return Ok(());
+    }
+
+    let scalar = handle_scalar(value, builtin)?;
+    let (src_handle, src_axes, src_kind) =
+        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
+    if src_kind != kind {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: expected a matching text handle for `{}`",
+                key_name(kind)
+            ),
+        ));
+    }
+    axes_metadata_snapshot(src_handle, src_axes).map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
 fn apply_figure_text_alias(
     handle: FigureHandle,
     kind: PlotObjectKind,
@@ -2929,6 +3511,44 @@ fn tensor_from_vec(data: Vec<f64>) -> Value {
     })
 }
 
+fn string_array_from_vec(data: Vec<String>) -> BuiltinResult<Value> {
+    let cols = data.len();
+    let array = StringArray::new(data, vec![1, cols])
+        .map_err(|e| plotting_error("get", format!("get: {e}")))?;
+    Ok(Value::StringArray(array))
+}
+
+pub(crate) fn label_strings_from_value(
+    value: &Value,
+    builtin: &'static str,
+    label_context: &str,
+) -> BuiltinResult<Vec<String>> {
+    match value {
+        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .map(|item| {
+                value_as_text_string(item).ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: {label_context} must contain text values"),
+                    )
+                })
+            })
+            .collect(),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
+        Value::String(text) => Ok(vec![text.clone()]),
+        Value::Tensor(tensor) => Ok(tensor.data.iter().map(|v| v.to_string()).collect()),
+        Value::Int(i) => Ok(vec![i.to_i64().to_string()]),
+        Value::Num(v) => Ok(vec![v.to_string()]),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported {label_context} value {other:?}"),
+        )),
+    }
+}
+
 fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
     let rows = data.len();
     let cols = data.first().map(|row| row.len()).unwrap_or(0);
@@ -2940,6 +3560,68 @@ fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
         data: flat,
         dtype: runmat_builtins::NumericDType::F64,
     })
+}
+
+fn vertices_tensor(vertices: &[glam::Vec3]) -> Value {
+    let rows = vertices.len();
+    let cols = 3;
+    let mut data = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for vertex in vertices {
+            data.push(match col {
+                0 => vertex.x as f64,
+                1 => vertex.y as f64,
+                _ => vertex.z as f64,
+            });
+        }
+    }
+    Value::Tensor(runmat_builtins::Tensor {
+        rows,
+        cols,
+        shape: vec![rows, cols],
+        data,
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn faces_tensor(faces: &[Vec<usize>]) -> Value {
+    let rows = faces.len();
+    let cols = faces.iter().map(|face| face.len()).max().unwrap_or(0);
+    let mut data = Vec::with_capacity(rows * cols);
+    for col in 0..cols {
+        for face in faces {
+            data.push(
+                face.get(col)
+                    .map(|idx| *idx as f64 + 1.0)
+                    .unwrap_or(f64::NAN),
+            );
+        }
+    }
+    Value::Tensor(runmat_builtins::Tensor {
+        rows,
+        cols,
+        shape: vec![rows, cols],
+        data,
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: glam::Vec4) -> Value {
+    match mode {
+        runmat_plot::plots::PatchFaceColorMode::None => Value::String("none".into()),
+        runmat_plot::plots::PatchFaceColorMode::Flat => Value::String("flat".into()),
+        runmat_plot::plots::PatchFaceColorMode::Color => Value::String(color_to_short_name(color)),
+    }
+}
+
+fn patch_edge_color_property(
+    mode: runmat_plot::plots::PatchEdgeColorMode,
+    color: glam::Vec4,
+) -> Value {
+    match mode {
+        runmat_plot::plots::PatchEdgeColorMode::None => Value::String("none".into()),
+        runmat_plot::plots::PatchEdgeColorMode::Color => Value::String(color_to_short_name(color)),
+    }
 }
 
 fn insert_line_marker_struct_props(

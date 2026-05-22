@@ -1,54 +1,90 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import LazyVideo from "@/components/LazyVideo";
+import Media, { type MediaTone } from "@/components/Media";
 
-export default function Hero() {
+interface HeroLink {
+  label: ReactNode;
+  href: string;
+}
+
+interface HeroProps {
+  title: string;
+  description: string;
+  primaryCta: HeroLink;
+  secondaryCta: HeroLink;
+  supportingLinks: {
+    prefix: string;
+    links: HeroLink[];
+    suffix: string;
+  };
+  media: {
+    label: string;
+    note?: string;
+    tone?: MediaTone;
+  };
+}
+
+export default function Hero({
+  title,
+  description,
+  primaryCta,
+  secondaryCta,
+  supportingLinks,
+  media,
+}: HeroProps) {
   return (
-    <section className="w-full py-16 md:py-24 lg:py-32" id="hero">
+    <section
+      className="relative isolate -mt-px overflow-hidden bg-background pt-24 text-foreground md:pt-32"
+      id="hero"
+    >
+      <div className="pointer-events-none" />
       <div className="container mx-auto px-4 md:px-6">
-        <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
-          <div className="flex flex-col space-y-6 text-left items-start">
-            <p className="font-heading text-left leading-tight tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]" role="heading" aria-level={2}>
-              Run your math, blazing fast
-            </p>
-            <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem] sm:text-base">
-              Write MATLAB-syntax code and run it with GPU acceleration, in your browser, on the desktop, or from the CLI. No license required.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-              <Button
-                size="lg"
-                asChild
-                className="h-12 px-8 text-base font-semibold rounded-none bg-[hsl(var(--brand))] hover:bg-[hsl(var(--brand))]/90 text-white border-0 shadow-none"
-              >
-                <Link href="/sandbox">Open Sandbox</Link>
-              </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base rounded-none">
-                <Link href="/download">Download</Link>
-              </Button>
-            </div>
-          </div>
-
-          <Link
-            href="/docs/reference/builtins/surf#wave-interference-from-8-point-sources"
-            className="group relative rounded-lg border border-border overflow-hidden min-h-[360px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            <LazyVideo
-              className="w-full h-auto min-h-[360px] object-cover"
-              muted
-              loop
-              playsInline
-              poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
-              mobilePoster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation-720.webp"
-              initialPosterVariant="mobilePoster"
-              aria-label="RunMat wave simulation demo"
+        <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
+          <h1 className="text-5xl font-semibold tracking-tight sm:text-6xl md:text-7xl">
+            {title}
+          </h1>
+          <p className="mt-5 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+            {description}
+          </p>
+          <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Button
+              size="lg"
+              asChild
+              className="h-11 rounded-none border-0 bg-[hsl(var(--brand))] px-7 text-sm font-semibold text-white shadow-none hover:bg-[hsl(var(--brand))]/90"
             >
-              <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
-            </LazyVideo>
-            <span className="hidden sm:flex absolute bottom-2 right-2 items-center gap-1 rounded-md bg-black/40 backdrop-blur-sm px-2 py-1 text-[10px] font-medium text-white/70 transition-colors group-hover:text-white group-hover:bg-black/60">
-              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
-              surf() example
-            </span>
-          </Link>
+              <Link href={primaryCta.href}>{primaryCta.label}</Link>
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              asChild
+              className="h-11 rounded-none border-border bg-card px-7 text-sm font-medium text-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
+            >
+              <Link href={secondaryCta.href}>{secondaryCta.label}</Link>
+            </Button>
+          </div>
+          <p className="mt-5 text-xs text-muted-foreground">
+            {supportingLinks.prefix}{" "}
+            {supportingLinks.links.map((link, index) => (
+              <span key={link.href}>
+                <Link href={link.href} className="underline underline-offset-2">
+                  {link.label}
+                </Link>
+                {index < supportingLinks.links.length - 1 ? " and " : ""}
+              </span>
+            ))}
+            {supportingLinks.suffix}
+          </p>
+        </div>
+
+        <div className="mx-auto mt-24 max-w-5xl pb-20 md:mt-32">
+          <Media
+            label={media.label}
+            note={media.note}
+            tone={media.tone}
+            className="min-h-[360px] rounded-3xl shadow-2xl shadow-foreground/10"
+          />
         </div>
       </div>
     </section>

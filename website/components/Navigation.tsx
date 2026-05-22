@@ -16,18 +16,49 @@ import {
 import { Button } from "@/components/ui/button";
 import { Download, Menu, BookOpen, FileText, Minus } from "lucide-react";
 import { SiGithub } from "react-icons/si";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ThemeToggle } from "./ThemeToggle";
 import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
   const router = useRouter();
+  const projectHref = "/p";
+  const primaryCtaHref = authenticated ? "/p" : "/sandbox";
+  const primaryCtaLabel = authenticated ? "Open RunMat" : "Try in Browser";
+  const secondaryCtaLabel = authenticated ? "My Projects" : "Sign In";
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAuthStatus = async () => {
+      try {
+        const response = await fetch("/api/auth-status", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!response.ok) {
+          return;
+        }
+        const result = (await response.json()) as { authenticated?: boolean };
+        if (!cancelled) {
+          setAuthenticated(result.authenticated === true);
+        }
+      } catch {
+        // Keep logged-out copy when the lightweight status probe is unavailable.
+      }
+    };
+    void loadAuthStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleTryInBrowserClick = () => {
     trackWebsiteEvent("website.nav.cta_clicked", {
       category: "navigation",
-      label: "try_in_browser",
+      label: authenticated ? "open_runmat" : "try_in_browser",
     });
   };
   const handleDocsClick = () => {
@@ -38,7 +69,7 @@ export default function Navigation() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 py-2">
       <div className="container mx-auto flex items-center justify-between px-4 md:px-6">
         <div className="mr-4 hidden md:flex">
           <Link href="/" className="mr-6 flex items-center">
@@ -240,29 +271,29 @@ export default function Navigation() {
             </Link>
             <ThemeToggle />
             <Link
-              href="/download"
+              href="/download/latest"
               className="inline-flex items-center gap-1.5 h-11 px-4 text-sm text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               <Download className="h-4 w-4" />
               Download
             </Link>
             <Link
-              href="/o/"
-              className="inline-flex items-center justify-center h-11 px-5 text-sm font-medium whitespace-nowrap border border-border text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              href={projectHref}
+              className="inline-flex items-center justify-center h-11 px-5 text-sm font-medium whitespace-nowrap border-x border-border text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
-              Sign In
+              {secondaryCtaLabel}
             </Link>
             <Link
-              href="/sandbox"
+              href={primaryCtaHref}
               className="inline-flex items-center justify-center h-11 px-6 text-sm font-semibold whitespace-nowrap bg-[hsl(var(--brand))] hover:bg-[hsl(var(--brand))]/90 text-white transition-colors"
               onClick={handleTryInBrowserClick}
               target="_blank"
               rel="noopener noreferrer"
-              data-ph-capture-attribute-destination="sandbox"
+              data-ph-capture-attribute-destination={authenticated ? "projects" : "sandbox"}
               data-ph-capture-attribute-source="nav-desktop"
-              data-ph-capture-attribute-cta="try-in-browser"
+              data-ph-capture-attribute-cta={authenticated ? "open-runmat" : "try-in-browser"}
             >
-              Try in Browser
+              {primaryCtaLabel}
             </Link>
           </nav>
         </div>
@@ -359,7 +390,7 @@ export default function Navigation() {
                 Pricing
               </Link>
               <Link
-                href="/download"
+                href="/download/latest"
                 className="flex w-full items-center p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
@@ -367,7 +398,7 @@ export default function Navigation() {
                 Download
               </Link>
               <Link
-                href="https://runmat.com/sandbox"
+                href={primaryCtaHref}
                 className="flex w-full items-center justify-center mt-2 p-3 text-sm font-semibold bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90"
                 onClick={() => {
                   setMobileMenuOpen(false);
@@ -376,14 +407,14 @@ export default function Navigation() {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Try in Browser
+                {primaryCtaLabel}
               </Link>
               <Link
-                href="https://runmat.com/o/"
+                href={projectHref}
                 className="flex w-full items-center justify-center p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                Sign In
+                {secondaryCtaLabel}
               </Link>
             </div>
           </div>

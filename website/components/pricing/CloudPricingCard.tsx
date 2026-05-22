@@ -4,12 +4,11 @@ import Link from "next/link";
 import { useState } from "react";
 import { Check } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type CloudTier = "hobby" | "pro" | "team";
+type CloudTier = "pro" | "team";
 
 type Feature = string | { label: string; href: string };
 
@@ -23,68 +22,52 @@ interface CloudTierDef {
 }
 
 const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
-  hobby: {
-    price: "$0",
-    description: "Sign up to get cloud storage and versioning.",
-    features: [
-      "Unlimited projects",
-      { label: "100 MB storage", href: "#compare-storage" },
-      "Version history (uses storage)",
-      "Community support",
-    ],
-    ctaLabel: "Start free",
-    ctaHref: "/sandbox",
-  },
   pro: {
-    price: "$30/mo per user",
+    price: "$30/month per user",
     description: "For individuals and small teams shipping real work.",
-    inheritsFrom: "Everything in Hobby, plus:",
     features: [
-      { label: "10 GB storage", href: "#compare-storage" },
+      "Code versioning and execution history",
+      "Team collaboration and sync",
+      "Elastic remote filesystem (10GB included)",
+      "$10/mo LLM credits",
     ],
-    ctaLabel: "Get started",
-    ctaHref: "/sandbox",
+    ctaLabel: "Sign up",
+    ctaHref: "/login",
   },
   team: {
     price: "$100/mo per user",
     description: "For organizations that need SSO and centralized identity management.",
     inheritsFrom: "Everything in Pro, plus:",
     features: [
-      { label: "100 GB storage", href: "#compare-storage" },
-      "SSO / SAML (and SCIM)",
+      "SSO / SAML / SCIM",
+      "$50/mo LLM credits",
+      "100 GB storage included",
       "Priority support",
     ],
     ctaLabel: "Get started",
-    ctaHref: "/sandbox",
+    ctaHref: "/login",
   },
 };
 
 const cloudTierTabs: { id: CloudTier; label: string }[] = [
-  { id: "hobby", label: "Hobby" },
   { id: "pro", label: "Pro" },
   { id: "team", label: "Team" },
 ];
 
 export default function CloudPricingCard() {
-  const [activeTier, setActiveTier] = useState<CloudTier>("hobby");
+  const [activeTier, setActiveTier] = useState<CloudTier>("pro");
   const currentTier = cloudTierConfig[activeTier];
 
   return (
     <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
-        <Badge className="w-fit bg-secondary text-foreground border-border hover:bg-secondary">
-          Cloud
-        </Badge>
-        <CardTitle className="text-lg font-semibold text-foreground">RunMat Cloud</CardTitle>
-        <p className="text-[0.938rem] text-foreground">Everything in RunMat, plus cloud storage and versioning.</p>
-        <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
-      </CardHeader>
-      <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">
-        <div className="flex min-h-0 flex-1 flex-col space-y-5">
-          <div
+        <CardTitle className="text-3xl font-semibold text-foreground">{currentTier.price}</CardTitle>
+        <p className="text-[0.938rem] text-foreground">High-performance computing platform.</p>
+
+        <div
             role="tablist"
-            aria-label="RunMat Cloud tiers"
-            className="grid min-w-[7rem] grid-cols-3 gap-1 rounded-lg border border-border/60 bg-background/50 p-1"
+          aria-label="RunMat tiers"
+          className="grid min-w-[7rem] grid-cols-2 gap-1 rounded-lg border border-border/60 bg-background/50 p-1 pb-0"
           >
             {cloudTierTabs.map(({ id, label }) => {
               const selected = activeTier === id;
@@ -110,6 +93,10 @@ export default function CloudPricingCard() {
               );
             })}
           </div>
+      </CardHeader>
+      <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">
+        <div className="flex min-h-0 flex-1 flex-col space-y-5">
+
 
           <div
             role="tabpanel"

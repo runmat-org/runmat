@@ -1,0 +1,40 @@
+{
+  "title": "yline",
+  "category": "plotting",
+  "keywords": [
+    "yline",
+    "horizontal reference line",
+    "constant line",
+    "plot annotation"
+  ],
+  "summary": "Draw horizontal reference lines on the current axes.",
+  "description": "`yline` adds one or more horizontal reference lines to the current axes. It accepts scalar or vector y-coordinates, MATLAB line specs, labels, and common line name/value styling such as `Color`, `LineStyle`, `LineWidth`, and `DisplayName`.",
+  "behaviors": [
+    "`yline(y)` adds a horizontal reference line at each coordinate in `y`.",
+    "Reference lines append to the current axes without replacing existing plot content.",
+    "Line spans follow the active axes limits, including later `xlim` and `ylim` changes.",
+    "The returned handle supports `get` and `set` for `Value`, `Color`, `LineWidth`, `LineStyle`, `Label`, `LabelOrientation`, `DisplayName`, and `Visible`."
+  ],
+  "examples": [
+    {
+      "description": "Add a zero baseline",
+      "input": "plot(-5:5, (-5:5).^2 - 10);\nyline(0, 'k', 'LineWidth', 1);",
+      "output": "% Adds a black horizontal reference line at y = 0"
+    },
+    {
+      "description": "Label a baseline",
+      "input": "plot(1:10, rand(1, 10));\nyline(0.5, ':', 'Baseline', 'LabelOrientation', 'horizontal');",
+      "output": "% Adds a dotted labeled horizontal reference line"
+    }
+  ],
+  "links": [
+    {
+      "label": "xline",
+      "url": "./xline"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ]
+}

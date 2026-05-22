@@ -518,7 +518,7 @@ where
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
-    use tracing::info;
+    use tracing::warn;
 
     #[test]
     fn log_hook_receives_record() {
@@ -537,7 +537,7 @@ mod tests {
             default_filter: None,
         });
 
-        info!("hello world");
+        warn!("hello world");
 
         let items = captured.lock().unwrap();
         assert!(!items.is_empty());
@@ -561,9 +561,9 @@ mod tests {
             default_filter: None,
         });
 
-        let span = tracing::info_span!("test_span");
+        let span = tracing::warn_span!("test_span");
         let _enter = span.enter();
-        info!("inside span");
+        warn!("inside span");
 
         let items = captured.lock().unwrap();
         assert!(!items.is_empty());

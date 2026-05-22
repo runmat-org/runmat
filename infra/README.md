@@ -1,4 +1,4 @@
-## RunMat Cloud Infrastructure
+## RunMat App Infrastructure
 
 This directory provisions the RunMat services on Google Cloud Platform.
 

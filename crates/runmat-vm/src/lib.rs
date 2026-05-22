@@ -36,7 +36,8 @@ pub use layout::{
     derive_layout, LayoutError, VmAssemblyLayout, VmEntrypointLayout, VmFunctionLayout, VmSlotId,
 };
 pub use runtime::workspace::{
-    push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
+    push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,
+    PendingWorkspaceGuard, WorkspaceAssignedReport,
 };
 
 pub async fn call_method_or_member_index_named_with_outputs(

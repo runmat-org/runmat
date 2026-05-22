@@ -1,4 +1,5 @@
 use crate::runtime::call_stack::error_namespace;
+use crate::runtime::workspace::mark_workspace_assigned;
 use runmat_builtins::{MException, Value};
 use runmat_runtime::RuntimeError;
 
@@ -52,6 +53,7 @@ pub fn redirect_exception_to_catch(
             let mex = parse_exception(&err);
             *last_exception = Some(mex.clone());
             vars[var_idx] = Value::MException(mex);
+            mark_workspace_assigned(var_idx);
         }
         *pc = catch_pc;
         ExceptionHandling::Caught

@@ -7,6 +7,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::math::optim::brent::{brent_zero, BrentParams, BrentZeroBracket};
 use crate::builtins::math::optim::common::{
     call_scalar_function, optim_error, option_f64, option_string, option_usize,
 };
@@ -61,7 +62,23 @@ async fn fzero_builtin(function: Value, x: Value, rest: Vec<Value>) -> BuiltinRe
     let options = parse_options(rest.first())?;
     let opts = FzeroOptions::from_struct(options.as_ref())?;
     let bracket = initial_bracket(&function, x, &opts).await?;
-    let root = brent(&function, bracket, &opts).await?;
+    let root = brent_zero(
+        NAME,
+        &function,
+        BrentZeroBracket {
+            a: bracket.a,
+            b: bracket.b,
+            fa: bracket.fa,
+            fb: bracket.fb,
+            evals: bracket.evals,
+        },
+        BrentParams {
+            tol_x: opts.tol_x,
+            max_iter: opts.max_iter,
+            max_fun_evals: opts.max_fun_evals,
+        },
+    )
+    .await?;
     Ok(Value::Num(root))
 }
 
@@ -246,107 +263,10 @@ async fn expand_bracket(
     ))
 }
 
-async fn brent(function: &Value, bracket: Bracket, options: &FzeroOptions) -> BuiltinResult<f64> {
-    if bracket.fa == 0.0 || bracket.a == bracket.b {
-        return Ok(bracket.a);
-    }
-    if bracket.fb == 0.0 {
-        return Ok(bracket.b);
-    }
-
-    let mut a = bracket.a;
-    let mut b = bracket.b;
-    let mut c = a;
-    let mut fa = bracket.fa;
-    let mut fb = bracket.fb;
-    let mut fc = fa;
-    let mut d = b - a;
-    let mut e = d;
-    let mut evals = bracket.evals;
-
-    for _ in 0..options.max_iter {
-        if fb.signum() == fc.signum() {
-            c = a;
-            fc = fa;
-            d = b - a;
-            e = d;
-        }
-        if fc.abs() < fb.abs() {
-            let old_b = b;
-            let old_fb = fb;
-            a = b;
-            fa = fb;
-            b = c;
-            fb = fc;
-            c = old_b;
-            fc = old_fb;
-        }
-
-        let tol = 2.0 * f64::EPSILON * b.abs() + 0.5 * options.tol_x;
-        let midpoint = 0.5 * (c - b);
-        if midpoint.abs() <= tol || fb == 0.0 {
-            return Ok(b);
-        }
-        if evals >= options.max_fun_evals {
-            return Err(optim_error(
-                NAME,
-                "fzero: exceeded maximum function evaluations",
-            ));
-        }
-
-        if e.abs() >= tol && fa.abs() > fb.abs() {
-            let s = fb / fa;
-            let (mut p, mut q) = if a == c {
-                (2.0 * midpoint * s, 1.0 - s)
-            } else {
-                let q = fa / fc;
-                let r = fb / fc;
-                (
-                    s * (2.0 * midpoint * q * (q - r) - (b - a) * (r - 1.0)),
-                    (q - 1.0) * (r - 1.0) * (s - 1.0),
-                )
-            };
-            if p > 0.0 {
-                q = -q;
-            }
-            p = p.abs();
-            if interpolation_step_accepted(p, q, midpoint, tol, e) {
-                e = d;
-                d = p / q;
-            } else {
-                d = midpoint;
-                e = d;
-            }
-        } else {
-            d = midpoint;
-            e = d;
-        }
-
-        a = b;
-        fa = fb;
-        b += if d.abs() > tol {
-            d
-        } else if midpoint >= 0.0 {
-            tol
-        } else {
-            -tol
-        };
-        fb = call_scalar_function(NAME, function, b).await?;
-        evals += 1;
-    }
-
-    Err(optim_error(NAME, "fzero: exceeded maximum iterations"))
-}
-
-fn interpolation_step_accepted(p: f64, q: f64, midpoint: f64, tol: f64, e: f64) -> bool {
-    let min_a = 3.0 * midpoint * q - (tol * q).abs();
-    let min_b = (e * q).abs();
-    2.0 * p < min_a.min(min_b)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::math::optim::brent::interpolation_step_accepted;
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
     use std::sync::Arc;
@@ -393,7 +313,6 @@ mod tests {
             other => panic!("unexpected value {other:?}"),
         }
     }
-
     #[test]
     fn fzero_accepts_semantic_function_handle_callback() {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(

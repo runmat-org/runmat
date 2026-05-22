@@ -95,11 +95,14 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<bool> {
 
     let handle = registry::take_handle(fid)
         .ok_or_else(|| feof_error(format!("feof: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let mut file = handle
+    let mut guard = handle
         .lock()
         .map_err(|_| feof_error("feof: failed to lock file handle (poisoned mutex)"))?;
+    let file = guard
+        .as_mut()
+        .ok_or_else(|| feof_error(format!("feof: {INVALID_IDENTIFIER_MESSAGE}")))?;
 
-    let position = file.seek(SeekFrom::Current(0)).map_err(|err| {
+    let position = file.stream_position().map_err(|err| {
         build_runtime_error(format!("feof: failed to query file position: {err}"))
             .with_builtin(BUILTIN_NAME)
             .with_source(err)

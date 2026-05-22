@@ -410,10 +410,7 @@ impl RunMatSession {
 
         if preserve_layout_var_names && bytecode.layout.is_some() {
             for (slot, name) in &id_to_name {
-                bytecode
-                    .var_names
-                    .entry(*slot)
-                    .or_insert_with(|| name.clone());
+                bytecode.var_names.insert(*slot, name.clone());
             }
         } else {
             bytecode.var_names = id_to_name.clone();
@@ -552,21 +549,23 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            if let Some(var_id) = display_context.first_assign_var {
-                                if let Some(name) = id_to_name.get(&var_id) {
-                                    assigned_this_execution.insert(name.clone());
-                                }
-                                if var_id < self.variable_array.len() {
-                                    let assignment_value = self.variable_array[var_id].clone();
-                                    if !is_semicolon_suppressed {
-                                        result_value = Some(assignment_value);
-                                        if self.verbose {
-                                            debug!("JIT assignment result: {result_value:?}");
-                                        }
-                                    } else {
-                                        suppressed_value = Some(assignment_value);
-                                        if self.verbose {
-                                            debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                            if !display_context.single_stmt_non_assign {
+                                if let Some(var_id) = display_context.first_assign_var {
+                                    if let Some(name) = id_to_name.get(&var_id) {
+                                        assigned_this_execution.insert(name.clone());
+                                    }
+                                    if var_id < self.variable_array.len() {
+                                        let assignment_value = self.variable_array[var_id].clone();
+                                        if !is_semicolon_suppressed {
+                                            result_value = Some(assignment_value);
+                                            if self.verbose {
+                                                debug!("JIT assignment result: {result_value:?}");
+                                            }
+                                        } else {
+                                            suppressed_value = Some(assignment_value);
+                                            if self.verbose {
+                                                debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                                            }
                                         }
                                     }
                                 }
@@ -645,28 +644,31 @@ impl RunMatSession {
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if stmt_count == 1 {
-                        if let Some(var_id) = display_context.first_assign_var {
-                            if let Some(name) = id_to_name.get(&var_id) {
-                                assigned_this_execution.insert(name.clone());
-                            }
-                            // For assignments, capture the assigned value for both display and type info
-                            if var_id < self.variable_array.len() {
-                                let assignment_value = self.variable_array[var_id].clone();
-                                if !is_semicolon_suppressed {
-                                    result_value = Some(assignment_value);
-                                    if self.verbose {
-                                        debug!("Interpreter assignment result: {result_value:?}");
-                                    }
-                                } else {
-                                    suppressed_value = Some(assignment_value);
-                                    if self.verbose {
-                                        debug!("Interpreter assignment suppressed due to semicolon, captured for type info");
+                        if !display_context.single_stmt_non_assign {
+                            if let Some(var_id) = display_context.first_assign_var {
+                                if let Some(name) = id_to_name.get(&var_id) {
+                                    assigned_this_execution.insert(name.clone());
+                                }
+                                // For assignments, capture the assigned value for both display and type info
+                                if var_id < self.variable_array.len() {
+                                    let assignment_value = self.variable_array[var_id].clone();
+                                    if !is_semicolon_suppressed {
+                                        result_value = Some(assignment_value);
+                                        if self.verbose {
+                                            debug!("Interpreter assignment result: {result_value:?}");
+                                        }
+                                    } else {
+                                        suppressed_value = Some(assignment_value);
+                                        if self.verbose {
+                                            debug!("Interpreter assignment suppressed due to semicolon, captured for type info");
+                                        }
                                     }
                                 }
                             }
                         } else if !is_expression_stmt
                             && !results.is_empty()
                             && !is_semicolon_suppressed
+                            && !display_context.single_stmt_non_assign
                             && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
                         {
                             result_value = Some(results[0].clone());
@@ -723,23 +725,29 @@ impl RunMatSession {
         let last_assign_var = display_context.last_assign_var;
         let last_expr_emits = display_context.last_expr_emits;
         if !is_semicolon_suppressed && result_value.is_none() {
-            if last_assign_var.is_some() || last_expr_emits {
+            let can_emit_from_context = !display_var_ids.is_empty() || last_expr_emits;
+            if can_emit_from_context {
                 if let Some(value) = runmat_runtime::console::take_last_value_output() {
                     result_value = Some(value);
                 }
-            }
-            if result_value.is_none() {
-                if last_assign_var.is_some() {
-                    if let Some(var_id) = last_emit_var_index(&bytecode) {
+                if result_value.is_none() {
+                    if let Some(var_id) = last_store_var_index(&bytecode) {
                         if var_id < self.variable_array.len() {
                             result_value = Some(self.variable_array[var_id].clone());
                         }
                     }
-                }
-                if result_value.is_none() {
-                    if let Some(var_id) = last_assign_var {
-                        if var_id < self.variable_array.len() {
-                            result_value = Some(self.variable_array[var_id].clone());
+                    if result_value.is_none() {
+                        if let Some(var_id) = last_assign_var {
+                            if var_id < self.variable_array.len() {
+                                result_value = Some(self.variable_array[var_id].clone());
+                            }
+                        }
+                    }
+                    if result_value.is_none() {
+                        if let Some(var_id) = last_emit_var_index(&bytecode) {
+                            if var_id < self.variable_array.len() {
+                                result_value = Some(self.variable_array[var_id].clone());
+                            }
                         }
                     }
                 }
@@ -788,7 +796,6 @@ impl RunMatSession {
                     .difference(&prev_assigned_snapshot)
                     .cloned()
                     .collect();
-                changed_names.extend(assigned_this_execution.iter().cloned());
 
                 for name in &current_names {
                     let Some(var_id) = mutated_names.get(name).copied() else {
@@ -822,17 +829,35 @@ impl RunMatSession {
                     }
                 }
             } else {
-                for name in &assigned_this_execution {
-                    if let Some(var_id) =
-                        id_to_name
-                            .iter()
-                            .find_map(|(vid, n)| if n == name { Some(*vid) } else { None })
-                    {
-                        if var_id < self.variable_array.len() {
-                            let value_clone = self.variable_array[var_id].clone();
-                            self.workspace_values
-                                .insert(name.clone(), value_clone.clone());
-                            workspace_updates.push(workspace_entry(name, &value_clone));
+                let previous_workspace = self.workspace_values.clone();
+                let mut rebuilt_workspace = HashMap::new();
+                let mut changed_names: HashSet<String> = HashSet::new();
+
+                for (name, var_id) in &execution_vars {
+                    if *var_id >= self.variable_array.len() {
+                        continue;
+                    }
+                    let value_clone = self.variable_array[*var_id].clone();
+                    if previous_workspace.get(name) != Some(&value_clone) {
+                        changed_names.insert(name.clone());
+                    }
+                    self.bind_workspace_slot(name.clone(), *var_id);
+                    rebuilt_workspace.insert(name.clone(), value_clone);
+                }
+
+                let removed_names: HashSet<String> = previous_workspace
+                    .keys()
+                    .filter(|name| !rebuilt_workspace.contains_key(*name))
+                    .cloned()
+                    .collect();
+
+                self.workspace_values = rebuilt_workspace;
+                if !removed_names.is_empty() {
+                    workspace_snapshot_force_full = true;
+                } else {
+                    for name in changed_names {
+                        if let Some(value_clone) = self.workspace_values.get(&name).cloned() {
+                            workspace_updates.push(workspace_entry(&name, &value_clone));
                         }
                     }
                 }
@@ -855,17 +880,26 @@ impl RunMatSession {
 
         if !is_expression_stmt
             && !is_semicolon_suppressed
-            && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
-            && result_value.is_none()
+            && last_assign_var.is_some()
+            && !display_context.single_stmt_non_assign
+            && !display_var_ids.is_empty()
         {
-            if let Some(v) = self
-                .variable_array
-                .iter()
-                .rev()
-                .find(|v| !matches!(v, Value::Num(0.0)))
-                .cloned()
+            if let Some(var_id) = last_store_var_index(&bytecode) {
+                if var_id < self.variable_array.len() {
+                    result_value = Some(self.variable_array[var_id].clone());
+                }
+            } else if matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+                && result_value.is_none()
             {
-                result_value = Some(v);
+                if let Some(v) = self
+                    .variable_array
+                    .iter()
+                    .rev()
+                    .find(|v| !matches!(v, Value::Num(0.0)))
+                    .cloned()
+                {
+                    result_value = Some(v);
+                }
             }
         }
 

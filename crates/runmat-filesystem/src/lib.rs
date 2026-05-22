@@ -32,9 +32,15 @@ use data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 
-pub trait FileHandle: Read + Write + Seek + Send + Sync {}
+#[async_trait(?Send)]
+pub trait FileHandle: Read + Write + Seek + Send + Sync {
+    async fn flush_async(&mut self) -> io::Result<()> {
+        self.flush()
+    }
+}
 
-impl<T> FileHandle for T where T: Read + Write + Seek + Send + Sync + 'static {}
+#[async_trait(?Send)]
+impl FileHandle for std::fs::File {}
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenFlags {
@@ -91,6 +97,15 @@ impl OpenOptions {
     pub fn open(&self, path: impl AsRef<Path>) -> io::Result<File> {
         let resolved = resolve_path(path.as_ref());
         with_provider(|provider| provider.open(&resolved, &self.flags)).map(File::from_handle)
+    }
+
+    pub async fn open_async(&self, path: impl AsRef<Path>) -> io::Result<File> {
+        let resolved = resolve_path(path.as_ref());
+        let provider = current_provider();
+        provider
+            .open_async(&resolved, &self.flags)
+            .await
+            .map(File::from_handle)
     }
 
     pub fn flags(&self) -> &OpenFlags {
@@ -268,6 +283,9 @@ impl DirEntry {
 #[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>>;
+    async fn open_async(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+        self.open(path, flags)
+    }
     async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
     async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
     async fn remove_file(&self, path: &Path) -> io::Result<()>;
@@ -352,10 +370,26 @@ impl File {
         opts.open(path)
     }
 
+    pub async fn open_async(path: impl AsRef<Path>) -> io::Result<Self> {
+        let mut opts = OpenOptions::new();
+        opts.read(true);
+        opts.open_async(path).await
+    }
+
     pub fn create(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut opts = OpenOptions::new();
         opts.write(true).create(true).truncate(true);
         opts.open(path)
+    }
+
+    pub async fn create_async(path: impl AsRef<Path>) -> io::Result<Self> {
+        let mut opts = OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        opts.open_async(path).await
+    }
+
+    pub async fn flush_async(&mut self) -> io::Result<()> {
+        self.inner.flush_async().await
     }
 }
 
@@ -655,13 +689,73 @@ fn default_provider() -> Arc<dyn FsProvider> {
 mod tests {
     use super::*;
     use once_cell::sync::Lazy;
-    use std::io::{Read, Write};
+    use std::io::{Read, Seek, SeekFrom, Write};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     struct UnsupportedProvider;
+
+    struct AsyncOpenProvider {
+        opened_async: Arc<Mutex<bool>>,
+        flushed_async: Arc<Mutex<bool>>,
+    }
+
+    struct AsyncTestHandle {
+        cursor: usize,
+        data: Vec<u8>,
+        flushed_async: Arc<Mutex<bool>>,
+    }
+
+    impl Read for AsyncTestHandle {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let remaining = self.data.len().saturating_sub(self.cursor);
+            let to_read = remaining.min(buf.len());
+            buf[..to_read].copy_from_slice(&self.data[self.cursor..self.cursor + to_read]);
+            self.cursor += to_read;
+            Ok(to_read)
+        }
+    }
+
+    impl Write for AsyncTestHandle {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let end = self.cursor + buf.len();
+            if end > self.data.len() {
+                self.data.resize(end, 0);
+            }
+            self.data[self.cursor..end].copy_from_slice(buf);
+            self.cursor = end;
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Seek for AsyncTestHandle {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            let next = match pos {
+                SeekFrom::Start(offset) => offset as i64,
+                SeekFrom::End(offset) => self.data.len() as i64 + offset,
+                SeekFrom::Current(offset) => self.cursor as i64 + offset,
+            };
+            if next < 0 {
+                return Err(io::Error::new(ErrorKind::InvalidInput, "seek before start"));
+            }
+            self.cursor = next as usize;
+            Ok(self.cursor as u64)
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl FileHandle for AsyncTestHandle {
+        async fn flush_async(&mut self) -> io::Result<()> {
+            *self.flushed_async.lock().unwrap() = true;
+            Ok(())
+        }
+    }
 
     #[async_trait(?Send)]
     impl FsProvider for UnsupportedProvider {
@@ -744,6 +838,78 @@ mod tests {
         }
     }
 
+    #[async_trait(?Send)]
+    impl FsProvider for AsyncOpenProvider {
+        fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
+            Err(unsupported())
+        }
+
+        async fn open_async(
+            &self,
+            _path: &Path,
+            _flags: &OpenFlags,
+        ) -> io::Result<Box<dyn FileHandle>> {
+            *self.opened_async.lock().unwrap() = true;
+            Ok(Box::new(AsyncTestHandle {
+                cursor: 0,
+                data: b"async contents".to_vec(),
+                flushed_async: self.flushed_async.clone(),
+            }))
+        }
+
+        async fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
+            Err(unsupported())
+        }
+
+        async fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn remove_file(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+            Err(unsupported())
+        }
+
+        async fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+            Err(unsupported())
+        }
+
+        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
+            Err(unsupported())
+        }
+
+        async fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
+            Err(unsupported())
+        }
+
+        async fn create_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+            Err(unsupported())
+        }
+    }
+
     fn unsupported() -> io::Error {
         io::Error::new(ErrorKind::Unsupported, "unsupported in test provider")
     }
@@ -796,6 +962,29 @@ mod tests {
         }
         let final_provider = current_provider();
         assert!(Arc::ptr_eq(&final_provider, &original));
+    }
+
+    #[test]
+    fn open_async_and_flush_async_use_provider_async_paths() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let opened_async = Arc::new(Mutex::new(false));
+        let flushed_async = Arc::new(Mutex::new(false));
+        let provider = Arc::new(AsyncOpenProvider {
+            opened_async: opened_async.clone(),
+            flushed_async: flushed_async.clone(),
+        });
+        let _provider_guard = replace_provider(provider);
+
+        let mut file =
+            futures::executor::block_on(OpenOptions::new().read(true).open_async("data.txt"))
+                .expect("async open");
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).expect("read contents");
+        futures::executor::block_on(file.flush_async()).expect("async flush");
+
+        assert_eq!(contents, "async contents");
+        assert!(*opened_async.lock().unwrap());
+        assert!(*flushed_async.lock().unwrap());
     }
 
     #[test]

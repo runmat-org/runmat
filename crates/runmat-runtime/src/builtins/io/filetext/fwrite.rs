@@ -118,10 +118,6 @@ pub async fn evaluate(
         fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
     })?;
 
-    let mut file = handle
-        .lock()
-        .map_err(|_| fwrite_error("fwrite: failed to lock file handle (poisoned mutex)"))?;
-
     let data_host = gather_value(data_value).await?;
     let rest_host = gather_args(rest).await?;
     let (precision_arg, skip_arg, machine_arg) = map_string_result(classify_arguments(&rest_host))?;
@@ -130,9 +126,16 @@ pub async fn evaluate(
     let skip_bytes = map_string_result(parse_skip(skip_arg))?;
     let machine_format = map_string_result(parse_machine_format(machine_arg, &info.machinefmt))?;
 
+    let mut guard = handle
+        .lock()
+        .map_err(|_| fwrite_error("fwrite: failed to lock file handle (poisoned mutex)"))?;
+    let file = guard.as_mut().ok_or_else(|| {
+        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
+    })?;
+
     let elements = map_string_result(flatten_elements(&data_host))?;
     let count = map_string_result(write_elements(
-        &mut file,
+        file,
         &elements,
         precision_spec,
         skip_bytes,

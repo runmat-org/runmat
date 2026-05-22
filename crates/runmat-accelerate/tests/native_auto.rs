@@ -10,6 +10,7 @@ fn ensure_auto_init() {
     INIT.call_once(|| {
         std::env::set_var("RUNMAT_ACCEL_AUTO_OFFLOAD", "1");
         std::env::set_var("RUNMAT_ACCEL_CALIBRATE", "0");
+        std::env::set_var("RUNMAT_ACCEL_THRESHOLD_UNARY", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_ELEMWISE", "1");
         std::env::set_var("RUNMAT_ACCEL_THRESHOLD_REDUCTION", "1");
         register_inprocess_provider();
@@ -43,4 +44,14 @@ async fn gather_occurs_for_sink_builtins() {
         .expect("promote");
     let prepared = prepare_builtin_args("disp", &[gpu]).await.expect("prepare");
     assert!(matches!(prepared.as_slice(), [Value::Tensor(_)]));
+}
+
+#[tokio::test]
+async fn prepare_builtin_promotes_sinc_as_unary() {
+    ensure_auto_init();
+    let tensor = make_tensor(4);
+    let prepared = prepare_builtin_args("sinc", &[Value::Tensor(tensor)])
+        .await
+        .expect("prepare");
+    assert!(matches!(prepared.as_slice(), [Value::GpuTensor(_)]));
 }

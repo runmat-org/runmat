@@ -1,0 +1,126 @@
+{
+  "title": "tf",
+  "category": "control",
+  "keywords": [
+    "tf",
+    "transfer function",
+    "control system",
+    "coefficient vector"
+  ],
+  "summary": "Create a SISO transfer-function object from numerator and denominator coefficient vectors.",
+  "references": [
+    "title: \"MATLAB tf documentation\"",
+    "title: \"Octave control package tf documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`tf` constructs host-side metadata. If coefficient inputs are gpuArray values, RunMat gathers them before creating the object."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`tf` is not fused; it constructs a host-side object."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::tf::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`tf(num, den)` creates a scalar-input scalar-output transfer-function object from numeric numerator and denominator coefficient vectors. Coefficients follow MATLAB's polynomial convention: the first entry is the highest-order term and the last entry is the constant term.",
+  "behaviors": [
+    "Accepts numeric scalar, row-vector, or column-vector numerator coefficients.",
+    "Accepts numeric scalar, row-vector, or column-vector denominator coefficients.",
+    "Normalizes stored numerator and denominator coefficients to row vectors on the returned `tf` object.",
+    "Returns a lightweight object whose class name is `tf`.",
+    "Stores `Numerator`, `Denominator`, `Variable`, `Ts`, `InputDelay`, and `OutputDelay` properties on the object.",
+    "Uses continuous-time defaults: `Variable` is `'s'` and `Ts` is `0`.",
+    "`tf(num, den, Ts)` stores a finite non-negative sample time and defaults `Variable` to `'z'`.",
+    "`tf(num, den, 'Variable', variable)` accepts `variable` values `'s'`, `'p'`, `'z'`, `'q'`, `'z^-1'`, and `'q^-1'`.",
+    "`tf(num, den, 'Ts', Ts)` or `tf(num, den, 'SampleTime', Ts)` stores a finite non-negative sample time.",
+    "Complex coefficients are accepted and stored as complex row vectors.",
+    "Logical and integer coefficients are promoted to double precision."
+  ],
+  "examples": [
+    {
+      "description": "Creating a first-order continuous-time transfer function",
+      "input": "H = tf(20, [1 5]);\nclass(H)",
+      "output": "ans = \"tf\""
+    },
+    {
+      "description": "Creating a second-order transfer function",
+      "input": "H = tf([1 2], [1 3 2]);\nH.Numerator\nH.Denominator",
+      "output": "H.Numerator = [1 2]\nH.Denominator = [1 3 2]"
+    },
+    {
+      "description": "Creating a discrete-time transfer function",
+      "input": "H = tf(1, [1 -0.5], 0.1);\nH.Variable\nH.Ts",
+      "output": "H.Variable = 'z'\nH.Ts = 0.1"
+    },
+    {
+      "description": "Selecting the polynomial variable",
+      "input": "H = tf([1 0], [1 2 1], 'Variable', 'p');\nH.Variable",
+      "output": "H.Variable = 'p'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `tf` evaluate the transfer function at frequency points?",
+      "answer": "No. This implementation only constructs the transfer-function object. Frequency-response helpers such as `bode`, `freqresp`, and `evalfr` are separate Control System Toolbox functions."
+    },
+    {
+      "question": "Does `tf` support MIMO transfer functions?",
+      "answer": "Not yet. This implementation supports scalar-input scalar-output systems created from numeric coefficient vectors."
+    },
+    {
+      "question": "Does `tf` implement `step`, `impulse`, or `bode`?",
+      "answer": "No. Those functions are not part of this builtin."
+    },
+    {
+      "question": "Can I pass matrices of coefficients?",
+      "answer": "No. Numerator and denominator inputs must be scalars or vectors."
+    },
+    {
+      "question": "Can the denominator be all zeros?",
+      "answer": "No. The denominator coefficient vector must contain at least one non-zero value."
+    }
+  ],
+  "links": [
+    {
+      "label": "polyval",
+      "url": "./polyval"
+    },
+    {
+      "label": "roots",
+      "url": "./roots"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/tf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/tf.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "H = tf(num, den)\nH = tf(num, den, Ts)\nH = tf(num, den, 'Variable', variable)\nH = tf(num, den, 'Ts', Ts)",
+      "output": "H is a tf object."
+    },
+    "points": [
+      "`num` and `den` are numeric scalar, row-vector, or column-vector coefficient inputs. Coefficients are stored using MATLAB's highest-order-term-first polynomial convention.",
+      "`Ts` is an optional finite non-negative sample time. Positive sample times default the transfer-function variable to `'z'` unless `Variable` is provided explicitly.",
+      "`Variable` accepts `'s'`, `'p'`, `'z'`, `'q'`, `'z^-1'`, or `'q^-1'`. The denominator vector must contain at least one non-zero coefficient."
+    ]
+  },
+  "validation": {
+    "summary": "`tf` validates coefficient shapes, finite numeric values, supported variable names, and sample-time constraints before constructing the host-side transfer-function object. Unit and integration tests cover continuous and discrete constructors, row normalization, option parsing, and invalid denominator or matrix coefficient inputs.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/tf.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/tf.rs"
+    }
+  },
+  "gpu_residency": "`tf` is a host-side object constructor. gpuArray coefficient inputs are gathered before object construction, and the returned transfer-function object does not live on the GPU."
+}

@@ -4,6 +4,7 @@
 
 pub mod class;
 pub mod clear;
+pub mod clearvars;
 pub(crate) mod isa;
 pub(crate) mod ischar;
 pub(crate) mod isstring;

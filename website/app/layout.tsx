@@ -24,9 +24,9 @@ export const metadata: Metadata = {
   keywords: [
     "MATLAB", "Octave", "Rust", "JIT compiler", "scientific computing",
     "numerical computing", "open source", "high performance", "plotting",
-    "mathematics", "engineering", "simulation", "drop-in replacement",
+    "mathematics", "engineering", "simulation",
     "jupyter kernel", "jupyter matlab", "blas", "lapack", "matlab jupyter",
-    "GPU acceleration", "RunMat Cloud", "run matlab online", "free matlab runtime",
+    "GPU acceleration", "RunMat App", "run matlab online", "free matlab runtime",
     "matlab alternative"
   ],
   authors: [{ name: "RunMat", url: "https://runmat.com" }],
@@ -148,9 +148,14 @@ export default function RootLayout({
                   "softwareVersion": "Beta",
                   "featureList": [
                     "JIT-accelerated MATLAB-style syntax",
-                    "RunMat Desktop: Full IDE experience with code editor, file explorer, and live plotting in-browser",
+                    "Full IDE experience with code editor, file explorer, and live plotting in-browser",
                     "Automatic GPU Fusion & Memory Management",
-                    "Cross-platform binary (Metal, Vulkan, DX12) and CLI support"
+                    "Cross-platform binary (Metal, Vulkan, DX12) and CLI support",
+                    "Interactive 2D and 3D plotting with GPU acceleration",
+                    "Real-time type and shape tracking with dimension error detection",
+                    "Built-in agent with runtime execution and workspace inspection",
+                    "Compatibility-guided script adaptation with reviewable diffs",
+                    "Deterministic session replay and audit journal"
                   ],
                   "offers": {
                     "@type": "Offer",
