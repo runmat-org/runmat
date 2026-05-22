@@ -12,6 +12,27 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Objective Item 3 strict-queue closeout audit completed
+  - `scope: in-scope`
+  - `blocker: completion required converting audit state from narrative partials to strict queue-item evidence (P0-P2 + in-scope P3 items 13 and 15), then revalidating required gates on current HEAD.`
+  - Updated audit artifacts:
+    - [DELIVERABLE_AUDIT.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/DELIVERABLE_AUDIT.md) section `### 3` moved `partial -> met` with strict queue evidence references.
+    - [COMPLETION_AUDIT.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/COMPLETION_AUDIT.md) now marks Objective Item 3 achieved and includes prompt-to-artifact checklist rows for queue items.
+    - [NEXT_STEPS.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/NEXT_STEPS.md) gap classification language now marks remaining notes as post-closeout design work rather than active Objective Item 3 blockers.
+  - Targeted queue evidence rerun on 2026-05-21:
+    - `cargo test -p runmat-vm primary_compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm --test basics struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates -- --nocapture`
+    - `cargo test -p runmat-vm --test basics object_aggregate_literal_uses_typed_instruction_and_sets_properties -- --nocapture`
+    - `cargo test -p runmat-vm --test spawn_semantic_lifecycle semantic_async_spawn_varargout_ -- --nocapture`
+    - `cargo test -p runmat-vm --test functions varargout_expand_into_outer_call -- --nocapture`
+    - `cargo test -p runmat-vm --test functions user_function_consumes_varargout_exact_needed -- --nocapture`
+    - `cargo test -p runmat-turbine test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path -- --nocapture`
+  - Required final gates rerun green:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Struct/object aggregate-literal source form now lowers through typed compiler/runtime products
   - `scope: in-scope`
   - `blocker: queue item 15 required parser/HIR/MIR source-form enablement plus typed bytecode construction for struct/object aggregate literals; prior state only exposed tensor/cell aggregate products.`

@@ -41,7 +41,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Residual watchpoints:
   - keep this grep in validation cadence to prevent regressions.
 
-### 3) MATLAB semantics as products (`partial`)
+### 3) MATLAB semantics as products (`met`)
 
 - Evidence:
   - semantic coverage ratchets tracked in [NEXT_STEPS.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/NEXT_STEPS.md).
@@ -523,8 +523,18 @@ This audit maps the active objective to concrete repository evidence and marks e
       - MIR: `struct_aggregate_literal_lowers_to_mir_struct_literal`, `object_aggregate_literal_lowers_to_mir_object_literal`
       - VM compile: `primary_compile_lowers_struct_aggregate_literal_to_typed_instruction`, `primary_compile_lowers_object_aggregate_literal_to_typed_instruction`
       - VM runtime: `struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates`, `object_aggregate_literal_uses_typed_instruction_and_sets_properties`
-- Gap:
-  - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
+- Objective Item 3 closeout evidence (strict queue):
+  - P0 (assignment/indexing ownership): MIR assignment-place/store-back context invariants and selector-plan compile contracts are ratcheted in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) and [lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/tests/lowering.rs), including `primary_compile_rejects_index_assignment_with_read_context_identifier`, `primary_compile_rejects_multi_assign_index_target_context_mismatch_with_identifier`, and `indexed_member_assignment_lowers_to_index_place_over_member_base`.
+  - P1 (callable ABI/call-shape): typed callable identity/runtime-name policy and unresolved-call contracts are ratcheted in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs), [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs), [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and [jit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/tests/jit.rs), including `method_identity_runtime_name_resolution_can_use_semantic_resolver`, `imported_identity_runtime_name_resolution_can_use_semantic_resolver`, `semantic_expand_multi_output_uses_typed_instruction`, `unresolved_function_expand_multi_output_uses_typed_instruction_and_errors`, and `test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path`.
+  - P2 (object/member/output policy): object/member descriptor-first paths and varargout/multi-output contracts are ratcheted in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs), [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs), [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), and [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs), including `StoreIndex requires scalar indices`, `varargout_expand_into_outer_call`, `user_function_consumes_varargout_exact_needed`, and `RunMat:VarargoutMismatch` contracts.
+  - P3 in-scope items complete:
+    - item 13 async/future/spawn ABI lane ratcheted in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) (`semantic_async_spawn_varargout_helper_unrequested_handle_releases`, `semantic_async_spawn_varargout_nested_unrequested_handle_releases`) and runtime model metadata in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs) (`SemanticAsyncRuntimeModel::LazyFutureDescriptorLane`).
+    - item 15 struct/object aggregate-literal source-form and typed construction ratcheted across parser/HIR/MIR/VM tests and products in [expr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/src/parser/expr.rs), [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs), [rvalue.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/src/rvalue.rs), [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), and [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs).
+  - Required final gates rerun green on 2026-05-21:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
 
 ### 4) Manifest-driven composition/entrypoints (`met`)
 

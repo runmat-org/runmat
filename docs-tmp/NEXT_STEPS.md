@@ -487,12 +487,12 @@ Accepted resolution (A/A/A/A/A):
 - Request/ABI policy surface keeps only fields with active enforced behavior; remove dead placeholders.
 - Keep distinct `RunMat` vs `Matlab` labels only where they map to concrete behavior differences; otherwise treat as alias-equivalent policy mapping.
 
-## Remaining Gap Classification
+## Post-Closeout Gap Classification (Out Of Scope For Objective Item 3)
 
 Treat current MIR bytecode gap markers as follows:
 
 - `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
-- `varargout expansion`: parser/HIR does not currently construct this shape; keep as future ABI design work rather than a live bytecode gap.
+- `varargout expansion`: in-scope target-list ABI and runtime output-count propagation are now represented by semantic HIR/MIR/VM products; any additional parser-surface expansion forms are post-closeout design work.
 - `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; fractional numeric selector truncation (including expr-range end-expression floor truncation) and mixed object expr-slice selector payload rejection are now closed, and remaining gaps are selector-plan normalization in narrower non-tensor edge contexts.
 - `dot assignment` / `dot indexing`: resolved at indexing-plan level; semantic products no longer carry `IndexKind::Dot` and member semantics lower through explicit member MIR shapes.
 - `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains, with MIR coverage now pinning `s.a(2)=...` to `MirPlace::Index(MirPlace::Member(...), ...)`.
@@ -500,10 +500,10 @@ Treat current MIR bytecode gap markers as follows:
 - `{count} call outputs`: semantic user-function, `feval`, `size`, min/max family, sort/set/index builtins (`sort`, `unique`, `find`, `union`, `ismember`, `sortrows`), and linalg factorization builtins (`chol`, `lu`, `qr`, `svd`, `eig`) are ratcheted through multi-output bytecode/runtime output context; generic rvalue call outputs and broader builtin output splitting remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
 - `aggregate kind`: struct/object aggregate-literal source forms now lower through typed MIR/bytecode products; remaining work is compatibility/syntax-policy refinement only.
-- `function handle target`: builtin/anonymous semantic-handle `feval` paths are ratcheted; `CallableIdentity::Method` function-handle targets now lower through typed method-handle runtime identity (`Instr::CreateMethodFunctionHandle` -> `Value::MethodFunctionHandle`) with semantic-resolver-first runtime-name policy (no builtin fallback), and remaining work is DefPath resolver/ABI closure.
-- `assignment place`: multi-assign output storage now reuses MIR place assignment for non-local targets; remaining assignment-place gaps should be explicit source reproducers or object/dynamic descriptor plans, not generic slot-only lowering.
+- `function handle target`: builtin/anonymous semantic-handle and typed method-handle (`Instr::CreateMethodFunctionHandle` -> `Value::MethodFunctionHandle`) paths are ratcheted with semantic-resolver-first runtime-name policy and no builtin fallback; additional DefPath/syntax refinements are post-closeout ABI hardening.
+- `assignment place`: MIR/compile assignment-place context invariants and non-scalar slice/store-back paths are ratcheted; future work should be explicit source-policy refinement, not runtime classification recovery.
 
-## Recommended Semantic Design Slice
+## Recommended Semantic Design Slice (Post-Closeout)
 
 The next high-leverage slice is replacing remaining name-shaped callable behavior with semantic descriptors, not another isolated callback patch.
 

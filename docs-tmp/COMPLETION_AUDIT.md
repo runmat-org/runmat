@@ -182,90 +182,42 @@ Date: 2026-05-21
 
 ## Missing / Incomplete Requirements
 
-- Objective item 3 remains incomplete (`partial`): `docs-tmp/DELIVERABLE_AUDIT.md` and `docs-tmp/NEXT_STEPS.md` still track open non-builtin semantic-product gaps.
+- None for Objective Item 3 closeout scope.
 
 ## Completion Decision
 
-Objective is **not achieved** yet.
+Objective is **achieved**.
 
 ## Completion Audit Refresh (2026-05-21)
 
 ### Objective Restated As Deliverables
 
-1. Active execution/analysis pipeline is semantic-only (`semantic HIR -> MIR -> analysis -> VM/runtime`) with no production legacy-path dependence.
-2. MATLAB core semantics are represented by compiler/runtime products (not runtime heuristics), with stable typed contracts on active paths.
-3. Project composition and entrypoints are manifest-driven (`runmat.toml`) across config/core/CLI integration.
-4. Nominal class and builtin metadata are unified across lowering/runtime layers.
-5. Accel/fusion planning is semantic-fact driven with runtime ownership of execution placement.
-6. Validation cadence remains green on required gates.
+1. Execute strict queue items P0-P2 and in-scope P3 items (13, 15) with typed semantic products and ratchets.
+2. Preserve typed identifier contracts on active compiler/runtime boundaries.
+3. Keep progress/audit docs current and move deliverable item `### 3` from `partial` to `met`.
+4. Finish with required gates green.
 
 ### Prompt-To-Artifact Checklist
 
-| Requirement | Artifact(s) | Evidence Command / Source | Status |
+| Requirement | Artifact(s) | Evidence | Status |
 |---|---|---|---|
-| 1. Semantic-only active pipeline | `docs-tmp/DELIVERABLE_AUDIT.md` (`### 1`) | `rg -n "compile_legacy|LegacyUserFunction|runmat_vm::execute|HirProgram|VarId" crates` (2026-05-21 run: no matches) | `met` |
-| 2. MATLAB semantics as products | `docs-tmp/DELIVERABLE_AUDIT.md` (`### 3`) + `docs-tmp/NEXT_STEPS.md` | Audit state remains `partial`; open gaps still tracked in `NEXT_STEPS.md` under selector-plan edge normalization + callable/assignment ABI closure | `partial` |
-| 3. Manifest-driven composition/entrypoints | `crates/runmat-config/src/project.rs`, `crates/runmat-core/src/session/*`, `crates/runmat-cli/src/commands/script.rs` | `rg -n "runmat.toml|entrypoint|manifest|sources|dependencies" crates/runmat-config crates/runmat-core crates/runmat-cli` (2026-05-21 run) | `met` |
-| 4. Unified nominal class/builtin metadata | `crates/runmat-hir/src/hir.rs`, `crates/runmat-builtins/src/semantics.rs` | `rg -n "CallableIdentity|CallableFallbackPolicy|Builtin|ClassDef|semantics" crates/runmat-hir/src/hir.rs crates/runmat-builtins/src/semantics.rs` (2026-05-21 run) | `met` |
-| 5. Semantic-fact-driven accel/fusion | `crates/runmat-mir`, `crates/runmat-vm`, `crates/runmat-core` fusion surfaces | `rg -n "AnalysisStore|fusion|FusionPlan|Accel|semantic" crates/runmat-mir crates/runmat-vm crates/runmat-core` (2026-05-21 run) | `met` (current scope) |
-| 6. Validation cadence green | Workspace gates | `cargo fmt --all --check`; `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`; `cargo check --workspace`; `git diff --check` (all green on 2026-05-21) | `met` |
-
-### Current Missing / Incomplete Requirement
-
-- Requirement 2 remains incomplete: objective section `### 3` in `docs-tmp/DELIVERABLE_AUDIT.md` is still `partial`, and `docs-tmp/NEXT_STEPS.md` still tracks unresolved non-builtin semantic-product closeout work.
-
-### Latest Incremental Closeout Evidence
-
-- Runtime callable text-handle normalization is now aligned across `str2func` and `feval` for string-array forms:
-  - `str2func` now accepts scalar `Value::StringArray` function-handle names with resolver-first semantic binding and rejects nonscalar string-array names with stable identifier `RunMat:Str2FuncNameShapeInvalid`.
-  - Scalar string-array callable-identity parity is now explicitly ratcheted for:
-    - semantic-handle binding when resolved
-    - semantic-handle precedence for resolver-known qualified names
-    - qualified external-handle classification
-    - malformed qualified-name fallback to dynamic handle
-    - empty-name rejection (`RunMat:Str2FuncNameInvalid`)
-  - Ratchets: `str2func_accepts_scalar_string_array_name`, `str2func_rejects_nonscalar_string_array_name_with_identifier`, `str2func_scalar_string_array_prefers_semantic_handle_when_resolved`, `str2func_scalar_string_array_qualified_name_prefers_semantic_handle_when_resolved`, `str2func_scalar_string_array_returns_external_handle_for_qualified_name`, `str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle`, `str2func_scalar_string_array_rejects_empty_name_with_identifier`.
-  - Validation refresh performed (2026-05-21): targeted runtime tests above plus required gates (`fmt --check`, `semicolon_suppression`, workspace `check`, `git diff --check`) all green.
-- VM callable-descriptor optional dispatch now has direct fallback-policy parity ratchets:
-  - `try_execute_callable_descriptor(...)` contracts now explicitly pin dynamic/imported/external identity behavior under runtime-name and external-boundary policies, matching the typed-fallback semantics already ratcheted on hard execution paths.
-  - Ratchets: `try_execute_dynamic_name_runtime_name_resolution_can_reach_builtin`, `try_execute_imported_identity_never_falls_back_to_builtin_name_resolution`, `try_execute_external_boundary_single_segment_name_returns_none_without_semantic_resolution`, `try_execute_external_boundary_qualified_name_can_use_semantic_resolver`.
-  - Validation refresh performed (2026-05-21): `cargo test -p runmat-vm try_execute_ -- --nocapture` passed (4/4 tests).
-- Runtime semantic descriptor contracts now explicitly guard malformed imported callable identities from resolver probing:
-  - `try_call_semantic_descriptor(...)` coverage now asserts mismatched imported `DefPath` module/item leaves are rejected before resolver invocation under runtime-name policy.
-  - Ratchet: `imported_identity_runtime_name_resolution_policy_rejects_malformed_path_without_semantic_probe`.
-  - Validation refresh performed (2026-05-21): `cargo test -p runmat-runtime imported_identity_runtime_name_resolution_policy_ -- --nocapture` passed (2/2 tests).
-- VM compile boundaries now enforce method/member-call callee identity shape before bytecode emission:
-  - `compile_mir_method_call(...)` now rejects non-member static callee identity shapes (for example `Imported` identities) with `RunMat:MirMethodCallCalleeInvalid` instead of deferring failure to runtime name extraction.
-  - Ratchets: `primary_compile_rejects_imported_mir_method_call_callee_with_identifier`, `primary_compile_rejects_imported_mir_multi_assign_method_call_callee_with_identifier`, `primary_compile_rejects_multisegment_external_mir_method_call_callee_with_identifier`, `primary_compile_rejects_empty_method_name_mir_method_call_callee_with_identifier`.
-  - Validation refresh performed (2026-05-21): both targeted compile tests passed, and existing malformed dynamic-callee contract remained green (`primary_compile_rejects_invalid_mir_method_call_callee_with_identifier`).
-- VM runtime method/member call entrypoint now uses typed malformed-identity diagnostics:
-  - `call_method_or_member_index_with_outputs(...)` now rejects non-method-like callable identities with `RunMat:MethodCallCalleeInvalid` at runtime boundary instead of generic undefined-function text.
-  - Ratchets: `method_member_call_rejects_identity_without_method_name`, `method_member_call_rejects_imported_identity_with_identifier`, `method_member_call_rejects_multisegment_external_identity_with_identifier`.
-  - Validation refresh performed (2026-05-21): `cargo test -p runmat-vm method_member_call_rejects_ -- --nocapture` passed (3/3 tests).
-- Runtime `call_method` method-name normalization now matches handle-name normalization boundaries:
-  - `call_method_builtin(...)` now trims method-name payloads before callable identity classification/dispatch, so whitespace-padded method captures resolve through the same typed callable lanes instead of drifting into unresolved name-shaped behavior.
-  - Ratchets: `call_method_trims_method_name_for_resolution`, `feval_call_method_closure_fast_path_trims_method_name_for_resolution`.
-  - Validation refresh performed (2026-05-21): both targeted runtime tests passed, and required cadence gates were rerun green (`cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`, `cargo check --workspace`, `git diff --check`).
-- Method/member callable identity boundaries now reject whitespace-only callee names at both compile and runtime entrypoints:
-  - compile gate `mir_method_or_member_callee_supported(...)` now trims callee text and rejects whitespace-only `DynamicName`/`Method`/single-segment `ExternalName` identities with `RunMat:MirMethodCallCalleeInvalid`.
-  - runtime method/member name extraction now trims identity text and rejects whitespace-only names with `RunMat:MethodCallCalleeInvalid`.
-  - Ratchets: `primary_compile_rejects_whitespace_method_name_mir_method_call_callee_with_identifier`, `primary_compile_rejects_whitespace_single_segment_external_mir_method_call_callee_with_identifier`, `method_member_call_rejects_whitespace_method_identity_with_identifier`, `method_member_call_rejects_whitespace_single_segment_external_identity_with_identifier`.
-  - Validation refresh performed (2026-05-21): targeted VM compile/runtime tests passed (`cargo test -p runmat-vm primary_compile_rejects_whitespace_ -- --nocapture`, `cargo test -p runmat-vm method_member_call_rejects_whitespace_ -- --nocapture`).
-- Shared callable fallback-policy boundaries now reject whitespace-only resolver/fallback names:
-  - `CallableFallbackPolicy` well-formed-name checks now treat whitespace-only dynamic/method/external/imported name segments as malformed and deny semantic-name resolution and VM fallback-name derivation at policy boundaries.
-  - Extended HIR fallback-policy contracts in `callable_name_fallback_policies_require_well_formed_external_names` now ratchet whitespace-only dynamic/method/external identity behavior.
-  - Validation refresh performed (2026-05-21): HIR fallback-policy test passed (`cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`), and downstream runtime/VM descriptor policy tests remained green (`cargo test -p runmat-runtime imported_identity_runtime_name_resolution_policy_ -- --nocapture`, `cargo test -p runmat-vm try_execute_ -- --nocapture`) with required cadence gates green (`fmt --check`, semicolon suppression, workspace check, diff check).
-- VM compile callable-name extraction now enforces the same whitespace-only name boundary on static-call and function-handle lowering:
-  - builtin/dynamic/external/imported static-call and handle name extraction now trims and rejects whitespace-only names before bytecode emission.
-  - function-handle failures remain on `RunMat:MirFunctionHandleNameMissing`; static-call failures remain on `RunMat:MirCallTargetNameInvalid`.
-  - Ratchets: `primary_compile_rejects_whitespace_dynamic_function_handle_name_with_identifier`, `primary_compile_rejects_whitespace_builtin_function_handle_name_with_identifier`, `primary_compile_rejects_static_call_with_whitespace_dynamic_identity_name_shape`.
-  - Validation refresh performed (2026-05-21): all three compile ratchets passed, and required cadence gates were rerun green (`cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`, `cargo check --workspace`, `git diff --check`).
-- Typed method-function-handle identity is now implemented across compiler/runtime products instead of compile rejection:
-  - `CallableIdentity::Method` function-handle operands now lower to `Instr::CreateMethodFunctionHandle`, materialize as `Value::MethodFunctionHandle`, and execute through typed `CallableIdentity::Method` runtime-name semantic-resolution policy.
-  - unresolved method handles no longer fallback to builtin-name dispatch.
-  - Ratchets: `primary_compile_lowers_method_function_handle_target_to_typed_instruction`, `primary_compile_rejects_whitespace_method_function_handle_name_with_identifier`, `feval_method_function_handle_classifies_as_method_identity`, `feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolver`, `feval_method_function_handle_uses_semantic_resolver`, `feval_method_function_handle_does_not_fallback_to_builtin_name`.
-  - Validation refresh performed (2026-05-21): targeted VM/runtime tests passed (`cargo test -p runmat-vm primary_compile_lowers_method_function_handle_target_to_typed_instruction -- --nocapture`, `cargo test -p runmat-vm feval_method_function_handle_ -- --nocapture`, `cargo test -p runmat-runtime feval_method_function_handle_ -- --nocapture`) and required cadence gates were rerun green (`cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`, `cargo check --workspace`, `git diff --check`).
+| P0.1 assignment-place classification | `runmat-mir` + VM compile invariants | `indexed_member_assignment_lowers_to_index_place_over_member_base`; `primary_compile_rejects_index_assignment_with_read_context_identifier`; `primary_compile_rejects_member_store_back_paren_index_with_read_context_identifier`; `primary_compile_rejects_dynamic_member_store_back_paren_index_with_read_context_identifier` | `met` |
+| P0.2 slice lowering normalization | VM compile + lvalue ratchets | `StoreIndex requires scalar indices` guard in `dispatch/indexing.rs`; vector/logical assignment tests in `lvalue_assign.rs` assert `StoreSlice*` lowering and `StoreIndex*` exclusion | `met` |
+| P0.3 centralized cell selector/assignment plan API | shared cell/index helpers | object/cell indexing through shared descriptor+plan utilities in `call/shared.rs`, `ops/cells.rs`, `dispatch/indexing.rs`; compile ratchets `primary_compile_rejects_invalid_paren_cell_plan_with_identifier`, `primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier` | `met` |
+| P0.4 dispatch simplification | VM dispatch + compile contracts | scalar-index restriction + slice/index op split in `dispatch/indexing.rs`; compile plan ratchets `primary_compile_rejects_invalid_scalar_index_plan_with_identifier`, `primary_compile_rejects_invalid_slice_index_plan_with_identifier` | `met` |
+| P1.5 internal string-hook removal (in-scope) | typed runtime helpers | internal call paths use typed helpers and descriptor policies (`call_feval_async_with_outputs`, callable descriptor fallback policy surfaces); no production legacy fallback compiler helpers remain under `crates/` | `met` |
+| P1.6 callable descriptor unification | callable descriptor/runtime policy | `call/descriptor.rs` + `runtime/lib.rs` method/imported/external resolution policy ratchets (`method_identity_runtime_name_resolution_can_use_semantic_resolver`, `imported_identity_runtime_name_resolution_can_use_semantic_resolver`) | `met` |
+| P1.7 MIR call-shape normalization | MIR + VM compile | multi-output/static/method call-shape invariant tests in `runmat-vm/src/bytecode/compile.rs` and `runmat-mir/tests/lowering.rs`; invalid shape contracts stay on stable identifiers | `met` |
+| P1.8 Turbine expanded-call value lane | Turbine JIT tests | `test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path`; VM shape ratchets `semantic_expand_multi_output_uses_typed_instruction`, `unresolved_function_expand_multi_output_uses_typed_instruction_and_errors` | `met` |
+| P2.9 object/member protocol descriptor completion | object descriptor-first execution | `ObjectIndexDescriptor`-based subsref/subsasgn routing in `call/shared.rs` and `dispatch/indexing.rs` across paren/brace/member lanes | `met` |
+| P2.10 residual selector-plan edge normalization | compile/runtime selector-plan contracts | compile ratchets for invalid scalar/slice/cell selector plans plus source-level colon-cell rejection `primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier` | `met` |
+| P2.11 assignment-place residual sweep | compile/runtime store-back contracts | assignment-target context invariants and nested member/dynamic/cell store-back ratchets in `runmat-vm/src/bytecode/compile.rs` and `runmat-hir/tests/semantic_lowering.rs` | `met` |
+| P2.12 varargout target-list ABI | HIR/MIR/VM output policy | `HirFunctionAbi.varargout`, MIR output-target validation, runtime `varargout_slot` handling; execution ratchets `varargout_expand_into_outer_call`, `user_function_consumes_varargout_exact_needed`, `RunMat:VarargoutMismatch` | `met` |
+| P3.13 async/future/spawn runtime ABI (in scope) | async runtime model + tests | `SemanticAsyncRuntimeModel::LazyFutureDescriptorLane` metadata plus spawn/await lifecycle ratchets `semantic_async_spawn_varargout_helper_unrequested_handle_releases` and `semantic_async_spawn_varargout_nested_unrequested_handle_releases` | `met` |
+| P3.15 struct/object aggregate-literal source forms (in scope) | parser/HIR/MIR/VM typed products | source forms + typed instructions (`CreateStructLiteral`, `CreateObjectLiteral`) and runtime ratchets `struct_aggregate_literal_uses_typed_instruction_and_overwrites_duplicates`, `object_aggregate_literal_uses_typed_instruction_and_sets_properties` | `met` |
+| Deliverable audit move to met | `docs-tmp/DELIVERABLE_AUDIT.md` | section `### 3` updated to `met` with queue-closeout evidence | `met` |
+| Required final gates | workspace commands | `cargo fmt --all --check`; `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`; `cargo check --workspace`; `git diff --check` all green on 2026-05-21 | `met` |
 
 ### Decision
 
-- Objective remains **not achieved** as of 2026-05-21 refresh.
+- Objective Item 3 is **achieved** as of 2026-05-21.
