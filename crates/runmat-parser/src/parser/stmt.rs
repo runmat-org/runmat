@@ -41,7 +41,7 @@ impl Parser {
                 self.parse_function().map_err(|e| e.into())
             }
             Some(Token::LBracket) => {
-                if matches!(self.peek_token_at(1), Some(Token::Ident | Token::Tilde)) {
+                if self.looks_like_multi_assign_lhs() {
                     match self.try_parse_multi_assign() {
                         Ok(stmt) => Ok(stmt),
                         Err(msg) => Err(self.error(&msg)),
@@ -106,6 +106,35 @@ impl Parser {
                     let span = expr.span();
                     Ok(Stmt::ExprStmt(expr, false, span))
                 }
+            }
+        }
+    }
+
+    fn looks_like_multi_assign_lhs(&self) -> bool {
+        if self.peek_token() != Some(&Token::LBracket) {
+            return false;
+        }
+        let mut i = self.pos + 1;
+        let mut expect_name = true;
+        loop {
+            let token = match self.tokens.get(i) {
+                Some(info) => &info.token,
+                None => return false,
+            };
+            match (expect_name, token) {
+                (true, Token::Ident | Token::Tilde) => {
+                    expect_name = false;
+                    i += 1;
+                }
+                (false, Token::Comma) => {
+                    expect_name = true;
+                    i += 1;
+                }
+                (false, Token::RBracket) => {
+                    i += 1;
+                    return matches!(self.tokens.get(i).map(|info| &info.token), Some(Token::Assign));
+                }
+                _ => return false,
             }
         }
     }
