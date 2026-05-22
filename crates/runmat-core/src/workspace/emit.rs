@@ -114,7 +114,7 @@ pub(crate) fn execution_display_context(
     assembly: &HirAssembly,
     layout: Option<&runmat_vm::VmAssemblyLayout>,
 ) -> ExecutionDisplayContext {
-    semantic_display_context(assembly, layout).unwrap_or_else(|| ExecutionDisplayContext {
+    display_context(assembly, layout).unwrap_or_else(|| ExecutionDisplayContext {
         display_var_ids: Vec::new(),
         context: DisplayContext {
             first_assign_var: None,
@@ -127,7 +127,7 @@ pub(crate) fn execution_display_context(
     })
 }
 
-fn semantic_display_context(
+fn display_context(
     assembly: &HirAssembly,
     layout: Option<&runmat_vm::VmAssemblyLayout>,
 ) -> Option<ExecutionDisplayContext> {
@@ -171,7 +171,7 @@ fn semantic_display_context(
     for stmt in statements.iter().rev() {
         match &stmt.kind {
             HirStmtKind::ExprStmt(expr, suppressed) => {
-                final_stmt_emit = semantic_expr_emit_disposition(expr, *suppressed);
+                final_stmt_emit = expr_emit_disposition(expr, *suppressed);
                 break;
             }
             HirStmtKind::Assign(_, _, _) | HirStmtKind::MultiAssign(_, _, _) => break,
@@ -200,7 +200,7 @@ fn semantic_display_context(
         match &stmt.kind {
             HirStmtKind::ExprStmt(expr, suppressed) => {
                 last_expr_emits = matches!(
-                    semantic_expr_emit_disposition(expr, *suppressed),
+                    expr_emit_disposition(expr, *suppressed),
                     FinalStmtEmitDisposition::Inline
                 );
                 break;
@@ -242,10 +242,7 @@ fn semantic_display_context(
     })
 }
 
-fn semantic_expr_emit_disposition(
-    expr: &runmat_hir::HirExpr,
-    suppressed: bool,
-) -> FinalStmtEmitDisposition {
+fn expr_emit_disposition(expr: &runmat_hir::HirExpr, suppressed: bool) -> FinalStmtEmitDisposition {
     if suppressed {
         return FinalStmtEmitDisposition::Suppressed;
     }

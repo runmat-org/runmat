@@ -375,7 +375,7 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                             runmat_hir::AssignmentCreationPolicy::ExistingOnly
                         )
                     {
-                        diagnostics.push(semantic_diagnostic(
+                        diagnostics.push(hir_diagnostic(
                             "RM-MIR0007",
                             "delete assignment cannot create a target",
                             "delete assignments require an existing indexed target",
@@ -386,7 +386,7 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                 }
                 MirStmtKind::WorkspaceEffect { effect, .. } => {
                     if matches!(effect, runmat_hir::WorkspaceEffect::DynamicEval) {
-                        diagnostics.push(semantic_diagnostic(
+                        diagnostics.push(hir_diagnostic(
                             "RM-MIR0008",
                             "dynamic workspace evaluation blocks static analysis",
                             "prefer explicit bindings over eval-style workspace mutation",
@@ -395,7 +395,7 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
                         ));
                     }
                 }
-                MirStmtKind::EnvironmentEffect(_) => diagnostics.push(semantic_diagnostic(
+                MirStmtKind::EnvironmentEffect(_) => diagnostics.push(hir_diagnostic(
                     "RM-MIR0009",
                     "environment mutation invalidates dynamic lookup assumptions",
                     "avoid path, cwd, or function-cache mutation in analyzable regions",
@@ -417,7 +417,7 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
                     runmat_hir::RequestedOutputCount::Zero
                 )
             {
-                diagnostics.push(semantic_diagnostic(
+                diagnostics.push(hir_diagnostic(
                     "RM-MIR0005",
                     "command syntax cannot request output values",
                     "use function-call syntax when outputs are required",
@@ -433,7 +433,7 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
                 .iter()
                 .any(|arg| matches!(arg, MirCallArg::Expansion { .. }))
             {
-                diagnostics.push(semantic_diagnostic(
+                diagnostics.push(hir_diagnostic(
                     "RM-MIR0004",
                     "comma-list expansion is not valid for a zero-output call",
                     "consume comma-list expansions in value-producing call contexts",
@@ -448,7 +448,7 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
                 .iter()
                 .any(|component| matches!(component, MirIndexComponent::End { dim: None, .. }))
             {
-                diagnostics.push(semantic_diagnostic(
+                diagnostics.push(hir_diagnostic(
                     "RM-MIR0006",
                     "symbolic end requires an index dimension context",
                     "resolve end against the indexed value and dimension before runtime lowering",
@@ -461,7 +461,7 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
     }
 }
 
-fn semantic_diagnostic(
+fn hir_diagnostic(
     code: &'static str,
     message: &'static str,
     help: &'static str,

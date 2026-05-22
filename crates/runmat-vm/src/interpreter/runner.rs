@@ -173,7 +173,7 @@ pub async fn invoke_semantic_function_value(
     let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
     #[cfg(feature = "native-accel")]
     clear_semantic_function_temp_residency(&result_vars, &output_values);
-    Ok(semantic_output_value(output_values, requested_outputs))
+    Ok(output_value(output_values, requested_outputs))
 }
 
 fn collect_semantic_outputs(
@@ -217,7 +217,7 @@ fn collect_semantic_outputs(
     Ok(values)
 }
 
-fn semantic_output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
+fn output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
     match requested_outputs {
         0 => Value::OutputList(Vec::new()),
         1 => output_values.into_iter().next().unwrap_or(Value::Num(0.0)),
@@ -718,7 +718,7 @@ pub async fn interpret_function_with_counts(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_semantic_outputs, interpret_with_vars, run_interpreter_inner, semantic_output_value,
+        collect_semantic_outputs, interpret_with_vars, output_value, run_interpreter_inner,
     };
     use crate::bytecode::program::{Bytecode, SemanticFunctionBytecode};
     use crate::bytecode::Instr;
@@ -787,13 +787,13 @@ mod tests {
 
     #[test]
     fn semantic_output_value_zero_requested_is_empty_output_list() {
-        let value = semantic_output_value(vec![Value::Num(1.0)], 0);
+        let value = output_value(vec![Value::Num(1.0)], 0);
         assert_eq!(value, Value::OutputList(Vec::new()));
     }
 
     #[test]
     fn semantic_output_value_multi_requested_returns_output_list() {
-        let value = semantic_output_value(vec![Value::Num(1.0), Value::Num(2.0)], 2);
+        let value = output_value(vec![Value::Num(1.0), Value::Num(2.0)], 2);
         assert_eq!(
             value,
             Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])

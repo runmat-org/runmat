@@ -367,7 +367,7 @@ impl RunMatSession {
         let display = execution_display_context(&lowering.assembly, bytecode.layout.as_ref());
         let display_context = display.context;
         let display_var_ids = display.display_var_ids;
-        let semantic_stmt_count = semantic_entry_statement_count(&lowering.assembly);
+        let semantic_stmt_count = entry_statement_count(&lowering.assembly);
         let execution_vars = execution_workspace_mapping(&bytecode);
         let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
@@ -511,7 +511,7 @@ impl RunMatSession {
 
         if self.verbose {
             debug!("Semantic entry body len: {semantic_stmt_count}");
-            if let Some(stmt) = semantic_first_entry_statement(&lowering.assembly) {
+            if let Some(stmt) = first_entry_statement(&lowering.assembly) {
                 debug!("Semantic HIR statement: {stmt:?}");
             }
             debug!("is_semicolon_suppressed: {is_semicolon_suppressed}");
@@ -1106,7 +1106,7 @@ fn execution_workspace_mapping(bytecode: &runmat_vm::Bytecode) -> HashMap<String
     mapping
 }
 
-fn semantic_entry_function(assembly: &runmat_hir::HirAssembly) -> Option<&runmat_hir::HirFunction> {
+fn entry_function(assembly: &runmat_hir::HirAssembly) -> Option<&runmat_hir::HirFunction> {
     let entrypoint = assembly.entrypoints.first()?;
     assembly
         .functions
@@ -1114,16 +1114,14 @@ fn semantic_entry_function(assembly: &runmat_hir::HirAssembly) -> Option<&runmat
         .find(|function| function.id == entrypoint.target)
 }
 
-fn semantic_entry_statement_count(assembly: &runmat_hir::HirAssembly) -> usize {
-    semantic_entry_function(assembly)
+fn entry_statement_count(assembly: &runmat_hir::HirAssembly) -> usize {
+    entry_function(assembly)
         .map(|function| function.body.statements.len())
         .unwrap_or(0)
 }
 
-fn semantic_first_entry_statement(
-    assembly: &runmat_hir::HirAssembly,
-) -> Option<&runmat_hir::HirStmt> {
-    semantic_entry_function(assembly)?.body.statements.first()
+fn first_entry_statement(assembly: &runmat_hir::HirAssembly) -> Option<&runmat_hir::HirStmt> {
+    entry_function(assembly)?.body.statements.first()
 }
 
 struct SessionExecution {

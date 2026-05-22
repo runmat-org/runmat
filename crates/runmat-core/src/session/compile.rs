@@ -388,7 +388,7 @@ fn bind_semantic_callback_literals(
                 if stack.len() >= *argc {
                     let producer = stack[stack.len() - *argc];
                     if let Some((function, display_name)) =
-                        semantic_callback_literal(bytecode.instructions.get(producer), registry)
+                        callback_literal(bytecode.instructions.get(producer), registry)
                     {
                         replacements.push((producer, function, display_name));
                     }
@@ -399,7 +399,7 @@ fn bind_semantic_callback_literals(
                 if stack.len() >= pops {
                     let producer = stack[stack.len() - pops];
                     if let Some((function, display_name)) =
-                        semantic_callback_literal(bytecode.instructions.get(producer), registry)
+                        callback_literal(bytecode.instructions.get(producer), registry)
                     {
                         replacements.push((producer, function, display_name));
                     }
@@ -410,7 +410,7 @@ fn bind_semantic_callback_literals(
                     if stack.len() >= effect.pops {
                         let producer = stack[stack.len() - effect.pops];
                         if let Some((function, display_name)) =
-                            semantic_callback_literal(bytecode.instructions.get(producer), registry)
+                            callback_literal(bytecode.instructions.get(producer), registry)
                         {
                             replacements.push((producer, function, display_name));
                         }
@@ -442,7 +442,7 @@ fn bind_semantic_callback_literals(
     }
 }
 
-fn semantic_callback_literal(
+fn callback_literal(
     instr: Option<&runmat_vm::Instr>,
     registry: &runmat_vm::SemanticFunctionRegistry,
 ) -> Option<(runmat_hir::FunctionId, String)> {

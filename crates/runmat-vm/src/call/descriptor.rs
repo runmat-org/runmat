@@ -99,7 +99,7 @@ impl CallableDescriptor {
         segments.len() > 1 && segments.iter().all(|segment| !segment.is_empty())
     }
 
-    fn semantic_inner(
+    fn function_inner(
         function: usize,
         name: Option<String>,
         fallback_policy: CallableFallbackPolicy,
@@ -148,7 +148,7 @@ impl CallableDescriptor {
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
-        Self::semantic_inner(
+        Self::function_inner(
             function,
             Some(name.clone()),
             fallback_policy,
@@ -351,7 +351,7 @@ impl CallableDescriptor {
     }
 }
 
-fn semantic_unavailable_error(function: usize, metadata: &CallableMetadata) -> RuntimeError {
+fn function_unavailable_error(function: usize, metadata: &CallableMetadata) -> RuntimeError {
     let display = metadata
         .display_name
         .as_deref()
@@ -439,7 +439,7 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
-            Err(semantic_unavailable_error(function.0, &metadata))
+            Err(function_unavailable_error(function.0, &metadata))
         }
         other => {
             let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(

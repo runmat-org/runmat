@@ -35,20 +35,20 @@ const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
 
 #[derive(Clone)]
-struct SemanticScope {
+struct ScopeFrame {
     owner: FunctionId,
     bindings: HashMap<String, BindingId>,
     workspace_visibility: WorkspaceVisibility,
 }
 
-struct SemanticCtx {
+struct LoweringCtx {
     assembly: HirAssembly,
     semantic_index: SemanticIndex,
     module: ModuleId,
     next_expr: usize,
     next_stmt: usize,
     next_function: usize,
-    scopes: Vec<SemanticScope>,
+    scopes: Vec<ScopeFrame>,
     function_modifiers: Vec<FunctionModifiers>,
     top_level_await: Vec<bool>,
     runmat_extensions_enabled: bool,
@@ -65,7 +65,7 @@ pub fn lower(
     prog: &AstProgram,
     context: &LoweringContext<'_>,
 ) -> Result<LoweringResult, SemanticError> {
-    let (assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
+    let (assembly, semantic_index) = LoweringCtx::lower_program(prog, context)?;
 
     Ok(LoweringResult {
         assembly,
@@ -73,7 +73,7 @@ pub fn lower(
     })
 }
 
-impl SemanticCtx {
+impl LoweringCtx {
     fn qualified_name_string(name: &QualifiedName) -> String {
         name.0
             .iter()
@@ -334,7 +334,7 @@ impl SemanticCtx {
         top_level_await: bool,
         f: impl FnOnce(&mut Self) -> Result<T, SemanticError>,
     ) -> Result<T, SemanticError> {
-        self.scopes.push(SemanticScope {
+        self.scopes.push(ScopeFrame {
             owner,
             bindings: HashMap::new(),
             workspace_visibility,
@@ -369,11 +369,11 @@ impl SemanticCtx {
         }
     }
 
-    fn current_scope(&self) -> &SemanticScope {
+    fn current_scope(&self) -> &ScopeFrame {
         self.scopes.last().expect("semantic lowering scope")
     }
 
-    fn current_scope_mut(&mut self) -> &mut SemanticScope {
+    fn current_scope_mut(&mut self) -> &mut ScopeFrame {
         self.scopes.last_mut().expect("semantic lowering scope")
     }
 

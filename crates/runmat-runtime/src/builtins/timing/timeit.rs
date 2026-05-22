@@ -222,7 +222,7 @@ fn prepare_callable(
 
     fn canonicalize_text_handle(handle: String) -> Value {
         let name = handle.strip_prefix('@').unwrap_or(handle.as_str());
-        semantic_handle_for_name(name).unwrap_or(Value::String(handle))
+        handle_for_name(name).unwrap_or(Value::String(handle))
     }
 
     match func {
@@ -258,7 +258,7 @@ fn prepare_callable(
         Value::FunctionHandle(name) => {
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
-                handle: semantic_handle_for_name(&normalized)
+                handle: handle_for_name(&normalized)
                     .unwrap_or_else(|| Value::String(format!("@{normalized}"))),
                 num_outputs,
             })
@@ -267,7 +267,7 @@ fn prepare_callable(
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
                 handle: if crate::is_well_formed_qualified_name(&normalized) {
-                    semantic_handle_for_name(&normalized)
+                    handle_for_name(&normalized)
                         .unwrap_or_else(|| Value::ExternalFunctionHandle(normalized))
                 } else {
                     Value::ExternalFunctionHandle(normalized)
@@ -304,7 +304,7 @@ fn prepare_callable(
     }
 }
 
-fn semantic_handle_for_name(name: &str) -> Option<Value> {
+fn handle_for_name(name: &str) -> Option<Value> {
     let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
     Some(Value::SemanticFunctionHandle {
         name: name.to_string(),
