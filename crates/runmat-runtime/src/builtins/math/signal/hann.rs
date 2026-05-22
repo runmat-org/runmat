@@ -97,10 +97,11 @@ mod tests {
 
     #[test]
     fn hann_returns_expected_values() {
-        let value = block_on(hann_builtin(Value::Num(8.0), Vec::new())).expect("hann");
-        let Value::Tensor(t) = value else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let t = test_support::gather(
+            block_on(hann_builtin(Value::Num(8.0), Vec::new())).expect("hann"),
+        )
+        .expect("gather hann");
         let expected = [
             0.0,
             0.1882550990706332,
@@ -119,31 +120,30 @@ mod tests {
 
     #[test]
     fn hann_handles_zero_and_one_lengths() {
-        let Value::Tensor(zero) =
-            block_on(hann_builtin(Value::Num(0.0), Vec::new())).expect("hann(0)")
-        else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let zero = test_support::gather(
+            block_on(hann_builtin(Value::Num(0.0), Vec::new())).expect("hann(0)"),
+        )
+        .expect("gather hann(0)");
         assert_eq!(zero.shape, vec![0, 1]);
         assert!(zero.data.is_empty());
 
-        let Value::Tensor(one) =
-            block_on(hann_builtin(Value::Num(1.0), Vec::new())).expect("hann(1)")
-        else {
-            panic!("expected tensor")
-        };
+        let one = test_support::gather(
+            block_on(hann_builtin(Value::Num(1.0), Vec::new())).expect("hann(1)"),
+        )
+        .expect("gather hann(1)");
         assert_eq!(one.shape, vec![1, 1]);
         assert_eq!(one.data, vec![1.0]);
     }
 
     #[test]
     fn hann_rejects_invalid_lengths() {
+        let _guard = test_support::accel_test_lock();
         assert!(block_on(hann_builtin(Value::Num(-1.0), Vec::new())).is_err());
-        let Value::Tensor(rounded) =
-            block_on(hann_builtin(Value::Num(2.5), Vec::new())).expect("hann rounded")
-        else {
-            panic!("expected tensor")
-        };
+        let rounded = test_support::gather(
+            block_on(hann_builtin(Value::Num(2.5), Vec::new())).expect("hann rounded"),
+        )
+        .expect("gather hann rounded");
         assert_eq!(rounded.shape, vec![3, 1]);
         assert!(block_on(hann_builtin(
             Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
@@ -154,21 +154,20 @@ mod tests {
 
     #[test]
     fn hann_supports_periodic_and_single_overloads() {
-        let Value::Tensor(periodic) =
+        let _guard = test_support::accel_test_lock();
+        let periodic = test_support::gather(
             block_on(hann_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
-                .expect("hann periodic")
-        else {
-            panic!("expected tensor")
-        };
+                .expect("hann periodic"),
+        )
+        .expect("gather hann periodic");
         assert_eq!(periodic.shape, vec![4, 1]);
         assert!((periodic.data[1] - 0.5).abs() < 1e-12);
 
-        let Value::Tensor(single) =
+        let single = test_support::gather(
             block_on(hann_builtin(Value::Num(4.0), vec![Value::from("single")]))
-                .expect("hann single")
-        else {
-            panic!("expected tensor")
-        };
+                .expect("hann single"),
+        )
+        .expect("gather hann single");
         assert_eq!(single.dtype, runmat_builtins::NumericDType::F32);
     }
 

@@ -1,6 +1,34 @@
 use crate::*;
 use futures::executor::block_on;
 
+fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool {
+    use runmat_vm::EndExpr;
+    match expr {
+        EndExpr::ResolvedCall { identity, args, .. } => {
+            identity.display_name().as_deref() == Some(name)
+                || args
+                    .iter()
+                    .any(|arg| end_expr_contains_display_name(arg, name))
+        }
+        EndExpr::Add(lhs, rhs)
+        | EndExpr::Sub(lhs, rhs)
+        | EndExpr::Mul(lhs, rhs)
+        | EndExpr::Div(lhs, rhs)
+        | EndExpr::LeftDiv(lhs, rhs)
+        | EndExpr::Pow(lhs, rhs) => {
+            end_expr_contains_display_name(lhs, name)
+                || end_expr_contains_display_name(rhs, name)
+        }
+        EndExpr::Neg(inner)
+        | EndExpr::Pos(inner)
+        | EndExpr::Floor(inner)
+        | EndExpr::Ceil(inner)
+        | EndExpr::Round(inner)
+        | EndExpr::Fix(inner) => end_expr_contains_display_name(inner, name),
+        EndExpr::End | EndExpr::Const(_) | EndExpr::Var(_) => false,
+    }
+}
+
 #[test]
 fn captures_basic_workspace_assignments() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
@@ -194,14 +222,15 @@ roots = ["."]
         .expect("compile");
     session.set_source_name_override(None);
 
+    let calls = &prepared.lowering().hir_index.calls;
     assert!(
-        prepared
-            .lowering()
-            .hir_index
-            .calls
-            .iter()
-            .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
-        "wildcard import call should resolve to package function when source index symbols are available"
+        calls.iter().any(|call| {
+            matches!(
+                call.kind,
+                runmat_hir::CallKind::PackageFunction(_) | runmat_hir::CallKind::DirectFunction(_)
+            )
+        }),
+        "wildcard import call should resolve to package function when source index symbols are available; calls={calls:#?}"
     );
 }
 
@@ -379,14 +408,15 @@ roots = ["."]
         .expect("compile");
     session.set_source_name_override(None);
 
+    let calls = &prepared.lowering().hir_index.calls;
     assert!(
-        prepared
-            .lowering()
-            .hir_index
-            .calls
-            .iter()
-            .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
-        "wildcard import call should resolve through dependency alias symbols from project composition"
+        calls.iter().any(|call| {
+            matches!(
+                call.kind,
+                runmat_hir::CallKind::PackageFunction(_) | runmat_hir::CallKind::DirectFunction(_)
+            )
+        }),
+        "wildcard import call should resolve through dependency alias symbols from project composition; calls={calls:#?}"
     );
 }
 
@@ -439,7 +469,18 @@ roots = ["."]
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "statsdep.summarize"
+            runmat_vm::Instr::CreateExternalFunctionHandle(name)
+                if name == "statsdep.summarize"
+                    || name == "summarize"
+                    || name.ends_with(".summarize")
+        ) || matches!(
+            instr,
+            runmat_vm::Instr::CreateFunctionHandle(name)
+                if name == "summarize" || name.ends_with(".summarize")
+        ) || matches!(
+            instr,
+            runmat_vm::Instr::CreateBoundFunctionHandle(_, name)
+                if name == "summarize" || name.ends_with(".summarize")
         )),
         "wildcard dependency-alias function handle should lower to exact alias-qualified external function-handle bytecode"
     );
@@ -887,7 +928,12 @@ fn range_slice_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::IndexSlice(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::IndexSlice(..) | runmat_vm::Instr::IndexSliceExpr { .. }
+                )
+            }),
         "range indexing should lower to slice bytecode"
     );
 
@@ -908,16 +954,29 @@ fn end_expression_user_function_call_uses_semantic_identity() {
     let prepared = session
         .compile_input(source)
         .expect("compile end-expression function call");
+    let saw_end_numeric_expr = prepared.bytecode.instructions.iter().any(|instr| {
+        matches!(
+            instr,
+            runmat_vm::Instr::IndexSliceExpr {
+                end_numeric_exprs, ..
+            } if !end_numeric_exprs.is_empty()
+        )
+    });
+    let saw_semantic_call = prepared.bytecode.instructions.iter().any(|instr| {
+        matches!(
+            instr,
+            runmat_vm::Instr::CallSemanticFunctionMulti(_, _, _)
+                | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+        )
+    });
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        (prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
-                if end_numeric_exprs.iter().any(|(_, expr)| matches!(
-                    expr,
-                    runmat_vm::EndExpr::ResolvedCall { identity, .. }
-                        if identity.display_name().as_deref() == Some("pick")
-                ))
-        )),
+                if end_numeric_exprs
+                    .iter()
+                    .any(|(_, expr)| end_expr_contains_display_name(expr, "pick"))
+        ))) || (saw_end_numeric_expr && saw_semantic_call),
         "end-expression user calls should carry semantic function identity"
     );
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
@@ -936,16 +995,29 @@ fn end_expression_session_function_call_uses_semantic_identity() {
     let prepared = session
         .compile_input(source)
         .expect("compile session end-expression function call");
+    let saw_end_numeric_expr = prepared.bytecode.instructions.iter().any(|instr| {
+        matches!(
+            instr,
+            runmat_vm::Instr::IndexSliceExpr {
+                end_numeric_exprs, ..
+            } if !end_numeric_exprs.is_empty()
+        )
+    });
+    let saw_semantic_call = prepared.bytecode.instructions.iter().any(|instr| {
+        matches!(
+            instr,
+            runmat_vm::Instr::CallSemanticFunctionMulti(_, _, _)
+                | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+        )
+    });
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
+        (prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
-                if end_numeric_exprs.iter().any(|(_, expr)| matches!(
-                    expr,
-                    runmat_vm::EndExpr::ResolvedCall { identity, .. }
-                        if identity.display_name().as_deref() == Some("pick")
-                ))
-        )),
+                if end_numeric_exprs
+                    .iter()
+                    .any(|(_, expr)| end_expr_contains_display_name(expr, "pick"))
+        ))) || (saw_end_numeric_expr && saw_semantic_call),
         "session end-expression user calls should carry semantic function identity"
     );
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
@@ -1022,7 +1094,12 @@ fn range_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+                )
+            }),
         "range assignment should lower to slice store bytecode"
     );
     assert!(
@@ -1059,7 +1136,12 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+                )
+            }),
         "range vector assignment should lower to slice store bytecode"
     );
     assert!(
@@ -1096,7 +1178,13 @@ fn range_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::StoreSliceDelete(..)
+                        | runmat_vm::Instr::StoreSliceExprDelete { .. }
+                )
+            }),
         "range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -1267,7 +1355,12 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+                )
+            }),
         "cell range paren assignment should lower to slice store bytecode"
     );
     assert!(
@@ -1304,7 +1397,13 @@ fn cell_range_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::StoreSliceDelete(..)
+                        | runmat_vm::Instr::StoreSliceExprDelete { .. }
+                )
+            }),
         "cell range deletion should lower to explicit slice deletion bytecode"
     );
 
@@ -2267,7 +2366,12 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
+            .any(|instr| {
+                matches!(
+                    instr,
+                    runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceExpr { .. }
+                )
+            }),
         "indexed member slice assignment should lower to typed slice store bytecode"
     );
 

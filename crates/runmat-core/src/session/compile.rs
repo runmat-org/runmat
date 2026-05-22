@@ -1,6 +1,7 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
@@ -28,9 +29,17 @@ fn mir_local_fact_count_for_entrypoint(
 fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     use runmat_config::discover_known_project_symbols_from_source_name;
 
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(_) => return HashSet::new(),
+    let source_path = PathBuf::from(source_name);
+    let cwd = if source_path.is_absolute() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"))
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(_) => return HashSet::new(),
+        }
     };
     discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
 }

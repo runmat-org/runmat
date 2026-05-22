@@ -2611,11 +2611,25 @@ pub fn clear_provider() {
 }
 
 pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
-    PROVIDER_REGISTRY
+    if let Some(thread_provider) = current_thread_provider() {
+        return Some(thread_provider);
+    }
+    if let Some(registered) = PROVIDER_REGISTRY
         .read()
         .ok()
         .and_then(|guard| guard.get(&device_id).copied())
-        .or_else(|| provider())
+    {
+        return Some(registered);
+    }
+    // Preserve legacy/default-handle behavior for callers that use device id 0
+    // without an explicit registry entry.
+    if device_id == 0 {
+        return GLOBAL_PROVIDER
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().copied());
+    }
+    None
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {

@@ -376,10 +376,12 @@ mod tests {
 
     #[test]
     fn gather_if_needed_reports_provider_unavailable_for_nested_output_list_gpu() {
+        runmat_accelerate_api::clear_provider();
         let _provider_guard = ThreadProviderGuard::set(None);
         let value = Value::OutputList(vec![Value::GpuTensor(GpuTensorHandle {
             shape: vec![1],
-            device_id: 997,
+            // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
+            device_id: 0,
             buffer_id: 44,
         })]);
         let err = futures::executor::block_on(gather_if_needed_async(&value))
@@ -389,13 +391,15 @@ mod tests {
 
     #[test]
     fn gather_if_needed_reports_provider_unavailable_for_closure_capture_gpu() {
+        runmat_accelerate_api::clear_provider();
         let _provider_guard = ThreadProviderGuard::set(None);
         let value = Value::Closure(Closure {
             function_name: "worker".to_string(),
             bound_function: None,
             captures: vec![Value::GpuTensor(GpuTensorHandle {
                 shape: vec![1],
-                device_id: 996,
+                // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
+                device_id: 0,
                 buffer_id: 45,
             })],
         });

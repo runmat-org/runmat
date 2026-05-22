@@ -77,10 +77,11 @@ mod tests {
 
     #[test]
     fn hamming_returns_expected_values() {
-        let value = block_on(hamming_builtin(Value::Num(8.0), Vec::new())).expect("hamming");
-        let Value::Tensor(t) = value else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let t = test_support::gather(
+            block_on(hamming_builtin(Value::Num(8.0), Vec::new())).expect("hamming"),
+        )
+        .expect("gather hamming");
         let expected = [
             0.08,
             0.25319469114498255,
@@ -99,31 +100,30 @@ mod tests {
 
     #[test]
     fn hamming_handles_zero_and_one_lengths() {
-        let Value::Tensor(zero) =
-            block_on(hamming_builtin(Value::Num(0.0), Vec::new())).expect("hamming(0)")
-        else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let zero = test_support::gather(
+            block_on(hamming_builtin(Value::Num(0.0), Vec::new())).expect("hamming(0)"),
+        )
+        .expect("gather hamming(0)");
         assert_eq!(zero.shape, vec![0, 1]);
         assert!(zero.data.is_empty());
 
-        let Value::Tensor(one) =
-            block_on(hamming_builtin(Value::Num(1.0), Vec::new())).expect("hamming(1)")
-        else {
-            panic!("expected tensor")
-        };
+        let one = test_support::gather(
+            block_on(hamming_builtin(Value::Num(1.0), Vec::new())).expect("hamming(1)"),
+        )
+        .expect("gather hamming(1)");
         assert_eq!(one.shape, vec![1, 1]);
         assert_eq!(one.data, vec![1.0]);
     }
 
     #[test]
     fn hamming_rejects_invalid_lengths() {
+        let _guard = test_support::accel_test_lock();
         assert!(block_on(hamming_builtin(Value::Num(-1.0), Vec::new())).is_err());
-        let Value::Tensor(rounded) =
-            block_on(hamming_builtin(Value::Num(2.5), Vec::new())).expect("hamming rounded")
-        else {
-            panic!("expected tensor")
-        };
+        let rounded = test_support::gather(
+            block_on(hamming_builtin(Value::Num(2.5), Vec::new())).expect("hamming rounded"),
+        )
+        .expect("gather hamming rounded");
         assert_eq!(rounded.shape, vec![3, 1]);
         assert!(block_on(hamming_builtin(
             Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
@@ -134,13 +134,12 @@ mod tests {
 
     #[test]
     fn hamming_supports_periodic_overload() {
-        let Value::Tensor(periodic) = block_on(hamming_builtin(
-            Value::Num(4.0),
-            vec![Value::from("periodic")],
-        ))
-        .expect("hamming periodic") else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let periodic = test_support::gather(
+            block_on(hamming_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
+                .expect("hamming periodic"),
+        )
+        .expect("gather hamming periodic");
         assert_eq!(periodic.shape, vec![4, 1]);
         assert!((periodic.data[1] - 0.54).abs() < 1e-12);
     }

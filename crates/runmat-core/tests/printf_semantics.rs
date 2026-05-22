@@ -94,6 +94,11 @@ fn fprintf_file_roundtrip_and_count_work_end_to_end() {
         path_text
     );
     let result = block_on(engine.execute(&script)).unwrap();
+    assert!(
+        result.error.is_none(),
+        "expected no execution error, got {:?}",
+        result.error
+    );
     assert_eq!(stdout_stream(&result), "|7|");
     let bytes = std::fs::read(&path).expect("written file should exist");
     assert_eq!(bytes, b"hello-7");
@@ -109,7 +114,12 @@ fn fprintf_encoding_alias_smoke_utf8_underscore() {
         "fid = fopen('{}', 'w', 'native', 'utf_8'); fprintf(fid, '%s', 'é'); fclose(fid);",
         path_text
     );
-    block_on(engine.execute(&script)).unwrap();
+    let result = block_on(engine.execute(&script)).unwrap();
+    assert!(
+        result.error.is_none(),
+        "expected no execution error, got {:?}",
+        result.error
+    );
     let bytes = std::fs::read(&path).expect("utf8 alias output should exist");
     assert_eq!(bytes, "é".as_bytes());
     let _ = std::fs::remove_file(path);

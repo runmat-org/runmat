@@ -55,7 +55,11 @@ fn matrices_cells_and_indexing_lower_to_semantic_shapes() {
         matches!(&body[1].kind, HirStmtKind::Assign(_, expr, _) if matches!(expr.kind, HirExprKind::Cell(_)))
     );
     assert!(
-        matches!(&body[2].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Index(_, _)))
+        matches!(
+            &body[2].kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(expr.kind, HirExprKind::Call(HirCall { callee: HirCallableRef::DynamicExpr(_), .. }) | HirExprKind::Index(_, _))
+        )
     );
     assert!(
         matches!(&body[3].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Index(_, _)))
@@ -68,7 +72,11 @@ fn end_colon_and_range_lower_to_semantic_shapes() {
     let body = entry_body(&prog);
     assert_eq!(body.len(), 4);
     assert!(
-        matches!(&body[1].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Index(_, _)))
+        matches!(
+            &body[1].kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(expr.kind, HirExprKind::Call(HirCall { callee: HirCallableRef::DynamicExpr(_), .. }) | HirExprKind::Index(_, _))
+        )
     );
     assert!(
         matches!(&body[2].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::Range(_, _, _)))

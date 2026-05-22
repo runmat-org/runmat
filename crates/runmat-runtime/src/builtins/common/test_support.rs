@@ -88,7 +88,8 @@ pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     let provider = match &value {
-        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle),
+        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
+            .or_else(runmat_accelerate_api::provider),
         _ => runmat_accelerate_api::provider(),
     };
 

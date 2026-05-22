@@ -25,8 +25,20 @@ fn mir_local_fact_count_for_entrypoint(
 
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
     use runmat_config::discover_known_project_symbols_from_source_name;
+    use std::path::{Path, PathBuf};
 
     let Ok(cwd) = std::env::current_dir() else {
+        let Some(source_name) = source_name else {
+            return HashSet::new();
+        };
+        let source_path = PathBuf::from(source_name);
+        if source_path.is_absolute() {
+            let source_cwd = source_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("/"));
+            return discover_known_project_symbols_from_source_name(Some(source_name), &source_cwd);
+        }
         return HashSet::new();
     };
     discover_known_project_symbols_from_source_name(source_name, &cwd)

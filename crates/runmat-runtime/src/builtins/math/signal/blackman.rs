@@ -83,10 +83,11 @@ mod tests {
 
     #[test]
     fn blackman_returns_expected_values() {
-        let value = block_on(blackman_builtin(Value::Num(8.0), Vec::new())).expect("blackman");
-        let Value::Tensor(t) = value else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let t = test_support::gather(
+            block_on(blackman_builtin(Value::Num(8.0), Vec::new())).expect("blackman"),
+        )
+        .expect("gather blackman");
         let expected = [
             -1.3877787807814457e-17,
             0.09045342435412812,
@@ -105,31 +106,30 @@ mod tests {
 
     #[test]
     fn blackman_handles_zero_and_one_lengths() {
-        let Value::Tensor(zero) =
-            block_on(blackman_builtin(Value::Num(0.0), Vec::new())).expect("blackman(0)")
-        else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let zero = test_support::gather(
+            block_on(blackman_builtin(Value::Num(0.0), Vec::new())).expect("blackman(0)"),
+        )
+        .expect("gather blackman(0)");
         assert_eq!(zero.shape, vec![0, 1]);
         assert!(zero.data.is_empty());
 
-        let Value::Tensor(one) =
-            block_on(blackman_builtin(Value::Num(1.0), Vec::new())).expect("blackman(1)")
-        else {
-            panic!("expected tensor")
-        };
+        let one = test_support::gather(
+            block_on(blackman_builtin(Value::Num(1.0), Vec::new())).expect("blackman(1)"),
+        )
+        .expect("gather blackman(1)");
         assert_eq!(one.shape, vec![1, 1]);
         assert_eq!(one.data, vec![1.0]);
     }
 
     #[test]
     fn blackman_rejects_invalid_lengths() {
+        let _guard = test_support::accel_test_lock();
         assert!(block_on(blackman_builtin(Value::Num(-1.0), Vec::new())).is_err());
-        let Value::Tensor(rounded) =
-            block_on(blackman_builtin(Value::Num(2.5), Vec::new())).expect("blackman rounded")
-        else {
-            panic!("expected tensor")
-        };
+        let rounded = test_support::gather(
+            block_on(blackman_builtin(Value::Num(2.5), Vec::new())).expect("blackman rounded"),
+        )
+        .expect("gather blackman rounded");
         assert_eq!(rounded.shape, vec![3, 1]);
         assert!(block_on(blackman_builtin(
             Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
@@ -140,23 +140,20 @@ mod tests {
 
     #[test]
     fn blackman_supports_periodic_and_single_overloads() {
-        let Value::Tensor(periodic) = block_on(blackman_builtin(
-            Value::Num(4.0),
-            vec![Value::from("periodic")],
-        ))
-        .expect("blackman periodic") else {
-            panic!("expected tensor")
-        };
+        let _guard = test_support::accel_test_lock();
+        let periodic = test_support::gather(
+            block_on(blackman_builtin(Value::Num(4.0), vec![Value::from("periodic")]))
+                .expect("blackman periodic"),
+        )
+        .expect("gather blackman periodic");
         assert_eq!(periodic.shape, vec![4, 1]);
         assert!((periodic.data[1] - 0.34).abs() < 1e-12);
 
-        let Value::Tensor(single) = block_on(blackman_builtin(
-            Value::Num(4.0),
-            vec![Value::from("single")],
-        ))
-        .expect("blackman single") else {
-            panic!("expected tensor")
-        };
+        let single = test_support::gather(
+            block_on(blackman_builtin(Value::Num(4.0), vec![Value::from("single")]))
+                .expect("blackman single"),
+        )
+        .expect("gather blackman single");
         assert_eq!(single.dtype, runmat_builtins::NumericDType::F32);
     }
 
