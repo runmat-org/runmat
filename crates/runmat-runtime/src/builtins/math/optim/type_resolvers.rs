@@ -4,6 +4,10 @@ pub fn scalar_root_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
 }
 
+pub fn numerical_integral_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Num
+}
+
 pub fn nonlinear_solve_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.get(1) {
         Some(Type::Tensor { shape }) => Type::Tensor {

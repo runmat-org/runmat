@@ -65,3 +65,62 @@ fn degree_radian_conversion_builtins_dispatch() {
         other => panic!("expected scalar result, got {other:?}"),
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn degree_trig_builtins_return_matlab_exact_values() {
+    let sin_zero = runmat_runtime::call_builtin("sind", &[Value::Num(180.0)]).unwrap();
+    match sin_zero {
+        Value::Num(value) => assert_eq!(value, 0.0),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let sin_half = runmat_runtime::call_builtin("sind", &[Value::Num(30.0)]).unwrap();
+    match sin_half {
+        Value::Num(value) => assert_eq!(value, 0.5),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let cos_zero = runmat_runtime::call_builtin("cosd", &[Value::Num(90.0)]).unwrap();
+    match cos_zero {
+        Value::Num(value) => assert_eq!(value, 0.0),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let tan_one = runmat_runtime::call_builtin("tand", &[Value::Num(45.0)]).unwrap();
+    match tan_one {
+        Value::Num(value) => assert_eq!(value, 1.0),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let tan_pos_inf = runmat_runtime::call_builtin("tand", &[Value::Num(90.0)]).unwrap();
+    match tan_pos_inf {
+        Value::Num(value) => assert!(value.is_infinite() && value.is_sign_positive()),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let tan_neg_inf = runmat_runtime::call_builtin("tand", &[Value::Num(-90.0)]).unwrap();
+    match tan_neg_inf {
+        Value::Num(value) => assert!(value.is_infinite() && value.is_sign_negative()),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mode_builtin_dispatches_for_majority_and_ties() {
+    let majority =
+        runmat_builtins::Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
+    let result = runmat_runtime::call_builtin("mode", &[Value::Tensor(majority)]).unwrap();
+    assert_eq!(result, Value::Num(3.0));
+
+    let ties = runmat_builtins::Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![1, 4]).unwrap();
+    let tied_result = runmat_runtime::call_builtin("mode", &[Value::Tensor(ties)]).unwrap();
+    assert_eq!(tied_result, Value::Num(1.0));
+
+    let across =
+        runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 2.0, 3.0, 2.0], vec![2, 3]).unwrap();
+    let all_result =
+        runmat_runtime::call_builtin("mode", &[Value::Tensor(across), Value::from("all")]).unwrap();
+    assert_eq!(all_result, Value::Num(2.0));
+}

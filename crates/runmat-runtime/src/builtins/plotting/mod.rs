@@ -48,6 +48,8 @@ pub(crate) mod drawnow;
 pub(crate) mod errorbar;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
+#[path = "ops/fill3.rs"]
+pub(crate) mod fill3;
 #[path = "ops/gca.rs"]
 pub(crate) mod gca;
 #[path = "ops/gcf.rs"]
@@ -82,6 +84,8 @@ pub(crate) mod mesh;
 pub(crate) mod meshc;
 #[path = "ops/common/mod.rs"]
 pub(crate) mod op_common;
+#[path = "ops/patch.rs"]
+pub(crate) mod patch;
 #[path = "ops/pie.rs"]
 pub(crate) mod pie;
 #[path = "ops/plot.rs"]
@@ -108,6 +112,8 @@ pub(crate) mod stairs;
 pub(crate) mod stem;
 #[path = "ops/subplot.rs"]
 pub(crate) mod subplot;
+#[path = "ops/suptitle.rs"]
+pub(crate) mod suptitle;
 #[path = "ops/surf.rs"]
 pub(crate) mod surf;
 #[path = "ops/surfc.rs"]

@@ -1,4 +1,5 @@
 use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::{ResolveContext, Type};
 
@@ -8,6 +9,25 @@ pub fn cov_type(args: &[Type], _context: &ResolveContext) -> Type {
 
 pub fn corrcoef_type(args: &[Type], _context: &ResolveContext) -> Type {
     square_summary_type(args)
+}
+
+/// Type resolver for `mode`. Mirrors the reduction-style shape inference used by
+/// `mean` / `median` / `var`: the leading output (`M`) keeps the input's element
+/// type and reduces the requested dimension (or the first non-singleton dim by
+/// default). The frequency (`F`) output mirrors `M`'s shape, while the cell
+/// array (`C`) is described separately at the type level.
+pub fn mode_type(args: &[Type], context: &ResolveContext) -> Type {
+    let reduced = reduce_numeric_type(args, context);
+    match args.first() {
+        Some(Type::Logical { .. }) => match reduced {
+            Type::Tensor { shape } | Type::Logical { shape } => Type::Logical { shape },
+            Type::Num | Type::Bool => Type::Bool,
+            other => other,
+        },
+        Some(Type::Bool) => Type::Bool,
+        Some(Type::Int) => Type::Int,
+        _ => reduced,
+    }
 }
 
 pub fn histcounts_type(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -137,6 +157,32 @@ fn is_numeric_scalar(ty: &Type) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mode_type_preserves_logical_shape() {
+        let ty = Type::Logical {
+            shape: Some(vec![Some(3), Some(4)]),
+        };
+        let out = mode_type(&[ty], &ResolveContext::new(Vec::new()));
+        assert_eq!(
+            out,
+            Type::Logical {
+                shape: Some(vec![Some(1), Some(4)])
+            }
+        );
+    }
+
+    #[test]
+    fn mode_type_preserves_scalar_bool_and_int() {
+        assert_eq!(
+            mode_type(&[Type::Bool], &ResolveContext::new(Vec::new())),
+            Type::Bool
+        );
+        assert_eq!(
+            mode_type(&[Type::Int], &ResolveContext::new(Vec::new())),
+            Type::Int
+        );
+    }
 
     #[test]
     fn rng_type_is_struct() {

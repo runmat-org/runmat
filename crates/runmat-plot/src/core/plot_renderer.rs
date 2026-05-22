@@ -23,6 +23,9 @@ struct CachedSceneBuffers {
     index_buffer: Option<Arc<wgpu::Buffer>>,
 }
 
+const PATCH_3D_ABS_EPSILON: f32 = 1e-9;
+const PATCH_3D_REL_EPSILON: f32 = 1e-6;
+
 /// Unified plot renderer that handles both interactive and static rendering
 pub struct PlotRenderer {
     /// WGPU renderer for GPU-accelerated rendering
@@ -270,6 +273,20 @@ impl PlotRenderer {
     fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
         match plot {
             crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
+            crate::plots::figure::PlotElement::Patch(patch) => {
+                if patch.force_3d() {
+                    return true;
+                }
+
+                let mut max_xy = 0.0_f32;
+                let mut max_z = 0.0_f32;
+                for point in patch.vertices() {
+                    max_xy = max_xy.max(point.x.abs().max(point.y.abs()));
+                    max_z = max_z.max(point.z.abs());
+                }
+
+                max_z > PATCH_3D_ABS_EPSILON.max(max_xy * PATCH_3D_REL_EPSILON)
+            }
             crate::plots::figure::PlotElement::Line3(_) => true,
             crate::plots::figure::PlotElement::Scatter3(_) => true,
             _ => false,
@@ -2913,6 +2930,38 @@ impl PlotRenderer {
         let (rows, cols) = self.figure_axes_grid();
         fig.set_subplot_grid(rows, cols);
         fig
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plots::{figure::PlotElement, PatchPlot};
+
+    fn patch_element(vertices: Vec<Vec3>) -> PlotElement {
+        PlotElement::Patch(PatchPlot::new(vertices, vec![vec![0, 1, 2]]).unwrap())
+    }
+
+    #[test]
+    fn patch_3d_detection_preserves_small_scene_depth() {
+        let patch = patch_element(vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0e-4, 0.0, 0.0),
+            Vec3::new(0.0, 1.0e-4, 1.0e-8),
+        ]);
+
+        assert!(PlotRenderer::plot_element_is_3d(&patch));
+    }
+
+    #[test]
+    fn patch_3d_detection_ignores_large_scene_relative_noise() {
+        let patch = patch_element(vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0e6, 0.0, 0.0),
+            Vec3::new(0.0, 1.0e6, 0.5),
+        ]);
+
+        assert!(!PlotRenderer::plot_element_is_3d(&patch));
     }
 }
 

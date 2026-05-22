@@ -2,6 +2,7 @@
 
 pub mod fclose;
 pub mod feof;
+pub mod fgetl;
 pub mod fgets;
 pub mod fileread;
 pub mod filewrite;

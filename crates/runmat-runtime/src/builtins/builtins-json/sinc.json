@@ -1,0 +1,131 @@
+{
+  "title": "sinc",
+  "category": "math/signal",
+  "keywords": [
+    "sinc",
+    "normalized sinc",
+    "signal processing",
+    "elementwise",
+    "complex"
+  ],
+  "summary": "Normalized sinc, sin(pi*x)/(pi*x), evaluated element-wise.",
+  "references": [
+    "title: \"MATLAB sinc documentation\""
+  ],
+  "gpu_support": {
+    "elementwise": true,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Providers may execute sinc on-device through unary_sinc. The runtime gathers to the host only when a provider lacks that hook or cannot service the input."
+  },
+  "fusion": {
+    "elementwise": true,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::signal::sinc::tests",
+    "integration": "builtins::math::signal::sinc::tests::sinc_gpu_input_stays_resident_when_provider_supports_sinc"
+  },
+  "description": "`y = sinc(x)` evaluates the normalized sinc function element-wise using MATLAB's definition `sin(pi*x)/(pi*x)`, with `sinc(0)` defined as `1`.",
+  "behaviors": [
+    "Accepts real or complex scalars, vectors, matrices, and N-D tensors.",
+    "Preserves the input shape for vector, matrix, and N-D tensor inputs.",
+    "Returns `1` for exactly zero real inputs.",
+    "Returns exact `0` for finite nonzero integer-valued real inputs, matching MATLAB's `sinpi`-style integer accuracy where practical.",
+    "Logical and integer inputs are promoted to double precision before evaluation.",
+    "Complex inputs use the analytic extension `sin(pi*z)/(pi*z)` and return `1 + 0i` for `z == 0`.",
+    "GPU inputs stay resident when the active provider supports `unary_sinc`; otherwise RunMat gathers automatically and evaluates with the host implementation."
+  ],
+  "examples": [
+    {
+      "description": "Evaluate sinc at zero",
+      "input": "y = sinc(0)",
+      "output": "y = 1"
+    },
+    {
+      "description": "Evaluate sinc at integer inputs",
+      "input": "x = 1:5;\ny = sinc(x)",
+      "output": "y = [0 0 0 0 0]"
+    },
+    {
+      "description": "Evaluate normalized sinc values",
+      "input": "x = [-1 0 1 0.5];\ny = sinc(x)",
+      "output": "y = [0 1 0 0.6366]"
+    },
+    {
+      "description": "Preserve matrix shape",
+      "input": "A = [0 0.5; 1.5 2];\nY = sinc(A)",
+      "output": "Y =\n    1.0000    0.6366\n   -0.2122         0"
+    },
+    {
+      "description": "Evaluate sinc for a complex value",
+      "input": "z = sinc(0.5 + 0.25i)"
+    },
+    {
+      "description": "Use gpuArray input",
+      "input": "g = gpuArray([0 0.5 1]);\ny = sinc(g);\nresult = gather(y)",
+      "output": "result = [1 0.6366 0]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Which sinc definition does RunMat use?",
+      "answer": "RunMat uses MATLAB's normalized definition, `sin(pi*x)/(pi*x)`, with the removable singularity at zero defined as `1`."
+    },
+    {
+      "question": "Why does `sinc(1:5)` return exact zeros?",
+      "answer": "The implementation detects finite nonzero integer-valued real inputs before evaluating the trigonometric expression. This avoids floating-point residuals from `sin(pi*x)` and matches MATLAB's practical `sinpi` behaviour."
+    },
+    {
+      "question": "Does `sinc` support complex values?",
+      "answer": "Yes. Complex scalars and complex tensors use the analytic extension `sin(pi*z)/(pi*z)` and preserve tensor shape."
+    },
+    {
+      "question": "Will `sinc(gpuArray(...))` stay on the GPU?",
+      "answer": "Yes when the active provider implements `unary_sinc`. Providers without that hook fall back to host evaluation so zero and integer cases still use the exact MATLAB-compatible path."
+    }
+  ],
+  "links": [
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "fft",
+      "url": "./fft"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
+    },
+    {
+      "label": "conv",
+      "url": "./conv"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/signal/sinc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/sinc.rs"
+  },
+  "gpu_residency": "`sinc` keeps real GPU tensors resident when the active provider exposes `unary_sinc`. The runtime preserves a host fallback for providers that do not support the hook.",
+  "gpu_behavior": [
+    "Provider-backed execution uses the same normalized sinc semantics, including `sinc(0) == 1` and exact zeros for finite nonzero integer-valued real inputs.",
+    "If the provider declines the operation, RunMat gathers through the active provider and evaluates with the host implementation.",
+    "Fusion emits a guarded normalized sinc expression with explicit zero and integer branches for real elementwise graphs."
+  ]
+}

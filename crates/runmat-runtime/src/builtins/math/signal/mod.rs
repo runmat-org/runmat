@@ -8,4 +8,7 @@ pub mod deconv;
 pub mod filter;
 pub(crate) mod hamming;
 pub(crate) mod hann;
+pub(crate) mod sawtooth;
+pub(crate) mod sinc;
+pub(crate) mod square;
 pub(crate) mod type_resolvers;

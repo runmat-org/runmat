@@ -124,6 +124,10 @@
       "url": "./feof"
     },
     {
+      "label": "fgetl",
+      "url": "./fgetl"
+    },
+    {
       "label": "fread",
       "url": "./fread"
     },
