@@ -54,7 +54,8 @@ const pricingFaqItems: FAQItem[] = [
     id: "pricing-free",
     question: "Is RunMat really free?",
     answer:
-      "Yes. RunMat Runtime is open source. The browser sandbox is free to use, and the desktop app will be free when available. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. RunMat Runtime is open source. The browser sandbox is free to use, and you can download the desktop app from the download page. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+    answerContent: <>Yes. RunMat Runtime is open source. The browser sandbox is free to use, and you can <Link href="/download" className="underline hover:text-foreground">download the desktop app</Link>. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.</>,
   },
   {
     id: "pricing-account",

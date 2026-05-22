@@ -166,7 +166,7 @@ Key capabilities:
 
 ## Pricing
 
-- **Runtime**: Free and open source (MIT). Browser sandbox, CLI, and desktop app (coming soon) are all free.
+- **Runtime**: Free and open source (MIT). Browser sandbox, CLI, and desktop app are all free; download the desktop app at https://runmat.com/download.
 - **App Hobby**: $0/month. Unlimited projects, 100 MB storage, version history.
 - **App Pro**: $30/month per user. Unlimited projects, 10 GB storage, version history.
 - **App Team**: $100/month per user. Unlimited projects, 100 GB storage, SSO/SAML, SCIM provisioning, priority support.

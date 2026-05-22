@@ -377,7 +377,7 @@ The "avoid transfers" principle extends to visualization. RunMat's plotting rend
 |-------------|----------|----------|
 | Browser ([runmat.com/sandbox](https://runmat.com/sandbox)) | WebGPU | Trying code with no install |
 | CLI (`runmat run script.m`) | Metal / DX12 / Vulkan | Scripts, benchmarks, CI, max performance |
-| Desktop app (coming soon) | Metal / DX12 / Vulkan | Full IDE + full GPU headroom |
+| [Desktop app](/download) | Metal / DX12 / Vulkan | Full IDE + full GPU headroom |
 
 For benchmarks against MATLAB, PyTorch, and NumPy, see [Introducing RunMat Accelerate](/blog/runmat-accelerate-fastest-runtime-for-your-math).
 

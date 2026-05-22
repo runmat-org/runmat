@@ -4,6 +4,20 @@ import LazyVideo from "@/components/LazyVideo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+export type MediaTone = "muted" | "brand" | "surface";
+
+export const mediaToneClasses: Record<MediaTone, string> = {
+  muted: "bg-muted text-foreground",
+  brand: "bg-brand/15 text-foreground",
+  surface: "bg-card text-card-foreground",
+};
+
+const mediaToneBorderClasses: Record<MediaTone, string> = {
+  muted: "border-border",
+  brand: "border-brand/30",
+  surface: "border-border",
+};
+
 interface HeroLink {
   label: ReactNode;
   href: string;
@@ -22,18 +36,12 @@ interface HeroProps {
   media: {
     label: string;
     note?: string;
-    tone?: "muted" | "brand" | "surface";
+    tone?: MediaTone;
     image?: string;
     poster?: string;
     video?: string;
   };
 }
-
-const mediaToneClasses = {
-  muted: "border-border bg-muted text-foreground",
-  brand: "border-brand/30 bg-brand/15 text-foreground",
-  surface: "border-border bg-card text-card-foreground",
-} as const;
 
 export default function Hero({
   title,
@@ -95,6 +103,7 @@ export default function Hero({
             className={cn(
               "relative aspect-video w-full overflow-hidden rounded-3xl border",
               mediaToneClasses[media.tone ?? "muted"],
+              mediaToneBorderClasses[media.tone ?? "muted"],
             )}
           >
             {media.video ? (

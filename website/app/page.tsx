@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import Hero from "@/components/Hero";
+import Hero, { mediaToneClasses } from "@/components/Hero";
 import LazyVideo from "@/components/LazyVideo";
 import { Button } from "@/components/ui/button";
 import { DetectedDownloadLabel } from "@/components/DetectedDownloadLabel";
@@ -252,12 +252,6 @@ const surfaces = [
   },
 ] as const;
 
-const mediaToneClasses = {
-  muted: "bg-muted text-foreground",
-  brand: "bg-brand/15 text-foreground",
-  surface: "bg-card text-card-foreground",
-} as const;
-
 function SurfaceIcon({ type }: { type: "desktop" | "browser" | "cli" }) {
   return (
     <svg
@@ -392,7 +386,10 @@ export default function HomePage() {
 
           <div className="mx-auto mt-12 grid max-w-6xl gap-5 md:grid-cols-3">
             {surfaces.map((surface) => {
-              const Pattern = CARD_PATTERNS[surface.mediaIndex % CARD_PATTERNS.length];
+              const SafePattern =
+                CARD_PATTERNS.length > 0
+                  ? CARD_PATTERNS[surface.mediaIndex % CARD_PATTERNS.length]
+                  : null;
 
               return (
                 <Link
@@ -405,7 +402,7 @@ export default function HomePage() {
                     aria-label={surface.mediaLabel}
                     className="relative min-h-[150px] w-full overflow-hidden rounded-xl border border-border bg-muted text-foreground"
                   >
-                    <Pattern />
+                    {SafePattern ? <SafePattern /> : null}
                     <SurfaceIcon type={surface.icon} />
                   </div>
                   <div className="px-2 pb-3 pt-5">

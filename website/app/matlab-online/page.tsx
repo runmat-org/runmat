@@ -141,8 +141,8 @@ const faqItems: FAQItem[] = [
     id: "mo-offline",
     question: "Does RunMat work offline?",
     answer:
-      "Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the RunMat CLI today. The desktop app with a full IDE experience is coming soon.",
-    answerContent: <>Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the <Link href="/docs/cli" className="underline hover:text-foreground">RunMat CLI</Link> today. The desktop app with a full IDE experience is coming soon.</>,
+      "Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, download the RunMat desktop app or use the RunMat CLI.",
+    answerContent: <>Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, <Link href="/download" className="underline hover:text-foreground">download the RunMat desktop app</Link> or use the <Link href="/docs/cli" className="underline hover:text-foreground">RunMat CLI</Link>.</>,
   },
   {
     id: "mo-browser-how",
@@ -172,8 +172,8 @@ const faqItems: FAQItem[] = [
     id: "mo-desktop",
     question: "Is there a desktop version?",
     answer:
-      "The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the CLI is available today for local script execution.",
-    answerContent: <>The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the <Link href="/docs/cli" className="underline hover:text-foreground">CLI</Link> is available today for local script execution.</>,
+      "Yes. The RunMat desktop app provides the same interface as the browser sandbox with full local file system access. Download it from the download page, or use the CLI for local script execution.",
+    answerContent: <>Yes. The RunMat desktop app provides the same interface as the browser sandbox with full local file system access. <Link href="/download" className="underline hover:text-foreground">Download it from the download page</Link>, or use the <Link href="/docs/cli" className="underline hover:text-foreground">CLI</Link> for local script execution.</>,
   },
   {
     id: "mo-plotting",
