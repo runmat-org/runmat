@@ -200,7 +200,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Type};
 
     fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::db_builtin(y, rest))
@@ -275,6 +275,27 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(4), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn db_type_text_modes_use_unary_shape_rules() {
+        let string_array_type = Type::from_value(&Value::StringArray(
+            StringArray::new(vec!["power".into()], vec![1, 1]).unwrap(),
+        ));
+        let char_array_type = Type::from_value(&Value::CharArray(CharArray::new_row("power")));
+
+        for mode in [Type::String, string_array_type, char_array_type] {
+            let out = db_type(
+                &[
+                    Type::Tensor {
+                        shape: Some(vec![Some(1), Some(1)]),
+                    },
+                    mode,
+                ],
+                &ResolveContext::new(Vec::new()),
+            );
+            assert_eq!(out, Type::Num);
+        }
     }
 
     #[test]
