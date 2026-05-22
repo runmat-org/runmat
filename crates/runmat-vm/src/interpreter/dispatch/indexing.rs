@@ -811,7 +811,7 @@ pub async fn dispatch_indexing(
     vars: &mut Vec<Value>,
     function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
-    mut clear_value_residency: impl FnMut(&Value),
+    _clear_value_residency: impl FnMut(&Value),
 ) -> Result<bool, RuntimeError> {
     match instr {
         crate::bytecode::Instr::Index(num_indices) => {
@@ -993,7 +993,6 @@ pub async fn dispatch_indexing(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            clear_value_residency(&base);
             match base {
                 Value::Object(obj) => {
                     if let Some(err) = missing_member_index_overload_error(
@@ -1566,7 +1565,6 @@ pub async fn dispatch_indexing(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            clear_value_residency(&base);
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
                     Value::GpuTensor(handle) => {
@@ -1844,7 +1842,6 @@ pub async fn dispatch_indexing(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            clear_value_residency(&base);
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
                     Value::GpuTensor(handle) => {

@@ -638,9 +638,11 @@ impl AccelProvider for TestProvider {
         }
 
         let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+        let mut input_shapes: Vec<Vec<usize>> = Vec::with_capacity(inputs.len());
         for handle in inputs {
-            let (data, _shape) = self.pull(handle)?;
+            let (data, shape) = self.pull(handle)?;
             input_values.push(data);
+            input_shapes.push(shape);
         }
 
         let max_input_len = input_values
@@ -655,11 +657,25 @@ impl AccelProvider for TestProvider {
         for idx in 0..total {
             let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
             for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
-                let value = evaluate_expression(expr, idx, &input_values, &tmp_values)
+                let value = evaluate_expression(
+                    expr,
+                    idx,
+                    &input_values,
+                    &input_shapes,
+                    output_shape,
+                    &tmp_values,
+                )
                     .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
                 tmp_values[slot] = Some(value);
             }
-            let result = evaluate_expression(&parsed.output_expr, idx, &input_values, &tmp_values)
+            let result = evaluate_expression(
+                &parsed.output_expr,
+                idx,
+                &input_values,
+                &input_shapes,
+                output_shape,
+                &tmp_values,
+            )
                 .with_context(|| format!("evaluating output expression for idx {idx}"))?;
             out.push(result);
         }
@@ -703,9 +719,11 @@ impl AccelProvider for TestProvider {
         }
 
         let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+        let mut input_shapes: Vec<Vec<usize>> = Vec::with_capacity(inputs.len());
         for handle in inputs {
-            let (data, _shape) = self.pull(handle)?;
+            let (data, shape) = self.pull(handle)?;
             input_values.push(data);
+            input_shapes.push(shape);
         }
 
         let max_input_len = input_values.iter().map(|d| d.len()).max().unwrap_or(0);
@@ -725,12 +743,26 @@ impl AccelProvider for TestProvider {
         for idx in 0..total {
             let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
             for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
-                let value = evaluate_expression(expr, idx, &input_values, &tmp_values)
+                let value = evaluate_expression(
+                    expr,
+                    idx,
+                    &input_values,
+                    &input_shapes,
+                    output_shape,
+                    &tmp_values,
+                )
                     .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
                 tmp_values[slot] = Some(value);
             }
             for (k, out_expr) in parsed.output_exprs.iter().enumerate() {
-                let result = evaluate_expression(out_expr, idx, &input_values, &tmp_values)
+                let result = evaluate_expression(
+                    out_expr,
+                    idx,
+                    &input_values,
+                    &input_shapes,
+                    output_shape,
+                    &tmp_values,
+                )
                     .with_context(|| format!("evaluating output{k} expression for idx {idx}"))?;
                 per_output[k].push(result);
             }
@@ -914,14 +946,56 @@ impl ParsedShader {
     }
 }
 
+fn broadcast_linear_position(
+    output_linear: usize,
+    output_shape: &[usize],
+    input_shape: &[usize],
+) -> Option<usize> {
+    if input_shape.is_empty() || input_shape.iter().product::<usize>() == 0 {
+        return Some(0);
+    }
+    if output_shape.is_empty() {
+        return Some(output_linear % input_shape.iter().product::<usize>().max(1));
+    }
+    let rank = output_shape.len().max(input_shape.len());
+    let mut out_dims = vec![1usize; rank];
+    let mut in_dims = vec![1usize; rank];
+    for (i, dim) in output_shape.iter().copied().enumerate() {
+        out_dims[i] = dim.max(1);
+    }
+    for (i, dim) in input_shape.iter().copied().enumerate() {
+        in_dims[i] = dim.max(1);
+    }
+
+    let mut coord = vec![0usize; rank];
+    let mut tmp = output_linear;
+    for d in 0..rank {
+        let dim = out_dims[d];
+        coord[d] = if dim == 0 { 0 } else { tmp % dim };
+        tmp = if dim == 0 { 0 } else { tmp / dim };
+    }
+
+    let mut stride = 1usize;
+    let mut linear = 0usize;
+    for d in 0..rank {
+        let dim = in_dims[d];
+        let c = if dim == 1 { 0 } else { coord[d].min(dim - 1) };
+        linear += c * stride;
+        stride = stride.saturating_mul(dim.max(1));
+    }
+    Some(linear)
+}
+
 fn evaluate_expression(
     expr: &str,
     idx: usize,
     inputs: &[Vec<f64>],
+    input_shapes: &[Vec<usize>],
+    output_shape: &[usize],
     tmp_values: &[Option<f64>],
 ) -> anyhow::Result<f64> {
     let tokens = tokenize(expr)?;
-    let mut parser = ExprParser::new(tokens, idx, inputs, tmp_values);
+    let mut parser = ExprParser::new(tokens, idx, inputs, input_shapes, output_shape, tmp_values);
     let value = parser.parse_expression()?;
     parser.expect_end()?;
     Ok(value)
@@ -1006,6 +1080,8 @@ struct ExprParser<'a> {
     pos: usize,
     idx: usize,
     inputs: &'a [Vec<f64>],
+    input_shapes: &'a [Vec<usize>],
+    output_shape: &'a [usize],
     tmp_values: &'a [Option<f64>],
 }
 
@@ -1014,6 +1090,8 @@ impl<'a> ExprParser<'a> {
         tokens: Vec<Token>,
         idx: usize,
         inputs: &'a [Vec<f64>],
+        input_shapes: &'a [Vec<usize>],
+        output_shape: &'a [usize],
         tmp_values: &'a [Option<f64>],
     ) -> Self {
         Self {
@@ -1021,6 +1099,8 @@ impl<'a> ExprParser<'a> {
             pos: 0,
             idx,
             inputs,
+            input_shapes,
+            output_shape,
             tmp_values,
         }
     }
@@ -1156,7 +1236,12 @@ impl<'a> ExprParser<'a> {
             if data.is_empty() {
                 bail!("input{input_idx} has no data");
             }
-            let pos = self.idx % data.len();
+            let shape = self
+                .input_shapes
+                .get(input_idx)
+                .ok_or_else(|| anyhow!("input shape index {input_idx} out of range"))?;
+            let pos = broadcast_linear_position(self.idx, self.output_shape, shape)
+                .unwrap_or(self.idx % data.len());
             return Ok(data[pos]);
         }
 
@@ -2296,7 +2381,6 @@ fn fused_elementwise_residency_and_gather() {
         "#;
 
         let bytecode = compile_semantic(source);
-
         let vars = interpret(&bytecode).expect("interpret");
 
         let y_index = bytecode
@@ -3233,7 +3317,6 @@ fn centered_gram_fusion_matches_cpu() {
         "#;
 
         let bytecode = compile_semantic(source);
-
         let cov_index = bytecode
             .instructions
             .iter()
