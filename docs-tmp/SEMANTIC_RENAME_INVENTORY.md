@@ -4,73 +4,22 @@ Date: 2026-05-21
 
 ## Current Footprint
 
-- Files containing `SemanticXxx` in `crates/`: 102
-- Files containing `semantic_xxx` in `crates/`: 59
-- Non-test Rust occurrences:
-  - `SemanticXxx`: 627
-  - `semantic_xxx`: 532
+- Files containing `SemanticXxx` in `crates/`: 20
+- Files containing `semantic_xxx` in `crates/`: 53
+- Rust occurrences:
+  - `SemanticXxx`: 93
+  - `semantic_xxx`: 638
 
 Primary concentration:
 
-- `runmat-vm`: 230 (`SemanticXxx`) / 313 (`semantic_xxx`)
-- `runmat-runtime`: 159 / 72
-- `runmat-hir`: 90 / 61
-- `runmat-mir`: 51 / 13
-- `runmat-lsp`: 41 / 14
-- `runmat-turbine`: 38 / 106
-- `runmat-core`: 36 / 85
+- `runmat-vm/src/bytecode/compile.rs`: 130 hits
+- `runmat-turbine/tests/jit.rs`: 70 hits
+- `runmat-vm/src/bytecode/program.rs`: 45 hits
+- `runmat-builtins/src/semantics.rs`: 42 hits
+- `runmat-vm/tests/functions.rs`: 41 hits
+- `runmat-runtime/src/lib.rs`: 36 hits
 
-## Public API Surface Using `Semantic*`
-
-- `runmat-hir`
-  - `SemanticError` ([error.rs](./../crates/runmat-hir/src/error.rs))
-  - `SemanticIndex` ([hir.rs](./../crates/runmat-hir/src/hir.rs))
-  - `semantic_resolution_name_for(...)` ([hir.rs](./../crates/runmat-hir/src/hir.rs))
-- `runmat-runtime`
-  - `SemanticCallableRequest`
-  - `SemanticFunctionInvoker`
-  - `SemanticFunctionResolver`
-  - guard types for resolver/invoker
-  - ([user_functions.rs](./../crates/runmat-runtime/src/user_functions.rs))
-- `runmat-vm`
-  - `SemanticFunctionBytecode`
-  - `SemanticFunctionRegistry`
-  - `SemanticAsyncMetadata`
-  - `SemanticAsyncRuntimeModel`
-  - `SemanticSpawnSite`
-  - `SemanticAwaitSite`
-  - `SemanticFusionMetadata`
-  - `SemanticFusionCandidateGroup`
-  - `SemanticFusionInstructionKind`
-  - `SemanticFusionInstructionWindow`
-  - ([program.rs](./../crates/runmat-vm/src/bytecode/program.rs))
-- `runmat-lsp`
-  - `SemanticModel`
-  - semantic token exports (`semantic_tokens*`)
-
-## High-Volume `Semantic*` Symbols
-
-- `SemanticError`: 131
-- `SemanticFunctionRegistry`: 60
-- `SemanticFusionInstructionKind`: 57
-- `SemanticFunctionBytecode`: 44
-- `SemanticFusionInstructionWindow`: 40
-- `SemanticFusionCandidateGroup`: 32
-- `SemanticCallableRequest`: 28
-
-## Keep As-Is (Confirmed)
-
-These stay unchanged because they are protocol vocabulary, not migration leftovers.
-
-1. LSP semantic token API names in `runmat-lsp`:
-   - `semantic_tokens`, `semantic_tokens_full`, `semantic_tokens_legend`
-   - `SemanticToken*` types from LSP.
-
-## Rename-Now (Final Resting Names)
-
-Decision: previous “rename later” items are promoted to **rename now**. The target is long-lived compiler/runtime names with no migration-era `Semantic` prefix.
-
-### Core compiler/runtime types
+## Completed In This Rename Campaign
 
 - `SemanticError` -> `HirError`
 - `SemanticIndex` -> `HirIndex`
@@ -89,41 +38,59 @@ Decision: previous “rename later” items are promoted to **rename now**. The 
 - `SemanticFusionCandidateGroup` -> `FusionCandidateGroup`
 - `SemanticFusionInstructionKind` -> `FusionInstructionKind`
 - `SemanticFusionInstructionWindow` -> `FusionInstructionWindow`
-
-### Internal/private helpers
-
 - `SemanticCtx` -> `LoweringCtx`
 - `SemanticScope` -> `ScopeFrame`
 - `semantic_resolution_name_for` -> `resolution_name_for`
 - `semantic_registry()` -> `function_registry()`
-- Private helper prefixes:
-  - `semantic_diagnostic` -> `hir_diagnostic` (or equivalent domain-specific naming)
-  - `semantic_output_value` -> `output_value`
-  - `semantic_callback_literal` -> `callback_literal`
-  - `semantic_display_context` -> `display_context`
-  - `semantic_expr_emit_disposition` -> `expr_emit_disposition`
-
-### Test/support helpers
-
 - `compile_semantic_source` -> `compile_source`
 - `execute_semantic_source` -> `execute_source`
 
+## Keep As-Is (Confirmed)
+
+These stay unchanged because they are protocol vocabulary, not migration leftovers.
+
+1. LSP semantic token API names in `runmat-lsp`:
+   - `semantic_tokens`, `semantic_tokens_full`, `semantic_tokens_legend`
+   - `SemanticToken*` types from LSP.
+
+## Rename-Now (Next Tranche, Resting Names)
+
+Decision: keep draining migration-era `semantic_*` where the symbol denotes bytecode/runtime plumbing rather than language semantics.
+
+### Bytecode/runtime function identity
+
+- `CallableIdentity::SemanticFunction` -> `CallableIdentity::BoundFunction`
+- `semantic_function` field -> `bound_function`
+- `semantic_functions` maps -> `bound_functions`
+- `semantic_function_registry` variables/fields -> `function_registry`
+
+### Bytecode metadata carriers
+
+- `semantic_async_metadata` -> `async_metadata`
+- `semantic_fusion_metadata` -> `fusion_metadata`
+- `semantic_instruction_windows` -> `instruction_windows`
+- `semantic_candidate_groups` / `semantic_candidates` -> `candidate_groups` / `candidates`
+- local `semantic_index` variables with `HirIndex` type -> `hir_index`
+
+### Tests and fixtures
+
+- Remaining `semantic_*` test function names -> domain names (drop `semantic_` prefix).
+- `spawn_semantic_lifecycle.rs` -> `spawn_function_lifecycle.rs`.
+- String literals like `"RunMat:SemanticFunctionUnavailable"` should move to `"RunMat:FunctionUnavailable"` if compatibility constraints permit.
+
 ## Execution Plan (Updated)
 
-### Commit 1: internal/private rename sweep
+### Completed
 
-- Rename `SemanticCtx`, `SemanticScope`, and private `semantic_*` helpers.
-- No public API changes in this commit.
+- Commit 1: internal/private rename sweep
+- Commit 2: public type/API rename sweep
+- Commit 3: tests/docs/support sweep
 
-### Commit 2: public type/API rename sweep
+### Next
 
-- Apply all type and public function renames above across crates.
-- Update re-exports and call sites in dependent crates.
-
-### Commit 3: tests/docs/support sweep
-
-- Rename test helpers (`compile_semantic_source`, `execute_semantic_source`).
-- Update tests, docs-tmp audits, and references.
+- Commit 4: rename callable identity + bound function field names.
+- Commit 5: rename async/fusion metadata field names.
+- Commit 6: rename remaining test symbols/file names and decide error identifier compatibility policy.
 
 Validation gates after each commit:
 
