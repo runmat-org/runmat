@@ -14,7 +14,7 @@ Moving “execute onward” to a Rust future state machine unlocks:
 
 * non-blocking I/O and timers
 * cooperative scheduling with predictable performance
-* better host integration (CLI, Jupyter, WASM, GUI)
+* better host integration (CLI, WASM, GUI)
 * tracing spans that naturally flow across suspension points
 
 ### Goals
@@ -427,14 +427,7 @@ Keep default verbosity low.
 * CLI can `block_on` with chosen executor
 * REPL can run a local executor; optionally allow top-level `await(...)` by making REPL evaluation an async context
 
-### 10.2 Jupyter
-
-Notebook cells can naturally be async:
-
-* cell evaluation future resolves to display value
-* integrate with the notebook event loop (often async-friendly)
-
-### 10.3 WASM
+### 10.2 WASM
 
 * implement executor backed by JS promises and `setTimeout`
 * restrict blocking operations; require async builtins
@@ -524,7 +517,6 @@ Notebook cells can naturally be async:
 * Host tests:
 
   * CLI block_on
-  * Jupyter cell completion semantics
 
 ---
 

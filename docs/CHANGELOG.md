@@ -370,7 +370,6 @@ _[Fusion engine](/docs/fusion-guide):_
 _August 25, 2025_
 
 #### Added
-- Add Jupyter kernel support — ZMQ transport so RunMat can serve as a Jupyter kernel
 - Add PowerShell installer for Windows
 
 ---

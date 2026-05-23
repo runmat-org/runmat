@@ -24,23 +24,23 @@ interface CloudTierDef {
 const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
   pro: {
     price: "$30/month per user",
-    description: "For individuals and small teams shipping real work.",
+    description: "For individuals and small teams using cloud projects.",
     features: [
       "Code versioning and execution history",
       "Team collaboration and sync",
-      "Elastic remote filesystem (10GB included)",
-      "$10/mo LLM credits",
+      "10 GB high-bandwidth project storage",
+      "$10/mo AI credits",
     ],
     ctaLabel: "Sign up",
     ctaHref: "/login",
   },
   team: {
     price: "$100/mo per user",
-    description: "For organizations that need SSO and centralized identity management.",
+    description: "For organizations that need centralized identity and support.",
     inheritsFrom: "Everything in Pro, plus:",
     features: [
       "SSO / SAML / SCIM",
-      "$50/mo LLM credits",
+      "$50/mo AI credits",
       "100 GB storage included",
       "Priority support",
     ],
@@ -62,10 +62,10 @@ export default function CloudPricingCard() {
     <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
         <CardTitle className="text-3xl font-semibold text-foreground">{currentTier.price}</CardTitle>
-        <p className="text-[0.938rem] text-foreground">High-performance computing platform.</p>
+        <p className="text-[0.938rem] text-foreground">High-bandwidth project filesystem for large math workloads.</p>
 
         <div
-            role="tablist"
+          role="tablist"
           aria-label="RunMat tiers"
           className="grid min-w-[7rem] grid-cols-2 gap-1 rounded-lg border border-border/60 bg-background/50 p-1 pb-0"
           >

@@ -12,7 +12,7 @@ This document explains the “why” and the “how” of that design.
 - Core set of built-ins: RunMat includes a core set of MATLAB built-ins, with clear docs and tests.
 - Tiered CPU execution: VM interpreter for fast startup, Turbine JIT for hot code.
 - GPU-first math: a GPU layer and a Fusion engine that turns MATLAB-style code into fast GPU workloads when shapes and patterns fit.
-- Small, portable runtime: single static binary, fast startup, modern CLI, and Jupyter kernel support.
+- Small, portable runtime: single static binary, fast startup, and modern CLI.
 - Toolboxes on top: signal, stats, image, optimization, and other domains sit above the core as libraries and packages.
 
 ## The minimal core
@@ -37,7 +37,7 @@ MATLAB is a language, a large proprietary standard library, an IDE, and an ecosy
 
 - The language is a syntax and semantics for arrays, functions, control flow, and errors. That we support in the core.
 - The library (built-ins) is open-ended. RunMat ships a standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal). We don't chase bit-exact parity with MATLAB, but we do publish the validation methodology for every numerical path — see [Correctness & Trust](/docs/correctness) for the full coverage table, reference implementations, and parity tests.
-- RunMat is not an IDE. It is a runtime that can be used with any IDE (such as Cursor, VSCode, or IntelliJ).
+- RunMat is not a monolithic IDE. It is a runtime that can be used from the CLI, browser sandbox, or other tools that embed it.
 
 This separation keeps the core maintainable and lets the community move fast without destabilizing the runtime.
 

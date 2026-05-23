@@ -128,8 +128,8 @@ const faqItems: FAQItem[] = [
     id: "mo-free",
     question: "Is RunMat really free?",
     answer:
-      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see pricing.",
-    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
+      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the free tier (100 MB). Paid plans add more storage and team features -- see pricing.",
+    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the free tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
   },
   {
     id: "mo-account",
@@ -141,8 +141,8 @@ const faqItems: FAQItem[] = [
     id: "mo-offline",
     question: "Does RunMat work offline?",
     answer:
-      "Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the RunMat CLI today. The desktop app with a full IDE experience is coming soon.",
-    answerContent: <>Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the <Link href="/docs/cli" className="underline hover:text-foreground">RunMat CLI</Link> today. The desktop app with a full IDE experience is coming soon.</>,
+      "Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, download the RunMat desktop app or use the RunMat CLI.",
+    answerContent: <>Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, <Link href="/download" className="underline hover:text-foreground">download the RunMat desktop app</Link> or use the <Link href="/docs/cli" className="underline hover:text-foreground">RunMat CLI</Link>.</>,
   },
   {
     id: "mo-browser-how",
@@ -172,8 +172,8 @@ const faqItems: FAQItem[] = [
     id: "mo-desktop",
     question: "Is there a desktop version?",
     answer:
-      "The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the CLI is available today for local script execution.",
-    answerContent: <>The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the <Link href="/docs/cli" className="underline hover:text-foreground">CLI</Link> is available today for local script execution.</>,
+      "Yes. The RunMat desktop app provides the same interface as the browser sandbox with full local file system access. Download it from the download page, or use the CLI for local script execution.",
+    answerContent: <>Yes. The RunMat desktop app provides the same interface as the browser sandbox with full local file system access. <Link href="/download" className="underline hover:text-foreground">Download it from the download page</Link>, or use the <Link href="/docs/cli" className="underline hover:text-foreground">CLI</Link> for local script execution.</>,
   },
   {
     id: "mo-plotting",
@@ -335,6 +335,7 @@ const jsonLd = {
 export default function MatlabOnlinePage() {
   return (
     <div className="min-h-screen bg-background">
+      <link rel="preconnect" href="https://web.runmatstatic.com" crossOrigin="" />
       <link
         rel="preload"
         as="image"
@@ -397,18 +398,17 @@ export default function MatlabOnlinePage() {
                 data-ph-capture-attribute-cta="try-runmat-browser"
                 aria-label="Open the RunMat sandbox"
               >
-                <video
+                <LazyVideo
                   className="w-full h-auto rounded-lg"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  preload="none"
+                  initialPosterVariant="poster"
                   poster={heroPosterSrc}
                   aria-label="RunMat agent extending a clamped plate vibration simulation"
                 >
                   <source src={heroVideoSrc} type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
           </div>
@@ -608,6 +608,17 @@ export default function MatlabOnlinePage() {
               <p className="text-[0.938rem] text-foreground mt-1">Edits are presented as diffs. Accept or reject each change. Conversations are stored as searchable project files.</p>
             </div>
           </div>
+          <div className="flex justify-center mt-2">
+            <Link
+              href="/matlab-ai-agent"
+              className="text-[0.938rem] text-foreground underline hover:text-foreground/80"
+              data-ph-capture-attribute-destination="agent-page"
+              data-ph-capture-attribute-source="matlab-online-agent-section"
+              data-ph-capture-attribute-cta="learn-more-agent"
+            >
+              See what the agent can do
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -673,7 +684,7 @@ export default function MatlabOnlinePage() {
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Every change versioned. No git required.</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Every save creates a version automatically. Per-file history and full project snapshots are included on all{" "}
-              <Link href="/pricing" className="underline hover:text-foreground/80">App tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
+              <Link href="/pricing" className="underline hover:text-foreground/80">App tiers</Link>, starting at $0 with 100 MB on the free tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">

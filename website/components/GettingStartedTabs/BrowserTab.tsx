@@ -111,7 +111,7 @@ export function BrowserTabContent() {
         <CardContent className="space-y-4">
           <p className="text-foreground text-sm">
             Paste an existing <code className="rounded bg-muted px-1 py-0.5">.m</code> file and run it. If something fails — an unsupported function or a toolbox-specific call — open the built-in agent and ask it to rework the code. It will propose reviewable edits you can accept or discard.
-            See <Link href="/docs/compatibility#agent-assisted-migration" className="text-primary underline underline-offset-4">Agent-assisted migration</Link> for details.
+            See <Link href="/docs/compatibility#agent-assisted-migration" className="text-primary underline underline-offset-4">Agent-assisted migration</Link> for details, or <Link href="/matlab-ai-agent" className="text-primary underline underline-offset-4">what the browser agent can do</Link>.
           </p>
         </CardContent>
       </Card>

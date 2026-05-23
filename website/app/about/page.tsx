@@ -479,7 +479,7 @@ export default function AboutPage() {
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-amber-600 dark:text-amber-400">•</span>
                   <p>
-                    Free Hobby tier &middot;{" "}
+                    Free tier &middot;{" "}
                     <Link href="/pricing" className="underline underline-offset-2 hover:text-amber-200">Pro &amp; Team tiers</Link>
                   </p>
                 </div>

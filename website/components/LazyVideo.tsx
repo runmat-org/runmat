@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ComponentProps } from "react";
 type VideoProps = Omit<ComponentProps<"video">, "autoPlay" | "preload"> & {
   mobilePoster?: string;
   mobileMediaQuery?: string;
+  deferPosterUntilVisible?: boolean;
   initialPosterVariant?: "none" | "poster" | "mobilePoster";
 };
 
@@ -23,12 +24,14 @@ type VideoProps = Omit<ComponentProps<"video">, "autoPlay" | "preload"> & {
 export default function LazyVideo({
   mobilePoster,
   mobileMediaQuery = "(max-width: 768px)",
+  deferPosterUntilVisible = false,
   initialPosterVariant = "none",
   poster,
   ...props
 }: VideoProps) {
   const ref = useRef<HTMLVideoElement>(null);
   const [activePoster, setActivePoster] = useState<string | undefined>(() => {
+    if (deferPosterUntilVisible) return undefined;
     if (!mobilePoster) return poster;
     if (initialPosterVariant === "poster") return poster;
     if (initialPosterVariant === "mobilePoster") return mobilePoster;
@@ -39,13 +42,13 @@ export default function LazyVideo({
   });
 
   useEffect(() => {
-    if (!mobilePoster) return;
+    if (!mobilePoster || deferPosterUntilVisible) return;
     const media = window.matchMedia(mobileMediaQuery);
     const update = () => setActivePoster(media.matches ? mobilePoster : poster);
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
-  }, [mobilePoster, mobileMediaQuery, poster]);
+  }, [deferPosterUntilVisible, mobilePoster, mobileMediaQuery, poster]);
 
   useEffect(() => {
     const el = ref.current;
@@ -54,6 +57,10 @@ export default function LazyVideo({
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
+          if (deferPosterUntilVisible) {
+            const media = window.matchMedia(mobileMediaQuery);
+            setActivePoster(media.matches && mobilePoster ? mobilePoster : poster);
+          }
           el.play().catch(() => {});
           observer.disconnect();
         }
@@ -63,7 +70,7 @@ export default function LazyVideo({
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [deferPosterUntilVisible, mobilePoster, mobileMediaQuery, poster]);
 
   return <video ref={ref} preload="none" poster={activePoster} {...props} />;
 }

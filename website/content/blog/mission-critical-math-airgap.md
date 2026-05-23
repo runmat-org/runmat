@@ -133,7 +133,7 @@ Try setting up a Python scientific computing environment offline. You need NumPy
 
 MATLAB is simpler to install but comes with its own weight: a multi-gigabyte installer, a license server to configure, and toolbox add-ons that each require their own licenses.
 
-RunMat takes a different approach. The open-source runtime contains the full execution engine, the standard library, the LSP language server, and the Jupyter kernel in a single static binary with zero external dependencies. Copy it to a machine and it runs; startup takes 5 milliseconds. This is the engine for individual analysis and scripting. Download it from [GitHub](https://github.com/runmat-org/runmat), carry it in, and go.
+RunMat takes a different approach. The open-source runtime contains the full execution engine and standard library in a single static binary with zero external dependencies. Copy it to a machine and it runs; startup takes 5 milliseconds. This is the engine for individual analysis and scripting. Download it from [GitHub](https://github.com/runmat-org/runmat), carry it in, and go.
 
 RunMat Enterprise adds the team layer: pair the server binary with a Postgres instance and local disk for blob storage and you get multi-user real-time updates, a filesystem with automatic versioning and snapshots, LLM integration, SSO with your on-prem identity provider, role-based access control, and a real-time signal bus. All of it runs entirely offline. RunMat Enterprise is available through direct engagement, [contact sales](mailto:team@runmat.com) to discuss deployment for your facility.
 

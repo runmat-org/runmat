@@ -208,7 +208,7 @@ For a broader landscape view, see our comparison of RunMat vs Octave, Julia, and
 - **VM interpreter**: immediate execution, great for REPL and scripts.
 - **Turbine JIT**: hot functions get compiled to optimized machine code (Cranelift backend).
 - **Slim builtins**: a curated set in core; everything else via packages. Docs are generated from runtime metadata.
-- **Great developer experience**: built in Jupyter kernel, flow-sensitive inference for great autocomplete and type hints, and more.
+- **Great developer experience**: fast CLI workflows, flow-sensitive inference, helpful diagnostics, and more.
 - **Portable**: single binary, no dependencies, runs on Linux/macOS/Windows and embedded devices.
 - **GPU-optimized**: built in, configurable, swappable GPU planner with automatic fusion and data residency. Run your code on GPUs without any modifications across CPU, Metal (macOS), DirectX 12 (Windows), and Vulkan (Linux) via the wgpu backend. Additional backends (CUDA, ROCm, OpenCL) are planned.
 
@@ -238,7 +238,6 @@ If your code relies on many niche built-ins, the recommended path is to move tho
 >
 > - **Plotting** is no longer a work in progress. RunMat now supports [17+ GPU-accelerated plot types](/docs/matlab-function-reference#plotting) including `surf`, `contour`, `bar`, `pie`, `quiver`, `stem`, `area`, `errorbar`, and full 3D variants, with graphics handles, styling, and figure export. See the [plotting guide](/blog/matlab-plotting-guide) for runnable examples or the [plotting docs](/docs/plotting) for reference.
 > - **Browser sandbox** — A full browser-based IDE is now available at [runmat.com/sandbox](https://runmat.com/sandbox), running entirely client-side via WebAssembly and WebGPU. See the [browser guide](/docs/desktop-browser-guide).
-> - **LSP and IDE support** — A first-party language server and [VS Code / Cursor extension](https://marketplace.visualstudio.com/items?itemName=runmat.runmat-vscode) now provide diagnostics, completions, hover, and document symbols.
 > - **~330+ builtins** are now documented in the [function reference](/docs/matlab-function-reference), covering arrays, linear algebra, FFT/signal, statistics, strings, I/O, and plotting.
 > - **GPU fusion** now has [dedicated documentation](/docs/fusion-guide) covering 7 fusion patterns: elementwise chains, reductions, matmul epilogues, covariance, power-step normalization, explained variance, and image normalization.
 > - **Collaboration and teams** — Organizations, project roles, real-time sync, and API keys are now available through [RunMat App](/docs/collaboration).
