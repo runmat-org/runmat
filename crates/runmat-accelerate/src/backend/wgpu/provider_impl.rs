@@ -143,9 +143,26 @@ fn checked_binding_count(operation: &str, left: usize, right: usize) -> Result<u
         .ok_or_else(|| anyhow!("{}: binding count overflow", operation))
 }
 
+fn gpu_per_buffer_limit_error(operation: &str, requested_bytes: u64, max_bytes: u64) -> anyhow::Error {
+    let requested_mib = requested_bytes as f64 / (1024.0 * 1024.0);
+    let max_mib = max_bytes as f64 / (1024.0 * 1024.0);
+    anyhow!(
+        "{operation}: requested {requested_bytes} bytes ({requested_mib:.2} MiB) exceeds this device per-buffer limit of {max_bytes} bytes ({max_mib:.2} MiB). This is a per-buffer backend limit (not total VRAM). Split the input into smaller chunks/sub-batches."
+    )
+}
+
+fn gpu_dispatch_length_limit_error(operation: &str, len: usize) -> anyhow::Error {
+    anyhow!(
+        "{operation}: tensor length {len} exceeds the current GPU kernel indexing limit of {} elements. Split the operation into smaller chunks/sub-batches.",
+        u32::MAX
+    )
+}
+
 #[cfg(test)]
 mod compute_binding_count_tests {
-    use super::{checked_binding_count, validate_compute_binding_counts};
+    use super::{
+        checked_binding_count, validate_compute_binding_counts, WgpuProvider,
+    };
 
     #[test]
     fn rejects_storage_bindings_over_adapter_stage_limit() {
@@ -195,6 +212,46 @@ mod compute_binding_count_tests {
 
         assert!(err.to_string().contains("binding count overflow"));
     }
+
+    #[test]
+    fn poolable_bytes_uses_default_and_caps_to_adapter_limit() {
+        assert_eq!(
+            WgpuProvider::parse_buffer_residency_max_poolable_bytes(None, 0),
+            256u64 << 20
+        );
+        assert_eq!(
+            WgpuProvider::parse_buffer_residency_max_poolable_bytes(None, 128u64 << 20),
+            128u64 << 20
+        );
+    }
+
+    #[test]
+    fn poolable_bytes_honors_env_override_and_adapter_cap() {
+        assert_eq!(
+            WgpuProvider::parse_buffer_residency_max_poolable_bytes(
+                Some("1073741824"),
+                512u64 << 20
+            ),
+            512u64 << 20
+        );
+    }
+
+    #[test]
+    fn poolable_bytes_accepts_zero_to_disable_pooling() {
+        assert_eq!(
+            WgpuProvider::parse_buffer_residency_max_poolable_bytes(Some("0"), 2u64 << 30),
+            0
+        );
+    }
+
+    #[test]
+    fn poolable_bytes_invalid_override_falls_back_to_default() {
+        assert_eq!(
+            WgpuProvider::parse_buffer_residency_max_poolable_bytes(Some("bad"), 512u64 << 20),
+            256u64 << 20
+        );
+    }
+
 }
 
 #[derive(Clone, Debug)]
@@ -227,6 +284,7 @@ pub struct WgpuProvider {
     workgroup_config: WorkgroupConfig,
     buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
     buffer_residency: BufferResidency,
+    buffer_residency_max_poolable_bytes: u64,
     next_id: AtomicU64,
     pipelines: WgpuPipelines,
     runtime_device_id: u32,
@@ -2107,11 +2165,10 @@ impl WgpuProvider {
         // Centralised guard + warning for oversized allocations
         let size_bytes = (len as u64) * self.element_size as u64;
         if size_bytes > self.adapter_limits.max_buffer_size {
-            return Err(anyhow!(
-                "{}: requested {} bytes exceeds device max {}",
+            return Err(gpu_per_buffer_limit_error(
                 label,
                 size_bytes,
-                self.adapter_limits.max_buffer_size
+                self.adapter_limits.max_buffer_size,
             ));
         }
         let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
@@ -2611,6 +2668,60 @@ impl WgpuProvider {
         }
     }
 
+    fn parse_buffer_residency_max_poolable_bytes(
+        raw_override: Option<&str>,
+        adapter_max_buffer_size: u64,
+    ) -> u64 {
+        let default_limit = if adapter_max_buffer_size == 0 {
+            256u64 << 20
+        } else {
+            (256u64 << 20).min(adapter_max_buffer_size)
+        };
+        match raw_override {
+            Some(raw) => match raw.parse::<u64>() {
+                Ok(value) => {
+                    if adapter_max_buffer_size == 0 {
+                        value
+                    } else {
+                        value.min(adapter_max_buffer_size)
+                    }
+                }
+                Err(_) => default_limit,
+            },
+            None => default_limit,
+        }
+    }
+
+    fn buffer_residency_max_poolable_bytes(adapter_max_buffer_size: u64) -> u64 {
+        const VAR: &str = "RUNMAT_WGPU_POOL_MAX_BUFFER_BYTES";
+        match std::env::var(VAR) {
+            Ok(raw) => {
+                let parsed = Self::parse_buffer_residency_max_poolable_bytes(
+                    Some(raw.as_str()),
+                    adapter_max_buffer_size,
+                );
+                if raw.parse::<u64>().is_ok() {
+                    log::info!(
+                        "RunMat Accelerate: max pooled buffer size set to {} bytes via {}",
+                        parsed,
+                        VAR
+                    );
+                } else {
+                    let default_limit =
+                        Self::parse_buffer_residency_max_poolable_bytes(None, adapter_max_buffer_size);
+                    log::warn!(
+                        "RunMat Accelerate: failed to parse {}='{}'; using default {} bytes",
+                        VAR,
+                        raw,
+                        default_limit
+                    );
+                }
+                parsed
+            }
+            Err(_) => Self::parse_buffer_residency_max_poolable_bytes(None, adapter_max_buffer_size),
+        }
+    }
+
     pub async fn new_async(opts: WgpuProviderOptions) -> Result<Self> {
         let mut instance_desc = wgpu::InstanceDescriptor::default();
         #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
@@ -2872,6 +2983,8 @@ impl WgpuProvider {
         let pipelines = WgpuPipelines::new(&device, precision, image_norm_bootstrap);
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
+        let max_poolable_bytes =
+            Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
         Ok(Self {
             instance,
@@ -2883,6 +2996,7 @@ impl WgpuProvider {
             workgroup_config,
             buffers: Mutex::new(HashMap::new()),
             buffer_residency: BufferResidency::new(buffer_pool_limit),
+            buffer_residency_max_poolable_bytes: max_poolable_bytes,
             next_id: AtomicU64::new(1),
             pipelines,
             runtime_device_id,
@@ -12070,7 +12184,7 @@ impl WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
         if len > (u32::MAX as usize) {
-            return Err(anyhow!("tensor too large for GPU buffer"));
+            return Err(gpu_dispatch_length_limit_error("binary_op", len));
         }
         let start = Instant::now();
         {
@@ -12213,7 +12327,7 @@ impl WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
         }
         if len > (u32::MAX as usize) {
-            return Err(anyhow!("tensor too large for GPU buffer"));
+            return Err(gpu_dispatch_length_limit_error("binary_op_broadcast", len));
         }
         // Compute strides (column-major)
         let mut stride_a: Vec<u32> = vec![0; rank];
@@ -12857,7 +12971,7 @@ impl WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
         if len > (u32::MAX as usize) {
-            return Err(anyhow!("tensor too large for GPU buffer"));
+            return Err(gpu_dispatch_length_limit_error("unary_op", len));
         }
         let start = Instant::now();
         {
@@ -12954,7 +13068,7 @@ impl WgpuProvider {
             return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
         }
         if len > (u32::MAX as usize) {
-            return Err(anyhow!("tensor too large for GPU buffer"));
+            return Err(gpu_dispatch_length_limit_error("scalar_op", len));
         }
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
@@ -13155,12 +13269,13 @@ impl WgpuProvider {
                     );
                 }
                 let size_bytes = (output_len_total * self.element_size) as u64;
-                ensure!(
-                    size_bytes <= self.adapter_limits.max_buffer_size,
-                    "runmat-reduce-pass-unique: requested {} bytes exceeds device max {}",
-                    size_bytes,
-                    self.adapter_limits.max_buffer_size
-                );
+                if size_bytes > self.adapter_limits.max_buffer_size {
+                    return Err(gpu_per_buffer_limit_error(
+                        "runmat-reduce-pass-unique",
+                        size_bytes,
+                        self.adapter_limits.max_buffer_size,
+                    ));
+                }
                 out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-reduce-pass-unique"),
                     size: size_bytes,
@@ -13321,12 +13436,13 @@ impl WgpuProvider {
                 );
             }
             let size_bytes = (out_len * self.element_size) as u64;
-            ensure!(
-                size_bytes <= self.adapter_limits.max_buffer_size,
-                "runmat-reduce-dim-out-unique: requested {} bytes exceeds device max {}",
-                size_bytes,
-                self.adapter_limits.max_buffer_size
-            );
+            if size_bytes > self.adapter_limits.max_buffer_size {
+                return Err(gpu_per_buffer_limit_error(
+                    "runmat-reduce-dim-out-unique",
+                    size_bytes,
+                    self.adapter_limits.max_buffer_size,
+                ));
+            }
             out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-out-unique"),
                 size: size_bytes,
@@ -13420,12 +13536,13 @@ impl WgpuProvider {
         // Prevent aliasing either output with input buffer
         if std::ptr::eq(values_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (out_len * self.element_size) as u64;
-            ensure!(
-                size_bytes <= self.adapter_limits.max_buffer_size,
-                "runmat-reduce-dim-ext-values-unique: requested {} bytes exceeds device max {}",
-                size_bytes,
-                self.adapter_limits.max_buffer_size
-            );
+            if size_bytes > self.adapter_limits.max_buffer_size {
+                return Err(gpu_per_buffer_limit_error(
+                    "runmat-reduce-dim-ext-values-unique",
+                    size_bytes,
+                    self.adapter_limits.max_buffer_size,
+                ));
+            }
             values_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-values-unique"),
                 size: size_bytes,
@@ -13437,12 +13554,13 @@ impl WgpuProvider {
         }
         if std::ptr::eq(indices_buffer.as_ref(), entry.buffer.as_ref()) {
             let size_bytes = (out_len * self.element_size) as u64;
-            ensure!(
-                size_bytes <= self.adapter_limits.max_buffer_size,
-                "runmat-reduce-dim-ext-indices-unique: requested {} bytes exceeds device max {}",
-                size_bytes,
-                self.adapter_limits.max_buffer_size
-            );
+            if size_bytes > self.adapter_limits.max_buffer_size {
+                return Err(gpu_per_buffer_limit_error(
+                    "runmat-reduce-dim-ext-indices-unique",
+                    size_bytes,
+                    self.adapter_limits.max_buffer_size,
+                ));
+            }
             indices_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-reduce-dim-ext-indices-unique"),
                 size: size_bytes,
@@ -17322,12 +17440,13 @@ impl AccelProvider for WgpuProvider {
         let len = host.data.len();
         let shape = host.shape.to_vec();
         let bytes = (len as u64).saturating_mul(self.element_size as u64);
-        ensure!(
-            bytes <= self.adapter_limits.max_buffer_size,
-            "upload: requested {} bytes exceeds device max {}",
-            bytes,
-            self.adapter_limits.max_buffer_size
-        );
+        if bytes > self.adapter_limits.max_buffer_size {
+            return Err(gpu_per_buffer_limit_error(
+                "upload",
+                bytes,
+                self.adapter_limits.max_buffer_size,
+            ));
+        }
         let buffer =
             if len == 0 {
                 self.create_storage_buffer(0, "runmat-upload-empty")
@@ -17513,19 +17632,32 @@ impl AccelProvider for WgpuProvider {
     fn free(&self, h: &GpuTensorHandle) -> Result<()> {
         // Remove from handle table and return buffer to pool for reuse
         log::trace!("wgpu free id={}", h.buffer_id);
-        let mut guard = self.buffers.lock().expect("buffer mutex poisoned");
-        if let Some(entry) = guard.remove(&h.buffer_id) {
+        let entry = self
+            .buffers
+            .lock()
+            .expect("buffer mutex poisoned")
+            .remove(&h.buffer_id);
+        if let Some(entry) = entry {
             if entry.len > 0 {
-                if Arc::strong_count(&entry.buffer) == 1 {
-                    let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
-                    self.bind_group_cache.invalidate_buffer(buffer_ptr);
+                let size_bytes = (entry.len as u64).saturating_mul(self.element_size as u64);
+                let poolable_by_size = self.buffer_residency_max_poolable_bytes > 0
+                    && size_bytes <= self.buffer_residency_max_poolable_bytes;
+                let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
+                // Always invalidate bind-group cache first so cache-held references
+                // do not pin dropped buffers across loop iterations.
+                self.bind_group_cache.invalidate_buffer(buffer_ptr);
+                let strong_count = Arc::strong_count(&entry.buffer);
+                if poolable_by_size && strong_count == 1 {
                     self.buffer_residency
                         .release(entry.usage, entry.len, entry.buffer.clone());
                 } else {
                     log::trace!(
-                        "buffer_residency: not pooling buffer id={} len={} due to outstanding views",
+                        "buffer_residency: not pooling buffer id={} len={} bytes={} strong_count={} poolable_by_size={}",
                         h.buffer_id,
-                        entry.len
+                        entry.len,
+                        size_bytes,
+                        strong_count,
+                        poolable_by_size
                     );
                 }
             }
