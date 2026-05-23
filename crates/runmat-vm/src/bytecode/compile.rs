@@ -725,6 +725,7 @@ fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
                 | BuiltinSemanticKind::LinearAlgebra
                 | BuiltinSemanticKind::ShapeTransform(_)
         ),
+        MirRvalue::ShortCircuit { .. } => false,
         MirRvalue::Use(_)
         | MirRvalue::Range { .. }
         | MirRvalue::Aggregate { .. }

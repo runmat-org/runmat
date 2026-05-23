@@ -10,7 +10,8 @@ use runmat_hir::{
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
     MirConstant, MirIndexComponent, MirIndexPlan, MirIndexing, MirOperand, MirOutputTarget,
-    MirPlace, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    MirPlace, MirPlaceMutation, MirRvalue, MirShortCircuitOp, MirStmt, MirStmtKind,
+    MirTerminatorKind,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -1873,10 +1874,10 @@ impl Compiler {
             MirRvalue::Binary(left, op, right) => {
                 match op {
                     OperatorKind::ShortCircuitAnd => {
-                        return self.compile_mir_short_circuit_and(left, right);
+                        return self.compile_mir_short_circuit_and(left, &[], right);
                     }
                     OperatorKind::ShortCircuitOr => {
-                        return self.compile_mir_short_circuit_or(left, right);
+                        return self.compile_mir_short_circuit_or(left, &[], right);
                     }
                     _ => {}
                 }
@@ -1911,6 +1912,19 @@ impl Compiler {
                 };
                 Ok(())
             }
+            MirRvalue::ShortCircuit {
+                left,
+                op,
+                right_temps,
+                right,
+            } => match op {
+                MirShortCircuitOp::And => {
+                    self.compile_mir_short_circuit_and(left, right_temps, right)
+                }
+                MirShortCircuitOp::Or => {
+                    self.compile_mir_short_circuit_or(left, right_temps, right)
+                }
+            },
             MirRvalue::Range { start, step, end } => {
                 self.compile_mir_operand(start)?;
                 if let Some(step) = step {
@@ -1996,26 +2010,26 @@ impl Compiler {
         }
     }
 
-    fn compile_mir_truthy_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {
-        self.compile_mir_operand(operand)?;
-        self.emit(Instr::LoadConst(0.0));
-        self.emit(Instr::NotEqual);
-        Ok(())
-    }
-
     fn compile_mir_short_circuit_and(
         &mut self,
         left: &MirOperand,
+        right_temps: &[MirStmt],
         right: &MirOperand,
     ) -> Result<(), CompileError> {
-        self.compile_mir_truthy_operand(left)?;
-        let jump_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.compile_mir_truthy_operand(right)?;
+        self.compile_mir_operand(left)?;
+        let lhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
+        for stmt in right_temps {
+            self.compile_mir_stmt(stmt)?;
+        }
+        self.compile_mir_operand(right)?;
+        let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::LoadConst(1.0));
         let end = self.emit(Instr::Jump(usize::MAX));
         let false_pc = self.instructions.len();
-        self.patch(jump_false, Instr::JumpIfFalse(false_pc));
         self.emit(Instr::LoadConst(0.0));
         let end_pc = self.instructions.len();
+        self.patch(lhs_false, Instr::JumpIfFalse(false_pc));
+        self.patch(rhs_false, Instr::JumpIfFalse(false_pc));
         self.patch(end, Instr::Jump(end_pc));
         Ok(())
     }
@@ -2023,16 +2037,27 @@ impl Compiler {
     fn compile_mir_short_circuit_or(
         &mut self,
         left: &MirOperand,
+        right_temps: &[MirStmt],
         right: &MirOperand,
     ) -> Result<(), CompileError> {
-        self.compile_mir_truthy_operand(left)?;
-        let jump_false = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.compile_mir_operand(left)?;
+        let lhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
         self.emit(Instr::LoadConst(1.0));
         let end = self.emit(Instr::Jump(usize::MAX));
         let right_pc = self.instructions.len();
-        self.patch(jump_false, Instr::JumpIfFalse(right_pc));
-        self.compile_mir_truthy_operand(right)?;
+        self.patch(lhs_false, Instr::JumpIfFalse(right_pc));
+        for stmt in right_temps {
+            self.compile_mir_stmt(stmt)?;
+        }
+        self.compile_mir_operand(right)?;
+        let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::LoadConst(1.0));
+        let rhs_end = self.emit(Instr::Jump(usize::MAX));
+        let rhs_false_pc = self.instructions.len();
+        self.emit(Instr::LoadConst(0.0));
         let end_pc = self.instructions.len();
+        self.patch(rhs_false, Instr::JumpIfFalse(rhs_false_pc));
+        self.patch(rhs_end, Instr::Jump(end_pc));
         self.patch(end, Instr::Jump(end_pc));
         Ok(())
     }

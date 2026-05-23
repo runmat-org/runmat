@@ -84,6 +84,27 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
             scan_operand(body, left, reads_captures);
             scan_operand(body, right, reads_captures);
         }
+        MirRvalue::ShortCircuit {
+            left,
+            right_temps,
+            right,
+            ..
+        } => {
+            scan_operand(body, left, reads_captures);
+            for stmt in right_temps {
+                match &stmt.kind {
+                    crate::MirStmtKind::Assign { value, .. }
+                    | crate::MirStmtKind::Expr(value)
+                    | crate::MirStmtKind::MultiAssign { value, .. } => {
+                        scan_rvalue(body, value, reads_captures);
+                    }
+                    crate::MirStmtKind::PlaceMutation(_)
+                    | crate::MirStmtKind::WorkspaceEffect { .. }
+                    | crate::MirStmtKind::EnvironmentEffect(_) => {}
+                }
+            }
+            scan_operand(body, right, reads_captures);
+        }
         MirRvalue::Range { start, step, end } => {
             scan_operand(body, start, reads_captures);
             if let Some(step) = step {

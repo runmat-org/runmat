@@ -13,7 +13,8 @@ use crate::api::session::RunMatWasm;
 use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
-    capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider, GpuStatus,
+    capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider,
+    validate_webgpu_runtime, GpuStatus,
 };
 use crate::runtime::logging::{init_logging_once, set_log_filter_override};
 use crate::runtime::snapshot::resolve_snapshot_bytes;
@@ -121,29 +122,39 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     };
 
     if config.enable_gpu {
-        match initialize_gpu_provider(&config).await {
-            Ok(_) => {
-                gpu_status.active = true;
-                gpu_status.adapter = capture_gpu_adapter_info();
-                #[cfg(target_arch = "wasm32")]
-                {
-                    if let Err(err) =
-                        runmat_runtime::builtins::plotting::context::ensure_context_from_provider()
+        match validate_webgpu_runtime() {
+            Ok(()) => match initialize_gpu_provider(&config).await {
+                Ok(_) => {
+                    gpu_status.active = true;
+                    gpu_status.adapter = capture_gpu_adapter_info();
+                    #[cfg(target_arch = "wasm32")]
                     {
-                        let message = err.message().to_string();
-                        log::warn!(
-                            "RunMat wasm: unable to install shared plotting context: {message}"
-                        );
-                        gpu_status.error = Some(message);
+                        if let Err(err) =
+                            runmat_runtime::builtins::plotting::context::ensure_context_from_provider(
+                            )
+                        {
+                            let message = err.message().to_string();
+                            log::warn!(
+                                "RunMat wasm: unable to install shared plotting context: {message}"
+                            );
+                            gpu_status.error = Some(message);
+                        }
                     }
                 }
-            }
-            Err(err) => {
-                let message = js_value_to_string(err.clone());
+                Err(err) => {
+                    let message = js_value_to_string(err.clone());
+                    log::warn!(
+                        "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
+                    );
+                    gpu_status.error = Some(message);
+                    install_cpu_provider(&config);
+                }
+            },
+            Err(reason) => {
                 log::warn!(
-                    "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
+                    "RunMat wasm: WebGPU capability preflight failed (falling back to CPU): {reason}"
                 );
-                gpu_status.error = Some(message);
+                gpu_status.error = Some(reason);
                 install_cpu_provider(&config);
             }
         }

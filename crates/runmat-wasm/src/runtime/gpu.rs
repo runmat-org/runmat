@@ -34,6 +34,42 @@ pub(crate) fn install_cpu_provider(config: &SessionConfig) {
     initialize_acceleration_provider_with(&options);
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn validate_webgpu_runtime() -> Result<(), String> {
+    fn get_required_member(target: &JsValue, member: &str) -> Result<JsValue, String> {
+        js_sys::Reflect::get(target, &JsValue::from_str(member))
+            .map_err(|_| format!("missing `{member}` binding"))
+            .and_then(|value| {
+                if value.is_null() || value.is_undefined() {
+                    Err(format!("missing `{member}` binding"))
+                } else {
+                    Ok(value)
+                }
+            })
+    }
+
+    let global = js_sys::global();
+    let navigator = get_required_member(&global, "navigator")?;
+    let _gpu = get_required_member(&navigator, "gpu")?;
+    let limits_ctor = get_required_member(&global, "GPUSupportedLimits")?;
+    let prototype = get_required_member(&limits_ctor, "prototype")?;
+    let required_limit_fields = ["maxInterStageShaderComponents"];
+    for field in required_limit_fields {
+        let has = js_sys::Reflect::has(&prototype, &JsValue::from_str(field)).unwrap_or(false);
+        if !has {
+            return Err(format!(
+                "browser WebGPU limits API missing `{field}` support"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn validate_webgpu_runtime() -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(all(feature = "gpu", target_arch = "wasm32"))]
 pub(crate) async fn initialize_gpu_provider(config: &SessionConfig) -> Result<(), JsValue> {
     use runmat_accelerate::initialize_wgpu_provider_async;

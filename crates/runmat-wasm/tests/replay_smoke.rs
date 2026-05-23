@@ -27,5 +27,9 @@ async fn figure_scene_import_rejects_invalid_payload() {
         .await
         .expect_err("figure scene import should reject invalid payload");
     let message = error.as_string().unwrap_or_default();
-    assert!(message.contains("unsupported figure replay schema version"));
+    assert!(
+        message.contains("RunMat:ReplayUnsupportedSchema")
+            || message.contains("RunMat:ReplayDecodeFailed"),
+        "expected replay import rejection identifier, got: {message}"
+    );
 }

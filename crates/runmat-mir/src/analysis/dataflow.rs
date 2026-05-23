@@ -197,7 +197,9 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
         } => aggregate_fact(kind, *rows, *cols, elements),
         MirRvalue::StructLiteral { .. } => scalar_single_fact(TypeFact::Struct),
         MirRvalue::ObjectLiteral { .. } => scalar_single_fact(TypeFact::Unknown),
-        MirRvalue::Binary(_, _, _) | MirRvalue::Unary(_, _) => SimpleValueFact::default(),
+        MirRvalue::Binary(_, _, _) | MirRvalue::ShortCircuit { .. } | MirRvalue::Unary(_, _) => {
+            SimpleValueFact::default()
+        }
         MirRvalue::Range { .. } => SimpleValueFact::default(),
         MirRvalue::Index { .. } => SimpleValueFact {
             value_flow: ValueFlowFact::UnknownList,
@@ -638,6 +640,29 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Binary(left, _, right) => {
             diagnose_operand_read(left, state, span, diagnostics);
+            diagnose_operand_read(right, state, span, diagnostics);
+        }
+        MirRvalue::ShortCircuit {
+            left,
+            right_temps,
+            right,
+            ..
+        } => {
+            diagnose_operand_read(left, state, span, diagnostics);
+            for stmt in right_temps {
+                match &stmt.kind {
+                    crate::MirStmtKind::Assign { value, .. }
+                    | crate::MirStmtKind::Expr(value)
+                    | crate::MirStmtKind::MultiAssign { value, .. } => {
+                        diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+                    }
+                    crate::MirStmtKind::PlaceMutation(place) => {
+                        diagnose_place_reads(&place.place, state, stmt.span, diagnostics);
+                    }
+                    crate::MirStmtKind::WorkspaceEffect { .. }
+                    | crate::MirStmtKind::EnvironmentEffect(_) => {}
+                }
+            }
             diagnose_operand_read(right, state, span, diagnostics);
         }
         MirRvalue::Range { start, step, end } => {

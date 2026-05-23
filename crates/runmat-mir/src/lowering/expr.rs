@@ -1,6 +1,6 @@
 use crate::{
     MirAggregateKind, MirCall, MirCallArg, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan,
-    MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirIndexing, MirOperand, MirPlace, MirRvalue, MirShortCircuitOp, MirStmt, MirStmtKind,
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
@@ -39,11 +39,33 @@ pub(crate) fn lower_expr_with_replacements(
             op.clone(),
             lower_operand_with_replacements(ctx, inner, temps, await_replacements)?,
         ),
-        HirExprKind::Binary(left, op, right) => MirRvalue::Binary(
-            lower_operand_with_replacements(ctx, left, temps, await_replacements)?,
-            op.clone(),
-            lower_operand_with_replacements(ctx, right, temps, await_replacements)?,
-        ),
+        HirExprKind::Binary(left, op, right) => match op {
+            OperatorKind::ShortCircuitAnd | OperatorKind::ShortCircuitOr => {
+                let left = lower_operand_with_replacements(ctx, left, temps, await_replacements)?;
+                let mut right_temps = Vec::new();
+                let right = lower_operand_with_replacements(
+                    ctx,
+                    right,
+                    &mut right_temps,
+                    await_replacements,
+                )?;
+                MirRvalue::ShortCircuit {
+                    left,
+                    op: if matches!(op, OperatorKind::ShortCircuitAnd) {
+                        MirShortCircuitOp::And
+                    } else {
+                        MirShortCircuitOp::Or
+                    },
+                    right_temps,
+                    right,
+                }
+            }
+            _ => MirRvalue::Binary(
+                lower_operand_with_replacements(ctx, left, temps, await_replacements)?,
+                op.clone(),
+                lower_operand_with_replacements(ctx, right, temps, await_replacements)?,
+            ),
+        },
         HirExprKind::Range(start, step, end) => MirRvalue::Range {
             start: lower_operand_with_replacements(ctx, start, temps, await_replacements)?,
             step: step

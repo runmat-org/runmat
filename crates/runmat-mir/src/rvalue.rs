@@ -1,4 +1,4 @@
-use crate::{MirCallArg, MirIndexing, MirOperand};
+use crate::{MirCallArg, MirIndexing, MirOperand, MirStmt};
 use runmat_hir::{
     CallSyntax, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
 };
@@ -9,6 +9,12 @@ pub enum MirRvalue {
     Use(MirOperand),
     Unary(OperatorKind, MirOperand),
     Binary(MirOperand, OperatorKind, MirOperand),
+    ShortCircuit {
+        left: MirOperand,
+        op: MirShortCircuitOp,
+        right_temps: Vec<MirStmt>,
+        right: MirOperand,
+    },
     Range {
         start: MirOperand,
         step: Option<MirOperand>,
@@ -50,6 +56,12 @@ pub enum MirRvalue {
         requested_outputs: RequestedOutputCount,
     },
     Spawn(MirOperand),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MirShortCircuitOp {
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
