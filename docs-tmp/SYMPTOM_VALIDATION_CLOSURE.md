@@ -105,5 +105,6 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
   -- Note: this is likely a symptom of unbounded memory pressure, where the browser is running out of memory due to the large number of allocations that aren't garbage collected. The solution to this is to ensure the garbage collector is running correctly and in a manner that does not let WASM allocations pile up without being garbage collected, yet keeps runtime semantics stable and predictable.
 
 3. `RM-270` / `RM-272` and parent `RM-326`: finish GPU allocation/lifetime/GC fixes and verification.
-4. `RM-231`: complete and verify remaining module graph umbrella scenarios.
-5. `RM-228`: close umbrella after remaining non-backlog children are in review.
+4. `RM-408` (child of `RM-327`): resolve short-circuit `||` boolean-domain failure (`cannot convert Bool(false) to f64`) and move to `In Review` with repro proof.
+5. `RM-286`: confirm browser sandbox file-I/O closure proof and move to `In Review` when validated.
+6. `RM-228`: close umbrella after remaining non-backlog children are in review (currently includes `RM-286`, `RM-326` chain, and `RM-408`).
