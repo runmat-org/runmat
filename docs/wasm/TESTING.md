@@ -12,14 +12,14 @@ Replay-specific browser smoke tests can be run with:
 
 ```bash
 cd runmat
-scripts/test-wasm-replay-smoke.sh
+scripts/test-wasm-regression-suite.sh replay-smoke
 ```
 
 Symptom closure tests for the impedance-loop and slice-`end` regressions can be run with:
 
 ```bash
 cd runmat
-scripts/test-wasm-symptom-closure.sh
+scripts/test-wasm-regression-suite.sh symptom-closure
 ```
 
 What the script does:

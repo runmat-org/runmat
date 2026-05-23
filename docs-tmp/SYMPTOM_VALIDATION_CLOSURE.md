@@ -98,7 +98,7 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
 - `RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check -p runmat-runtime --target wasm32-unknown-unknown`
 - `wasm-pack test --node --test symptom_node_regressions` (pass: `2 passed; 0 failed`)
 - `wasm-pack test --chrome --headless --chromedriver /tmp/chromedriver-148/chromedriver-mac-arm64/chromedriver --test symptom_browser_regressions` (pass: `2 passed; 0 failed`)
-- `scripts/test-wasm-symptom-closure.sh` (pass: node + browser symptom closure in one command)
+- `scripts/test-wasm-regression-suite.sh symptom-closure` (pass: node + browser symptom closure in one command)
 
 ## Tracker Actions Recorded
 
