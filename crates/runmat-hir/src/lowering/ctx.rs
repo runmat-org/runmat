@@ -870,7 +870,9 @@ impl LoweringCtx {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
-                let requested_outputs = if *suppressed {
+                let requested_outputs = if stmt_expr_call_is_workspace_load(expr) {
+                    RequestedOutputCount::Zero
+                } else if *suppressed {
                     RequestedOutputCount::Zero
                 } else {
                     RequestedOutputCount::One
@@ -2015,6 +2017,10 @@ fn is_empty_array_expr(expr: &AstExpr) -> bool {
 
 fn lvalue_supports_deletion(lvalue: &runmat_parser::LValue) -> bool {
     matches!(lvalue, runmat_parser::LValue::Index(_, _))
+}
+
+fn stmt_expr_call_is_workspace_load(expr: &AstExpr) -> bool {
+    matches!(expr, AstExpr::FuncCall(name, _, _) if name == "load")
 }
 
 fn requested_outputs_for_lvalue_assignment(

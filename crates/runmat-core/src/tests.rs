@@ -398,6 +398,75 @@ roots = ["."]
 }
 
 #[test]
+fn execute_outcome_load_statement_assigns_workspace_bindings_with_semicolon() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let mat_path = tmp.path().join("data.mat");
+    let source_path = tmp.path().join("main.m");
+    let mat_path_literal = mat_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        "x = 42; save('{mat_path_literal}', 'x'); clear x; load('{mat_path_literal}'); y = x;"
+    );
+    std::fs::write(&source_path, &source).expect("write source file");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(source_path.to_string_lossy().to_string()));
+    let outcome = block_on(session.execute_outcome(&source)).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
+fn execute_outcome_load_statement_assigns_workspace_bindings_without_semicolon() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let mat_path = tmp.path().join("data.mat");
+    let source_path = tmp.path().join("main.m");
+    let mat_path_literal = mat_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        "x = 42; save('{mat_path_literal}', 'x'); clear x; load('{mat_path_literal}')\ny = x;"
+    );
+    std::fs::write(&source_path, &source).expect("write source file");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(source_path.to_string_lossy().to_string()));
+    let outcome = block_on(session.execute_outcome(&source)).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
+fn execute_load_statement_assigns_workspace_bindings_with_semicolon() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let mat_path = tmp.path().join("data.mat");
+    let mat_path_literal = mat_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        "x = 42; save('{mat_path_literal}', 'x'); clear x; load('{mat_path_literal}'); y = x;"
+    );
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute(&source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("z = y;")).expect("follow-up succeeds");
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "z"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
 fn compile_input_reports_isolated_capture_identifier() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let err = match session.compile_input(

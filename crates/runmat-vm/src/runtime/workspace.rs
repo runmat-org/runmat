@@ -274,6 +274,12 @@ pub fn set_workspace_variable(
             Some(ws) => {
                 let idx = if let Some(idx) = ws.names.get(name).copied() {
                     idx
+                } else if let Some(idx) = ws.removed_this_execution.get(name).copied() {
+                    // Reuse the prior lexical slot when a name was cleared earlier in the
+                    // same execution so subsequent reads resolve the reloaded value.
+                    ws.names.insert(name.to_string(), idx);
+                    ws.idx_to_name.insert(idx, name.to_string());
+                    idx
                 } else {
                     let idx = vars.len();
                     ws.names.insert(name.to_string(), idx);
@@ -377,5 +383,27 @@ mod tests {
         assert!(report.names.contains("x"));
         assert!(report.removed_names.is_empty());
         assert!(report.removed_ids.is_empty());
+    }
+
+    #[test]
+    fn assignment_after_remove_reuses_previous_slot() {
+        let mut vars = Vec::new();
+        let _ = take_updated_workspace_state();
+        {
+            let _guard = set_workspace_state(HashMap::new(), HashSet::new(), &mut vars);
+            set_workspace_variable("x", Value::Num(1.0), &mut vars).unwrap();
+            set_workspace_variable("z", Value::Num(9.0), &mut vars).unwrap();
+            workspace_remove("x").unwrap();
+            set_workspace_variable("x", Value::Num(42.0), &mut vars).unwrap();
+            assert_eq!(workspace_lookup("x"), Some(Value::Num(42.0)));
+            assert_eq!(vars[0], Value::Num(42.0));
+        }
+
+        let (names, assigned) =
+            take_updated_workspace_state().expect("workspace state should be recorded");
+        assert_eq!(names.get("x"), Some(&0));
+        assert_eq!(names.get("z"), Some(&1));
+        assert!(assigned.contains("x"));
+        assert!(assigned.contains("z"));
     }
 }
