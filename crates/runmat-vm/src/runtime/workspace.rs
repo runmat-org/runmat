@@ -3,13 +3,31 @@ use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone)]
+enum SlotLifecycle {
+    Assigned(String),
+    Unassigned(String),
+}
+
+impl SlotLifecycle {
+    fn name(&self) -> &str {
+        match self {
+            SlotLifecycle::Assigned(name) | SlotLifecycle::Unassigned(name) => name,
+        }
+    }
+
+    fn is_assigned(&self) -> bool {
+        matches!(self, SlotLifecycle::Assigned(_))
+    }
+}
+
 struct WorkspaceState {
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     assigned_names_this_execution: HashSet<String>,
     assigned_ids_this_execution: HashSet<usize>,
-    removed_this_execution: HashMap<String, usize>,
-    idx_to_name: HashMap<usize, String>,
+    removed_slots_this_execution: HashMap<usize, String>,
+    slot_lifecycle: HashMap<usize, SlotLifecycle>,
     data_ptr: *const Value,
     len: usize,
 }
@@ -32,6 +50,55 @@ runmat_thread_local! {
     static WORKSPACE_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
 }
 
+fn mark_slot_unassigned(ws: &mut WorkspaceState, index: usize, name: String) {
+    ws.slot_lifecycle
+        .insert(index, SlotLifecycle::Unassigned(name.clone()));
+    ws.removed_slots_this_execution.insert(index, name);
+}
+
+fn mark_slot_assigned(ws: &mut WorkspaceState, index: usize, name: String) {
+    ws.slot_lifecycle
+        .insert(index, SlotLifecycle::Assigned(name.clone()));
+    ws.removed_slots_this_execution.remove(&index);
+}
+
+fn find_unassigned_slot_for_name(ws: &WorkspaceState, name: &str) -> Option<usize> {
+    ws.slot_lifecycle.iter().find_map(|(idx, state)| {
+        matches!(state, SlotLifecycle::Unassigned(slot_name) if slot_name == name).then_some(*idx)
+    })
+}
+
+fn upsert_slot_lifecycle_name(ws: &mut WorkspaceState, index: usize, name: &str) {
+    if let Some(existing_index) = ws.names.insert(name.to_string(), index) {
+        if existing_index != index {
+            mark_slot_unassigned(ws, existing_index, name.to_string());
+            ws.assigned.remove(name);
+        }
+    }
+
+    match ws.slot_lifecycle.get_mut(&index) {
+        Some(state) => {
+            let was_assigned = state.is_assigned();
+            let old_name = state.name().to_string();
+            if old_name != name {
+                if ws.names.get(&old_name).copied() == Some(index) {
+                    ws.names.remove(&old_name);
+                }
+                ws.assigned.remove(&old_name);
+            }
+            *state = if was_assigned {
+                SlotLifecycle::Assigned(name.to_string())
+            } else {
+                SlotLifecycle::Unassigned(name.to_string())
+            };
+        }
+        None => {
+            ws.slot_lifecycle
+                .insert(index, SlotLifecycle::Unassigned(name.to_string()));
+        }
+    }
+}
+
 pub struct WorkspaceStateGuard;
 
 impl Drop for WorkspaceStateGuard {
@@ -39,8 +106,8 @@ impl Drop for WorkspaceStateGuard {
         WORKSPACE_STATE.with(|state| {
             let mut state_mut = state.borrow_mut();
             if let Some(ws) = state_mut.take() {
-                let removed_ids = ws.removed_this_execution.values().copied().collect();
-                let removed_names = ws.removed_this_execution.keys().cloned().collect();
+                let removed_ids = ws.removed_slots_this_execution.keys().copied().collect();
+                let removed_names = ws.removed_slots_this_execution.values().cloned().collect();
                 LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| {
                     *slot.borrow_mut() = Some(WorkspaceAssignedReport {
                         ids: ws.assigned_ids_this_execution,
@@ -97,15 +164,23 @@ pub fn set_workspace_state(
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
 ) -> WorkspaceStateGuard {
-    let idx_to_name: HashMap<usize, String> = names.iter().map(|(k, &v)| (v, k.clone())).collect();
+    let mut slot_lifecycle = HashMap::new();
+    for (name, idx) in &names {
+        let lifecycle = if assigned.contains(name) {
+            SlotLifecycle::Assigned(name.clone())
+        } else {
+            SlotLifecycle::Unassigned(name.clone())
+        };
+        slot_lifecycle.insert(*idx, lifecycle);
+    }
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
             names,
             assigned,
             assigned_names_this_execution: HashSet::new(),
             assigned_ids_this_execution: HashSet::new(),
-            removed_this_execution: HashMap::new(),
-            idx_to_name,
+            removed_slots_this_execution: HashMap::new(),
+            slot_lifecycle,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
         });
@@ -148,13 +223,7 @@ pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
     WORKSPACE_STATE.with(|state| {
         let state_ref = state.borrow();
         let ws = state_ref.as_ref()?;
-        if let Some(name) = ws.idx_to_name.get(&index) {
-            return Some(ws.assigned.contains(name));
-        }
-        if ws.removed_this_execution.values().any(|idx| *idx == index) {
-            return Some(false);
-        }
-        None
+        ws.slot_lifecycle.get(&index).map(SlotLifecycle::is_assigned)
     })
 }
 
@@ -162,12 +231,9 @@ pub fn workspace_slot_name(index: usize) -> Option<String> {
     WORKSPACE_STATE.with(|state| {
         let state_ref = state.borrow();
         let ws = state_ref.as_ref()?;
-        if let Some(name) = ws.idx_to_name.get(&index) {
-            return Some(name.clone());
-        }
-        ws.removed_this_execution
-            .iter()
-            .find_map(|(name, idx)| (*idx == index).then(|| name.clone()))
+        ws.slot_lifecycle
+            .get(&index)
+            .map(|state| state.name().to_string())
     })
 }
 
@@ -193,14 +259,11 @@ pub fn workspace_clear() -> Result<(), String> {
             return Err("clear: workspace state unavailable".to_string());
         };
         vars.clear();
-        for (name, idx) in &ws.names {
-            if ws.assigned.contains(name) {
-                ws.removed_this_execution.insert(name.clone(), *idx);
-            }
+        for (name, idx) in ws.names.clone() {
+            mark_slot_unassigned(ws, idx, name);
         }
         ws.names.clear();
         ws.assigned.clear();
-        ws.idx_to_name.clear();
         ws.data_ptr = vars.as_ptr();
         ws.len = vars.len();
         Ok(())
@@ -220,11 +283,8 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
             return Err("clear: workspace state unavailable".to_string());
         };
         if let Some(idx) = ws.names.remove(name) {
-            if ws.assigned.contains(name) {
-                ws.removed_this_execution.insert(name.to_string(), idx);
-            }
             ws.assigned.remove(name);
-            ws.idx_to_name.remove(&idx);
+            mark_slot_unassigned(ws, idx, name.to_string());
             ws.data_ptr = vars.as_ptr();
             ws.len = vars.len();
         }
@@ -271,16 +331,12 @@ pub fn set_workspace_variable(
             Some(ws) => {
                 let idx = if let Some(idx) = ws.names.get(name).copied() {
                     idx
-                } else if let Some(idx) = ws.removed_this_execution.get(name).copied() {
-                    // Reuse the prior lexical slot when a name was cleared earlier in the
-                    // same execution so subsequent reads resolve the reloaded value.
+                } else if let Some(idx) = find_unassigned_slot_for_name(ws, name) {
                     ws.names.insert(name.to_string(), idx);
-                    ws.idx_to_name.insert(idx, name.to_string());
                     idx
                 } else {
                     let idx = vars.len();
                     ws.names.insert(name.to_string(), idx);
-                    ws.idx_to_name.insert(idx, name.to_string());
                     idx
                 };
                 if idx >= vars.len() {
@@ -292,7 +348,7 @@ pub fn set_workspace_variable(
                 ws.assigned.insert(name.to_string());
                 ws.assigned_names_this_execution.insert(name.to_string());
                 ws.assigned_ids_this_execution.insert(idx);
-                ws.removed_this_execution.remove(name);
+                mark_slot_assigned(ws, idx, name.to_string());
             }
             None => {
                 result = Err("load: workspace state unavailable".to_string());
@@ -305,10 +361,7 @@ pub fn set_workspace_variable(
 pub fn ensure_workspace_slot_name(index: usize, name: &str) {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow_mut().as_mut() {
-            ws.names.entry(name.to_string()).or_insert(index);
-            ws.idx_to_name
-                .entry(index)
-                .or_insert_with(|| name.to_string());
+            upsert_slot_lifecycle_name(ws, index, name);
         }
     });
 }
@@ -316,11 +369,15 @@ pub fn ensure_workspace_slot_name(index: usize, name: &str) {
 pub fn mark_workspace_assigned(index: usize) {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow_mut().as_mut() {
-            if let Some(name) = ws.idx_to_name.get(&index).cloned() {
+            if let Some(name) = ws
+                .slot_lifecycle
+                .get(&index)
+                .map(|slot| slot.name().to_string())
+            {
                 ws.assigned.insert(name.clone());
                 ws.assigned_names_this_execution.insert(name.clone());
                 ws.assigned_ids_this_execution.insert(index);
-                ws.removed_this_execution.remove(&name);
+                mark_slot_assigned(ws, index, name);
             }
         }
     });

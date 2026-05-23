@@ -398,6 +398,38 @@ roots = ["."]
 }
 
 #[test]
+fn execute_outcome_reports_project_symbol_preload_warning_for_invalid_project_source() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(tmp.path().join("helpers/bad.m"), "function y = bad(; end")
+        .expect("write invalid helper function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let outcome = block_on(session.execute_outcome("v = 1;")).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:ProjectSymbolPreloadSkipped"
+            && matches!(diagnostic.severity, abi::DiagnosticSeverity::Warning)
+    }));
+}
+
+#[test]
 fn execute_outcome_load_statement_assigns_workspace_bindings_with_semicolon() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let mat_path = tmp.path().join("data.mat");
