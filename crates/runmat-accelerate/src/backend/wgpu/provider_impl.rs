@@ -147,13 +147,13 @@ fn gpu_per_buffer_limit_error(operation: &str, requested_bytes: u64, max_bytes: 
     let requested_mib = requested_bytes as f64 / (1024.0 * 1024.0);
     let max_mib = max_bytes as f64 / (1024.0 * 1024.0);
     anyhow!(
-        "{operation}: requested {requested_bytes} bytes ({requested_mib:.2} MiB) exceeds this device per-buffer limit of {max_bytes} bytes ({max_mib:.2} MiB). This is a per-buffer backend limit (not total VRAM). Split the input into smaller chunks/sub-batches."
+        "{operation}: requested {requested_bytes} bytes ({requested_mib:.2} MiB) exceeds this device per-buffer limit of {max_bytes} bytes ({max_mib:.2} MiB). This is a per-buffer backend limit (not total VRAM). Split the data into smaller arrays/chunks and process iteratively."
     )
 }
 
 fn gpu_dispatch_length_limit_error(operation: &str, len: usize) -> anyhow::Error {
     anyhow!(
-        "{operation}: tensor length {len} exceeds the current GPU kernel indexing limit of {} elements. Split the operation into smaller chunks/sub-batches.",
+        "{operation}: tensor length {len} exceeds the current GPU kernel indexing limit of {} elements. Split the operation into smaller chunks and process iteratively.",
         u32::MAX
     )
 }
