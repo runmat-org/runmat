@@ -1126,6 +1126,10 @@ fn get_histogram_property(
             st.insert("BinCounts", tensor_from_vec(normalized));
             st.insert("Normalization", Value::String(hist.normalization.clone()));
             st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
+            st.insert(
+                "DisplayName",
+                Value::String(hist.display_name.clone().unwrap_or_default()),
+            );
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("histogram".into())),
@@ -1138,6 +1142,7 @@ fn get_histogram_property(
         Some("bincounts") => Ok(tensor_from_vec(normalized)),
         Some("normalization") => Ok(Value::String(hist.normalization.clone())),
         Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
+        Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported histogram property `{other}`"),
@@ -2493,6 +2498,23 @@ fn apply_histogram_property(
                 hist.plot_index,
                 norm,
                 hist.raw_counts.clone(),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        "displayname" => {
+            let display_name = value_as_string(value).map(|s| s.to_string());
+            super::state::update_plot_element(hist.figure, hist.plot_index, |plot| {
+                if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+                    bar.label = display_name.clone();
+                }
+            })
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::set_histogram_handle_display_name(
+                hist.figure,
+                hist.axes_index,
+                hist.plot_index,
+                display_name,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())

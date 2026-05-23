@@ -198,6 +198,7 @@ pub struct HistogramHandleState {
     pub bin_edges: Vec<f64>,
     pub raw_counts: Vec<f64>,
     pub normalization: String,
+    pub display_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1147,6 +1148,7 @@ pub fn register_histogram_handle(
             bin_edges,
             raw_counts,
             normalization,
+            display_name: None,
         }),
     );
     id as f64
@@ -1436,6 +1438,28 @@ pub fn update_histogram_handle_for_plot(
         PlotChildHandleState::Histogram(hist) => {
             hist.normalization = normalization;
             hist.raw_counts = raw_counts;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn set_histogram_handle_display_name(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    display_name: Option<String>,
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg.plot_children.values_mut().find(|state| match state {
+        PlotChildHandleState::Histogram(hist) => {
+            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
+        }
+        _ => false,
+    });
+    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
+        PlotChildHandleState::Histogram(hist) => {
+            hist.display_name = display_name;
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),

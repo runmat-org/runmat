@@ -371,4 +371,38 @@ mod tests {
         .unwrap();
         assert_eq!(norm, Value::String("cdf".into()));
     }
+
+    #[test]
+    fn histogram_supports_displayname_property() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let handle =
+            futures::executor::block_on(histogram_builtin(vec![Value::Tensor(tensor_from(&[
+                1.0, 2.0, 3.0,
+            ]))]))
+            .unwrap();
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("DisplayName".into()),
+            Value::String("Process A".into()),
+        ])
+        .unwrap();
+        let display_name = get_builtin(vec![
+            Value::Num(handle),
+            Value::String("DisplayName".into()),
+        ])
+        .unwrap();
+        assert_eq!(display_name, Value::String("Process A".into()));
+
+        let props = get_builtin(vec![Value::Num(handle)]).unwrap();
+        let Value::Struct(props) = props else {
+            panic!("expected struct from get(handle)");
+        };
+        assert_eq!(
+            props.fields.get("DisplayName"),
+            Some(&Value::String("Process A".into()))
+        );
+    }
 }

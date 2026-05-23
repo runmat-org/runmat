@@ -188,17 +188,40 @@ async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return empty_double();
     }
-    if args.len() == 1 {
-        return Ok(args.into_iter().next().unwrap());
+    let filtered = if args.len() > 1 {
+        args.into_iter()
+            .filter(|value| !is_true_empty_numeric_matrix(value))
+            .collect::<Vec<_>>()
+    } else {
+        args
+    };
+    if filtered.is_empty() {
+        return empty_double();
+    }
+    if filtered.len() == 1 {
+        return Ok(filtered.into_iter().next().unwrap());
     }
 
-    let mut forwarded = Vec::with_capacity(args.len() + 1);
+    let mut forwarded = Vec::with_capacity(filtered.len() + 1);
     forwarded.push(Value::Int(IntValue::I32(2)));
-    forwarded.extend(args);
+    forwarded.extend(filtered);
     match crate::call_builtin_async("cat", &forwarded).await {
         Ok(value) => Ok(value),
         Err(err) => Err(adapt_cat_error(err)),
     }
+}
+
+fn is_true_empty_numeric_matrix(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Tensor(Tensor {
+            shape,
+            rows: 0,
+            cols: 0,
+            data,
+            ..
+        }) if data.is_empty() && shape == &vec![0, 0]
+    )
 }
 
 fn empty_double() -> crate::BuiltinResult<Value> {
@@ -274,6 +297,14 @@ pub(crate) mod tests {
     fn single_argument_round_trips() {
         let result = horzcat_builtin(vec![Value::Num(3.5)]).expect("horzcat");
         assert_eq!(result, Value::Num(3.5));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn true_empty_operand_is_neutral_for_dynamic_growth() {
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
+        let result = horzcat_builtin(vec![Value::Tensor(empty), Value::Num(1.0)]).expect("horzcat");
+        assert_eq!(result, Value::Num(1.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
