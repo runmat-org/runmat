@@ -47,7 +47,10 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn source_discovery_start_dir(source_name: &str, cwd: &std::path::Path) -> Option<std::path::PathBuf> {
+fn source_discovery_start_dir(
+    source_name: &str,
+    cwd: &std::path::Path,
+) -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
 
     let source_path = PathBuf::from(source_name);
@@ -59,7 +62,8 @@ fn source_discovery_start_dir(source_name: &str, cwd: &std::path::Path) -> Optio
     if source_name.contains(':') && !local_candidate.exists() {
         return None;
     }
-    if (source_path.is_absolute() || source_path.components().count() > 1) && !local_candidate.exists()
+    if (source_path.is_absolute() || source_path.components().count() > 1)
+        && !local_candidate.exists()
     {
         return None;
     }
@@ -76,7 +80,9 @@ fn source_discovery_start_dir(source_name: &str, cwd: &std::path::Path) -> Optio
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn discover_project_symbol_sources(source_name: Option<&str>) -> HashMap<String, std::path::PathBuf> {
+fn discover_project_symbol_sources(
+    source_name: Option<&str>,
+) -> HashMap<String, std::path::PathBuf> {
     use runmat_config::{build_project_composition_graph, discover_project_manifest_from};
 
     let Some(source_name) = source_name else {
@@ -115,7 +121,10 @@ fn discover_project_symbol_sources(source_name: Option<&str>) -> HashMap<String,
             );
             for (alias, dependency_package) in root_dependencies {
                 if dependency_package == &package.package_name {
-                    symbols.insert(format!("{alias}.{}", source.qualified_name), full_path.clone());
+                    symbols.insert(
+                        format!("{alias}.{}", source.qualified_name),
+                        full_path.clone(),
+                    );
                 }
             }
         }
@@ -123,11 +132,7 @@ fn discover_project_symbol_sources(source_name: Option<&str>) -> HashMap<String,
     symbols
 }
 
-#[cfg(target_arch = "wasm32")]
-fn discover_project_symbol_sources(_source_name: Option<&str>) -> HashMap<String, std::path::PathBuf> {
-    HashMap::new()
-}
-
+#[cfg(not(target_arch = "wasm32"))]
 fn remap_external_function_instr(
     instr: &mut runmat_vm::Instr,
     remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
@@ -172,6 +177,7 @@ fn remap_external_function_instr(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn remap_external_end_expr(
     expr: &mut runmat_vm::EndExpr,
     remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
@@ -210,6 +216,7 @@ fn remap_external_end_expr(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn insert_registry_function_without_replacing_name(
     registry: &mut runmat_vm::FunctionRegistry,
     function: runmat_vm::FunctionBytecode,
@@ -1324,9 +1331,7 @@ impl RunMatSession {
             symbols_by_path.entry(path).or_default().push(symbol);
         }
 
-        let current_source = std::path::PathBuf::from(&source_name)
-            .canonicalize()
-            .ok();
+        let current_source = std::path::PathBuf::from(&source_name).canonicalize().ok();
         let known_project_symbols = discover_known_project_symbols(Some(source_name.as_str()));
         let mut next_function_id = bytecode
             .function_registry
@@ -1441,7 +1446,10 @@ impl RunMatSession {
             };
 
             for function in remapped_functions {
-                insert_registry_function_without_replacing_name(&mut bytecode.function_registry, function);
+                insert_registry_function_without_replacing_name(
+                    &mut bytecode.function_registry,
+                    function,
+                );
             }
             for symbol in symbols {
                 bytecode
@@ -1494,8 +1502,8 @@ impl RunMatSession {
                     runmat_hir::HirCallableRef::Unresolved(qualified),
                 ) => {
                     if let Some(name) = qualified.display_name() {
-                        let is_builtin = runmat_builtins::builtin_function_by_name(name.as_str())
-                            .is_some();
+                        let is_builtin =
+                            runmat_builtins::builtin_function_by_name(name.as_str()).is_some();
                         if !is_builtin {
                             required.insert(name);
                             if qualified.0.len() == 1 {

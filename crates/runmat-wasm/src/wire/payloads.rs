@@ -65,6 +65,7 @@ pub(crate) struct MemoryUsagePayload {
 
 impl ExecutionPayload {
     pub(crate) fn from_outcome(outcome: ExecutionOutcome, source: &str) -> Self {
+        let workspace = WorkspacePayload::from_outcome(&outcome);
         let value = outcome.flow.durable_workspace_value().cloned();
         let error = outcome
             .diagnostics
@@ -83,7 +84,7 @@ impl ExecutionPayload {
                 .into_iter()
                 .map(ConsoleStreamPayload::from)
                 .collect(),
-            workspace: WorkspacePayload::from_outcome(&outcome),
+            workspace,
             figures_touched: outcome.figures_touched,
             warnings: outcome
                 .diagnostics
