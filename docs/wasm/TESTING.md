@@ -8,6 +8,13 @@ cd runmat
 scripts/test-wasm-headless.sh
 ```
 
+Replay-specific browser smoke tests can be run with:
+
+```bash
+cd runmat
+scripts/test-wasm-replay-smoke.sh
+```
+
 What the script does:
 
 1. Regenerates the wasm builtin registry (`RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check …`).
@@ -15,6 +22,8 @@ What the script does:
    (`runmat-core` by default).
 3. Uses `scripts/chrome-headless.sh` to start Chrome/Chromium with the right WebGPU flags
    (`--headless=new --enable-unsafe-webgpu --use-angle=metal|vulkan`).
+4. Uses `scripts/resolve-chromedriver.sh` to pick a ChromeDriver compatible with the local
+   Chrome version (or downloads one when allowed).
 
 ## Configuration
 
@@ -24,8 +33,21 @@ Environment variables:
 | --- | --- |
 | `RUNMAT_CHROME_BIN` | Override the Chrome binary (defaults to the system Chrome/Chromium). |
 | `CHROMEDRIVER_ARGS` | Extra args for the WebDriver binary (default `--log-level=SEVERE` to suppress early stderr warnings that confuse `wasm-bindgen-test`). |
+| `RUNMAT_CHROMEDRIVER_BIN` | Explicit ChromeDriver binary to use (bypasses auto-resolution). |
+| `RUNMAT_CHROMEDRIVER_ALLOW_DOWNLOAD` | Set to `0` to disable auto-download when no compatible cached driver exists (default `1`). |
 | `RUNMAT_WASM_INCLUDE_RUNTIME=1` | Attempt to run the `runmat-runtime` tests as well (see below). |
 | `WASM_BINDGEN_TEST_TIMEOUT` | Per-test timeout passed to `wasm-bindgen-test` (default `300`). |
+
+If no compatible driver is found and download is disabled or unavailable, the scripts fall back
+to wasm-pack's default ChromeDriver resolution.
+
+For ad-hoc browser tests outside `scripts/test-wasm-headless.sh`:
+
+```bash
+cd runmat/crates/runmat-wasm
+CHROMEDRIVER="$(../../scripts/resolve-chromedriver.sh)" \
+  wasm-pack test --chrome --headless --chromedriver "${CHROMEDRIVER}" --test replay_smoke
+```
 
 ## Current coverage
 
