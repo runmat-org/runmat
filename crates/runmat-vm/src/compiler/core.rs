@@ -1111,7 +1111,7 @@ impl Compiler {
             }
             MirPlace::Index(base, indexing) => {
                 if let Ok(base_slot) = self.mir_place_slot(base) {
-                    self.emit(Instr::LoadVar(base_slot));
+                    self.emit(Instr::LoadVarForIndexAssignment(base_slot));
                     self.compile_mir_store_indexed_value_from_temp(
                         indexing, value_slot, false, false,
                     )?;
@@ -1412,7 +1412,11 @@ impl Compiler {
             }
             MirPlace::Index(base, indexing) => {
                 if let Ok(base_slot) = self.mir_place_slot(base) {
-                    self.emit(Instr::LoadVar(base_slot));
+                    if delete {
+                        self.emit(Instr::LoadVar(base_slot));
+                    } else {
+                        self.emit(Instr::LoadVarForIndexAssignment(base_slot));
+                    }
                     self.compile_mir_index_assignment_after_base(indexing, value, delete)?;
                     self.emit(Instr::StoreVar(base_slot));
                     return Ok(());
@@ -3181,7 +3185,9 @@ impl Compiler {
 
     pub fn emit(&mut self, instr: Instr) -> usize {
         match &instr {
-            Instr::LoadVar(id) | Instr::StoreVar(id) => self.ensure_var(*id),
+            Instr::LoadVar(id) | Instr::LoadVarForIndexAssignment(id) | Instr::StoreVar(id) => {
+                self.ensure_var(*id)
+            }
             _ => {}
         }
         let pc = self.instructions.len();

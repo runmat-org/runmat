@@ -100,7 +100,9 @@ impl<'a> GraphBuilder<'a> {
             Instr::LoadCharRow(s) => {
                 self.push_constant(Type::String, Some(Value::String(s.clone())))
             }
-            Instr::LoadVar(idx) => self.handle_load_var(*idx),
+            Instr::LoadVar(idx) | Instr::LoadVarForIndexAssignment(idx) => {
+                self.handle_load_var(*idx)
+            }
             Instr::StoreVar(idx) => self.handle_store_var(*idx),
             Instr::LoadLocal(idx) => self.handle_load_local(*idx),
             Instr::StoreLocal(idx) => self.handle_store_local(*idx),

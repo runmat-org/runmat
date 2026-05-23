@@ -44,6 +44,118 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn source_discovery_start_dir(
+    source_name: &str,
+    cwd: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let source_path = PathBuf::from(source_name);
+    let local_candidate = if source_path.is_absolute() {
+        source_path.clone()
+    } else {
+        cwd.join(&source_path)
+    };
+    if source_name.contains(':') && !local_candidate.exists() {
+        return None;
+    }
+    if (source_path.is_absolute() || source_path.components().count() > 1)
+        && !local_candidate.exists()
+    {
+        return None;
+    }
+    if source_path.is_file() {
+        return source_path.parent().map(|parent| parent.to_path_buf());
+    }
+    if source_path.is_absolute() {
+        return source_path.parent().map(|parent| parent.to_path_buf());
+    }
+    if source_path.components().count() > 1 {
+        return local_candidate.parent().map(|parent| parent.to_path_buf());
+    }
+    Some(cwd.to_path_buf())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn discover_project_symbol_sources(source_name: &str) -> HashMap<String, std::path::PathBuf> {
+    use runmat_config::{build_project_composition_graph, discover_project_manifest_from};
+
+    let source_path = PathBuf::from(source_name);
+    let cwd = if source_path.is_absolute() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"))
+    } else {
+        let Ok(cwd) = std::env::current_dir() else {
+            return HashMap::new();
+        };
+        cwd
+    };
+    let Some(start_dir) = source_discovery_start_dir(source_name, &cwd) else {
+        return HashMap::new();
+    };
+    let Some(manifest_path) = discover_project_manifest_from(&start_dir) else {
+        return HashMap::new();
+    };
+    let Ok(composition) = build_project_composition_graph(&manifest_path) else {
+        return HashMap::new();
+    };
+    let Some(root) = composition.packages.get(&composition.root_package) else {
+        return HashMap::new();
+    };
+    let root_dependencies = &root.dependencies;
+    let mut symbols = HashMap::new();
+    for package in composition.packages.values() {
+        for source in &package.source_index.files {
+            if source.is_private {
+                continue;
+            }
+            let full_path = package
+                .project_root
+                .join(&source.source_root)
+                .join(&source.relative_path);
+            if let Some(leaf) = source.qualified_name.rsplit('.').next() {
+                symbols
+                    .entry(leaf.to_string())
+                    .or_insert_with(|| full_path.clone());
+            }
+            symbols.insert(source.qualified_name.clone(), full_path.clone());
+            symbols.insert(
+                format!("{}.{}", package.package_name, source.qualified_name),
+                full_path.clone(),
+            );
+            for (alias, dependency_package) in root_dependencies {
+                if dependency_package == &package.package_name {
+                    symbols.insert(
+                        format!("{alias}.{}", source.qualified_name),
+                        full_path.clone(),
+                    );
+                }
+            }
+        }
+    }
+    symbols
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn insert_registry_function_without_replacing_name(
+    registry: &mut runmat_vm::FunctionRegistry,
+    function: runmat_vm::FunctionBytecode,
+) {
+    let function_id = function.function;
+    if let Some(source_id) = function.source_id {
+        let source_functions = registry.source_functions.entry(source_id).or_default();
+        if !source_functions.contains(&function_id) {
+            source_functions.push(function_id);
+        }
+    }
+    registry
+        .names
+        .entry(function.display_name.clone())
+        .or_insert(function_id);
+    registry.functions.insert(function_id, function);
+}
+
 impl RunMatSession {
     pub(crate) fn compile_input(
         &mut self,
@@ -82,6 +194,7 @@ impl RunMatSession {
             self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
         };
         bytecode.source_id = Some(source_id);
+        self.preload_project_symbol_functions_for_compile(&source_name, &lowering, &mut bytecode)?;
         let (function_registry_after_success, next_semantic_function_id_after_success) =
             self.prepare_session_semantic_function_registry(&mut bytecode);
         Ok(PreparedExecution {
@@ -134,6 +247,231 @@ impl RunMatSession {
         Ok(runmat_vm::compile(assembly, mir, entrypoint.id)?)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn preload_project_symbol_functions_for_compile(
+        &self,
+        source_name: &str,
+        lowering: &LoweringResult,
+        bytecode: &mut runmat_vm::Bytecode,
+    ) -> std::result::Result<(), RunError> {
+        let mut symbol_sources = discover_project_symbol_sources(source_name);
+        let mut required_symbols = self.required_external_symbols(lowering);
+        if let Some(stem) = std::path::Path::new(source_name)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+        {
+            required_symbols.remove(stem);
+        }
+        let source_dir = std::path::PathBuf::from(source_name)
+            .canonicalize()
+            .ok()
+            .and_then(|path| path.parent().map(|parent| parent.to_path_buf()));
+        for symbol in required_symbols {
+            if symbol_sources.contains_key(&symbol) {
+                continue;
+            }
+            if let Some(local_dir) = source_dir.as_ref() {
+                let (packages, base_name) =
+                    runmat_runtime::builtins::common::path_search::split_package_components(
+                        &symbol,
+                    );
+                let mut local_candidate = local_dir.clone();
+                for package in packages {
+                    local_candidate.push(format!("+{package}"));
+                }
+                local_candidate.push(format!("{base_name}.m"));
+                if local_candidate.is_file() {
+                    symbol_sources.insert(symbol.clone(), local_candidate);
+                    continue;
+                }
+            }
+            let candidates = runmat_runtime::builtins::common::path_search::file_candidates(
+                &symbol,
+                &[".m"],
+                "project symbol preload",
+            )
+            .unwrap_or_default();
+            if let Some(path) = candidates.into_iter().find(|candidate| candidate.is_file()) {
+                symbol_sources.insert(symbol, path);
+            }
+        }
+        if symbol_sources.is_empty() {
+            return Ok(());
+        }
+
+        let mut symbols_by_path: HashMap<std::path::PathBuf, Vec<String>> = HashMap::new();
+        for (symbol, path) in symbol_sources {
+            symbols_by_path.entry(path).or_default().push(symbol);
+        }
+
+        let current_source = std::path::PathBuf::from(source_name).canonicalize().ok();
+        let known_project_symbols = discover_known_project_symbols(source_name);
+        let mut next_function_id = bytecode
+            .function_registry
+            .functions
+            .keys()
+            .map(|id| id.0)
+            .max()
+            .unwrap_or(0)
+            + 1;
+
+        for (path, symbols) in symbols_by_path {
+            let canonical_path = path.canonicalize().ok();
+            if current_source.is_some() && current_source == canonical_path {
+                continue;
+            }
+
+            let source_text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(_) => continue,
+            };
+            let ast = match parse_with_options(&source_text, ParserOptions::new(self.compat_mode)) {
+                Ok(ast) => ast,
+                Err(_) => continue,
+            };
+            let mut bound_functions = self.function_registry.names.clone();
+            for (name, function_id) in &bytecode.function_registry.names {
+                bound_functions.entry(name.clone()).or_insert(*function_id);
+            }
+            let lowering = match runmat_hir::lower(
+                &ast,
+                &LoweringContext::new(&HashMap::new())
+                    .with_bound_functions(&bound_functions)
+                    .with_known_project_symbols(&known_project_symbols)
+                    .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
+                    .with_top_level_await_enabled(self.top_level_await_enabled),
+            ) {
+                Ok(lowering) => lowering,
+                Err(_) => continue,
+            };
+            let mir = match runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+                Ok(mir) => mir,
+                Err(_) => continue,
+            };
+            let mut compiled_functions =
+                match runmat_vm::compile_semantic_function_registry(&lowering.assembly, &mir) {
+                    Ok(compiled) => compiled,
+                    Err(_) => continue,
+                };
+            if compiled_functions.is_empty() {
+                continue;
+            }
+
+            let mut ids: Vec<_> = compiled_functions.keys().copied().collect();
+            ids.sort_by_key(|id| id.0);
+            let mut remap: HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId> = HashMap::new();
+            let mut remapped_functions = Vec::new();
+            for old_id in ids {
+                let Some(mut function) = compiled_functions.remove(&old_id) else {
+                    continue;
+                };
+                let new_id = runmat_hir::FunctionId(next_function_id);
+                next_function_id += 1;
+                remap.insert(old_id, new_id);
+                function.function = new_id;
+                remapped_functions.push(function);
+            }
+            for function in &mut remapped_functions {
+                for instr in &mut function.instructions {
+                    remap_semantic_function_instr(instr, &remap);
+                }
+            }
+
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_string);
+            let fallback_primary = remapped_functions.first().map(|function| function.function);
+            let preferred_primary = stem.as_ref().and_then(|file_stem| {
+                remapped_functions
+                    .iter()
+                    .find(|function| function.display_name == *file_stem)
+                    .map(|function| function.function)
+            });
+            let Some(primary_function) = preferred_primary.or(fallback_primary) else {
+                continue;
+            };
+
+            for function in remapped_functions {
+                insert_registry_function_without_replacing_name(
+                    &mut bytecode.function_registry,
+                    function,
+                );
+            }
+            for symbol in symbols {
+                bytecode
+                    .function_registry
+                    .names
+                    .entry(symbol)
+                    .or_insert(primary_function);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn preload_project_symbol_functions_for_compile(
+        &self,
+        _source_name: &str,
+        _lowering: &LoweringResult,
+        _bytecode: &mut runmat_vm::Bytecode,
+    ) -> std::result::Result<(), RunError> {
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn required_external_symbols(&self, lowering: &LoweringResult) -> HashSet<String> {
+        let mut required = HashSet::new();
+        let mut wildcard_import_prefixes = Vec::new();
+        let mut specific_imports_by_leaf: HashMap<String, String> = HashMap::new();
+        if let Some(module) = lowering.assembly.modules.first() {
+            for import in &module.imports {
+                let Some(path_display) = import.path.display_name() else {
+                    continue;
+                };
+                if import.wildcard {
+                    wildcard_import_prefixes.push(path_display);
+                    continue;
+                }
+                if let Some(leaf) = import.path.0.last().map(|segment| segment.0.clone()) {
+                    specific_imports_by_leaf.insert(leaf, path_display);
+                }
+            }
+        }
+        for call in &lowering.hir_index.calls {
+            match (&call.kind, &call.callee) {
+                (runmat_hir::CallKind::PackageFunction(path), _) => {
+                    if let Some(name) = path.module.display_name() {
+                        required.insert(name);
+                    }
+                }
+                (
+                    runmat_hir::CallKind::Dynamic,
+                    runmat_hir::HirCallableRef::Unresolved(qualified),
+                ) => {
+                    if let Some(name) = qualified.display_name() {
+                        let is_builtin =
+                            runmat_builtins::builtin_function_by_name(name.as_str()).is_some();
+                        if !is_builtin {
+                            required.insert(name);
+                            if qualified.0.len() == 1 {
+                                let leaf = qualified.0[0].0.as_str();
+                                if let Some(specific_target) = specific_imports_by_leaf.get(leaf) {
+                                    required.insert(specific_target.clone());
+                                }
+                                for import_prefix in &wildcard_import_prefixes {
+                                    required.insert(format!("{import_prefix}.{leaf}"));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        required
+    }
+
     fn prepare_session_semantic_function_registry(
         &self,
         bytecode: &mut runmat_vm::Bytecode,
@@ -160,6 +498,11 @@ impl RunMatSession {
         for instr in &mut bytecode.instructions {
             remap_semantic_function_instr(instr, &remap);
         }
+        let name_remaps: Vec<(String, runmat_hir::FunctionId)> = current_registry
+            .names
+            .iter()
+            .map(|(name, function)| (name.clone(), *function))
+            .collect();
 
         let mut replaced_sources = Vec::new();
         for function in current_registry.functions.values() {
@@ -189,6 +532,12 @@ impl RunMatSession {
                 remap_semantic_function_instr(instr, &remap);
             }
             session_registry.insert_replacing_name(function);
+        }
+        for (name, old_id) in name_remaps {
+            let Some(new_id) = remap.get(&old_id).copied() else {
+                continue;
+            };
+            session_registry.names.insert(name, new_id);
         }
 
         bytecode.function_registry = session_registry.clone();

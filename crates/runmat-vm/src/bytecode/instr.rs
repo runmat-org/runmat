@@ -46,6 +46,7 @@ pub enum Instr {
     LoadString(String),
     LoadCharRow(String),
     LoadVar(usize),
+    LoadVarForIndexAssignment(usize),
     StoreVar(usize),
 
     // Scalar and matrix arithmetic.
@@ -318,6 +319,7 @@ impl Instr {
             | Instr::CreateMethodFunctionHandle(_)
             | Instr::CreateBoundFunctionHandle(_, _)
             | Instr::LoadVar(_)
+            | Instr::LoadVarForIndexAssignment(_)
             | Instr::LoadLocal(_) => effect(0, 1),
             Instr::StoreVar(_)
             | Instr::StoreLocal(_)

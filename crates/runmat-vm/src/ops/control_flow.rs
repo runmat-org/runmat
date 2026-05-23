@@ -1,7 +1,3 @@
-use crate::interpreter::stack::pop_value;
-use runmat_builtins::Value;
-use runmat_runtime::RuntimeError;
-
 pub enum ControlFlowAction {
     Next,
     Jump(usize),
@@ -9,22 +5,20 @@ pub enum ControlFlowAction {
 }
 
 #[inline]
-pub fn and_and(stack: &mut Vec<Value>, target: usize) -> Result<ControlFlowAction, RuntimeError> {
-    let lhs: f64 = (&pop_value(stack)?).try_into()?;
-    if lhs == 0.0 {
-        Ok(ControlFlowAction::Jump(target))
+pub fn and_and(lhs_truth: bool, target: usize) -> ControlFlowAction {
+    if lhs_truth {
+        ControlFlowAction::Next
     } else {
-        Ok(ControlFlowAction::Next)
+        ControlFlowAction::Jump(target)
     }
 }
 
 #[inline]
-pub fn or_or(stack: &mut Vec<Value>, target: usize) -> Result<ControlFlowAction, RuntimeError> {
-    let lhs: f64 = (&pop_value(stack)?).try_into()?;
-    if lhs != 0.0 {
-        Ok(ControlFlowAction::Jump(target))
+pub fn or_or(lhs_truth: bool, target: usize) -> ControlFlowAction {
+    if lhs_truth {
+        ControlFlowAction::Jump(target)
     } else {
-        Ok(ControlFlowAction::Next)
+        ControlFlowAction::Next
     }
 }
 
@@ -74,3 +68,6 @@ pub fn return_value(stack: &mut Vec<Value>) -> Result<ControlFlowAction, Runtime
 pub fn return_void() -> ControlFlowAction {
     ControlFlowAction::Return
 }
+use crate::interpreter::stack::pop_value;
+use runmat_builtins::Value;
+use runmat_runtime::RuntimeError;

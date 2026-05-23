@@ -231,6 +231,25 @@ fn scalar_value_index_assignment_executes() {
 }
 
 #[test]
+fn undefined_root_index_assignment_uses_index_assignment_load_semantics() {
+    let bytecode = compile_source("x(1) = 7; y = x;").unwrap();
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadVarForIndexAssignment(_))),
+        "indexed assignment to undefined root should lower through LoadVarForIndexAssignment"
+    );
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+    let updated = vars.last().expect("expected final variable");
+    let Value::Tensor(tensor) = updated else {
+        panic!("expected tensor assignment result, got {updated:?}");
+    };
+    assert_eq!(tensor.shape, vec![1, 1]);
+    assert_eq!(tensor.data, vec![7.0]);
+}
+
+#[test]
 fn string_array_scalar_index_assignment_executes() {
     let bytecode = compile_source(r#"S = ["a" "b"]; S(2) = "z"; T = S;"#).unwrap();
     let vars = test_helpers::interpret(&bytecode).unwrap();

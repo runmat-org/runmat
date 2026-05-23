@@ -384,7 +384,7 @@ impl BytecodeCompiler {
                             "Non-numeric literal not supported in JIT mode".to_string(),
                         ));
                     }
-                    Instr::LoadVar(idx) => {
+                    Instr::LoadVar(idx) | Instr::LoadVarForIndexAssignment(idx) => {
                         let idx_val = builder.ins().iconst(types::I64, *idx as i64);
                         let element_size = builder.ins().iconst(types::I64, 16);
                         let offset = builder.ins().imul(idx_val, element_size);

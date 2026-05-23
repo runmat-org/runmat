@@ -23,3 +23,12 @@ fn logical_operators_and_short_circuit() {
     assert!(logical_truth(&vars[4]));
     assert!(!logical_truth(&vars[5]));
 }
+
+#[test]
+fn short_circuit_or_accepts_boolean_lhs_without_numeric_coercion() {
+    let vars = execute_source(
+        "tau = []; flight_duration = 10; guard = isempty(tau) || tau(end) < flight_duration;",
+    )
+    .unwrap();
+    assert!(logical_truth(&vars[2]));
+}

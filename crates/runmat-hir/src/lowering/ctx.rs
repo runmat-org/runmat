@@ -870,9 +870,9 @@ impl LoweringCtx {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
-                let requested_outputs = if stmt_expr_call_is_workspace_load(expr) {
-                    RequestedOutputCount::Zero
-                } else if *suppressed {
+                let requested_outputs = if *suppressed
+                    || stmt_expr_call_loads_external_bindings(expr)
+                {
                     RequestedOutputCount::Zero
                 } else {
                     RequestedOutputCount::One
@@ -2019,8 +2019,17 @@ fn lvalue_supports_deletion(lvalue: &runmat_parser::LValue) -> bool {
     matches!(lvalue, runmat_parser::LValue::Index(_, _))
 }
 
-fn stmt_expr_call_is_workspace_load(expr: &AstExpr) -> bool {
-    matches!(expr, AstExpr::FuncCall(name, _, _) if name == "load")
+fn stmt_expr_call_loads_external_bindings(expr: &AstExpr) -> bool {
+    let call_name = match expr {
+        AstExpr::FuncCall(name, _, _) | AstExpr::CommandCall(name, _, _) => name.as_str(),
+        _ => return false,
+    };
+    runmat_builtins::builtin_function_by_name(call_name).is_some_and(|builtin| {
+        matches!(
+            builtin.semantics().workspace_effect,
+            Some(runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings)
+        )
+    })
 }
 
 fn requested_outputs_for_lvalue_assignment(

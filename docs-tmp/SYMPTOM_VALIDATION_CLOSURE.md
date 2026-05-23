@@ -43,9 +43,9 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
 | RM-273 | Canceled | N/A | Already canceled | Commented, no state change |
 | RM-286 | In Review | In review | Already in review prior to this closeout | No state change |
 | RM-290 | In Review | Resolved/ready for review | Command syntax repro (`grid on`, `hold on`, `clear all`, `clc`) validated | Commented + moved to `In Review` |
-| RM-295 | In Progress | Open | wasm-only unreachable crash ticket still open | Commented, no state change |
+| RM-295 | In Progress | Open | Added wasm-node regression (`impedance_loop_executes_without_runtime_error`) and reran successfully; browser harness proof still pending | No state change (Linear closeout comment blocked by external-write policy in this environment) |
 | RM-298 | In Review | Resolved/ready for review | Histogram `DisplayName` get/set support added with regression; direct repro returns expected name | Commented + moved to `In Review` |
-| RM-302 | In Progress | Open | Native repro passes; wasm/browser-specific closure proof still pending | Commented, no state change |
+| RM-302 | In Progress | Open | Added wasm-node regression (`slice_end_arithmetic_executes_without_runtime_error`) and reran successfully; browser harness proof still pending | Commented with commit/test evidence, no state change |
 | RM-303 | In Review | Resolved/ready for review | Multi-output destructuring covered across user+builtin paths | Commented + moved to `In Review` |
 | RM-304 | Done | Closed | Already done | No state change |
 | RM-309 | In Review | Resolved/ready for review | Bare `nargin`/`nargout` plus optional-arg guard pattern validated (direct repro returns `4`) | Commented + moved to `In Review` |
@@ -77,6 +77,10 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
   - Lowering semantics: treat statement-form `load(...)` as zero-requested-output so it assigns loaded symbols into caller workspace
   - VM workspace semantics: reuse cleared lexical slot when a name is re-assigned in the same execution (fixes `clear x; load(...); y = x` flow)
   - Regression coverage: `execute_outcome_load_statement_assigns_workspace_bindings_*`, `execute_load_statement_assigns_workspace_bindings_with_semicolon`, and VM slot-reuse unit test
+- `23eaedcf`
+  - Wasm runtime/wire safety: precompute workspace payload before stream move in `ExecutionPayload::from_outcome`; include external/method/bound function handles in wasm JSON value encoding
+  - Cross-target compile safety: gate non-wasm helper functions in `runmat-core/src/session/run.rs` to fix wasm32 `-D warnings` dead-code build failures
+  - Regression coverage: new wasm-targeted integration tests in `runmat-wasm/tests/symptom_node_regressions.rs` for impedance loop and `end`-arithmetic slice assignment paths
 
 ## Focused Validation Commands (latest pass)
 
@@ -91,18 +95,22 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
 - `cargo test -p runmat-core execute_outcome_load_statement_assigns_workspace_bindings -- --nocapture`
 - `cargo test -p runmat-core execute_load_statement_assigns_workspace_bindings_with_semicolon -- --nocapture`
 - `cargo test -p runmat-vm assignment_after_remove_reuses_previous_slot -- --nocapture`
+- `RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check -p runmat-runtime --target wasm32-unknown-unknown`
+- `wasm-pack test --node --test symptom_node_regressions` (pass: `2 passed; 0 failed`)
+- `CHROME_BIN=../../scripts/chrome-headless.sh CHROMEDRIVER_ARGS=--log-level=SEVERE wasm-pack test --chrome --headless --test replay_smoke` (browser harness failure before test execution: ChromeDriver session startup/URL handling)
 
 ## Tracker Actions Recorded
 
 - Added per-issue comments across symptom inventory.
 - Moved resolved symptoms to `In Review`.
 - Left open, unresolved, or umbrella items in active states.
+- Posted RM-302 validation comment referencing commit `23eaedcf`.
+- RM-295 validation comment write is currently blocked by external-write policy enforcement in this environment.
 
 ## Remaining Direct-Work Queue
 
-1. `RM-302`: obtain wasm/browser-specific closure proof (native repro already passes).
-2. `RM-295`: debug/close wasm unreachable crash repro path.
-  -- Note: this is likely a symptom of unbounded memory pressure, where the browser is running out of memory due to the large number of allocations that aren't garbage collected. The solution to this is to ensure the garbage collector is running correctly and in a manner that does not let WASM allocations pile up without being garbage collected, yet keeps runtime semantics stable and predictable.
+1. `RM-302`: complete browser-sandbox closure proof (wasm-node regression proof now lands/passes; browser harness run remains blocked in this environment before test execution).
+2. `RM-295`: complete browser-sandbox closure proof + post Linear closeout comment (wasm-node regression proof now lands/passes; browser harness run remains blocked in this environment before test execution).
 
 3. `RM-270` / `RM-272` and parent `RM-326`: finish GPU allocation/lifetime/GC fixes and verification.
 4. `RM-408` (child of `RM-327`): resolve short-circuit `||` boolean-domain failure (`cannot convert Bool(false) to f64`) and move to `In Review` with repro proof.

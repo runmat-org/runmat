@@ -469,7 +469,6 @@ async fn run_interpreter_inner(
         let dispatch_result = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
-                instructions: &bytecode.instructions,
                 var_names: &bytecode.var_names,
                 function_registry: &function_registry,
                 source_id: bytecode.source_id,
@@ -561,6 +560,7 @@ async fn run_interpreter_inner(
             | Instr::LoadCharRow(_)
             | Instr::LoadLocal(_)
             | Instr::LoadVar(_)
+            | Instr::LoadVarForIndexAssignment(_)
             | Instr::StoreVar(_)
             | Instr::StoreLocal(_)
             | Instr::Swap

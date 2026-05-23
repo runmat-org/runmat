@@ -220,9 +220,6 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
             return Err("clear: workspace state unavailable".to_string());
         };
         if let Some(idx) = ws.names.remove(name) {
-            if idx < vars.len() {
-                vars[idx] = Value::Num(0.0);
-            }
             if ws.assigned.contains(name) {
                 ws.removed_this_execution.insert(name.to_string(), idx);
             }

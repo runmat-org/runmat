@@ -13,7 +13,7 @@ use crate::runtime::workspace::{
     refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
 };
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{IntValue, ObjectInstance, StructValue, Value};
+use runmat_builtins::{IntValue, ObjectInstance, StructValue, Tensor, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::{HashMap, HashSet};
@@ -44,7 +44,6 @@ pub enum DispatchHandled {
 
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
-    pub instructions: &'a [Instr],
     pub var_names: &'a HashMap<usize, String>,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
@@ -718,7 +717,6 @@ pub async fn dispatch_instruction(
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     let DispatchMeta {
         instr,
-        instructions,
         var_names,
         function_registry,
         source_id,
@@ -827,13 +825,44 @@ pub async fn dispatch_instruction(
                 workspace_slot_name(*index),
                 var_names.get(index),
             ) {
-                if slot_name == *var_name
-                    && !loaded_var_will_store_back_via_index_assignment(instructions, *pc, *index)
-                {
+                if slot_name == *var_name {
                     return Err(crate::interpreter::errors::mex(
                         "UndefinedVariable",
                         &format!("Undefined variable: {slot_name}"),
                     ));
+                }
+            }
+            let value = vars[*index].clone();
+            debug::trace_load_var(*pc, *index, &value);
+            load_var(stack, vars, *index);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::LoadVarForIndexAssignment(index) => {
+            if missing_input_slots.contains(index) {
+                return Err(crate::interpreter::errors::mex(
+                    "NotEnoughInputs",
+                    "Not enough input arguments.",
+                ));
+            }
+            if let (Some(false), Some(slot_name), Some(var_name)) = (
+                workspace_slot_assigned(*index),
+                workspace_slot_name(*index),
+                var_names.get(index),
+            ) {
+                if slot_name == *var_name {
+                    let empty = Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
+                        crate::interpreter::errors::mex(
+                            "IndexAssignmentBaseInit",
+                            &format!(
+                                "failed to initialize undefined indexed-assignment base '{slot_name}': {err}"
+                            ),
+                        )
+                    })?;
+                    debug::trace_load_var(*pc, *index, &Value::Tensor(empty.clone()));
+                    stack.push(Value::Tensor(empty));
+                    return Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)));
                 }
             }
             let value = vars[*index].clone();
@@ -972,11 +1001,25 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::AndAnd(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-            crate::ops::control_flow::and_and(stack, *target)?,
+            crate::ops::control_flow::and_and(
+                logical_truth_from_value(
+                    &crate::interpreter::stack::pop_value(stack)?,
+                    "short-circuit && condition",
+                )
+                .await?,
+                *target,
+            ),
             pc,
         )))),
         Instr::OrOr(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-            crate::ops::control_flow::or_or(stack, *target)?,
+            crate::ops::control_flow::or_or(
+                logical_truth_from_value(
+                    &crate::interpreter::stack::pop_value(stack)?,
+                    "short-circuit || condition",
+                )
+                .await?,
+                *target,
+            ),
             pc,
         )))),
         Instr::JumpIfFalse(target) => {
@@ -1514,36 +1557,6 @@ pub async fn dispatch_instruction(
         }
         _ => Ok(None),
     }
-}
-
-fn loaded_var_will_store_back_via_index_assignment(
-    instructions: &[Instr],
-    load_pc: usize,
-    var_index: usize,
-) -> bool {
-    let mut saw_index_store = false;
-    for instr in instructions.iter().skip(load_pc + 1).take(32) {
-        match instr {
-            Instr::StoreIndex(_)
-            | Instr::StoreIndexDelete(_)
-            | Instr::StoreIndexCell { .. }
-            | Instr::StoreIndexCellDelete { .. }
-            | Instr::StoreSlice(_, _, _, _)
-            | Instr::StoreSliceDelete(_, _, _, _)
-            | Instr::StoreSliceExpr { .. }
-            | Instr::StoreSliceExprDelete { .. } => {
-                saw_index_store = true;
-            }
-            Instr::StoreVar(index) if *index == var_index => {
-                return saw_index_store;
-            }
-            Instr::Jump(_) | Instr::JumpIfFalse(_) | Instr::Return | Instr::ReturnValue => {
-                return false
-            }
-            _ => {}
-        }
-    }
-    false
 }
 
 #[cfg(test)]
