@@ -33,62 +33,6 @@ fn skip_headless_gpu_test(test_name: &str) -> bool {
 
 #[cfg(test)]
 mod export_subplot_tests {
-    #[test]
-    fn test_svg_two_axes_line_scatter() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        fig.set_subplot_grid(2, 1);
-        let x: Vec<f64> = (0..=50).map(|i| i as f64 * 0.2).collect();
-        let y: Vec<f64> = x.iter().map(|v| v.sin()).collect();
-        let i1 = fig.add_line_plot(runmat_plot::plots::LinePlot::new(x.clone(), y).unwrap());
-        let _ = fig.assign_plot_to_axes(i1, 0);
-        let y2: Vec<f64> = x.iter().map(|v| v.cos() * 0.5 + 0.5).collect();
-        let i2 = fig.add_scatter_plot(runmat_plot::plots::ScatterPlot::new(x.clone(), y2).unwrap());
-        let _ = fig.assign_plot_to_axes(i2, 1);
-        let exporter = runmat_plot::export::vector::VectorExporter::new();
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<svg"));
-        assert!(svg.len() > 500);
-    }
-
-    #[test]
-    fn test_svg_four_axes_bars_imagesc() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        fig.set_subplot_grid(2, 2);
-        let y = vec![1.0, 2.0, 3.0, 2.0, 1.0];
-        let labels: Vec<String> = (1..=y.len()).map(|i| i.to_string()).collect();
-        let i0 = fig.add_bar_chart(runmat_plot::plots::BarChart::new(labels, y).unwrap());
-        let _ = fig.assign_plot_to_axes(i0, 0);
-        let rows = 5usize;
-        let cols = 5usize;
-        let mut grid = vec![vec![0.0; cols]; rows];
-        for (r, row_vec) in grid.iter_mut().enumerate() {
-            for cell in row_vec.iter_mut() {
-                *cell = (r as f64) / (rows as f64);
-            }
-        }
-        let xv: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
-        let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
-        yv.reverse();
-        let img = runmat_plot::plots::SurfacePlot::new(xv, yv, grid)
-            .unwrap()
-            .with_colormap(runmat_plot::plots::surface::ColorMap::Parula)
-            .with_flatten_z(true)
-            .with_image_mode(true);
-        let i1 = fig.add_surface_plot(img);
-        let _ = fig.assign_plot_to_axes(i1, 1);
-        let x2: Vec<f64> = (0..=20).map(|i| i as f64 * 0.2).collect();
-        let y2: Vec<f64> = x2.iter().map(|v| v.sin()).collect();
-        let i2 = fig.add_line_plot(runmat_plot::plots::LinePlot::new(x2, y2).unwrap());
-        let _ = fig.assign_plot_to_axes(i2, 2);
-        let xs: Vec<f64> = (0..10).map(|i| i as f64).collect();
-        let ys: Vec<f64> = xs.iter().map(|v| v.cos()).collect();
-        let i3 = fig.add_scatter_plot(runmat_plot::plots::ScatterPlot::new(xs, ys).unwrap());
-        let _ = fig.assign_plot_to_axes(i3, 3);
-        let exporter = runmat_plot::export::vector::VectorExporter::new();
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<svg"));
-        assert!(svg.len() > 500);
-    }
     #[tokio::test]
     async fn test_export_two_axes_line_scatter() {
         if super::skip_headless_gpu_test("export_subplot_tests::test_export_two_axes_line_scatter")
@@ -371,95 +315,6 @@ mod aesthetics_line_tests {
         let tmp = std::env::temp_dir().join("dash_dot_lines.png");
         exporter.export_png(&mut fig, &tmp).await.unwrap();
         assert!(tmp.exists());
-    }
-}
-
-#[cfg(test)]
-mod svg_aesthetics_tests {
-    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
-    use runmat_plot::plots::line::{LineCap, LineJoin, LinePlot, LineStyle};
-
-    #[test]
-    fn test_svg_stroke_caps_joins_and_dasharray() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        let x: Vec<f64> = (0..=20).map(|i| i as f64 * 0.2).collect();
-        let y1: Vec<f64> = x.iter().map(|v| (v * 0.7).sin()).collect();
-        let y2: Vec<f64> = x.iter().map(|v| (v * 0.7).cos()).collect();
-
-        let mut solid = LinePlot::new(x.clone(), y1).unwrap();
-        solid.set_line_style(LineStyle::Solid);
-        solid.set_line_width(1.0);
-        solid.set_line_join(LineJoin::Bevel);
-        solid.set_line_cap(LineCap::Square);
-        let _ = fig.add_line_plot(solid);
-
-        let mut dashed = LinePlot::new(x.clone(), y2).unwrap();
-        dashed.set_line_style(LineStyle::DashDot);
-        dashed.set_line_width(1.0);
-        dashed.set_line_join(LineJoin::Round);
-        dashed.set_line_cap(LineCap::Round);
-        let _ = fig.add_line_plot(dashed);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 320.0,
-            height: 240.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("stroke-linecap=\"square\""));
-        assert!(svg.contains("stroke-linejoin=\"bevel\""));
-        assert!(
-            svg.contains("stroke-dasharray=\"6,4,1,4\"")
-                || svg.contains("stroke-dasharray=\"6,4,1,4\"")
-        );
-    }
-
-    #[test]
-    fn test_svg_dasharray_scales_with_line_width() {
-        let mut fig = runmat_plot::plots::Figure::new();
-        let x: Vec<f64> = (0..=10).map(|i| i as f64).collect();
-        let y: Vec<f64> = x.iter().map(|v| (v * 0.3).sin()).collect();
-
-        // Dashed with lw=0.5 -> 3,3 (lines pipeline)
-        let mut dashed = LinePlot::new(x.clone(), y.clone()).unwrap();
-        dashed.set_line_style(LineStyle::Dashed);
-        dashed.set_line_width(0.5);
-        let _ = fig.add_line_plot(dashed);
-
-        // Dotted with lw=0.5 -> 0.5,3
-        let mut dotted = LinePlot::new(x.clone(), y.clone()).unwrap();
-        dotted.set_line_style(LineStyle::Dotted);
-        dotted.set_line_width(0.5);
-        let _ = fig.add_line_plot(dotted);
-
-        // DashDot with lw=0.5 -> 3,2,0.5,2
-        let mut dashdot = LinePlot::new(x.clone(), y.clone()).unwrap();
-        dashdot.set_line_style(LineStyle::DashDot);
-        dashdot.set_line_width(0.5);
-        let _ = fig.add_line_plot(dashdot);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 320.0,
-            height: 240.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-
-        assert!(
-            svg.contains("stroke-dasharray=\"3,3\""),
-            "expected dashed 3,3; svg={}",
-            svg
-        );
-        assert!(
-            svg.contains("stroke-dasharray=\"0.5,3\""),
-            "expected dotted 0.5,3; svg={}",
-            svg
-        );
-        assert!(
-            svg.contains("stroke-dasharray=\"3,2,0.5,2\""),
-            "expected dashdot 3,2,0.5,2; svg={}",
-            svg
-        );
     }
 }
 
@@ -1127,30 +982,6 @@ mod image_export_tests {
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
         assert!(bytes.len() > 1000);
-    }
-}
-
-#[cfg(test)]
-mod pie_export_tests {
-    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
-    use runmat_plot::plots::{Figure, PieChart};
-
-    #[test]
-    fn test_svg_includes_pie_slice_labels() {
-        let mut fig = Figure::new();
-        let pie = PieChart::new(vec![1.0, 2.0], None)
-            .unwrap()
-            .with_slice_labels(vec!["A".into(), "B".into()]);
-        fig.add_pie_chart(pie);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 160.0,
-            height: 120.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains(">A<"));
-        assert!(svg.contains(">B<"));
     }
 }
 

@@ -387,11 +387,7 @@ impl RunMatSession {
             let mir = match runmat_mir::lowering::lower_assembly(&lowering.assembly) {
                 Ok(mir) => mir,
                 Err(err) => {
-                    record_project_symbol_preload_warning(
-                        &path,
-                        "mir_lower",
-                        &err.to_string(),
-                    );
+                    record_project_symbol_preload_warning(&path, "mir_lower", &err.to_string());
                     continue;
                 }
             };

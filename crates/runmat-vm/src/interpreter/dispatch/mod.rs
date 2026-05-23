@@ -862,7 +862,9 @@ pub async fn dispatch_instruction(
                     })?;
                     debug::trace_load_var(*pc, *index, &Value::Tensor(empty.clone()));
                     stack.push(Value::Tensor(empty));
-                    return Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)));
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::FallThrough,
+                    )));
                 }
             }
             let value = vars[*index].clone();

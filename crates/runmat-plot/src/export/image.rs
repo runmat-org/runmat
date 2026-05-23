@@ -1,7 +1,7 @@
 //! Image export (PNG and raw RGBA).
 //!
-//! This module routes through `export::native_surface` to produce static image
-//! output that matches interactive/webgpu composition (scene + overlay layout).
+//! This module renders with the native GPU surface path first and falls back to
+//! a CPU raster path only when headless GPU initialization is unavailable.
 
 use crate::core::Camera;
 use crate::plots::Figure;
@@ -15,6 +15,8 @@ pub struct ImageExporter {
     settings: ImageExportSettings,
     /// Optional theme override for export composition.
     theme: Option<PlotThemeConfig>,
+    /// Optional export textmark.
+    textmark: Option<String>,
 }
 
 /// Image export configuration
@@ -67,12 +69,21 @@ impl ImageExporter {
         Ok(Self {
             settings,
             theme: None,
+            textmark: None,
         })
     }
 
     /// Set the export theme configuration.
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
         self.theme = Some(theme);
+    }
+
+    /// Set an optional textmark rendered in export output.
+    pub fn set_textmark(&mut self, textmark: Option<&str>) {
+        self.textmark = textmark
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
     }
 
     /// Export figure to PNG file.
@@ -87,41 +98,80 @@ impl ImageExporter {
 
     /// Render figure into a PNG buffer.
     pub async fn render_png_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
-        if let Some(theme) = &self.theme {
-            crate::export::native_surface::render_figure_png_bytes_interactive_and_theme(
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let gpu = if let Some(theme) = &self.theme {
+            crate::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 theme.clone(),
+                self.textmark.as_deref(),
             )
             .await
         } else {
             crate::export::native_surface::render_figure_png_bytes_interactive(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
             )
             .await
+        };
+
+        match gpu {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if crate::export::native_surface::is_headless_gpu_unavailable_error(&err) => {
+                crate::export::cpu_surface::render_figure_png_bytes(
+                    figure.clone(),
+                    width,
+                    height,
+                    self.theme.clone(),
+                    None,
+                    None,
+                    self.textmark.as_deref(),
+                )
+                .await
+            }
+            Err(err) => Err(err),
         }
     }
 
     /// Render figure into raw RGBA8 bytes.
     pub async fn render_rgba_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
-        if let Some(theme) = &self.theme {
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let gpu = if let Some(theme) = &self.theme {
             crate::export::native_surface::render_figure_rgba_bytes_interactive_and_theme(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 theme.clone(),
             )
             .await
         } else {
             crate::export::native_surface::render_figure_rgba_bytes_interactive(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
             )
             .await
+        };
+
+        match gpu {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if crate::export::native_surface::is_headless_gpu_unavailable_error(&err) => {
+                crate::export::cpu_surface::render_figure_rgba_bytes(
+                    figure.clone(),
+                    width,
+                    height,
+                    self.theme.clone(),
+                    None,
+                    None,
+                    self.textmark.as_deref(),
+                )
+                .await
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -131,23 +181,43 @@ impl ImageExporter {
         figure: &mut Figure,
         camera: &Camera,
     ) -> Result<Vec<u8>, String> {
-        if let Some(theme) = &self.theme {
-            crate::export::native_surface::render_figure_png_bytes_interactive_with_camera_and_theme(
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let gpu = if let Some(theme) = &self.theme {
+            crate::export::native_surface::render_figure_png_bytes_interactive_with_camera_and_theme_and_textmark(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 camera,
                 theme.clone(),
+                self.textmark.as_deref(),
             )
             .await
         } else {
             crate::export::native_surface::render_figure_png_bytes_interactive_with_camera(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 camera,
             )
             .await
+        };
+
+        match gpu {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if crate::export::native_surface::is_headless_gpu_unavailable_error(&err) => {
+                crate::export::cpu_surface::render_figure_png_bytes(
+                    figure.clone(),
+                    width,
+                    height,
+                    self.theme.clone(),
+                    Some(camera),
+                    None,
+                    self.textmark.as_deref(),
+                )
+                .await
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -157,11 +227,13 @@ impl ImageExporter {
         figure: &mut Figure,
         camera: &Camera,
     ) -> Result<Vec<u8>, String> {
-        if let Some(theme) = &self.theme {
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let gpu = if let Some(theme) = &self.theme {
             crate::export::native_surface::render_figure_rgba_bytes_interactive_with_camera_and_theme(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 camera,
                 theme.clone(),
             )
@@ -169,11 +241,28 @@ impl ImageExporter {
         } else {
             crate::export::native_surface::render_figure_rgba_bytes_interactive_with_camera(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 camera,
             )
             .await
+        };
+
+        match gpu {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if crate::export::native_surface::is_headless_gpu_unavailable_error(&err) => {
+                crate::export::cpu_surface::render_figure_rgba_bytes(
+                    figure.clone(),
+                    width,
+                    height,
+                    self.theme.clone(),
+                    Some(camera),
+                    None,
+                    self.textmark.as_deref(),
+                )
+                .await
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -183,23 +272,43 @@ impl ImageExporter {
         figure: &mut Figure,
         axes_cameras: &[Camera],
     ) -> Result<Vec<u8>, String> {
-        if let Some(theme) = &self.theme {
-            crate::export::native_surface::render_figure_png_bytes_interactive_with_axes_cameras_and_theme(
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let gpu = if let Some(theme) = &self.theme {
+            crate::export::native_surface::render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 axes_cameras,
                 theme.clone(),
+                self.textmark.as_deref(),
             )
             .await
         } else {
             crate::export::native_surface::render_figure_png_bytes_interactive_with_axes_cameras(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 axes_cameras,
             )
             .await
+        };
+
+        match gpu {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if crate::export::native_surface::is_headless_gpu_unavailable_error(&err) => {
+                crate::export::cpu_surface::render_figure_png_bytes(
+                    figure.clone(),
+                    width,
+                    height,
+                    self.theme.clone(),
+                    None,
+                    Some(axes_cameras),
+                    self.textmark.as_deref(),
+                )
+                .await
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -209,11 +318,13 @@ impl ImageExporter {
         figure: &mut Figure,
         axes_cameras: &[Camera],
     ) -> Result<Vec<u8>, String> {
-        if let Some(theme) = &self.theme {
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let gpu = if let Some(theme) = &self.theme {
             crate::export::native_surface::render_figure_rgba_bytes_interactive_with_axes_cameras_and_theme(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 axes_cameras,
                 theme.clone(),
             )
@@ -221,11 +332,28 @@ impl ImageExporter {
         } else {
             crate::export::native_surface::render_figure_rgba_bytes_interactive_with_axes_cameras(
                 figure.clone(),
-                self.settings.width.max(1),
-                self.settings.height.max(1),
+                width,
+                height,
                 axes_cameras,
             )
             .await
+        };
+
+        match gpu {
+            Ok(bytes) => Ok(bytes),
+            Err(err) if crate::export::native_surface::is_headless_gpu_unavailable_error(&err) => {
+                crate::export::cpu_surface::render_figure_rgba_bytes(
+                    figure.clone(),
+                    width,
+                    height,
+                    self.theme.clone(),
+                    None,
+                    Some(axes_cameras),
+                    self.textmark.as_deref(),
+                )
+                .await
+            }
+            Err(err) => Err(err),
         }
     }
 

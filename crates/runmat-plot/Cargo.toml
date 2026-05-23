@@ -47,7 +47,6 @@ once_cell = "1.19"
 # Web browser integration
 webbrowser = "0.8"
 
-# Jupyter integration (optional)
 eframe = { version = "0.27.2", optional = true, features = ["glow"] }
 
 # Serialization and config
@@ -58,6 +57,7 @@ serde_yaml = "0.9"
 # Image processing for export
 image = { version = "0.24", features = ["png", "jpeg"] }
 base64 = "0.22"
+font8x8 = "0.3"
 rfd = { version = "0.14", optional = true }
 
 
@@ -94,8 +94,7 @@ static = []  # Static image export (always enabled)
 egui-overlay = ["egui", "egui-wgpu"]
 # Interactive GUI (native windowing + egui integration).
 gui = ["winit", "egui-overlay", "egui-winit", "eframe", "rfd"]
-jupyter = ["eframe"]  # Jupyter widget support
-web = []  # WebGL backend for web/jupyter
+web = []  # WebGL backend for web
 
 [dev-dependencies]
 tempfile = "3"

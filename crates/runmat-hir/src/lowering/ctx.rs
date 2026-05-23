@@ -870,13 +870,12 @@ impl LoweringCtx {
         let span = stmt.span();
         let kind = match stmt {
             AstStmt::ExprStmt(expr, suppressed, _) => {
-                let requested_outputs = if *suppressed
-                    || stmt_expr_call_loads_external_bindings(expr)
-                {
-                    RequestedOutputCount::Zero
-                } else {
-                    RequestedOutputCount::One
-                };
+                let requested_outputs =
+                    if *suppressed || stmt_expr_call_loads_external_bindings(expr) {
+                        RequestedOutputCount::Zero
+                    } else {
+                        RequestedOutputCount::One
+                    };
                 HirStmtKind::ExprStmt(
                     self.lower_expr_semantic_requested(expr, requested_outputs)?,
                     *suppressed,

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "gui")]
 use std::sync::Arc;
 #[cfg(feature = "gui")]
-use tracing::debug;
+use tracing::{debug, warn};
 #[cfg(feature = "gui")]
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
 #[cfg(feature = "gui")]
@@ -675,6 +675,9 @@ impl<'window> PlotWindow<'window> {
             self.plot_renderer.fit_extents();
         }
         if save_png || save_svg {
+            if save_svg {
+                warn!("SVG export is no longer supported");
+            }
             // OS Save Dialog to select path
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             {
@@ -701,17 +704,6 @@ impl<'window> PlotWindow<'window> {
                         });
                     }
                 }
-                if save_svg {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("SVG", &["svg"])
-                        .set_file_name("plot.svg")
-                        .save_file()
-                    {
-                        let mut fig_for_save = self.plot_renderer.export_figure_clone();
-                        let exporter = crate::export::vector::VectorExporter::new();
-                        let _ = exporter.export_svg(&mut fig_for_save, &path);
-                    }
-                }
             }
             #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
             {
@@ -733,12 +725,6 @@ impl<'window> PlotWindow<'window> {
                             });
                         }
                     });
-                }
-                if save_svg {
-                    let mut fig = self.plot_renderer.export_figure_clone();
-                    let tmp = std::env::temp_dir().join("runmat_export.svg");
-                    let exporter = crate::export::vector::VectorExporter::new();
-                    let _ = exporter.export_svg(&mut fig, &tmp);
                 }
             }
         }

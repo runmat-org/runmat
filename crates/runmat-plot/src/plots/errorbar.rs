@@ -269,10 +269,22 @@ impl ErrorBar {
                     verts.push(Vertex::new(Vec3::new(xi, y0, 0.0), self.color));
                     verts.push(Vertex::new(Vec3::new(xi, y1, 0.0), self.color));
                     if cap_half_data > 0.0 {
-                        verts.push(Vertex::new(Vec3::new(xi - cap_half_data, y0, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(xi + cap_half_data, y0, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(xi - cap_half_data, y1, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(xi + cap_half_data, y1, 0.0), self.color));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi - cap_half_data, y0, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi + cap_half_data, y0, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi - cap_half_data, y1, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi + cap_half_data, y1, 0.0),
+                            self.color,
+                        ));
                     }
                 }
             }
@@ -286,10 +298,22 @@ impl ErrorBar {
                     verts.push(Vertex::new(Vec3::new(x0, yi, 0.0), self.color));
                     verts.push(Vertex::new(Vec3::new(x1, yi, 0.0), self.color));
                     if cap_half_data > 0.0 {
-                        verts.push(Vertex::new(Vec3::new(x0, yi - cap_half_data, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(x0, yi + cap_half_data, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(x1, yi - cap_half_data, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(x1, yi + cap_half_data, 0.0), self.color));
+                        verts.push(Vertex::new(
+                            Vec3::new(x0, yi - cap_half_data, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(x0, yi + cap_half_data, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(x1, yi - cap_half_data, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(x1, yi + cap_half_data, 0.0),
+                            self.color,
+                        ));
                     }
                 }
             }

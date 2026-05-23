@@ -540,6 +540,35 @@ impl SurfacePlot {
         self.indices.as_ref().unwrap()
     }
 
+    fn generate_wireframe_indices(&self) -> Vec<u32> {
+        let mut indices = Vec::new();
+        if self.x_len < 2 || self.y_len < 2 {
+            return indices;
+        }
+
+        // Horizontal grid edges (along Y for each X row)
+        for i in 0..self.x_len {
+            for j in 0..(self.y_len - 1) {
+                let a = (i * self.y_len + j) as u32;
+                let b = (i * self.y_len + j + 1) as u32;
+                indices.push(a);
+                indices.push(b);
+            }
+        }
+
+        // Vertical grid edges (along X for each Y column)
+        for i in 0..(self.x_len - 1) {
+            for j in 0..self.y_len {
+                let a = (i * self.y_len + j) as u32;
+                let b = ((i + 1) * self.y_len + j) as u32;
+                indices.push(a);
+                indices.push(b);
+            }
+        }
+
+        indices
+    }
+
     /// Generate complete render data for the graphics pipeline
     pub fn render_data(&mut self) -> RenderData {
         log::debug!(
@@ -556,7 +585,11 @@ impl SurfacePlot {
         } else {
             self.generate_vertices().clone()
         };
-        let indices = self.generate_indices().clone();
+        let indices = if self.wireframe {
+            self.generate_wireframe_indices()
+        } else {
+            self.generate_indices().clone()
+        };
 
         let material = Material {
             albedo: Vec4::new(1.0, 1.0, 1.0, self.alpha),

@@ -143,7 +143,11 @@ fn checked_binding_count(operation: &str, left: usize, right: usize) -> Result<u
         .ok_or_else(|| anyhow!("{}: binding count overflow", operation))
 }
 
-fn gpu_per_buffer_limit_error(operation: &str, requested_bytes: u64, max_bytes: u64) -> anyhow::Error {
+fn gpu_per_buffer_limit_error(
+    operation: &str,
+    requested_bytes: u64,
+    max_bytes: u64,
+) -> anyhow::Error {
     let requested_mib = requested_bytes as f64 / (1024.0 * 1024.0);
     let max_mib = max_bytes as f64 / (1024.0 * 1024.0);
     anyhow!(
@@ -160,9 +164,7 @@ fn gpu_dispatch_length_limit_error(operation: &str, len: usize) -> anyhow::Error
 
 #[cfg(test)]
 mod compute_binding_count_tests {
-    use super::{
-        checked_binding_count, validate_compute_binding_counts, WgpuProvider,
-    };
+    use super::{checked_binding_count, validate_compute_binding_counts, WgpuProvider};
 
     #[test]
     fn rejects_storage_bindings_over_adapter_stage_limit() {
@@ -251,7 +253,6 @@ mod compute_binding_count_tests {
             256u64 << 20
         );
     }
-
 }
 
 #[derive(Clone, Debug)]
@@ -2707,8 +2708,10 @@ impl WgpuProvider {
                         VAR
                     );
                 } else {
-                    let default_limit =
-                        Self::parse_buffer_residency_max_poolable_bytes(None, adapter_max_buffer_size);
+                    let default_limit = Self::parse_buffer_residency_max_poolable_bytes(
+                        None,
+                        adapter_max_buffer_size,
+                    );
                     log::warn!(
                         "RunMat Accelerate: failed to parse {}='{}'; using default {} bytes",
                         VAR,
@@ -2718,7 +2721,9 @@ impl WgpuProvider {
                 }
                 parsed
             }
-            Err(_) => Self::parse_buffer_residency_max_poolable_bytes(None, adapter_max_buffer_size),
+            Err(_) => {
+                Self::parse_buffer_residency_max_poolable_bytes(None, adapter_max_buffer_size)
+            }
         }
     }
 

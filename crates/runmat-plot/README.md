@@ -1,6 +1,6 @@
 # RunMat Plot
 
-RunMat Plot is a **high performance interactive plotting library for Rust**, designed to provide comprehensive 2D/3D plotting. It is built from the ground up for performance, featuring a GPU-accelerated rendering pipeline using `wgpu`, a modern theming system, and seamless integration with Jupyter notebooks.
+RunMat Plot is a **high performance interactive plotting library for Rust**, designed to provide comprehensive 2D/3D plotting. It is built from the ground up for performance, featuring a GPU-accelerated rendering pipeline using `wgpu` and a modern theming system.
 
 As a core component of the [RunMat project](../../docs/ARCHITECTURE.md), it serves as the powerful handle-graphics engine for all visualization tasks.
 
@@ -12,7 +12,6 @@ As a core component of the [RunMat project](../../docs/ARCHITECTURE.md), it serv
 - **Interactive GUI**: A feature-rich interactive window built with `winit` and `egui`, offering smooth camera controls, zooming, panning, and UI overlays.
 - **Multi-Plot Figures**: Combine multiple plot types in a single figure with automatic bounds computation, legends, and grid lines.
 - **Language Compatibility**: A familiar, language-agnostic API for quickly creating plots (e.g., `plot()`, `surf()`, `scatter3()`).
-- **Jupyter Notebook Integration**: Display plots directly in Jupyter notebooks as static images or interactive HTML widgets.
 - **Modern Theming System**: A professional and configurable styling system with beautiful presets like `ModernDark`.
 
 ## Architecture
@@ -44,16 +43,15 @@ The crate is organized to clearly separate rendering, plot logic, and UI.
 
 ```
 runmat-plot/
-├── Cargo.toml          # Dependencies and feature flags (gui, jupyter)
+├── Cargo.toml          # Dependencies and feature flags (gui, web, static)
 ├── README.md           # This file
 ├── examples/           # Runnable examples (interactive_demo.rs, etc.)
 ├── shaders/            # WGSL shaders for GPU rendering pipelines
 └── src/
     ├── core/           # Low-level rendering engine (WGPU, scene, camera)
     ├── data/           # Data processing, LOD, buffer management (TODO)
-    ├── export/         # Static export to PNG, SVG, HTML (TODO)
+    ├── export/         # Static export to PNG and HTML
     ├── gui/            # Interactive GUI window, controls, and UI overlays
-    ├── jupyter/        # Jupyter Notebook integration
     ├── lib.rs          # Main library entry point and public API
     ├── plots/          # High-level plot types (LinePlot, SurfacePlot, etc.)
     ├── simple_plots.rs # Legacy static plotting with `plotters`
@@ -200,7 +198,6 @@ Active areas of development, in priority order:
 
 -   **Volume Rendering**: Implement the `VolumePlot` type for 3D volumetric data visualization.
 
--   **Jupyter WebGL Widget**: Complete the WebGL-based interactive widget for Jupyter to provide a fully interactive experience within notebooks, matching the native GUI.
 
 -   **Expanded Theming**: Add more built-in themes and expand the customizability of the styling system.
 

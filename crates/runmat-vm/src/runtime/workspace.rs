@@ -223,7 +223,9 @@ pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
     WORKSPACE_STATE.with(|state| {
         let state_ref = state.borrow();
         let ws = state_ref.as_ref()?;
-        ws.slot_lifecycle.get(&index).map(SlotLifecycle::is_assigned)
+        ws.slot_lifecycle
+            .get(&index)
+            .map(SlotLifecycle::is_assigned)
     })
 }
 
