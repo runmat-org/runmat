@@ -15,6 +15,13 @@ cd runmat
 scripts/test-wasm-replay-smoke.sh
 ```
 
+Symptom closure tests for the impedance-loop and slice-`end` regressions can be run with:
+
+```bash
+cd runmat
+scripts/test-wasm-symptom-closure.sh
+```
+
 What the script does:
 
 1. Regenerates the wasm builtin registry (`RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check …`).

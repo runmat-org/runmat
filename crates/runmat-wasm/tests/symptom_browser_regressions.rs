@@ -5,7 +5,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 #[path = "support/symptom_regressions_shared.rs"]
 mod shared;
 
-wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test(async)]
 async fn impedance_loop_executes_without_runtime_error() {

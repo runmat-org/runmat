@@ -43,9 +43,9 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
 | RM-273 | Canceled | N/A | Already canceled | Commented, no state change |
 | RM-286 | In Review | In review | Already in review prior to this closeout | No state change |
 | RM-290 | In Review | Resolved/ready for review | Command syntax repro (`grid on`, `hold on`, `clear all`, `clc`) validated | Commented + moved to `In Review` |
-| RM-295 | In Progress | Open | Added wasm-node regression (`impedance_loop_executes_without_runtime_error`) and reran successfully; browser harness proof still pending | No state change (Linear closeout comment blocked by external-write policy in this environment) |
+| RM-295 | In Progress | Ready for review evidence complete | Added wasm-node + browser regressions (`impedance_loop_executes_without_runtime_error`) and reran successfully in both harnesses | No state change (Linear closeout comment/state update blocked by external-write policy in this environment) |
 | RM-298 | In Review | Resolved/ready for review | Histogram `DisplayName` get/set support added with regression; direct repro returns expected name | Commented + moved to `In Review` |
-| RM-302 | In Progress | Open | Added wasm-node regression (`slice_end_arithmetic_executes_without_runtime_error`) and reran successfully; browser harness proof still pending | Commented with commit/test evidence, no state change |
+| RM-302 | In Progress | Ready for review evidence complete | Added wasm-node + browser regressions (`slice_end_arithmetic_executes_without_runtime_error`) and reran successfully in both harnesses | No state change (Linear closeout comment/state update blocked by external-write policy in this environment) |
 | RM-303 | In Review | Resolved/ready for review | Multi-output destructuring covered across user+builtin paths | Commented + moved to `In Review` |
 | RM-304 | Done | Closed | Already done | No state change |
 | RM-309 | In Review | Resolved/ready for review | Bare `nargin`/`nargout` plus optional-arg guard pattern validated (direct repro returns `4`) | Commented + moved to `In Review` |
@@ -97,7 +97,8 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
 - `cargo test -p runmat-vm assignment_after_remove_reuses_previous_slot -- --nocapture`
 - `RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check -p runmat-runtime --target wasm32-unknown-unknown`
 - `wasm-pack test --node --test symptom_node_regressions` (pass: `2 passed; 0 failed`)
-- `CHROME_BIN=../../scripts/chrome-headless.sh CHROMEDRIVER_ARGS=--log-level=SEVERE wasm-pack test --chrome --headless --test replay_smoke` (browser harness failure before test execution: ChromeDriver session startup/URL handling)
+- `wasm-pack test --chrome --headless --chromedriver /tmp/chromedriver-148/chromedriver-mac-arm64/chromedriver --test symptom_browser_regressions` (pass: `2 passed; 0 failed`)
+- `scripts/test-wasm-symptom-closure.sh` (pass: node + browser symptom closure in one command)
 
 ## Tracker Actions Recorded
 
@@ -105,14 +106,11 @@ Track RM-369 symptom-ticket closeout status across sessions with direct repro pr
 - Moved resolved symptoms to `In Review`.
 - Left open, unresolved, or umbrella items in active states.
 - Posted RM-302 validation comment referencing commit `23eaedcf`.
-- RM-295 validation comment write is currently blocked by external-write policy enforcement in this environment.
+- RM-295/RM-302 Linear closeout comment and state update writes are currently blocked by external-write policy enforcement in this environment.
 
 ## Remaining Direct-Work Queue
 
-1. `RM-302`: complete browser-sandbox closure proof (wasm-node regression proof now lands/passes; browser harness run remains blocked in this environment before test execution).
-2. `RM-295`: complete browser-sandbox closure proof + post Linear closeout comment (wasm-node regression proof now lands/passes; browser harness run remains blocked in this environment before test execution).
-
-3. `RM-270` / `RM-272` and parent `RM-326`: finish GPU allocation/lifetime/GC fixes and verification.
-4. `RM-408` (child of `RM-327`): resolve short-circuit `||` boolean-domain failure (`cannot convert Bool(false) to f64`) and move to `In Review` with repro proof.
-5. `RM-286`: confirm browser sandbox file-I/O closure proof and move to `In Review` when validated.
-6. `RM-228`: close umbrella after remaining non-backlog children are in review (currently includes `RM-286`, `RM-326` chain, and `RM-408`).
+1. `RM-295` / `RM-302`: post Linear closeout comments and move state to `In Review` (evidence is complete; external-write policy currently blocks the update here).
+2. `RM-270` / `RM-272` and parent `RM-326`: finish GPU allocation/lifetime/GC fixes and verification.
+3. `RM-286`: confirm browser sandbox file-I/O closure proof and move to `In Review` when validated.
+4. `RM-228`: close umbrella after remaining non-backlog children are in review (currently includes `RM-286` and `RM-326` chain).
