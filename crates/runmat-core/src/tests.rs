@@ -259,6 +259,145 @@ fn compile_input_reports_duplicate_import_identifier() {
 }
 
 #[test]
+fn execute_outcome_resolves_wildcard_import_from_project_package_function() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/foo.m"),
+        "function y = foo(); y = 42; end",
+    )
+    .expect("write package function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let outcome =
+        block_on(session.execute_outcome("import pkg.*; v = foo();")).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
+fn execute_outcome_resolves_qualified_package_function_call() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/foo.m"),
+        "function y = foo(); y = 42; end",
+    )
+    .expect("write package function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let outcome = block_on(session.execute_outcome("v = pkg.foo();")).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
+fn execute_outcome_resolves_wildcard_import_without_manifest_when_source_has_package_dir() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg/foo.m"),
+        "function y = foo(); y = 42; end",
+    )
+    .expect("write package function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let outcome =
+        block_on(session.execute_outcome("import pkg.*; v = foo();")).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
+fn execute_outcome_resolves_unqualified_helper_function_from_project_source_tree() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("helpers/add1.m"),
+        "function y = add1(x); y = x + 1; end",
+    )
+    .expect("write helper function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let outcome = block_on(session.execute_outcome("v = add1(41);")).expect("exec succeeds");
+    session.set_source_name_override(None);
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
+        ) && upsert.value.to_string() == "42"
+    }));
+}
+
+#[test]
 fn compile_input_reports_isolated_capture_identifier() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let err = match session.compile_input(
