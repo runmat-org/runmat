@@ -271,7 +271,7 @@ async fn build_line3_gpu_plot_async(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
+    let _ = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU X data"))?;
     let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
@@ -316,22 +316,9 @@ async fn build_line3_gpu_plot_async(
         len: x_ref.len as u32,
         scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
     };
-    let buffer = runmat_plot::gpu::line3::pack_vertices_from_xyz(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &runmat_plot::gpu::line3::Line3GpuParams {
-            color: appearance.color,
-            half_width_data: appearance.line_width.max(1.0) * 0.01,
-            thick: appearance.line_width > 1.0,
-            line_style: appearance.line_style,
-        },
-    )
-    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot3: {e}")))?;
     let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
-    Ok(Line3Plot::from_gpu_buffer(
-        buffer,
-        ((x_ref.len - 1) * if appearance.line_width > 1.0 { 6 } else { 2 }) as usize,
+    Ok(Line3Plot::from_gpu_xyz(
+        inputs,
         appearance.color,
         appearance.line_width,
         appearance.line_style,

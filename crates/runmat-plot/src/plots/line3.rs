@@ -1,7 +1,10 @@
 use crate::core::{
-    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material, PipelineType, RenderData,
+    Vertex,
 };
+use crate::gpu::line3::{Line3GpuInputs, Line3GpuParams};
 use glam::{Vec3, Vec4};
+use log::warn;
 
 #[derive(Debug, Clone)]
 pub struct Line3Plot {
@@ -18,6 +21,7 @@ pub struct Line3Plot {
     dirty: bool,
     pub gpu_vertices: Option<GpuVertexBuffer>,
     pub gpu_vertex_count: Option<usize>,
+    gpu_line_inputs: Option<Line3GpuInputs>,
 }
 
 impl Line3Plot {
@@ -42,6 +46,7 @@ impl Line3Plot {
             dirty: true,
             gpu_vertices: None,
             gpu_vertex_count: None,
+            gpu_line_inputs: None,
         })
     }
 
@@ -67,6 +72,32 @@ impl Line3Plot {
             dirty: false,
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
+            gpu_line_inputs: None,
+        }
+    }
+
+    pub fn from_gpu_xyz(
+        inputs: Line3GpuInputs,
+        color: Vec4,
+        line_width: f32,
+        line_style: crate::plots::line::LineStyle,
+        bounds: BoundingBox,
+    ) -> Self {
+        Self {
+            x_data: Vec::new(),
+            y_data: Vec::new(),
+            z_data: Vec::new(),
+            color,
+            line_width,
+            line_style,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: Some(bounds),
+            dirty: false,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_line_inputs: Some(inputs),
         }
     }
 
@@ -114,7 +145,14 @@ impl Line3Plot {
                 vertex.normal[2] = (self.line_width.max(1.0) * 4.0).max(6.0);
                 vec![vertex]
             } else if self.line_width > 1.0 {
-                create_thick_polyline3_dashed(&points, self.color, self.line_width, self.line_style)
+                // No viewport hint: interpret width in data units for legacy/non-viewport paths.
+                let fallback_half_width_data = self.line_width.max(0.1) * 0.5;
+                create_thick_polyline3_dashed(
+                    &points,
+                    self.color,
+                    fallback_half_width_data,
+                    self.line_style,
+                )
             } else {
                 create_line3_vertices_dashed(&points, self.color, self.line_style)
             };
@@ -179,6 +217,121 @@ impl Line3Plot {
         }
     }
 
+    fn pack_gpu_vertices_if_needed(
+        &mut self,
+        gpu: &GpuPackContext<'_>,
+        viewport_px: (u32, u32),
+    ) -> Result<(), String> {
+        if self.gpu_vertices.is_some() {
+            return Ok(());
+        }
+        let Some(inputs) = self.gpu_line_inputs.as_ref() else {
+            return Ok(());
+        };
+        let bounds = self
+            .bounds
+            .as_ref()
+            .ok_or_else(|| "plot3: missing bounds for GPU packing".to_string())?;
+        let thick_px = self.line_width > 1.0;
+        let data_per_px = crate::core::data_units_per_px_3d(bounds, viewport_px);
+        let half_width_data = if thick_px {
+            ((self.line_width.max(0.1)) * 0.5) * data_per_px
+        } else {
+            0.0
+        };
+        let packed = crate::gpu::line3::pack_vertices_from_xyz(
+            gpu.device,
+            gpu.queue,
+            inputs,
+            &Line3GpuParams {
+                color: self.color,
+                half_width_data,
+                thick: thick_px,
+                line_style: self.line_style,
+            },
+        )?;
+        self.gpu_vertex_count =
+            Some((inputs.len.saturating_sub(1) as usize) * if thick_px { 6 } else { 2 });
+        self.gpu_vertices = Some(packed);
+        Ok(())
+    }
+
+    pub fn render_data_with_viewport_gpu(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        gpu: Option<&GpuPackContext<'_>>,
+    ) -> RenderData {
+        if self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
+            if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
+                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
+                    warn!("plot3 gpu pack failed: {err}");
+                }
+            }
+        }
+        self.render_data_with_viewport(viewport_px)
+    }
+
+    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        if self.gpu_vertices.is_some() {
+            return self.render_data();
+        }
+
+        let single_point = self.x_data.len() == 1;
+        let (vertices, vertex_count, pipeline) = if !single_point && self.line_width > 1.0 {
+            let Some(vp) = viewport_px else {
+                return self.render_data();
+            };
+            let points: Vec<Vec3> = self
+                .x_data
+                .iter()
+                .zip(self.y_data.iter())
+                .zip(self.z_data.iter())
+                .map(|((&x, &y), &z)| Vec3::new(x as f32, y as f32, z as f32))
+                .collect();
+            let bounds = self.bounds();
+            let data_per_px = crate::core::data_units_per_px_3d(&bounds, vp);
+            let half_width_data = ((self.line_width.max(0.1)) * 0.5) * data_per_px;
+            let tris = create_thick_polyline3_dashed(
+                &points,
+                self.color,
+                half_width_data,
+                self.line_style,
+            );
+            let count = tris.len();
+            (tris, count, PipelineType::Triangles)
+        } else {
+            let verts = self.generate_vertices().clone();
+            let count = verts.len();
+            let pipeline = if single_point {
+                PipelineType::Scatter3
+            } else {
+                PipelineType::Lines
+            };
+            (verts, count, pipeline)
+        };
+
+        RenderData {
+            pipeline_type: pipeline,
+            vertices,
+            indices: None,
+            gpu_vertices: None,
+            bounds: Some(self.bounds()),
+            material: Material {
+                albedo: self.color,
+                roughness: self.line_width.max(0.5),
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count,
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            }],
+            image: None,
+        }
+    }
+
     pub fn estimated_memory_usage(&self) -> usize {
         self.vertices
             .as_ref()
@@ -214,10 +367,11 @@ fn create_line3_vertices_dashed(
 fn create_thick_polyline3_dashed(
     points: &[Vec3],
     color: Vec4,
-    width: f32,
+    half_width_data: f32,
     style: crate::plots::line::LineStyle,
 ) -> Vec<Vertex> {
     let mut out = Vec::new();
+    let half_width_data = half_width_data.max(1e-5);
     for i in 0..points.len().saturating_sub(1) {
         let include = match style {
             crate::plots::line::LineStyle::Solid => true,
@@ -235,7 +389,7 @@ fn create_thick_polyline3_dashed(
             points[i],
             points[i + 1],
             color,
-            width.max(0.5) * 0.01,
+            half_width_data,
         ));
     }
     out

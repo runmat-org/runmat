@@ -9,7 +9,7 @@ use crate::core::{
 use crate::gpu::line::LineGpuInputs;
 use crate::plots::scatter::MarkerStyle as ScatterMarkerStyle;
 use glam::{Vec3, Vec4};
-use log::trace;
+use log::{trace, warn};
 
 /// High-performance GPU-accelerated line plot
 #[derive(Debug, Clone)]
@@ -503,9 +503,9 @@ impl LinePlot {
         );
         if self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
-                // Best-effort: if packing fails, fall through and let the caller handle
-                // missing geometry (typically via a plotting error upstream).
-                let _ = self.pack_gpu_vertices_if_needed(gpu, vp);
+                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
+                    warn!("line gpu pack failed: {err}");
+                }
             }
         }
         self.render_data_with_viewport(viewport_px)
@@ -596,8 +596,10 @@ impl LinePlot {
         }
 
         let (vertices, vertex_count, pipeline, bounds) = if self.line_width > 1.0 {
+            let Some(viewport_px) = viewport_px else {
+                return self.render_data();
+            };
             let bounds = self.bounds();
-            let viewport_px = viewport_px.unwrap_or((600, 400));
             let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
             let width_data = (self.line_width.max(0.1)) * data_per_px;
 

@@ -1191,10 +1191,11 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
+                        plot.render_data_with_viewport_gpu(
                             axes_viewports_px
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
+                            gpu,
                         ),
                         plot.marker_render_data(),
                     );
@@ -1256,6 +1257,15 @@ impl Figure {
                         out.push((axes_index, edge_data));
                     }
                 }
+                PlotElement::Line3(plot) => out.push((
+                    axes_index,
+                    plot.render_data_with_viewport_gpu(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                        gpu,
+                    ),
+                )),
                 _ => out.push((axes_index, p.render_data())),
             }
         }

@@ -1,6 +1,6 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
-use runmat_plot::gpu::errorbar::{ErrorBarGpuInputs, ErrorBarGpuParams};
+use runmat_plot::gpu::errorbar::ErrorBarGpuInputs;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
 };
@@ -245,32 +245,17 @@ fn build_errorbar_gpu_plot(
     } else {
         gpu_errorbar_bounds(x, y, y_neg, y_pos, name)?
     };
-    let gpu_vertices = runmat_plot::gpu::errorbar::pack_vertical_vertices(
-        &context.device,
-        &context.queue,
-        &ErrorBarGpuInputs {
-            x_buffer: x_ref.buffer.clone(),
-            y_buffer: y_ref.buffer.clone(),
-            x_neg_buffer: xn_ref.as_ref().map(|r| r.buffer.clone()),
-            x_pos_buffer: xp_ref.as_ref().map(|r| r.buffer.clone()),
-            y_neg_buffer: yn_ref.buffer.clone(),
-            y_pos_buffer: yp_ref.buffer.clone(),
-            len: x_ref.len as u32,
-            scalar,
-        },
-        &ErrorBarGpuParams {
-            color: parsed.color,
-            cap_size_data: parsed.cap_size * 0.01,
-            line_style: parsed.line_style,
-            orientation: if x_neg.is_some() && x_pos.is_some() {
-                2
-            } else {
-                0
-            },
-        },
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
-    let mut plot = ErrorBar::from_gpu_buffer(
+    let inputs = ErrorBarGpuInputs {
+        x_buffer: x_ref.buffer.clone(),
+        y_buffer: y_ref.buffer.clone(),
+        x_neg_buffer: xn_ref.as_ref().map(|r| r.buffer.clone()),
+        x_pos_buffer: xp_ref.as_ref().map(|r| r.buffer.clone()),
+        y_neg_buffer: yn_ref.buffer.clone(),
+        y_pos_buffer: yp_ref.buffer.clone(),
+        len: x_ref.len as u32,
+        scalar,
+    };
+    let mut plot = ErrorBar::from_gpu_inputs(
         parsed.color,
         parsed.line_width,
         parsed.line_style,
@@ -280,8 +265,7 @@ fn build_errorbar_gpu_plot(
         } else {
             runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical
         },
-        gpu_vertices,
-        x_ref.len as usize * 6,
+        inputs,
         bounds,
     )
     .with_label(label);

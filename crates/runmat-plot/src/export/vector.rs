@@ -223,10 +223,20 @@ impl VectorExporter {
             }
         }
 
-        let axes_map = figure.plot_axes_indices().to_vec();
-        let rds = figure.render_data();
-        for (i, rd) in rds.iter().enumerate() {
-            let ax = axes_map.get(i).copied().unwrap_or(0).min(rows * cols - 1);
+        let axes_plot_sizes: Vec<(u32, u32)> = axes_vps
+            .iter()
+            .map(|(_, _, w, h)| (w.max(1.0).round() as u32, h.max(1.0).round() as u32))
+            .collect();
+        let render_items = figure.render_data_with_axes_with_viewport_and_gpu(
+            Some((
+                self.settings.width.max(1.0).round() as u32,
+                self.settings.height.max(1.0).round() as u32,
+            )),
+            Some(&axes_plot_sizes),
+            None,
+        );
+        for (ax, rd) in render_items {
+            let ax = ax.min(rows * cols - 1);
             let vp = axes_vps[ax];
             // Axes labels
             if let Some(lbl) = &figure.x_label {
@@ -259,7 +269,7 @@ impl VectorExporter {
                     xml_escape(&pie_label.label)
                 ).map_err(|e| format!("SVG write error: {e}"))?;
             }
-            self.add_render_data_to_svg_viewport(&mut svg, rd, vp)?;
+            self.add_render_data_to_svg_viewport(&mut svg, &rd, vp)?;
         }
 
         // SVG footer
