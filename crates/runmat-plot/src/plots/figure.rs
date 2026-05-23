@@ -1253,7 +1253,11 @@ impl Figure {
                 }
                 PlotElement::Patch(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data() {
+                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                    ) {
                         out.push((axes_index, edge_data));
                     }
                 }
@@ -1263,6 +1267,12 @@ impl Figure {
                         axes_viewports_px
                             .and_then(|viewports| viewports.get(axes_index).copied())
                             .or(viewport_px),
+                        self.axes_metadata.get(axes_index).and_then(|meta| {
+                            match (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                                (Some(az), Some(el)) => Some((az, el)),
+                                _ => None,
+                            }
+                        }),
                         gpu,
                     ),
                 )),

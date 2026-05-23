@@ -20,4 +20,4 @@ pub use interaction::{EventHandler, KeyCode, PlotEvent};
 pub use plot_renderer::{plot_utils, PlotRenderConfig, PlotRenderer, RenderResult};
 pub use renderer::*;
 pub use scene::*;
-pub use viewport::{data_units_per_px, data_units_per_px_3d};
+pub use viewport::{data_units_per_px, data_units_per_px_3d, data_units_per_px_3d_camera};

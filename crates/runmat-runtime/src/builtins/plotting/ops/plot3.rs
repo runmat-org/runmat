@@ -284,24 +284,18 @@ async fn build_line3_gpu_plot_async(
             "plot3: X, Y, and Z inputs must have identical non-empty lengths",
         ));
     }
+    let host_x =
+        crate::builtins::plotting::common::gather_tensor_from_gpu_async(x.clone(), BUILTIN_NAME)
+            .await?;
+    let host_y =
+        crate::builtins::plotting::common::gather_tensor_from_gpu_async(y.clone(), BUILTIN_NAME)
+            .await?;
+    let host_z =
+        crate::builtins::plotting::common::gather_tensor_from_gpu_async(z.clone(), BUILTIN_NAME)
+            .await?;
+    let (host_x, host_y, host_z) = numeric_triplet(host_x, host_y, host_z, BUILTIN_NAME)?;
     if x_ref.len == 1 {
-        let x = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            x.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let y = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            y.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let z = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
-            z.clone(),
-            BUILTIN_NAME,
-        )
-        .await?;
-        let (x, y, z) = numeric_triplet(x, y, z, BUILTIN_NAME)?;
-        return build_line3_plot(x, y, z, label, appearance);
+        return build_line3_plot(host_x, host_y, host_z, label, appearance);
     }
     if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
         return Err(plotting_error(
@@ -317,14 +311,8 @@ async fn build_line3_gpu_plot_async(
         scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
     };
     let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
-    Ok(Line3Plot::from_gpu_xyz(
-        inputs,
-        appearance.color,
-        appearance.line_width,
-        appearance.line_style,
-        bounds,
-    )
-    .with_label(label))
+    Ok(build_line3_plot(host_x, host_y, host_z, label, appearance)?
+        .with_gpu_xyz_inputs(inputs, bounds))
 }
 
 #[cfg(test)]

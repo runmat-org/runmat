@@ -2,9 +2,15 @@ use crate::core::{
     BoundingBox, DrawCall, GpuPackContext, GpuVertexBuffer, Material, PipelineType, RenderData,
     Vertex,
 };
+use crate::geometry::stroke3d::{
+    create_line_vertices_dashed, tessellate_polyline_tube, StrokeCap3D, StrokeStyle3D,
+};
 use crate::gpu::line3::{Line3GpuInputs, Line3GpuParams};
 use glam::{Vec3, Vec4};
 use log::warn;
+
+const POINTS_TO_PX: f32 = 96.0 / 72.0;
+const TUBE_RADIAL_SEGMENTS: usize = 8;
 
 #[derive(Debug, Clone)]
 pub struct Line3Plot {
@@ -25,6 +31,11 @@ pub struct Line3Plot {
 }
 
 impl Line3Plot {
+    #[inline]
+    fn line_width_px(&self) -> f32 {
+        (self.line_width.max(0.1)) * POINTS_TO_PX
+    }
+
     pub fn new(x_data: Vec<f64>, y_data: Vec<f64>, z_data: Vec<f64>) -> Result<Self, String> {
         if x_data.len() != y_data.len() || x_data.len() != z_data.len() {
             return Err("Data length mismatch for plot3".to_string());
@@ -101,6 +112,12 @@ impl Line3Plot {
         }
     }
 
+    pub fn with_gpu_xyz_inputs(mut self, inputs: Line3GpuInputs, bounds: BoundingBox) -> Self {
+        self.gpu_line_inputs = Some(inputs);
+        self.bounds = Some(bounds);
+        self
+    }
+
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
         self.label = Some(label.into());
         self
@@ -142,19 +159,23 @@ impl Line3Plot {
                 .collect();
             let vertices = if points.len() == 1 {
                 let mut vertex = Vertex::new(points[0], self.color);
-                vertex.normal[2] = (self.line_width.max(1.0) * 4.0).max(6.0);
+                vertex.normal[2] = (self.line_width_px().max(1.0) * 4.0).max(6.0);
                 vec![vertex]
-            } else if self.line_width > 1.0 {
+            } else if self.line_width_px() > 1.0 {
                 // No viewport hint: interpret width in data units for legacy/non-viewport paths.
-                let fallback_half_width_data = self.line_width.max(0.1) * 0.5;
-                create_thick_polyline3_dashed(
+                let fallback_half_width_data = self.line_width_px() * 0.5;
+                tessellate_polyline_tube(
                     &points,
                     self.color,
-                    fallback_half_width_data,
-                    self.line_style,
+                    StrokeStyle3D::new(
+                        fallback_half_width_data,
+                        self.line_style,
+                        StrokeCap3D::Square,
+                    ),
+                    TUBE_RADIAL_SEGMENTS,
                 )
             } else {
-                create_line3_vertices_dashed(&points, self.color, self.line_style)
+                create_line_vertices_dashed(&points, self.color, self.line_style)
             };
             self.vertices = Some(vertices);
             self.dirty = false;
@@ -184,7 +205,13 @@ impl Line3Plot {
         let vertex_count = self
             .gpu_vertex_count
             .unwrap_or_else(|| self.generate_vertices().len());
-        let thick = self.line_width > 1.0 && !single_point;
+        let width_px = self.line_width_px();
+        let thick = width_px > 1.0 && !single_point;
+        let indices = if self.gpu_vertices.is_none() && thick {
+            Some((0..vertex_count as u32).collect::<Vec<u32>>())
+        } else {
+            None
+        };
         RenderData {
             pipeline_type: if single_point {
                 PipelineType::Scatter3
@@ -198,12 +225,12 @@ impl Line3Plot {
             } else {
                 self.generate_vertices().clone()
             },
-            indices: None,
+            indices,
             gpu_vertices: self.gpu_vertices.clone(),
             bounds: Some(self.bounds()),
             material: Material {
                 albedo: self.color,
-                roughness: self.line_width.max(0.5),
+                roughness: width_px.max(0.5),
                 ..Default::default()
             },
             draw_calls: vec![DrawCall {
@@ -232,10 +259,11 @@ impl Line3Plot {
             .bounds
             .as_ref()
             .ok_or_else(|| "plot3: missing bounds for GPU packing".to_string())?;
-        let thick_px = self.line_width > 1.0;
+        let width_px = self.line_width_px();
+        let thick_px = width_px > 1.0;
         let data_per_px = crate::core::data_units_per_px_3d(bounds, viewport_px);
         let half_width_data = if thick_px {
-            ((self.line_width.max(0.1)) * 0.5) * data_per_px
+            (width_px * 0.5) * data_per_px
         } else {
             0.0
         };
@@ -259,25 +287,36 @@ impl Line3Plot {
     pub fn render_data_with_viewport_gpu(
         &mut self,
         viewport_px: Option<(u32, u32)>,
+        view_angles_deg: Option<(f32, f32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> RenderData {
-        if self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
+        let can_gpu_pack = self.line_width_px() <= 1.0;
+        if can_gpu_pack && self.gpu_line_inputs.is_some() && self.gpu_vertices.is_none() {
             if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
                 if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
                     warn!("plot3 gpu pack failed: {err}");
                 }
             }
         }
-        self.render_data_with_viewport(viewport_px)
+        self.render_data_with_viewport_and_view(viewport_px, view_angles_deg)
     }
 
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        self.render_data_with_viewport_and_view(viewport_px, None)
+    }
+
+    pub fn render_data_with_viewport_and_view(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        view_angles_deg: Option<(f32, f32)>,
+    ) -> RenderData {
         if self.gpu_vertices.is_some() {
             return self.render_data();
         }
 
         let single_point = self.x_data.len() == 1;
-        let (vertices, vertex_count, pipeline) = if !single_point && self.line_width > 1.0 {
+        let width_px = self.line_width_px();
+        let (vertices, vertex_count, pipeline) = if !single_point && width_px > 1.0 {
             let Some(vp) = viewport_px else {
                 return self.render_data();
             };
@@ -289,13 +328,14 @@ impl Line3Plot {
                 .map(|((&x, &y), &z)| Vec3::new(x as f32, y as f32, z as f32))
                 .collect();
             let bounds = self.bounds();
-            let data_per_px = crate::core::data_units_per_px_3d(&bounds, vp);
-            let half_width_data = ((self.line_width.max(0.1)) * 0.5) * data_per_px;
-            let tris = create_thick_polyline3_dashed(
+            let data_per_px =
+                crate::core::data_units_per_px_3d_camera(&bounds, vp, view_angles_deg);
+            let half_width_data = (width_px * 0.5) * data_per_px;
+            let tris = tessellate_polyline_tube(
                 &points,
                 self.color,
-                half_width_data,
-                self.line_style,
+                StrokeStyle3D::new(half_width_data, self.line_style, StrokeCap3D::Square),
+                TUBE_RADIAL_SEGMENTS,
             );
             let count = tris.len();
             (tris, count, PipelineType::Triangles)
@@ -310,15 +350,21 @@ impl Line3Plot {
             (verts, count, pipeline)
         };
 
+        let indices = if pipeline == PipelineType::Triangles {
+            Some((0..vertex_count as u32).collect::<Vec<u32>>())
+        } else {
+            None
+        };
+
         RenderData {
             pipeline_type: pipeline,
             vertices,
-            indices: None,
+            indices,
             gpu_vertices: None,
             bounds: Some(self.bounds()),
             material: Material {
                 albedo: self.color,
-                roughness: self.line_width.max(0.5),
+                roughness: width_px.max(0.5),
                 ..Default::default()
             },
             draw_calls: vec![DrawCall {
@@ -338,82 +384,6 @@ impl Line3Plot {
             .map(|v| v.len() * std::mem::size_of::<Vertex>())
             .unwrap_or(0)
     }
-}
-
-fn create_line3_vertices_dashed(
-    points: &[Vec3],
-    color: Vec4,
-    style: crate::plots::line::LineStyle,
-) -> Vec<Vertex> {
-    let mut vertices = Vec::new();
-    for i in 1..points.len() {
-        let include = match style {
-            crate::plots::line::LineStyle::Solid => true,
-            crate::plots::line::LineStyle::Dashed => (i % 4) < 2,
-            crate::plots::line::LineStyle::Dotted => (i % 4) == 0,
-            crate::plots::line::LineStyle::DashDot => {
-                let m = i % 6;
-                m < 2 || m == 3
-            }
-        };
-        if include {
-            vertices.push(Vertex::new(points[i - 1], color));
-            vertices.push(Vertex::new(points[i], color));
-        }
-    }
-    vertices
-}
-
-fn create_thick_polyline3_dashed(
-    points: &[Vec3],
-    color: Vec4,
-    half_width_data: f32,
-    style: crate::plots::line::LineStyle,
-) -> Vec<Vertex> {
-    let mut out = Vec::new();
-    let half_width_data = half_width_data.max(1e-5);
-    for i in 0..points.len().saturating_sub(1) {
-        let include = match style {
-            crate::plots::line::LineStyle::Solid => true,
-            crate::plots::line::LineStyle::Dashed => (i % 4) < 2,
-            crate::plots::line::LineStyle::Dotted => (i % 4) == 0,
-            crate::plots::line::LineStyle::DashDot => {
-                let m = i % 6;
-                m < 2 || m == 3
-            }
-        };
-        if !include {
-            continue;
-        }
-        out.extend(extrude_segment_3d(
-            points[i],
-            points[i + 1],
-            color,
-            half_width_data,
-        ));
-    }
-    out
-}
-
-fn extrude_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32) -> Vec<Vertex> {
-    let dir = (end - start).normalize_or_zero();
-    let mut normal = dir.cross(Vec3::Z);
-    if normal.length_squared() < 1e-6 {
-        normal = dir.cross(Vec3::X);
-    }
-    let normal = normal.normalize_or_zero() * half_width;
-    let v0 = start + normal;
-    let v1 = end + normal;
-    let v2 = end - normal;
-    let v3 = start - normal;
-    vec![
-        Vertex::new(v0, color),
-        Vertex::new(v1, color),
-        Vertex::new(v2, color),
-        Vertex::new(v0, color),
-        Vertex::new(v2, color),
-        Vertex::new(v3, color),
-    ]
 }
 
 #[cfg(test)]
