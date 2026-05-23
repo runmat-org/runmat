@@ -10,6 +10,7 @@ pub mod context;
 pub mod core;
 pub mod data;
 pub mod event;
+pub mod geometry;
 pub mod gpu;
 
 // High-level plot types and figures
@@ -31,10 +32,6 @@ pub mod overlay;
 // WASM/WebGPU bridge
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
 pub mod web;
-
-// Jupyter integration
-#[cfg(feature = "jupyter")]
-pub mod jupyter;
 
 // Styling and themes
 pub mod styling;
@@ -72,7 +69,7 @@ pub use gui::{
 
 // Export functionality
 // Explicitly export image exporter to avoid collision with plots::image
-pub use export::{image::*, vector::*};
+pub use export::image::*;
 
 // ===== UNIFIED PLOTTING FUNCTIONS =====
 
