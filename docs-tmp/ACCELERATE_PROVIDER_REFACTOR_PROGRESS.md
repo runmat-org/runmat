@@ -53,3 +53,9 @@
 - Verification for Phase 4a:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 4b: created `backend/wgpu/provider_impl/constructors.rs` and moved constructor/shape utility operations.
+  - moved: `eye_exec`, `fill_exec`, `zeros_exec`, `meshgrid_exec`, `fspecial_exec`, `peaks_exec`, `peaks_xy_exec`, `linspace_exec`, `diag_from_vector_exec`, `diag_extract_exec`.
+  - random generation and image filtering paths remain in `mod.rs`/`rnd.rs` for the next extraction pass.
+- Verification for Phase 4b:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
