@@ -17,3 +17,9 @@
 - Verification for Phase 1a:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo check -p runmat-accelerate` still blocked by the same pre-existing workspace warning-as-error in `runmat-runtime` (`ImpulseResponse.discrete` dead-code).
+- Phase 1b: extracted contiguous elementwise provider methods into `backend/wgpu/provider_impl/elementwise.rs` and wired `mod elementwise;` in `provider_impl/mod.rs`.
+  - moved methods: `elem_{eq,ne,lt,le,gt,ge}_exec`, `logical_*_exec`, `unary_op_exec`, `scalar_op_exec`.
+  - no kernel parameter or dispatch logic changes; code moved verbatim.
+- Verification for Phase 1b:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
