@@ -1,0 +1,636 @@
+# RunMat Accelerate WGPU Provider Refactor
+
+## Goal
+
+Refactor `runmat/crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs` into a clearer module tree without changing behavior, public APIs, fallback choices, buffer semantics, or kernel execution order.
+
+This is a logic cleanup only refactor.
+
+## Current State
+
+The WGPU backend currently has this layout:
+
+```text
+backend/wgpu/
+  provider.rs
+  provider_impl.rs
+  provider_impl/
+    fft.rs
+    solve.rs
+    window.rs
+  pipelines.rs
+  resources.rs
+  dispatch/*
+  shaders/*
+```
+
+`provider_impl.rs` is the center of gravity for the backend. It currently mixes:
+
+- provider construction and initialization
+- device/adapter selection
+- workgroup and autotune configuration
+- pipeline/bootstrap/warmup logic
+- GPU buffer lifecycle and handle registration
+- upload/download/readback/free
+- telemetry and cache reporting
+- inline WGSL shader strings for logical/comparison kernels
+- a very large `impl AccelProvider for WgpuProvider`
+- many private execution helpers across unrelated operation families
+
+The file is already partially dissolved into `provider_impl/fft.rs`, `provider_impl/solve.rs`, and `provider_impl/window.rs`, and the top-of-file comment in `provider_impl.rs` explicitly indicates that new implementation work should go into submodules.
+
+At this point, `provider_impl.rs` is still effectively monolithic.
+
+## Refactor Principles
+
+The refactor should preserve all semantics.
+
+Do:
+
+- move code into coherent modules
+- extract small local helpers where duplication is obvious
+- keep the `WgpuProvider` type and core lifecycle easy to find
+- preserve existing dispatch behavior and cleanup ordering
+- preserve current host fallback behavior
+- preserve current buffer metadata behavior
+- preserve current telemetry and cache behavior
+
+Do not:
+
+- redesign the provider trait surface
+- change which operations are GPU-backed vs host-backed
+- change shader math, kernel parameters, or workgroup choices
+- change caching semantics
+- change submission ordering or readback behavior
+- introduce broad generic abstractions that make control flow harder to follow
+
+## Naming Recommendation
+
+The current `provider_impl` name was reasonable when the implementation was primarily one file. It becomes less helpful as the implementation is dissolved into a real module tree.
+
+Recommended rename:
+
+- `backend/wgpu/provider_impl.rs` -> `backend/wgpu/provider/mod.rs`
+- `backend/wgpu/provider_impl/` -> `backend/wgpu/provider/`
+
+Keep:
+
+- `backend/wgpu/provider.rs`
+
+`provider.rs` should remain the public facade used for provider registration and public re-exports.
+
+Why not rename directly to `ops/`?
+
+Because a large portion of the current file is not operations code. It includes provider bootstrapping, buffer lifecycle, upload/download/free, warmup, metrics, and shared infrastructure. An `ops/` name would describe only part of the implementation.
+
+If needed later, `provider/ops/` can be introduced under `provider/`, but it should not be the first restructuring step.
+
+## Target Layout
+
+Recommended target layout:
+
+```text
+backend/wgpu/
+  mod.rs
+  provider.rs
+  provider/
+    mod.rs
+    init.rs
+    core.rs
+    helpers.rs
+    elementwise.rs
+    reduction.rs
+    tensor_ops.rs
+    indexing.rs
+    random.rs
+    constructors.rs
+    polynomial.rs
+    image.rs
+    linalg.rs
+    fft.rs
+    solve.rs
+    window.rs
+```
+
+This is the intended end state, not necessarily the first landing step.
+
+## What Should Live In Each Module
+
+### `provider/mod.rs`
+
+Primary contents:
+
+- `WgpuProviderOptions`
+- `WgpuProvider`
+- `BufferEntry`
+- `MatrixOperandView`
+- `WorkgroupConfig`
+- top-level module wiring and imports
+- the `impl AccelProvider for WgpuProvider` entrypoints, unless that impl itself later becomes split by family using private helper methods in submodules
+
+This file should become the top-level index for the provider implementation rather than the place where all logic lives.
+
+### `provider/init.rs`
+
+Provider construction and bootstrap logic:
+
+- adapter/device selection
+- environment variable parsing
+- precision selection
+- workgroup normalization/clamping
+- pipeline cache path setup
+- autotune bootstrap
+- warmup bootstrap configuration
+- device error handler installation
+
+This code is cross-cutting and should stay close to provider construction.
+
+### `provider/core.rs`
+
+Provider lifecycle and buffer management:
+
+- handle registration
+- `get_entry`
+- storage buffer creation helpers
+- uniform buffer helpers that belong directly to provider behavior
+- `submit`
+- readback staging helpers
+- upload/download
+- `read_scalar`
+- `free`
+- metadata cleanup
+- shared core validation helpers that directly depend on buffer tables
+
+This is the highest-risk behavior and should remain easy to inspect.
+
+### `provider/helpers.rs`
+
+Small non-semantic helper utilities that reduce repetition:
+
+- chunk iteration helpers
+- empty-output fast path helpers
+- pipeline warmup/noop helpers
+- common shape/limit guards when they are reused across multiple families
+- small dispatch helpers that do not own operation semantics
+
+This file should stay small and practical.
+
+### `provider/elementwise.rs`
+
+Operation family:
+
+- unary ops
+- scalar ops
+- binary ops
+- broadcast binary ops
+- logical/comparison ops
+- fused elementwise
+- `map_nan_to_zero`
+- `not_nan_mask`
+
+This is the best first extraction candidate because the family is large, internally coherent, and has a lot of low-risk repetition.
+
+### `provider/reduction.rs`
+
+Operation family:
+
+- global reductions
+- dimension reductions
+- min/max with indices
+- std/mean helpers
+- nd mean
+- nd moments
+- fused reduction dispatch
+- reduction tuning/autotune helpers that are only used here
+
+This is a major cohesion win after `elementwise.rs`.
+
+### `provider/tensor_ops.rs`
+
+Operation family:
+
+- transpose
+- permute
+- flip
+- circshift
+- repmat
+- kron
+- cat helpers
+- diag
+- tril/triu
+- reshape-related helper paths that are operational rather than lifecycle-related
+
+### `provider/indexing.rs`
+
+Operation family:
+
+- `find`
+- `sub2ind`
+- `ind2sub`
+- scatter row/column
+- gather/index-select related helpers if present
+
+### `provider/random.rs`
+
+Operation family:
+
+- random uniform
+- random normal
+- random integer range
+- random permutation
+- RNG synchronization helpers
+- stochastic evolution
+
+### `provider/constructors.rs`
+
+Operation family:
+
+- `fill`
+- `eye`
+- `linspace`
+- `peaks`
+- `peaks_xy`
+- `fspecial`
+- other pure allocation/creation style kernels
+
+`window.rs` can remain separate because it is already clean and self-contained.
+
+### `provider/polynomial.rs`
+
+Operation family:
+
+- `polyval`
+- `polyder`
+- `polyint`
+
+This can stay small.
+
+### `provider/image.rs`
+
+Operation family:
+
+- `imfilter`
+- image normalize helpers if they belong here instead of a lower-level dispatch/tuning module
+
+If image normalization remains deeply tied to backend-specific tuning and dynamic pipelines, some supporting code may still stay closer to provider core.
+
+### `provider/linalg.rs`
+
+Operation family:
+
+- matmul helpers that are not already separated elsewhere
+- pagefun mtimes
+- centered gram
+- `syrk`
+- QR / QR power iteration
+- covariance / corrcoef
+- eig and matrix structure helpers
+- `issymmetric`, `ishermitian`, `bandwidth`, `sym_rcm`
+
+This should not be the first extraction because it is broad and more tightly coupled.
+
+### Existing modules to keep
+
+- `provider/fft.rs`
+- `provider/solve.rs`
+- `provider/window.rs`
+
+These already match the desired direction.
+
+## Exact Duplicate Patterns Worth Factoring Out
+
+These should be treated as local cleanup opportunities during extraction, not as a separate abstraction project.
+
+### 1. Chunked dispatch loops
+
+Repeated shape:
+
+```rust
+let chunk_capacity = (MAX_DISPATCH_WORKGROUPS as usize) * WORKGROUP_SIZE as usize;
+let mut offset = 0usize;
+while offset < len {
+    let chunk_len = (len - offset).min(chunk_capacity).max(1);
+    // build params
+    // create bind group
+    // dispatch
+    offset += chunk_len;
+}
+```
+
+This appears across multiple constructors, transforms, random ops, and fused execution helpers.
+
+Safe extraction:
+
+- `for_each_chunk(len, |offset, chunk_len| -> Result<()>)`
+
+### 2. Pipeline warmup / noop / flush sequencing
+
+Several operations repeat a near-identical “touch pipeline and flush submission” sequence.
+
+Safe extraction:
+
+- `warm_pipeline_once(...)`
+- `flush_queue_gap(...)`
+
+### 3. Allocate-output-and-return-empty pattern
+
+Repeated shape:
+
+```rust
+let out_buffer = self.create_storage_buffer_checked(len, label)?;
+if len == 0 {
+    return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+}
+```
+
+Safe extraction:
+
+- `create_output_buffer_or_empty(...)`
+- or a smaller helper returning an early result option
+
+### 4. Logical/comparison wrappers
+
+Nearly identical wrappers exist for:
+
+- `eq`, `ne`, `lt`, `le`, `gt`, `ge`
+- `logical_and`, `logical_or`, `logical_xor`, `logical_not`
+- `isfinite`, `isnan`, `isinf`
+
+Differences are mostly shader choice, arity, and logical result annotation.
+
+Safe extraction:
+
+- `run_unary_shader_op(...)`
+- `run_binary_shader_op(...)`
+
+### 5. Reverse scan via flip-forward-flip
+
+This pattern is repeated for reverse `cumsum` / `cumprod` style logic.
+
+Safe extraction:
+
+- `reverse_scan_via_flip(...)`
+
+### 6. Inline WGSL constants for logical/comparison kernels
+
+The top of `provider_impl.rs` contains a large block of embedded WGSL strings for logical and comparison kernels in both `f32` and `f64` forms.
+
+These should move into `backend/wgpu/shaders/`.
+
+Recommended destination:
+
+- `backend/wgpu/shaders/logical.rs`
+- or `backend/wgpu/shaders/comparison.rs` and `backend/wgpu/shaders/logical.rs`
+
+This is a readability win and reduces the non-provider noise near the top of the implementation.
+
+## First Extraction Recommendation
+
+The best first extraction is `elementwise.rs`.
+
+Why:
+
+- large amount of code moved for relatively low risk
+- high internal cohesion
+- clear duplication cleanup opportunities
+- minimal impact on provider core lifecycle logic
+- natural place to move inline logical/comparison WGSL constants out of the monolith
+
+Suggested contents for the first extraction:
+
+- unary op execution helpers
+- scalar op execution helpers
+- binary and broadcast binary helpers
+- fused elementwise helpers
+- logical/comparison wrappers
+- NaN mapping helpers
+- any small local helper functions used only by this family
+
+## Second Extraction Recommendation
+
+After `elementwise.rs`, extract `reduction.rs`.
+
+Why:
+
+- another large cohesive family
+- a major readability improvement
+- reduces noise in the trait implementation
+
+But this should come after elementwise because reduction code is more coupled to tuning and performance heuristics.
+
+## Third Extraction Recommendation
+
+Extract `tensor_ops.rs`.
+
+Why:
+
+- operations are conceptually related
+- many of them use similar chunking/output allocation patterns
+- keeps reshaping and structural tensor transforms together
+
+## What Should Not Move First
+
+These areas are riskier and should stay put until the easier operation families are extracted:
+
+- provider construction and bootstrap
+- upload/download/free
+- submission and readback synchronization
+- buffer handle table behavior
+- QR power iteration internals
+- fused reduction tuning internals
+- complex linalg fallback bridges
+
+These parts are central to correctness and easy to destabilize during a purely structural refactor.
+
+## Proposed Method-to-Module Mapping
+
+This mapping is intentionally approximate. It is meant to guide extraction boundaries, not require a giant one-shot move.
+
+### `provider/core.rs`
+
+- handle registration helpers
+- `get_entry`
+- `create_storage_buffer*`
+- `register_existing_buffer`
+- `uniform_buffer`
+- `submit`
+- `map_readback_bytes_sync`
+- upload/download/read scalar/free
+- metadata cleanup helpers
+- exported device/context helpers
+- telemetry snapshot/reset if they remain tightly coupled to core caches
+
+### `provider/elementwise.rs`
+
+- unary execution helpers
+- scalar execution helpers
+- binary execution helpers
+- binary broadcast execution helpers
+- logical/comparison execution helpers
+- `fused_elementwise`
+- `fused_elementwise_multi`
+- `map_nan_to_zero`
+- `not_nan_mask`
+- inline WGSL logical/comparison shader references after they move to `shaders/`
+
+### `provider/reduction.rs`
+
+- `reduce_global_exec`
+- `reduce_dim_sum_mean_exec`
+- `reduce_dim_minmax_exec`
+- `reduce_std_exec`
+- `reduce_std_dim_exec`
+- `reduce_nd_mean_exec`
+- `reduce_moments_nd_exec`
+- `fused_reduction`
+- reduction wrapper entrypoints in `impl AccelProvider`
+
+### `provider/tensor_ops.rs`
+
+- transpose / permute / reshape-related execution helpers
+- flip / circshift
+- repmat / kron
+- diag helpers
+- tril / triu
+- cat-related helpers
+
+### `provider/indexing.rs`
+
+- `find_exec`
+- `scatter_column_exec`
+- `scatter_row_exec`
+- `sub2ind_exec`
+- `ind2sub_exec`
+
+### `provider/random.rs`
+
+- random uniform / normal / integer / permutation execution helpers
+- RNG state setting
+- stochastic evolution
+
+### `provider/constructors.rs`
+
+- `fill`
+- `eye`
+- `linspace`
+- `peaks`
+- `peaks_xy`
+- `fspecial`
+
+### `provider/polynomial.rs`
+
+- `polyval`
+- `polyder`
+- `polyint`
+
+### `provider/image.rs`
+
+- `imfilter`
+- image normalize provider-facing helpers if not better placed elsewhere
+
+### `provider/linalg.rs`
+
+- matmul helpers if still local here
+- pagefun mtimes
+- centered gram
+- `syrk`
+- QR / QR power iter helpers
+- covariance / corrcoef
+- eig / structure checks / bandwidth / symrcm style helpers
+
+## Proposed Refactor Sequence
+
+### Phase 0: Pure rename and path stabilization
+
+1. Rename `provider_impl.rs` to `provider/mod.rs`.
+2. Rename `provider_impl/` to `provider/`.
+3. Keep code otherwise unchanged except module paths.
+
+This creates the right structural landing zone before more extraction.
+
+### Phase 1: Extract `elementwise.rs`
+
+1. Move elementwise and logical/comparison execution helpers.
+2. Move inline WGSL logical/comparison shader strings into `shaders/`.
+3. Extract only small local helper functions needed to reduce repetition.
+
+Expected result:
+
+- large monolith reduction
+- minimal semantic risk
+- immediate readability win
+
+### Phase 2: Extract `reduction.rs`
+
+1. Move reduction execution helpers.
+2. Keep provider-core synchronization behavior unchanged.
+3. Keep tuning and thresholds exactly as they are.
+
+Expected result:
+
+- another large monolith reduction
+- clearer separation between elementwise and reduction families
+
+### Phase 3: Extract `tensor_ops.rs` and `indexing.rs`
+
+1. Move structural tensor transforms.
+2. Move indexing/scatter/find helpers.
+
+Expected result:
+
+- provider root becomes much easier to scan
+
+### Phase 4: Extract `random.rs`, `constructors.rs`, `polynomial.rs`
+
+1. Move creation and math utility families.
+2. Keep `window.rs` as-is.
+
+### Phase 5: Extract `linalg.rs` carefully
+
+1. Move the remaining higher-coupling math paths.
+2. Keep provider core logic stable.
+
+### Phase 6: Optional split of `provider/mod.rs`
+
+If `provider/mod.rs` still carries too much non-operational logic, split it further into:
+
+- `init.rs`
+- `core.rs`
+
+This should happen only after the larger operation families are gone.
+
+## Verification Strategy
+
+Because the goal is structural cleanup only, every phase should be validated with no expected behavioral deltas.
+
+At minimum after each phase:
+
+- compile `runmat-accelerate`
+- run relevant backend tests for WGPU
+- run targeted tests covering the extracted family
+- compare generated public behavior only through existing tests rather than new semantics
+
+Important:
+
+- no fallback changes
+- no shader parameter changes
+- no cleanup ordering changes
+- no host/device result changes
+
+## Bottom Line
+
+The right cleanup is not to keep slowly dissolving `provider_impl` under its current name forever.
+
+The clean target is:
+
+- `provider.rs` as the public facade
+- `provider/` as the real implementation package
+- provider core kept near the root
+- operation families extracted one at a time
+
+Recommended first move:
+
+1. rename `provider_impl` -> `provider`
+2. extract `elementwise.rs`
+
+That gives the best improvement-to-risk ratio while keeping the refactor firmly in the “logic cleanup only” category.
