@@ -864,12 +864,31 @@ fn concat_column_major<T: Clone>(
         }
     }
 
+    // MATLAB dynamic-growth semantics treat true empty [] operands as neutral.
+    // We model that centrally in cat instead of wrapper-local filtering.
+    let has_non_neutral = padded
+        .iter()
+        .any(|shape| !is_true_empty_neutral_shape(shape));
+    let mut active_shapes: Vec<Vec<usize>> = Vec::with_capacity(padded.len());
+    let mut active_data: Vec<&[T]> = Vec::with_capacity(data.len());
+    if has_non_neutral {
+        for (shape, slice) in padded.iter().zip(data.iter()) {
+            if !is_true_empty_neutral_shape(shape) {
+                active_shapes.push(shape.clone());
+                active_data.push(*slice);
+            }
+        }
+    } else {
+        active_shapes = padded;
+        active_data.extend(data.iter().copied());
+    }
+
     for axis in 0..rank {
         if axis == dim_zero {
             continue;
         }
-        let reference = padded[0][axis];
-        for (idx, shape) in padded.iter().enumerate().skip(1) {
+        let reference = active_shapes[0][axis];
+        for (idx, shape) in active_shapes.iter().enumerate().skip(1) {
             if shape[axis] != reference {
                 return Err(cat_err(format!(
                     "{context}: dimension {} mismatch between input 1 (size {}) and input {} (size {})",
@@ -882,9 +901,9 @@ fn concat_column_major<T: Clone>(
         }
     }
 
-    let mut output_shape = padded[0].clone();
+    let mut output_shape = active_shapes[0].clone();
     let mut concat_dim = 0usize;
-    for shape in &padded {
+    for shape in &active_shapes {
         concat_dim = concat_dim.checked_add(shape[dim_zero]).ok_or_else(|| {
             cat_err(format!(
                 "{context}: concatenated dimension exceeds maximum size"
@@ -918,7 +937,7 @@ fn concat_column_major<T: Clone>(
 
     let mut output = Vec::with_capacity(total);
     for outer_idx in 0..outer {
-        for (shape, slice) in padded.iter().zip(data.iter()) {
+        for (shape, slice) in active_shapes.iter().zip(active_data.iter()) {
             let mid = shape[dim_zero];
             let chunk = mid * inner;
             if chunk == 0 {
@@ -930,6 +949,10 @@ fn concat_column_major<T: Clone>(
     }
 
     Ok((output, normalize_shape(output_shape, dim_zero)))
+}
+
+fn is_true_empty_neutral_shape(shape: &[usize]) -> bool {
+    shape.iter().any(|&dim| dim == 0) && shape.iter().all(|&dim| dim <= 1)
 }
 
 fn normalize_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
