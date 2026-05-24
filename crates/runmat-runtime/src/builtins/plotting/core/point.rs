@@ -130,6 +130,16 @@ impl PointColorArg {
             Value::Tensor(tensor) => {
                 if tensor.data.len() == 1 {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
+                } else if tensor.rows == 1 && (tensor.cols == 3 || tensor.cols == 4) {
+                    let r = tensor_value(tensor, 0, 0) as f32;
+                    let g = tensor_value(tensor, 0, 1) as f32;
+                    let b = tensor_value(tensor, 0, 2) as f32;
+                    let a = if tensor.cols == 4 {
+                        tensor_value(tensor, 0, 3) as f32
+                    } else {
+                        1.0
+                    };
+                    Ok(Self::Uniform(Vec4::new(r, g, b, a)))
                 } else if tensor.cols == 3 || tensor.cols == 4 {
                     Ok(Self::RgbMatrix(Value::Tensor(tensor.clone())))
                 } else {

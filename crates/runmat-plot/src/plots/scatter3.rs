@@ -270,7 +270,12 @@ impl Scatter3Plot {
             let first = vertices[0].color;
             vertices.iter().any(|v| v.color != first)
         };
-        let use_vertex_edge_color = self.edge_color_from_vertex_colors && is_multi_color;
+        let has_vertex_colors = if self.gpu_vertices.is_some() {
+            self.gpu_has_per_point_colors
+        } else {
+            self.colors.len() > 1
+        };
+        let use_vertex_edge_color = self.edge_color_from_vertex_colors && has_vertex_colors;
         let mut material = Material {
             albedo: self.colors.first().copied().unwrap_or(Vec4::ONE),
             roughness: self.edge_thickness,

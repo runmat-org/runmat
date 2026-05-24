@@ -255,6 +255,7 @@ fn resolve_scatter_style(
 
     if let PointColorArg::Uniform(color) = &args.color {
         style.uniform_color = *color;
+        style.edge_color = *color;
     }
 
     if appearance.marker.is_none() {
@@ -677,6 +678,34 @@ pub(crate) mod tests {
             "size was {}",
             style.marker_size
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scatter_single_rgb_row_sets_uniform_face_and_edge_color() {
+        setup_plot_tests();
+        let rest = vec![
+            Value::Num(49.0),
+            Value::Tensor(Tensor {
+                data: vec![0.9, 0.2, 0.2],
+                shape: vec![1, 3],
+                rows: 1,
+                cols: 3,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("filled".into()),
+            Value::String("Marker".into()),
+            Value::String("o".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter()).unwrap();
+        let style = resolve_scatter_style(4, &args, "scatter").expect("style");
+        assert!((style.uniform_color.x - 0.9).abs() < 1e-6);
+        assert!((style.uniform_color.y - 0.2).abs() < 1e-6);
+        assert!((style.uniform_color.z - 0.2).abs() < 1e-6);
+        assert!((style.edge_color.x - 0.9).abs() < 1e-6);
+        assert!((style.edge_color.y - 0.2).abs() < 1e-6);
+        assert!((style.edge_color.z - 0.2).abs() < 1e-6);
+        assert!(!style.marker_edge_flat);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
