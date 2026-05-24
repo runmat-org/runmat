@@ -59,3 +59,9 @@
 - Verification for Phase 4b:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 4c: consolidated random-family execution methods into `provider_impl/rnd.rs`.
+  - moved from `mod.rs` to `rnd.rs`: `random_uniform_exec`, `random_normal_exec`, `stochastic_evolution_exec`, `random_integer_range_exec`, `randperm_exec`.
+  - existing distribution helpers in `rnd.rs` (`exprnd`/`normrnd`/`unifrnd`) remain unchanged; this pass only co-locates the family.
+- Verification for Phase 4c:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
