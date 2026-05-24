@@ -1,6 +1,7 @@
 use runmat_builtins::{StringArray, StructValue, Tensor, Value};
 use runmat_plot::plots::{LegendStyle, TextStyle};
 
+use super::point::{marker_area_points2_to_diameter_px, marker_diameter_px_to_area_points2};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
@@ -1621,7 +1622,10 @@ fn get_scatter_property(
                 "Marker",
                 Value::String(marker_style_name(scatter.marker_style).into()),
             );
-            st.insert("SizeData", Value::Num(scatter.marker_size as f64));
+            st.insert(
+                "SizeData",
+                Value::Num(marker_diameter_px_to_area_points2(scatter.marker_size)),
+            );
             st.insert(
                 "MarkerFaceColor",
                 Value::String(color_to_short_name(scatter.color)),
@@ -1647,7 +1651,9 @@ fn get_scatter_property(
         Some("marker") => Ok(Value::String(
             marker_style_name(scatter.marker_style).into(),
         )),
-        Some("sizedata") => Ok(Value::Num(scatter.marker_size as f64)),
+        Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
+            scatter.marker_size,
+        ))),
         Some("markerfacecolor") => Ok(Value::String(color_to_short_name(scatter.color))),
         Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
         Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
@@ -1902,7 +1908,25 @@ fn get_scatter3_property(
             st.insert("XData", tensor_from_vec(x));
             st.insert("YData", tensor_from_vec(y));
             st.insert("ZData", tensor_from_vec(z));
-            st.insert("SizeData", Value::Num(scatter.point_size as f64));
+            st.insert(
+                "Marker",
+                Value::String(marker_style_name(scatter.marker_style).into()),
+            );
+            st.insert(
+                "SizeData",
+                Value::Num(marker_diameter_px_to_area_points2(scatter.point_size)),
+            );
+            st.insert(
+                "MarkerFaceColor",
+                Value::String(color_to_short_name(
+                    scatter.colors.first().copied().unwrap_or_default(),
+                )),
+            );
+            st.insert(
+                "MarkerEdgeColor",
+                Value::String(color_to_short_name(scatter.edge_color)),
+            );
+            st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
                 st.insert("DisplayName", Value::String(label));
             }
@@ -1914,7 +1938,17 @@ fn get_scatter3_property(
             scatter_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("sizedata") => Ok(Value::Num(scatter.point_size as f64)),
+        Some("marker") => Ok(Value::String(
+            marker_style_name(scatter.marker_style).into(),
+        )),
+        Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
+            scatter.point_size,
+        ))),
+        Some("markerfacecolor") => Ok(Value::String(color_to_short_name(
+            scatter.colors.first().copied().unwrap_or_default(),
+        ))),
+        Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
+        Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
         Some("displayname") => Ok(Value::String(scatter.label.unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
@@ -2951,7 +2985,7 @@ fn apply_scatter_property(
                 }
                 "sizedata" => {
                     if let Some(v) = value_as_f64(value) {
-                        scatter.marker_size = v as f32;
+                        scatter.marker_size = marker_area_points2_to_diameter_px(v);
                     }
                 }
                 "markerfacecolor" => {
@@ -3173,7 +3207,32 @@ fn apply_scatter3_property(
             match key {
                 "sizedata" => {
                     if let Some(v) = value_as_f64(value) {
-                        scatter.point_size = v as f32;
+                        scatter.point_size = marker_area_points2_to_diameter_px(v);
+                    }
+                }
+                "marker" => {
+                    if let Some(s) = value_as_string(value) {
+                        scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
+                    }
+                }
+                "markerfacecolor" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        let count = scatter.points.len().max(1);
+                        scatter.colors = vec![c; count];
+                    }
+                }
+                "markeredgecolor" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        scatter.edge_color = c;
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        scatter.edge_thickness = v as f32;
                     }
                 }
                 "displayname" => {

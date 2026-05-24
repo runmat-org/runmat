@@ -188,7 +188,7 @@ pub fn pack_vertices_from_xy(
         entry_point: "main",
     });
 
-    let output_size = max_points as u64 * std::mem::size_of::<Vertex>() as u64;
+    let output_size = max_points as u64 * 6 * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scatter2-gpu-vertices"),
         size: output_size,
@@ -284,7 +284,7 @@ pub fn pack_vertices_from_xy(
 
     Ok(GpuVertexBuffer::with_indirect(
         output_buffer,
-        max_points as usize,
+        (max_points as usize) * 6,
         indirect_args,
     ))
 }
@@ -470,7 +470,7 @@ mod stress_tests {
         } else {
             point_count.div_ceil(target)
         };
-        let expected_vertices = point_count.div_ceil(stride) as usize;
+        let expected_vertices = point_count.div_ceil(stride) as usize * 6;
 
         let inputs = Scatter2GpuInputs {
             x_buffer,

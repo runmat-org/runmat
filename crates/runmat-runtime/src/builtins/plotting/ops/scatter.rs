@@ -31,8 +31,9 @@ use super::perf::scatter_target_points;
 use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
-    map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
-    PointColorArg, PointGpuColor, PointSizeArg,
+    default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
+    validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
+    PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
@@ -186,8 +187,6 @@ fn build_scatter_plot(
     Ok(scatter)
 }
 
-const DEFAULT_MARKER_SIZE: f32 = 10.0;
-
 fn scatter_err(message: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, message)
 }
@@ -230,7 +229,7 @@ fn resolve_scatter_style(
         edge_color: default_color(),
         edge_thickness: DEFAULT_LINE_WIDTH,
         marker_style: MarkerStyle::Circle,
-        marker_size: DEFAULT_MARKER_SIZE,
+        marker_size: default_marker_diameter_px(),
         filled: args.filled,
         per_point_sizes: None,
         per_point_colors: None,
@@ -295,7 +294,7 @@ fn resolve_scatter_style(
     }
 
     if let PointSizeArg::Scalar(size) = &args.size {
-        style.marker_size = (*size).max(0.1);
+        style.marker_size = marker_area_points2_to_diameter_px(*size as f64);
     }
 
     if let Some(value) = args.size.value() {
@@ -603,7 +602,7 @@ pub(crate) mod tests {
             edge_color: default_color(),
             edge_thickness: DEFAULT_LINE_WIDTH,
             marker_style: MarkerStyle::Circle,
-            marker_size: DEFAULT_MARKER_SIZE,
+            marker_size: default_marker_diameter_px(),
             filled: false,
             per_point_sizes: None,
             per_point_colors: None,
@@ -673,7 +672,11 @@ pub(crate) mod tests {
         let style = resolve_scatter_style(3, &args, "scatter").expect("style");
         assert!(style.filled);
         assert_eq!(style.marker_style, MarkerStyle::Square);
-        assert_eq!(style.marker_size as i32, 12);
+        assert!(
+            (style.marker_size - marker_area_points2_to_diameter_px(12.0)).abs() < 1e-5,
+            "size was {}",
+            style.marker_size
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

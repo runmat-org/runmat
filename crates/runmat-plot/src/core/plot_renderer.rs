@@ -1126,7 +1126,10 @@ impl PlotRenderer {
         let mut point_style_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
         for (render_data, _vb, _ib) in &render_items {
-            if render_data.pipeline_type == crate::core::PipelineType::Points {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) {
                 let style = crate::core::renderer::PointStyleUniforms {
                     face_color: render_data.material.albedo.to_array(),
                     edge_color: render_data.material.emissive.to_array(),
@@ -1140,6 +1143,28 @@ impl PlotRenderer {
                 point_style_bind_groups.push(None);
             }
         }
+        // Expand CPU marker vertices to billboard quads.
+        let mut point_buffers: Vec<Option<(wgpu::Buffer, usize)>> =
+            Vec::with_capacity(render_items.len());
+        for (render_data, _vb, _ib) in &render_items {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) && !render_data.vertices.is_empty()
+            {
+                let expanded = self
+                    .wgpu_renderer
+                    .create_direct_point_vertices(&render_data.vertices, 0.0);
+                let buffer = self.wgpu_renderer.create_vertex_buffer(&expanded);
+                point_buffers.push(Some((buffer, expanded.len())));
+            } else {
+                point_buffers.push(None);
+            }
+        }
+        self.wgpu_renderer.update_marker_screen_uniforms([
+            config.width.max(1) as f32,
+            config.height.max(1) as f32,
+        ]);
 
         // Create render pass
         {
@@ -1254,9 +1279,34 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     // Set the uniform bind group (required by shaders)
                     render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
+                    if matches!(
+                        render_data.pipeline_type,
+                        crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                    ) {
+                        if let Some(ref bg) = point_style_bind_groups[i] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                        render_pass.set_bind_group(
+                            2,
+                            self.wgpu_renderer.get_marker_screen_bind_group(),
+                            &[],
+                        );
+                    }
                 }
 
-                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                let is_markers = matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                );
+                if is_markers {
+                    if let Some((ref expanded, _len)) = point_buffers[i] {
+                        render_pass.set_vertex_buffer(0, expanded.slice(..));
+                    } else {
+                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    }
+                } else {
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                }
 
                 if let Some(index_buffer) = index_buffer {
                     render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1269,6 +1319,12 @@ impl PlotRenderer {
                     if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
                         render_pass.draw_indirect(args, offset);
                         continue;
+                    }
+                    if is_markers {
+                        if let Some((_, len)) = point_buffers[i] {
+                            render_pass.draw(0..len as u32, 0..1);
+                            continue;
+                        }
                     }
                     // Use draw_calls from render_data for proper vertex range handling
                     for draw_call in &render_data.draw_calls {
@@ -1887,7 +1943,11 @@ impl PlotRenderer {
         let mut point_buffers: Vec<Option<(wgpu::Buffer, usize)>> =
             Vec::with_capacity(render_items.len());
         for (render_data, _vb, _ib) in render_items.iter() {
-            if matches!(render_data.pipeline_type, crate::core::PipelineType::Points) {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) && !render_data.vertices.is_empty()
+            {
                 let expanded = self
                     .wgpu_renderer
                     // size_px=0.0 => use per-vertex normal.z sizes
@@ -1931,7 +1991,10 @@ impl PlotRenderer {
         let mut point_style_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
         for (render_data, _vb, _ib) in render_items.iter() {
-            if matches!(render_data.pipeline_type, crate::core::PipelineType::Points) {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) {
                 let style = crate::core::renderer::PointStyleUniforms {
                     face_color: render_data.material.albedo.to_array(),
                     edge_color: render_data.material.emissive.to_array(),
@@ -2033,6 +2096,10 @@ impl PlotRenderer {
             self.wgpu_renderer
                 .ensure_pipeline(crate::core::PipelineType::Points);
         }
+        self.wgpu_renderer.update_marker_screen_uniforms_for_axes(
+            axes_index,
+            [sw.max(1) as f32, sh.max(1) as f32],
+        );
 
         // Begin pass with Load (preserve egui)
         {
@@ -2159,8 +2226,6 @@ impl PlotRenderer {
                 None
             };
 
-            // Keep transient point buffers alive during this pass
-            let mut __temp_point_buffers_cam: Vec<wgpu::Buffer> = Vec::new();
             for (idx, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate()
             {
                 let is_triangles = matches!(
@@ -2169,8 +2234,10 @@ impl PlotRenderer {
                 );
                 let is_lines =
                     matches!(render_data.pipeline_type, crate::core::PipelineType::Lines);
-                let is_points =
-                    matches!(render_data.pipeline_type, crate::core::PipelineType::Points);
+                let is_points = matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                );
                 let is_textured = matches!(
                     render_data.pipeline_type,
                     crate::core::PipelineType::Textured
@@ -2209,6 +2276,11 @@ impl PlotRenderer {
                         .get_direct_uniform_bind_group_for_axes(axes_index);
                     render_pass.set_pipeline(pipeline_ref);
                     render_pass.set_bind_group(0, uniform_bg, &[]);
+                    if is_points {
+                        if let Some(ref bg) = point_style_bind_groups[idx] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                    }
                     log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=direct",
                         axes_index,
@@ -2242,6 +2314,17 @@ impl PlotRenderer {
                             .get_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
+                    if is_points {
+                        if let Some(ref bg) = point_style_bind_groups[idx] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                        render_pass.set_bind_group(
+                            2,
+                            self.wgpu_renderer
+                                .get_marker_screen_bind_group_for_axes(axes_index),
+                            &[],
+                        );
+                    }
                     log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=standard",
                         axes_index,
@@ -2251,9 +2334,6 @@ impl PlotRenderer {
 
                 if is_points && use_direct {
                     if let Some((ref buf, len)) = point_buffers[idx] {
-                        if let Some(ref bg) = point_style_bind_groups[idx] {
-                            render_pass.set_bind_group(1, bg, &[]);
-                        }
                         render_pass.set_vertex_buffer(0, buf.slice(..));
                         render_pass.draw(0..len as u32, 0..1);
                         log::debug!(
@@ -2263,6 +2343,12 @@ impl PlotRenderer {
                             len
                         );
                         continue;
+                    }
+                } else if is_points {
+                    if let Some((ref buf, _len)) = point_buffers[idx] {
+                        render_pass.set_vertex_buffer(0, buf.slice(..));
+                    } else {
+                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                     }
                 } else {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -2280,6 +2366,12 @@ impl PlotRenderer {
                         );
                     }
                 } else {
+                    if is_points {
+                        if let Some((_, len)) = point_buffers[idx] {
+                            render_pass.draw(0..len as u32, 0..1);
+                            continue;
+                        }
+                    }
                     for dc in &render_data.draw_calls {
                         render_pass.draw(
                             dc.vertex_offset as u32..(dc.vertex_offset + dc.vertex_count) as u32,

@@ -11,6 +11,8 @@ use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
 use runmat_plot::gpu::scatter3::{Scatter3GpuInputs, Scatter3GpuParams};
 use runmat_plot::gpu::ScalarType;
+use runmat_plot::plots::scatter::MarkerStyle;
+use runmat_plot::plots::scatter3::Scatter3GpuStyle;
 use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::Scatter3Plot;
@@ -30,11 +32,12 @@ use super::perf::scatter3_lod_stride;
 use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
-    map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
-    PointColorArg, PointGpuColor, PointSizeArg,
+    default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
+    validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
+    PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::LineStyleParseOptions;
+use super::style::{LineStyleParseOptions, MarkerColor};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "scatter3";
@@ -161,7 +164,6 @@ pub async fn scatter3_builtin(
     Ok(handle)
 }
 
-const DEFAULT_POINT_SIZE: f32 = 6.0;
 const DEFAULT_SCATTER3_LABEL: &str = "Data";
 
 fn scatter3_err(message: impl Into<String>) -> RuntimeError {
@@ -175,7 +177,11 @@ fn default_color() -> Vec4 {
 #[derive(Clone, Debug)]
 struct Scatter3ResolvedStyle {
     uniform_color: Vec4,
+    edge_color: Vec4,
+    edge_thickness: f32,
+    marker_style: MarkerStyle,
     point_size: f32,
+    filled: bool,
     per_point_sizes: Option<Vec<f32>>,
     per_point_colors: Option<Vec<Vec4>>,
     color_values: Option<Vec<f64>>,
@@ -183,6 +189,8 @@ struct Scatter3ResolvedStyle {
     gpu_sizes: Option<GpuTensorHandle>,
     gpu_colors: Option<PointGpuColor>,
     colormap: ColorMap,
+    marker_face_flat: bool,
+    marker_edge_flat: bool,
     requires_cpu: bool,
     label: String,
 }
@@ -194,7 +202,11 @@ fn resolve_scatter3_style(
 ) -> BuiltinResult<Scatter3ResolvedStyle> {
     let mut style = Scatter3ResolvedStyle {
         uniform_color: default_color(),
-        point_size: DEFAULT_POINT_SIZE,
+        edge_color: default_color(),
+        edge_thickness: 1.0,
+        marker_style: MarkerStyle::Circle,
+        point_size: default_marker_diameter_px(),
+        filled: args.filled,
         per_point_sizes: None,
         per_point_colors: None,
         color_values: None,
@@ -202,6 +214,8 @@ fn resolve_scatter3_style(
         gpu_sizes: None,
         gpu_colors: None,
         colormap: ColorMap::Parula,
+        marker_face_flat: false,
+        marker_edge_flat: false,
         requires_cpu: false,
         label: DEFAULT_SCATTER3_LABEL.to_string(),
     };
@@ -212,19 +226,51 @@ fn resolve_scatter3_style(
 
     let appearance = &args.style.appearance;
     style.uniform_color = appearance.color;
+    style.edge_color = appearance.color;
+    style.edge_thickness = appearance.line_width.max(0.1);
 
     if let PointColorArg::Uniform(color) = &args.color {
         style.uniform_color = *color;
     }
 
+    if appearance.marker.is_none() {
+        style.edge_color = style.uniform_color;
+    }
+
     if let Some(marker) = appearance.marker.as_ref() {
+        style.marker_style = marker.kind.to_plot_marker();
         if let Some(size) = marker.size {
-            style.point_size = size.max(0.1);
+            style.point_size = marker_area_points2_to_diameter_px(size as f64);
+        }
+        if matches!(marker.edge_color, MarkerColor::Flat) {
+            style.marker_edge_flat = true;
+        } else {
+            style.edge_color =
+                resolve_marker_color(&marker.edge_color, style.edge_color, style.uniform_color);
+        }
+        match &marker.face_color {
+            MarkerColor::Flat => {
+                style.marker_face_flat = true;
+                style.filled = true;
+            }
+            MarkerColor::None => {
+                style.filled = false;
+            }
+            _ => {
+                let face_color = resolve_marker_color(
+                    &marker.face_color,
+                    style.uniform_color,
+                    style.uniform_color,
+                );
+                if matches!(marker.face_color, MarkerColor::Color(_) | MarkerColor::Auto) {
+                    style.uniform_color = face_color;
+                }
+            }
         }
     }
 
     if let PointSizeArg::Scalar(size) = &args.size {
-        style.point_size = (*size).max(0.1);
+        style.point_size = marker_area_points2_to_diameter_px(*size as f64);
     }
 
     if let Some(value) = args.size.value() {
@@ -263,6 +309,25 @@ fn resolve_scatter3_style(
         _ => {}
     }
 
+    if style.per_point_colors.is_some() || style.color_values.is_some() {
+        style.filled = true;
+    }
+
+    if style.marker_face_flat {
+        if style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+            return Err(scatter3_err(format!(
+                "{context}: MarkerFaceColor 'flat' requires per-point color data (C argument)"
+            )));
+        }
+        style.filled = true;
+    }
+
+    if style.marker_edge_flat && style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+        return Err(scatter3_err(format!(
+            "{context}: MarkerEdgeColor 'flat' requires per-point color data (C argument)"
+        )));
+    }
+
     if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
         style.requires_cpu = true;
     }
@@ -272,6 +337,15 @@ fn resolve_scatter3_style(
     style.requires_cpu |= args.style.requires_cpu_fallback;
 
     Ok(style)
+}
+
+fn resolve_marker_color(marker_color: &MarkerColor, fallback: Vec4, default_base: Vec4) -> Vec4 {
+    match marker_color {
+        MarkerColor::Auto => fallback,
+        MarkerColor::None => Vec4::new(default_base.x, default_base.y, default_base.z, 0.0),
+        MarkerColor::Flat => fallback,
+        MarkerColor::Color(color) => *color,
+    }
 }
 
 fn build_scatter3_plot(
@@ -300,6 +374,11 @@ fn build_scatter3_plot(
         .with_point_size(style.point_size)
         .with_color(style.uniform_color)
         .with_label(style.label.clone());
+    scatter.set_marker_style(style.marker_style);
+    scatter.set_filled(style.filled);
+    scatter.set_edge_color(style.edge_color);
+    scatter.set_edge_thickness(style.edge_thickness);
+    scatter.set_edge_color_from_vertex(style.marker_edge_flat);
     if let Some(sizes) = style.per_point_sizes.take() {
         scatter.set_point_sizes(sizes);
     }
@@ -374,10 +453,20 @@ fn build_scatter3_gpu_plot(
     .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
 
     let drawn_points = gpu_vertices.vertex_count;
+    let gpu_style = Scatter3GpuStyle {
+        color: style.uniform_color,
+        edge_color: style.edge_color,
+        edge_thickness: style.edge_thickness,
+        marker_style: style.marker_style,
+        filled: style.filled,
+        has_per_point_colors: style.per_point_colors.is_some() || style.gpu_colors.is_some(),
+        edge_from_vertex_colors: style.marker_edge_flat,
+    };
+
     Ok(Scatter3Plot::from_gpu_buffer(
         gpu_vertices,
         drawn_points,
-        style.uniform_color,
+        gpu_style,
         style.point_size,
         bounds,
     )
@@ -521,7 +610,11 @@ pub(crate) mod tests {
     fn test_style() -> Scatter3ResolvedStyle {
         Scatter3ResolvedStyle {
             uniform_color: default_color(),
-            point_size: DEFAULT_POINT_SIZE,
+            edge_color: default_color(),
+            edge_thickness: 1.0,
+            marker_style: MarkerStyle::Circle,
+            point_size: default_marker_diameter_px(),
+            filled: false,
             per_point_sizes: None,
             per_point_colors: None,
             color_values: None,
@@ -529,6 +622,8 @@ pub(crate) mod tests {
             gpu_sizes: None,
             gpu_colors: None,
             colormap: ColorMap::Parula,
+            marker_face_flat: false,
+            marker_edge_flat: false,
             requires_cpu: false,
             label: DEFAULT_SCATTER3_LABEL.to_string(),
         }
@@ -588,6 +683,29 @@ pub(crate) mod tests {
         let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
         let style = resolve_scatter3_style(2, &args, "scatter3").expect("style");
         assert!(style.per_point_sizes.is_some());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scatter3_resolves_marker_style_color_and_size() {
+        setup_plot_tests();
+        let rest = vec![
+            Value::Num(12.0),
+            Value::String("g".into()),
+            Value::String("filled".into()),
+            Value::String("Marker".into()),
+            Value::String("s".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
+        let style = resolve_scatter3_style(3, &args, "scatter3").expect("style");
+        assert_eq!(style.marker_style, MarkerStyle::Square);
+        assert!(style.filled);
+        assert!(
+            (style.point_size - marker_area_points2_to_diameter_px(12.0)).abs() < 1e-5,
+            "size was {}",
+            style.point_size
+        );
+        assert!(style.uniform_color.y > style.uniform_color.x);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
