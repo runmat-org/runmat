@@ -101,7 +101,7 @@ mod signal;
 mod solve;
 #[path = "ops/tensor.rs"]
 mod tensor;
-#[path = "window.rs"]
+#[path = "ops/window.rs"]
 mod window;
 
 use self::window::WindowKind;
