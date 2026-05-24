@@ -141,3 +141,17 @@
 - Verification for Phase 8:
   - `cargo test -p runmat-accelerate --lib` passed.
   - `cargo test -p runmat-accelerate --tests` passed.
+- Phase 9 closeout validation completed.
+  - Full workspace verification passed:
+    - `cargo test --workspace --all-targets`
+  - Refactor closeout commit chain now includes:
+    - `22728d3e` (`accelerate: finalize provider ops module tree`)
+      - finalized `provider/ops/*` structure
+      - renamed random module path to `ops/random.rs`
+      - removed remaining `provider_impl/*` usage
+  - Non-refactor blockers resolved to reach workspace-green:
+    - `3e36dc58` (`runtime: isolate warning store per execution thread`)
+      - fixed cross-test/execution warning interference by moving warning storage to thread-local state
+    - `877eb464` (`runtime: centralize true-empty neutral cat semantics`)
+      - moved true-empty `[]` neutrality policy into shared concat core path
+- Plan-of-record status: complete.
