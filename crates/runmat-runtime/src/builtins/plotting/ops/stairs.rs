@@ -273,7 +273,13 @@ fn build_stairs_gpu_plot(
         };
         let marker_params = MarkerGpuParams {
             color: marker.face_color,
-            half_width_data: 0.0,
+            half_width_px: 0.0,
+            viewport_width_px: 1.0,
+            viewport_height_px: 1.0,
+            x_min: 0.0,
+            x_span: 1.0,
+            y_min: 0.0,
+            y_span: 1.0,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
         };

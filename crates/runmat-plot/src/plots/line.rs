@@ -443,15 +443,14 @@ impl LinePlot {
             .ok_or_else(|| "missing line bounds".to_string())?;
 
         let stroke_width_px = self.line_width.max(1.0);
-        let data_per_px = crate::core::data_units_per_px(bounds, viewport_px);
-        let half_width_data = (stroke_width_px * 0.5) * data_per_px;
+        let x_span = (bounds.max.x - bounds.min.x).abs().max(1e-12);
+        let y_span = (bounds.max.y - bounds.min.y).abs().max(1e-12);
         trace!(
             target: "runmat_plot",
-            "line-pack: begin len={} line_width_px={} stroke_width_px={} half_width_data={} viewport_px={:?} bounds=({:?}..{:?})",
+            "line-pack: begin len={} line_width_px={} stroke_width_px={} viewport_px={:?} bounds=({:?}..{:?})",
             inputs.len,
             self.line_width,
             stroke_width_px,
-            half_width_data,
             viewport_px,
             bounds.min,
             bounds.max
@@ -459,7 +458,13 @@ impl LinePlot {
 
         let params = crate::gpu::line::LineGpuParams {
             color: self.color,
-            half_width_data,
+            half_width_px: stroke_width_px * 0.5,
+            viewport_width_px: viewport_px.0 as f32,
+            viewport_height_px: viewport_px.1 as f32,
+            x_min: bounds.min.x,
+            x_span,
+            y_min: bounds.min.y,
+            y_span,
             line_style: self.line_style,
             marker_size: 1.0,
         };
@@ -579,8 +584,8 @@ impl LinePlot {
     ///
     /// With a viewport available, 2D lines are always rendered as triangle strokes so dense
     /// polylines remain visually continuous at all zoom levels and lengths. The user-facing
-    /// `line_width` is expressed in *pixels*, while extrusion operates in data space.
-    /// We convert pixels -> data-units using the current data range and target size.
+    /// `line_width` is expressed in *pixels* and extrusion is performed in viewport space,
+    /// then mapped back to data coordinates for the rest of the render pipeline.
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
         if self.gpu_vertices.is_some() {
             // GPU paths already handle sizing via pipeline/state; keep existing behavior.
@@ -591,44 +596,8 @@ impl LinePlot {
             return self.render_data();
         };
         let bounds = self.bounds();
-        let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
         let stroke_width_px = self.line_width.max(1.0);
-        let width_data = stroke_width_px * data_per_px;
-
-        let base_tris = match self.line_cap {
-            LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-                width_data,
-                self.line_join,
-            ),
-            LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-                width_data,
-            ),
-            LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
-                &self.x_data,
-                &self.y_data,
-                self.color,
-                width_data,
-                12,
-            ),
-        };
-        let tris = match self.line_style {
-            LineStyle::Solid => base_tris,
-            LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
-                vertex_utils::create_thick_polyline_dashed(
-                    &self.x_data,
-                    &self.y_data,
-                    self.color,
-                    width_data,
-                    self.line_style,
-                )
-            }
-        };
+        let tris = self.build_viewport_stroke_vertices(bounds, viewport_px, stroke_width_px);
         let vertex_count = tris.len();
 
         let style_code = match self.line_style {
@@ -674,6 +643,76 @@ impl LinePlot {
             draw_calls: vec![draw_call],
             image: None,
         }
+    }
+
+    fn build_viewport_stroke_vertices(
+        &self,
+        bounds: BoundingBox,
+        viewport_px: (u32, u32),
+        stroke_width_px: f32,
+    ) -> Vec<Vertex> {
+        let x_span = (bounds.max.x - bounds.min.x).abs().max(1e-12);
+        let y_span = (bounds.max.y - bounds.min.y).abs().max(1e-12);
+        let vw = (viewport_px.0 as f32).max(1.0);
+        let vh = (viewport_px.1 as f32).max(1.0);
+        let sx = vw / x_span;
+        let sy = vh / y_span;
+
+        let x_px: Vec<f64> = self
+            .x_data
+            .iter()
+            .map(|&x| ((x as f32 - bounds.min.x) * sx) as f64)
+            .collect();
+        let y_px: Vec<f64> = self
+            .y_data
+            .iter()
+            .map(|&y| ((y as f32 - bounds.min.y) * sy) as f64)
+            .collect();
+
+        let base_tris = match self.line_cap {
+            LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
+                &x_px,
+                &y_px,
+                self.color,
+                stroke_width_px,
+                self.line_join,
+            ),
+            LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
+                &x_px,
+                &y_px,
+                self.color,
+                stroke_width_px,
+            ),
+            LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
+                &x_px,
+                &y_px,
+                self.color,
+                stroke_width_px,
+                12,
+            ),
+        };
+        let mut tris = match self.line_style {
+            LineStyle::Solid => base_tris,
+            LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
+                vertex_utils::create_thick_polyline_dashed(
+                    &x_px,
+                    &y_px,
+                    self.color,
+                    stroke_width_px,
+                    self.line_style,
+                )
+            }
+        };
+
+        let inv_sx = x_span / vw;
+        let inv_sy = y_span / vh;
+        for v in &mut tris {
+            let px = v.position[0];
+            let py = v.position[1];
+            v.position[0] = bounds.min.x + px * inv_sx;
+            v.position[1] = bounds.min.y + py * inv_sy;
+        }
+        tris
     }
 
     /// Generate render data representing the markers for this line plot.
@@ -1032,5 +1071,30 @@ mod tests {
         let render_data = plot.render_data_with_viewport(None);
         assert_eq!(render_data.pipeline_type, PipelineType::Lines);
         assert_eq!(render_data.vertices.len(), 4); // 2 segments * 2 vertices
+    }
+
+    #[test]
+    fn viewport_stroke_width_is_pixel_stable_across_anisotropic_axes() {
+        let x = vec![-100.0, 0.0];
+        let y = vec![10000.0, 0.0];
+        let mut plot = LinePlot::new(x, y).unwrap();
+        plot.set_line_width(1.0);
+        let viewport = (1400, 1000);
+        let render_data = plot.render_data_with_viewport(Some(viewport));
+        assert_eq!(render_data.pipeline_type, PipelineType::Triangles);
+        assert!(render_data.vertices.len() >= 6);
+
+        let bounds = render_data.bounds.expect("bounds");
+        let v0 = render_data.vertices[0].position;
+        let v1 = render_data.vertices[1].position;
+        let px_per_x = viewport.0 as f32 / (bounds.max.x - bounds.min.x).abs().max(1e-12);
+        let px_per_y = viewport.1 as f32 / (bounds.max.y - bounds.min.y).abs().max(1e-12);
+        let dx_px = (v0[0] - v1[0]) * px_per_x;
+        let dy_px = (v0[1] - v1[1]) * px_per_y;
+        let width_px = (dx_px * dx_px + dy_px * dy_px).sqrt();
+        assert!(
+            (width_px - 1.0).abs() < 0.05,
+            "expected ~1px stroke, got {width_px}"
+        );
     }
 }

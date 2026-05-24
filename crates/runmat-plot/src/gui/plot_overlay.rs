@@ -346,6 +346,69 @@ impl PlotOverlay {
         (y_tick_zone + y_label_zone).max(24.0 * scale)
     }
 
+    fn estimate_x_axis_edge_padding(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        scale: f32,
+    ) -> f32 {
+        let tick_font_size = 10.0 * scale;
+        let x_log = plot_renderer.overlay_x_log_for_axes(axes_index);
+
+        let explicit_tick_labels = plot_renderer
+            .overlay_x_tick_labels_for_axes(axes_index)
+            .filter(|labels| !labels.is_empty());
+        let categorical_tick_labels = plot_renderer
+            .overlay_categorical_labels_for_axes(axes_index)
+            .and_then(|(is_x, labels)| if is_x { Some(labels) } else { None })
+            .or_else(|| {
+                plot_renderer
+                    .overlay_categorical_labels()
+                    .and_then(|(is_x, labels)| if is_x { Some(labels.clone()) } else { None })
+            });
+
+        let labels: Vec<String> = if let Some(labels) = explicit_tick_labels {
+            labels
+                .iter()
+                .map(|label| truncate_label(label, 14))
+                .collect()
+        } else if let Some(labels) = categorical_tick_labels {
+            labels
+                .iter()
+                .map(|label| truncate_label(label, 14))
+                .collect()
+        } else if let Some((x_min, x_max, _y_min, _y_max)) =
+            plot_renderer.overlay_display_bounds_for_axes(axes_index)
+        {
+            if x_log && x_min > 0.0 && x_max > 0.0 {
+                let start_decade = x_min.log10().floor() as i32;
+                let end_decade = x_max.log10().ceil() as i32;
+                (start_decade..=end_decade)
+                    .map(|d| format!("10^{d}"))
+                    .collect()
+            } else {
+                plot_utils::generate_major_ticks(x_min, x_max)
+                    .into_iter()
+                    .map(plot_utils::format_tick_label)
+                    .collect()
+            }
+        } else {
+            vec!["-1.00".to_string(), "1.00".to_string()]
+        };
+
+        let max_edge_label_width = if labels.is_empty() {
+            Self::approx_text_width_points("-1.00", tick_font_size)
+        } else if labels.len() == 1 {
+            Self::approx_text_width_points(&labels[0], tick_font_size)
+        } else {
+            let left = Self::approx_text_width_points(&labels[0], tick_font_size);
+            let right = Self::approx_text_width_points(&labels[labels.len() - 1], tick_font_size);
+            left.max(right)
+        };
+
+        (max_edge_label_width * 0.5 + 3.0 * scale).max(6.0 * scale)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn layout_2d_panel(
         &self,
@@ -365,7 +428,8 @@ impl PlotOverlay {
         let outer_h = outer.height().max(1.0);
         let title_gap = if has_title { 4.0 * scale } else { 1.5 * scale };
         let x_gap = 4.0 * scale;
-        let right_pad = 3.0 * scale;
+        let x_edge_pad = self.estimate_x_axis_edge_padding(plot_renderer, axes_index, scale);
+        let mut right_pad = (3.0 * scale).max(x_edge_pad + 1.0 * scale);
 
         let mut title_h = if has_title {
             (28.0 * scale).min(outer_h * 0.16)
@@ -380,8 +444,11 @@ impl PlotOverlay {
         let min_plot_w = (outer_w * 0.56).max(44.0 * scale).min(outer_w);
         let min_plot_h = (outer_h * 0.54).max(44.0 * scale).min(outer_h);
 
-        if outer_w - y_w < min_plot_w {
-            y_w = (outer_w - min_plot_w).max(0.0);
+        if outer_w - y_w - right_pad < min_plot_w {
+            y_w = (outer_w - right_pad - min_plot_w).max(0.0);
+        }
+        if outer_w - y_w - right_pad < min_plot_w {
+            right_pad = (outer_w - y_w - min_plot_w).max(0.0);
         }
 
         let available_h = outer_h - title_h - title_gap - x_h - x_gap;

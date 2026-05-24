@@ -20,8 +20,14 @@ pub struct LineGpuInputs {
 /// Parameters describing how the GPU vertices should be generated.
 pub struct LineGpuParams {
     pub color: Vec4,
-    /// Half-width in *data units* used to extrude thick line triangles.
-    pub half_width_data: f32,
+    /// Half-width in pixels used to extrude thick line triangles in viewport space.
+    pub half_width_px: f32,
+    pub viewport_width_px: f32,
+    pub viewport_height_px: f32,
+    pub x_min: f32,
+    pub x_span: f32,
+    pub y_min: f32,
+    pub y_span: f32,
     pub line_style: LineStyle,
     pub marker_size: f32,
 }
@@ -31,9 +37,16 @@ pub struct LineGpuParams {
 struct LineSegmentUniforms {
     color: [f32; 4],
     count: u32,
-    half_width_data: f32,
     line_style: u32,
-    _pad: u32,
+    half_width_px: f32,
+    _pad0: f32,
+    viewport_width_px: f32,
+    viewport_height_px: f32,
+    x_min: f32,
+    x_span: f32,
+    y_min: f32,
+    y_span: f32,
+    _pad1: [f32; 2],
 }
 
 #[repr(C)]
@@ -63,10 +76,12 @@ pub fn pack_vertices_from_xy(
     let max_vertices = segments as u64 * vertices_per_segment;
     trace!(
         target: "runmat_plot",
-        "line-pack-kernel: dispatch segments={} max_vertices={} half_width_data={}",
+        "line-pack-kernel: dispatch segments={} max_vertices={} half_width_px={} viewport=({},{})",
         segments,
         max_vertices,
-        params.half_width_data
+        params.half_width_px,
+        params.viewport_width_px,
+        params.viewport_height_px
     );
 
     let workgroup_size = tuning::effective_workgroup_size();
@@ -144,9 +159,16 @@ pub fn pack_vertices_from_xy(
     let uniforms = LineSegmentUniforms {
         color: params.color.to_array(),
         count: inputs.len,
-        half_width_data: params.half_width_data.max(0.0),
         line_style: line_style_code(params.line_style),
-        _pad: 0,
+        half_width_px: params.half_width_px.max(0.0),
+        _pad0: 0.0,
+        viewport_width_px: params.viewport_width_px.max(1.0),
+        viewport_height_px: params.viewport_height_px.max(1.0),
+        x_min: params.x_min,
+        x_span: params.x_span.max(1e-12),
+        y_min: params.y_min,
+        y_span: params.y_span.max(1e-12),
+        _pad1: [0.0; 2],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line-pack-uniforms"),
