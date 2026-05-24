@@ -92,3 +92,8 @@
   - `cargo test -p runmat-accelerate --lib` passed.
   - `cargo test -p runmat-turbine --tests` passed.
   - `cargo test -p runmat-static-analysis --lib` blocked by a pre-existing warning-as-error in `runmat-runtime` (`ImpulseResponse.discrete` dead-code), not introduced by this refactor.
+- Phase 5a: extracted signal/scan operations into `backend/wgpu/provider_impl/signal.rs`.
+  - moved: `conv1d_exec`, `iir_filter_exec`, `diff_once_exec`, `diff_exec`, `gradient_exec`, `cumsum_exec`, `cumprod_exec`, `cummin_exec`, `cummax_exec`.
+  - wired `mod signal;` and removed the moved method bodies from `provider_impl/mod.rs`.
+- Verification for Phase 5a:
+  - `cargo test -p runmat-accelerate --lib` passed.
