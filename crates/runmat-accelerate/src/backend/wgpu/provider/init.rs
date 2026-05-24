@@ -1,4 +1,27 @@
-use super::*;
+use anyhow::{anyhow, Result};
+use log::{info, warn};
+#[cfg(not(target_arch = "wasm32"))]
+use pollster::block_on;
+use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
+
+use super::{
+    canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode, ImageNormalizeTuning,
+    NumericPrecision, ReductionTwoPassMode, WgpuProvider, WgpuProviderOptions, WorkgroupConfig,
+};
+use crate::backend::wgpu::autotune::AutotuneController;
+use crate::backend::wgpu::cache::bind_group::BindGroupCache;
+use crate::backend::wgpu::config::{
+    self, DEFAULT_REDUCTION_WG, DEFAULT_TWO_PASS_THRESHOLD, MATMUL_TILE, WORKGROUP_SIZE,
+};
+use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
+use crate::backend::wgpu::residency::BufferResidency;
+use crate::backend::wgpu::resources::KernelResourceRegistry;
+use crate::telemetry::AccelTelemetry;
 
 impl WgpuProvider {
     pub(super) fn buffer_residency_pool_limit() -> usize {
