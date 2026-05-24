@@ -2,7 +2,7 @@
 
 ## Goal
 
-Refactor `runmat/crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs` into a clearer module tree without changing behavior, public APIs, fallback choices, buffer semantics, or kernel execution order.
+Refactor `runmat/crates/runmat-accelerate/src/backend/wgpu/provider_impl/mod.rs` into a clearer module tree without changing behavior, public APIs, fallback choices, buffer semantics, or kernel execution order.
 
 This is a logic cleanup only refactor.
 
@@ -13,8 +13,8 @@ The WGPU backend currently has this layout:
 ```text
 backend/wgpu/
   provider.rs
-  provider_impl.rs
   provider_impl/
+    mod.rs
     fft.rs
     rnd.rs
     solve.rs
@@ -25,7 +25,7 @@ backend/wgpu/
   shaders/*
 ```
 
-`provider_impl.rs` is the center of gravity for the backend. It currently mixes:
+`provider_impl/mod.rs` is the center of gravity for the backend. It currently mixes:
 
 - provider construction and initialization
 - device/adapter selection
@@ -38,16 +38,16 @@ backend/wgpu/
 - a very large `impl AccelProvider for WgpuProvider`
 - many private execution helpers across unrelated operation families
 
-The file is already partially dissolved into `provider_impl/fft.rs`, `provider_impl/rnd.rs`, `provider_impl/solve.rs`, and `provider_impl/window.rs`, and the top-of-file comment in `provider_impl.rs` explicitly indicates that new implementation work should go into submodules.
+The file is already partially dissolved into `provider_impl/fft.rs`, `provider_impl/rnd.rs`, `provider_impl/solve.rs`, and `provider_impl/window.rs`, and the top-of-file comment in `provider_impl/mod.rs` explicitly indicates that new implementation work should go into submodules.
 
-At this point, `provider_impl.rs` is still effectively monolithic.
+At this point, `provider_impl/mod.rs` is still effectively monolithic.
 
 ## Drift Notes (Repo-Verified)
 
 These updates reflect current repository reality:
 
 - `backend/wgpu/provider.rs` already exists and is the public registration/facade module.
-- Renaming `provider_impl.rs` directly to `provider/mod.rs` would collide with that existing module unless the facade is renamed in the same change.
+- Renaming `provider_impl/mod.rs` directly to `provider/mod.rs` would collide with that existing module unless the facade is renamed in the same change.
 - Multiple tests and internal imports currently reference `backend::wgpu::provider_impl::*`; a package rename is therefore not a pure local file move.
 - `rnd.rs` already exists as a partial random-family extraction.
 
@@ -245,7 +245,7 @@ Operation family:
 - `sub2ind`
 - `ind2sub`
 - scatter row/column
-- gather/index-select related helpers if present
+- gather/index-select related helpers
 
 ### `provider/ops/random.rs`
 
@@ -270,7 +270,7 @@ Operation family:
 - `fspecial`
 - other pure allocation/creation style kernels
 
-`window.rs` can remain separate because it is already clean and self-contained.
+`window.rs` remains separate because it is already clean and self-contained.
 
 ### `provider/ops/polynomial.rs`
 
@@ -287,9 +287,10 @@ This can stay small.
 Operation family:
 
 - `imfilter`
-- image normalize helpers if they belong here instead of a lower-level dispatch/tuning module
+- provider-facing image normalize helpers
+- operation-level orchestration for image kernels
 
-If image normalization remains deeply tied to backend-specific tuning and dynamic pipelines, some supporting code may still stay closer to provider core.
+Backend-tuning and low-level pipeline concerns stay in `dispatch/*` and are called from this ops layer.
 
 ### `provider/ops/linalg.rs`
 
@@ -391,7 +392,7 @@ Safe extraction:
 
 ### 6. Inline WGSL constants for logical/comparison kernels
 
-The top of `provider_impl.rs` contains a large block of embedded WGSL strings for logical and comparison kernels in both `f32` and `f64` forms.
+The top of `provider_impl/mod.rs` contains a large block of embedded WGSL strings for logical and comparison kernels in both `f32` and `f64` forms.
 
 These should move into `backend/wgpu/shaders/`.
 
@@ -476,7 +477,7 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - upload/download/read scalar/free
 - metadata cleanup helpers
 - exported device/context helpers
-- telemetry snapshot/reset if they remain tightly coupled to core caches
+- telemetry snapshot/reset (kept in core alongside cache ownership)
 
 ### `provider/ops/elementwise.rs`
 
@@ -544,11 +545,11 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 ### `provider/ops/image.rs`
 
 - `imfilter`
-- image normalize provider-facing helpers if not better placed elsewhere
+- image normalize provider-facing helpers
 
 ### `provider/ops/linalg.rs`
 
-- matmul helpers if still local here
+- matmul helpers that remain provider-level orchestration
 - pagefun mtimes
 - centered gram
 - `syrk`
@@ -558,6 +559,8 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 
 ## Proposed Refactor Sequence
 
+All phases below are plan-of-record, not optional.
+
 ### Phase 0: Path stabilization without public path churn
 
 1. Keep current public API/paths stable while extraction starts.
@@ -565,6 +568,8 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 3. Keep code otherwise unchanged except local path normalization.
 
 This creates the right structural landing zone before more extraction, without forcing import-path updates.
+
+Status: completed on 2026-05-24.
 
 ### Phase 1: Extract `elementwise.rs`
 
@@ -673,9 +678,9 @@ Final resting state (plan of record):
   - shader sources in `shaders/*`
 - normalized random naming (no long-term `rnd` abbreviation drift)
 
-Recommended first move:
+Next move:
 
-1. keep `provider_impl` naming stable
-2. extract `elementwise.rs`
+1. keep `provider_impl` naming stable through extraction phases
+2. extract `elementwise.rs` as Phase 1
 
 That gives the best improvement-to-risk ratio while keeping the refactor firmly in the “logic cleanup only” category.
