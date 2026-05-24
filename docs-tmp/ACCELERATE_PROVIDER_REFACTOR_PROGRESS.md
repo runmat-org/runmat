@@ -97,3 +97,8 @@
   - wired `mod signal;` and removed the moved method bodies from `provider_impl/mod.rs`.
 - Verification for Phase 5a:
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 5b: extracted image filtering execution paths into `backend/wgpu/provider_impl/image.rs`.
+  - moved: `imfilter_exec`, `imfilter_exec_fallback`.
+  - wired `mod image;` and removed the moved method bodies from `provider_impl/mod.rs`.
+- Verification for Phase 5b:
+  - `cargo test -p runmat-accelerate --lib` passed.
