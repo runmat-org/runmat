@@ -102,3 +102,8 @@
   - wired `mod image;` and removed the moved method bodies from `provider_impl/mod.rs`.
 - Verification for Phase 5b:
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 5c: extracted remaining linalg-heavy execution paths into `backend/wgpu/provider_impl/linalg.rs`.
+  - moved: `bandwidth_exec`, `syrk_exec`, `matmul_exec` (+ usage helper), `pagefun_exec` (+ mtimes helper), centered-gram/QR debug helpers, `covariance_exec`, `corrcoef_exec`, `cast_tensor_precision`, `dot_exec`, `cross_exec`.
+  - wired `mod linalg;` and removed the moved method bodies from `provider_impl/mod.rs`.
+- Verification for Phase 5c:
+  - `cargo test -p runmat-accelerate --lib` passed.
