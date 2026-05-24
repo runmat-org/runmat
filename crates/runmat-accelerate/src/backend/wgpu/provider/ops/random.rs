@@ -1,4 +1,11 @@
-use super::*;
+use anyhow::{anyhow, ensure, Result};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_time::Instant;
+
+use super::{
+    advance_rng_state, philox_keys_from_state, product_checked, rng_state, seed_from_state,
+    NumericPrecision, WgpuProvider, MAX_SAFE_INTEGER,
+};
 
 impl WgpuProvider {
     pub(crate) fn random_exponential_exec(
