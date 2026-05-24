@@ -47,3 +47,9 @@
 - Verification for Phase 3a:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 4a: created `backend/wgpu/provider_impl/polynomial.rs` and moved polynomial execution helpers.
+  - moved: `polyval_exec`, `polyint_exec`, `polyder_exec`, `polyder_product_exec`, `polyder_quotient_exec`.
+  - `linspace_exec` intentionally remains in `mod.rs` for the constructors extraction phase.
+- Verification for Phase 4a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
