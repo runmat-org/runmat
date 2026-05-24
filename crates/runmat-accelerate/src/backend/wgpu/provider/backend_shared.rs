@@ -867,5 +867,4 @@ fn rng_state() -> &'static Mutex<u64> {
     static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
     RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
 }
-static NEXT_SUBMISSION_ID: AtomicU32 = AtomicU32::new(1);
-
+pub(super) static NEXT_SUBMISSION_ID: AtomicU32 = AtomicU32::new(1);
