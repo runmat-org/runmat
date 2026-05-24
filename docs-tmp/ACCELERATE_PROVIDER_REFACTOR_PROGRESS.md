@@ -117,3 +117,27 @@
   - wired `mod {core,helpers,init};` and removed the monolithic lifecycle impl block from `provider_impl/mod.rs`.
 - Verification for Phase 5d + Phase 6:
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 7: finalized canonical `provider` tree naming/layout.
+  - moved implementation files from `backend/wgpu/provider_impl/*` to `backend/wgpu/provider/*`.
+  - renamed former monolith root to `backend/wgpu/provider/backend.rs` and wired it via `provider.rs`.
+  - `provider.rs` now owns implementation module wiring (`mod backend;`) and re-exports provider surface from there.
+  - removed `pub mod provider_impl;` from `backend/wgpu/mod.rs` and updated all internal tests/imports from `provider_impl` to `provider`.
+- Verification for Phase 7:
+  - `cargo test -p runmat-accelerate --lib` passed.
+  - `cargo test -p runmat-accelerate --tests` passed.
+- Plan/doc refresh (repo-aligned) completed after Phase 7 landing:
+  - rewrote `ACCELERATE_PROVIDER_REFACTOR.md` to reflect actual on-disk state (`provider/*` tree already present).
+  - converted remaining structural cleanup to mandatory plan-of-record phases:
+    - Phase 8: explicit `provider/ops/*` normalization + `rnd.rs` -> `random.rs` rename.
+    - Phase 9: full verification/closeout.
+  - removed stale guidance that still described `provider_impl/mod.rs` as active center of gravity.
+- Last known full-workspace verification state (from latest `cargo test --workspace --all-targets` run):
+  - single remaining failure in `runmat-core` test `execute_outcome_reports_project_symbol_preload_warning_for_invalid_project_source` (expected warning code assertion mismatch).
+  - this is tracked as the current closeout blocker before Phase 9 can be marked complete.
+- Phase 8: completed explicit `provider/ops/*` normalization and random naming cleanup.
+  - moved operation-family modules from `provider/*` into `provider/ops/*`.
+  - renamed `provider/rnd.rs` to `provider/ops/random.rs`.
+  - rewired module paths in `provider/backend.rs` to the new `ops/*` locations.
+- Verification for Phase 8:
+  - `cargo test -p runmat-accelerate --lib` passed.
+  - `cargo test -p runmat-accelerate --tests` passed.

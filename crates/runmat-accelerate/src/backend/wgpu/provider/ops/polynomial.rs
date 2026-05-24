@@ -428,7 +428,7 @@ impl WgpuProvider {
             denominator,
         })
     }
-}
+
     async fn trim_polynomial_handle(
         &self,
         handle: GpuTensorHandle,

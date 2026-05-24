@@ -1,7 +1,7 @@
 // Internal note: this file has become a bit too large.
 // Subsequent provider call implementations that would otherwise
 // be added in this file should, going forwards, be added to
-// ./provider_impl/*.rs instead. This module will be refactored into
+// ./provider/*.rs instead. This module will be refactored into
 // submodules in that manner in the future.
 
 use anyhow::{anyhow, ensure, Result};
@@ -71,21 +71,37 @@ use std::sync::{Arc, Mutex};
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
+#[path = "ops/constructors.rs"]
 mod constructors;
+#[path = "core.rs"]
 mod core;
+#[path = "ops/elementwise.rs"]
 mod elementwise;
+#[path = "fft.rs"]
 mod fft;
+#[path = "helpers.rs"]
 mod helpers;
+#[path = "ops/image.rs"]
 mod image;
+#[path = "ops/indexing.rs"]
 mod indexing;
+#[path = "init.rs"]
 mod init;
+#[path = "ops/linalg.rs"]
 mod linalg;
+#[path = "ops/polynomial.rs"]
 mod polynomial;
-mod rnd;
+#[path = "ops/random.rs"]
+mod random;
+#[path = "ops/reduction.rs"]
 mod reduction;
+#[path = "ops/signal.rs"]
 mod signal;
+#[path = "solve.rs"]
 mod solve;
+#[path = "ops/tensor.rs"]
 mod tensor;
+#[path = "window.rs"]
 mod window;
 
 use self::window::WindowKind;

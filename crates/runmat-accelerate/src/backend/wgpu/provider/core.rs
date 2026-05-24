@@ -1,7 +1,7 @@
 use super::*;
 
 impl WgpuProvider {
-    async fn map_readback_bytes(
+    pub(super) async fn map_readback_bytes(
         &self,
         staging: wgpu::Buffer,
         size_bytes: u64,
@@ -30,7 +30,7 @@ impl WgpuProvider {
         Ok(out)
     }
 
-    fn map_readback_bytes_sync(
+    pub(super) fn map_readback_bytes_sync(
         &self,
         staging: wgpu::Buffer,
         size_bytes: u64,
@@ -46,11 +46,11 @@ impl WgpuProvider {
             block_on(self.map_readback_bytes(staging, size_bytes, context))
         }
     }
-    const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
-    const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
-    const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
-    const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
-    const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
+    pub(super) const BUFFER_RESIDENCY_MAX_PER_KEY: usize = 8;
+    pub(super) const IMAGE_NORMALIZE_AUTOTUNE_VERSION: u8 = 1;
+    pub(super) const IMAGE_NORMALIZE_STREAM_COLD_CAP: u32 = 8;
+    pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
+    pub(super) const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
 
     pub(crate) fn device_ref(&self) -> &wgpu::Device {
         self.device.as_ref()
@@ -58,7 +58,7 @@ impl WgpuProvider {
     pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
         self.queue.as_ref()
     }
-    fn register_existing_buffer(
+    pub(super) fn register_existing_buffer(
         &self,
         buffer: Arc<wgpu::Buffer>,
         shape: Vec<usize>,
@@ -67,7 +67,7 @@ impl WgpuProvider {
         self.register_existing_buffer_with_usage(buffer, shape, len, BufferUsageClass::Generic)
     }
 
-    fn register_existing_buffer_with_storage(
+    pub(super) fn register_existing_buffer_with_storage(
         &self,
         buffer: Arc<wgpu::Buffer>,
         shape: Vec<usize>,
@@ -83,7 +83,7 @@ impl WgpuProvider {
         )
     }
 
-    fn register_existing_buffer_with_usage(
+    pub(super) fn register_existing_buffer_with_usage(
         &self,
         buffer: Arc<wgpu::Buffer>,
         shape: Vec<usize>,
@@ -99,7 +99,7 @@ impl WgpuProvider {
         )
     }
 
-    fn register_existing_buffer_with_usage_and_storage(
+    pub(super) fn register_existing_buffer_with_usage_and_storage(
         &self,
         buffer: Arc<wgpu::Buffer>,
         shape: Vec<usize>,
@@ -135,7 +135,7 @@ impl WgpuProvider {
         handle
     }
 
-    fn remember_matmul_sources(
+    pub(super) fn remember_matmul_sources(
         &self,
         product: &GpuTensorHandle,
         lhs: &GpuTensorHandle,
@@ -155,7 +155,7 @@ impl WgpuProvider {
             .remember_matmul_sources(product, lhs, rhs);
     }
 
-    fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
+    pub(super) fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
         if let Ok(mut guard) = self.buffers.lock() {
             if let Some(entry) = guard.get_mut(&handle.buffer_id) {
                 entry.usage = usage;
@@ -163,7 +163,7 @@ impl WgpuProvider {
         }
     }
 
-    fn record_buffer_submission(&self, buffer_id: u64, submission_id: u32) {
+    pub(super) fn record_buffer_submission(&self, buffer_id: u64, submission_id: u32) {
         if let Ok(mut guard) = self.buffers.lock() {
             if let Some(entry) = guard.get_mut(&buffer_id) {
                 entry.last_submission_id = Some(submission_id);
@@ -171,7 +171,7 @@ impl WgpuProvider {
         }
     }
 
-    fn create_storage_buffer_for_usage(
+    pub(super) fn create_storage_buffer_for_usage(
         &self,
         usage: BufferUsageClass,
         len: usize,
@@ -181,12 +181,12 @@ impl WgpuProvider {
             .acquire(self.device_ref(), usage, len, self.element_size, label)
     }
 
-    fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
+    pub(super) fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
         self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
             .0
     }
 
-    fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
+    pub(super) fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
         self.device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
@@ -195,7 +195,7 @@ impl WgpuProvider {
             })
     }
 
-    fn prepare_matmul_pipeline(&self) {
+    pub(super) fn prepare_matmul_pipeline(&self) {
         let mut enc = self
             .device_ref()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -218,7 +218,7 @@ impl WgpuProvider {
         self.submit(enc);
     }
 
-    fn prepare_matmul_vec4_pipeline(&self) {
+    pub(super) fn prepare_matmul_vec4_pipeline(&self) {
         let mut enc = self
             .device_ref()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -241,7 +241,7 @@ impl WgpuProvider {
         self.submit(enc);
     }
 
-    fn submit(&self, encoder: wgpu::CommandEncoder) -> u32 {
+    pub(super) fn submit(&self, encoder: wgpu::CommandEncoder) -> u32 {
         let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);
         let _span = info_span!(
             "gpu.dispatch",
@@ -294,7 +294,7 @@ impl WgpuProvider {
         }
         submission_id
     }
-    fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
+    pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         if handle.device_id != self.runtime_device_id {
             return Err(anyhow!(
                 "handle device mismatch: expected {}, got {}",

@@ -1,14 +1,14 @@
 use super::*;
 
 impl WgpuProvider {
-    fn precision_tag(&self) -> &'static str {
+    pub(super) fn precision_tag(&self) -> &'static str {
         match self.precision {
             NumericPrecision::F64 => "f64",
             NumericPrecision::F32 => "f32",
         }
     }
 
-    fn record_kernel_launch_basic(
+    pub(super) fn record_kernel_launch_basic(
         &self,
         kernel: &'static str,
         shape: &[(&'static str, u64)],
@@ -18,7 +18,7 @@ impl WgpuProvider {
             .record_kernel_launch(kernel, Some(self.precision_tag()), shape, tuning);
     }
 
-    fn record_matmul_kernel_launch(
+    pub(super) fn record_matmul_kernel_launch(
         &self,
         m: usize,
         n: usize,
@@ -34,7 +34,7 @@ impl WgpuProvider {
         self.record_kernel_launch_basic("matmul", &shape, &tuning);
     }
 
-    fn create_storage_buffer_checked_with_usage(
+    pub(super) fn create_storage_buffer_checked_with_usage(
         &self,
         len: usize,
         label: &str,
@@ -70,18 +70,18 @@ impl WgpuProvider {
         Ok(buffer)
     }
 
-    fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
+    pub(super) fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
         self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
     }
 
-    fn image_normalize_vector_width(&self) -> u32 {
+    pub(super) fn image_normalize_vector_width(&self) -> u32 {
         match self.precision {
             NumericPrecision::F64 => 2,
             NumericPrecision::F32 => 4,
         }
     }
 
-    fn round_up_to_multiple(value: u32, mult: u32) -> u32 {
+    pub(super) fn round_up_to_multiple(value: u32, mult: u32) -> u32 {
         if mult <= 1 {
             return value;
         }
@@ -93,7 +93,7 @@ impl WgpuProvider {
         }
     }
 
-    fn select_image_normalize_tuning(&self, batches: u32, plane: u32) -> ImageNormalizeTuning {
+    pub(super) fn select_image_normalize_tuning(&self, batches: u32, plane: u32) -> ImageNormalizeTuning {
         let batches = batches.max(1);
         let plane = plane.max(1);
         let mut lane =
@@ -140,7 +140,7 @@ impl WgpuProvider {
         sanitized
     }
 
-    fn resolve_image_normalize_tuning(
+    pub(super) fn resolve_image_normalize_tuning(
         &self,
         batches: u32,
         plane: u32,
@@ -186,7 +186,7 @@ impl WgpuProvider {
         }
     }
 
-    fn image_normalize_hot_stream_cap(&self, plane: u32, batches: u32) -> u32 {
+    pub(super) fn image_normalize_hot_stream_cap(&self, plane: u32, batches: u32) -> u32 {
         if batches == 0 {
             return 0;
         }
@@ -205,7 +205,7 @@ impl WgpuProvider {
             .unwrap_or(batches)
     }
 
-    fn image_normalize_stream_target_bytes(&self) -> u64 {
+    pub(super) fn image_normalize_stream_target_bytes(&self) -> u64 {
         if let Ok(raw) = std::env::var("RUNMAT_IMAGE_NORMALIZE_STREAM_TARGET_BYTES") {
             if let Ok(parsed) = raw.parse::<u64>() {
                 return parsed.max(1);
@@ -216,7 +216,7 @@ impl WgpuProvider {
         default.min(limit).max((self.element_size as u64) * 4)
     }
 
-    fn image_normalize_pipeline(
+    pub(super) fn image_normalize_pipeline(
         &self,
         tuning: &ImageNormalizeTuning,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
@@ -266,14 +266,7 @@ impl WgpuProvider {
         self.cache_device_id
     }
 
-    pub(crate) fn device_ref(&self) -> &wgpu::Device {
-        self.device.as_ref()
-    }
-    pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
-        self.queue.as_ref()
-    }
-
-    fn warmup_from_disk(&self) {
+    pub(super) fn warmup_from_disk(&self) {
         if std::env::var("RUNMAT_DISABLE_PIPELINE_WARMUP").is_ok() {
             return;
         }
@@ -291,7 +284,7 @@ impl WgpuProvider {
         );
     }
 
-    fn cached_bind_group_layout<F>(&self, key: &str, build: F) -> Arc<wgpu::BindGroupLayout>
+    pub(super) fn cached_bind_group_layout<F>(&self, key: &str, build: F) -> Arc<wgpu::BindGroupLayout>
     where
         F: FnOnce(&wgpu::Device) -> wgpu::BindGroupLayout,
     {
@@ -311,7 +304,7 @@ impl WgpuProvider {
         layout
     }
 
-    fn cached_bind_group_layout_for_tag(&self, tag: &str) -> Option<Arc<wgpu::BindGroupLayout>> {
+    pub(super) fn cached_bind_group_layout_for_tag(&self, tag: &str) -> Option<Arc<wgpu::BindGroupLayout>> {
         if let Ok(cache) = self.bind_group_layout_cache.lock() {
             if let Some(layout) = cache.get(tag).cloned() {
                 return Some(layout);
@@ -330,7 +323,7 @@ impl WgpuProvider {
         Some(layout)
     }
 
-    fn cached_fusion_bind_group_layout(&self, inputs_len: usize) -> Arc<wgpu::BindGroupLayout> {
+    pub(super) fn cached_fusion_bind_group_layout(&self, inputs_len: usize) -> Arc<wgpu::BindGroupLayout> {
         let key = format!("runmat-fusion-layout-{}", inputs_len);
         self.cached_bind_group_layout(&key, |device| {
             crate::backend::wgpu::bindings::build_fusion_bgl(device, inputs_len)
@@ -353,7 +346,7 @@ impl WgpuProvider {
         Ok(())
     }
 
-    async fn image_normalize_cpu_fallback(
+    pub(super) async fn image_normalize_cpu_fallback(
         &self,
         input: &GpuTensorHandle,
         desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
@@ -446,7 +439,7 @@ impl WgpuProvider {
 
     /// Get or create a compute pipeline from cache using a caller-provided hash key.
     #[allow(clippy::too_many_arguments)]
-    fn get_or_create_pipeline(
+    pub(super) fn get_or_create_pipeline(
         &self,
         hash_key: u64,
         pipeline_layout: &wgpu::PipelineLayout,
@@ -498,7 +491,7 @@ impl WgpuProvider {
         cache_key::compute_pipeline_hash_bytes(shader_bytes, layout_tag, workgroup_size)
     }
 
-    fn persist_pipeline_meta(
+    pub(super) fn persist_pipeline_meta(
         &self,
         hash_key: u64,
         label: &str,

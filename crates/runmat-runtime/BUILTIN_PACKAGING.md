@@ -86,7 +86,7 @@ crates/runmat-runtime/
 - Complete the accelerate API and implement the provider hooks for the builtins if needed.
 - The provider hooks are located in `crates/runmat-accelerate-api/src/lib.rs`.
 - The fallback (simple provider) is located in `crates/runmat-accelerate/src/simple_provider.rs`.
-- The WGPU provider is located in `crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs`. 
+- The WGPU provider is located in `crates/runmat-accelerate/src/backend/wgpu/provider.rs`. 
   - IMPORTANT: MAKE SURE THIS PROVIDER IS FULLY IMPLEMENTED AND TESTED FOR THE BUILTIN.
 - Ensure that the provider hooks are implemented for the builtins that need them.
 - The goal is to have a fully functional GPU implementation of the builtins, with the ability to run on the GPU if the provider is registered.

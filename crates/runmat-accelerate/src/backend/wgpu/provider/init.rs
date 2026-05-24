@@ -1,7 +1,7 @@
 use super::*;
 
 impl WgpuProvider {
-    fn buffer_residency_pool_limit() -> usize {
+    pub(super) fn buffer_residency_pool_limit() -> usize {
         const VAR: &str = "RUNMAT_WGPU_POOL_MAX_PER_KEY";
         match std::env::var(VAR) {
             Ok(raw) => match raw.parse::<usize>() {
@@ -28,7 +28,7 @@ impl WgpuProvider {
         }
     }
 
-    fn parse_buffer_residency_max_poolable_bytes(
+    pub(super) fn parse_buffer_residency_max_poolable_bytes(
         raw_override: Option<&str>,
         adapter_max_buffer_size: u64,
     ) -> u64 {
@@ -52,7 +52,7 @@ impl WgpuProvider {
         }
     }
 
-    fn buffer_residency_max_poolable_bytes(adapter_max_buffer_size: u64) -> u64 {
+    pub(super) fn buffer_residency_max_poolable_bytes(adapter_max_buffer_size: u64) -> u64 {
         const VAR: &str = "RUNMAT_WGPU_POOL_MAX_BUFFER_BYTES";
         match std::env::var(VAR) {
             Ok(raw) => {
