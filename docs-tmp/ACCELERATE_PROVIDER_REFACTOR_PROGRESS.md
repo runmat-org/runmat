@@ -65,3 +65,9 @@
 - Verification for Phase 4c:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 3b: created `backend/wgpu/provider_impl/tensor.rs` and moved a first tensor-ops slice.
+  - moved: `repmat_exec`, `cat_exec`, `kron_exec`, `transpose_exec`.
+  - `permute/circshift/tri*/flip` remain in `mod.rs` for follow-up tensor extraction.
+- Verification for Phase 3b:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
