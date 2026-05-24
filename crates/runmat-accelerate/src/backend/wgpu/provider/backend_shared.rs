@@ -36,7 +36,7 @@ fn checked_binding_count(operation: &str, left: usize, right: usize) -> Result<u
         .ok_or_else(|| anyhow!("{}: binding count overflow", operation))
 }
 
-fn gpu_per_buffer_limit_error(
+pub(super) fn gpu_per_buffer_limit_error(
     operation: &str,
     requested_bytes: u64,
     max_bytes: u64,
