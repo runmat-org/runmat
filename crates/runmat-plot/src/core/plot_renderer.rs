@@ -654,6 +654,48 @@ impl PlotRenderer {
         Some((x_min, x_max, y_min, y_max))
     }
 
+    fn axes_model_matrix(&self, axes_index: usize) -> Mat4 {
+        if !self.axes_has_3d_content(axes_index) {
+            return Mat4::IDENTITY;
+        }
+
+        let axis_equal = self
+            .last_figure
+            .as_ref()
+            .and_then(|fig| fig.axes_metadata(axes_index))
+            .map(|meta| meta.axis_equal)
+            .unwrap_or(self.figure_axis_equal);
+        if axis_equal {
+            return Mat4::IDENTITY;
+        }
+
+        let Some(bounds) = self.axes_bounds(axes_index) else {
+            return Mat4::IDENTITY;
+        };
+        let extent = (bounds.max - bounds.min).abs();
+        if !extent.x.is_finite() || !extent.y.is_finite() || !extent.z.is_finite() {
+            return Mat4::IDENTITY;
+        }
+
+        let eps = 1e-6_f32;
+        let ex = extent.x.max(eps);
+        let ey = extent.y.max(eps);
+        let ez = extent.z.max(eps);
+        let reference = ex.max(ey).max(ez).max(1.0);
+        let sx = if extent.x > eps { reference / ex } else { 1.0 };
+        let sy = if extent.y > eps { reference / ey } else { 1.0 };
+        let sz = if extent.z > eps { reference / ez } else { 1.0 };
+
+        if (sx - 1.0).abs() < 1e-4 && (sy - 1.0).abs() < 1e-4 && (sz - 1.0).abs() < 1e-4 {
+            return Mat4::IDENTITY;
+        }
+
+        let center = (bounds.min + bounds.max) * 0.5;
+        Mat4::from_translation(center)
+            * Mat4::from_scale(Vec3::new(sx, sy, sz))
+            * Mat4::from_translation(-center)
+    }
+
     fn fit_cameras_to_axes_data(&mut self) -> bool {
         let mut applied = false;
         for idx in 0..self.axes_cameras.len() {
@@ -1021,7 +1063,7 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         cam.update_aspect_ratio(aspect_ratio);
         let view_proj_matrix = cam.view_proj_matrix();
-        let model_matrix = Mat4::IDENTITY;
+        let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, model_matrix);
 
@@ -1546,8 +1588,9 @@ impl PlotRenderer {
             }
         }
         let view_proj_matrix = cam.view_proj_matrix();
+        let model_matrix = self.axes_model_matrix(axes_index);
         self.wgpu_renderer
-            .update_uniforms_for_axes(axes_index, view_proj_matrix, Mat4::IDENTITY);
+            .update_uniforms_for_axes(axes_index, view_proj_matrix, model_matrix);
         log::debug!(
             "runmat-plot: renderer.camera_to_target_viewport.uniforms_updated axes_index={}",
             axes_index
