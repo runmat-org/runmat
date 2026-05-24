@@ -495,4 +495,268 @@ impl WgpuProvider {
         Ok(handle)
     }
 
+    pub(crate) fn binary_op_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        if std::env::var("RUNMAT_DISABLE_BINARY").is_ok() {
+            return Err(anyhow!("binary ops disabled via RUNMAT_DISABLE_BINARY"));
+        }
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape != entry_b.shape {
+            // Attempt general N-D broadcasted binary op
+            return self.binary_op_broadcast_exec(op, a, b);
+        }
+        let len = entry_a.len;
+        if len == 0 {
+            let out_buffer = self.create_storage_buffer(0, "runmat-binary-out");
+            return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
+        }
+        if len > (u32::MAX as usize) {
+            return Err(gpu_dispatch_length_limit_error("binary_op", len));
+        }
+        let start = Instant::now();
+        {
+            let mut enc =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-binary-noop"),
+                    });
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runmat-binary-noop-pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipelines.binary.pipeline);
+            drop(pass);
+            self.submit(enc);
+        }
+        self.device_ref().poll(wgpu::Maintain::Poll);
+        {
+            let enc = self
+                .device_ref()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-binary-flush-gap"),
+                });
+            self.submit(enc);
+        }
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-binary-out")?;
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            let params = crate::backend::wgpu::params::LenOpParams {
+                len: chunk_len as u32,
+                op: op as u32,
+                offset: offset as u32,
+                total: len as u32,
+            };
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::LenOpParams,
+                std::mem::size_of::<crate::backend::wgpu::params::LenOpParams>() as u64,
+                "runmat-binary-params",
+            );
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-binary-bind"),
+                    layout: &self.pipelines.binary.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.binary.pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
+            runmat_accelerate_api::record_handle_transpose(&handle, info.base_rows, info.base_cols);
+        }
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(handle)
+    }
+    fn binary_op_broadcast_exec(
+        &self,
+        op: crate::backend::wgpu::types::BinaryOpCode,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        use crate::backend::wgpu::params::{AlignedU32, BinaryBroadcastParams, BCAST_MAX_RANK};
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        // Compute broadcasted output shape
+        let mut shape_a = entry_a.shape.clone();
+        let mut shape_b = entry_b.shape.clone();
+        let rank = shape_a.len().max(shape_b.len());
+        if rank > BCAST_MAX_RANK {
+            return Err(anyhow!("broadcast rank exceeds limit"));
+        }
+        if shape_a.len() < rank {
+            let pad = rank - shape_a.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_a);
+            shape_a = v;
+        }
+        if shape_b.len() < rank {
+            let pad = rank - shape_b.len();
+            let mut v = vec![1usize; pad];
+            v.extend_from_slice(&shape_b);
+            shape_b = v;
+        }
+        let mut out_shape: Vec<usize> = vec![1; rank];
+        for i in 0..rank {
+            let da = shape_a[i];
+            let db = shape_b[i];
+            if da == db {
+                out_shape[i] = da;
+            } else if da == 1 {
+                out_shape[i] = db;
+            } else if db == 1 {
+                out_shape[i] = da;
+            } else {
+                return Err(anyhow!("shape mismatch for broadcast"));
+            }
+        }
+        let len: usize = out_shape
+            .iter()
+            .copied()
+            .fold(1usize, |a, b| a.saturating_mul(b));
+        if len == 0 {
+            let out_buffer = self.create_storage_buffer(0, "runmat-binary-bcast-out");
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        }
+        if len > (u32::MAX as usize) {
+            return Err(gpu_dispatch_length_limit_error("binary_op_broadcast", len));
+        }
+        // Compute strides (column-major)
+        let mut stride_a: Vec<u32> = vec![0; rank];
+        let mut stride_b: Vec<u32> = vec![0; rank];
+        let mut s: u64 = 1;
+        for i in 0..rank {
+            stride_a[i] = if shape_a[i] == 1 { 0 } else { s as u32 };
+            s = s.saturating_mul(shape_a[i] as u64);
+        }
+        s = 1;
+        for i in 0..rank {
+            stride_b[i] = if shape_b[i] == 1 { 0 } else { s as u32 };
+            s = s.saturating_mul(shape_b[i] as u64);
+        }
+
+        // Create output buffer
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-binary-bcast-out")?;
+        // Prepare params buffer and bind group once; update params per chunk
+        let params_size = std::mem::size_of::<BinaryBroadcastParams>() as u64;
+        let params_buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::BinaryBroadcastParams,
+            params_size,
+            "runmat-binary-bcast-params",
+        );
+        let bind_group_layout = &self.pipelines.binary_broadcast.layout;
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-binary-bcast-bind"),
+                layout: bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.get_entry(a)?.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.get_entry(b)?.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        // Dispatch in chunks
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+        let start = Instant::now();
+        while offset < len {
+            let remaining = len - offset;
+            let chunk_len = remaining.min(chunk_capacity);
+            // Pack params
+            let mut params = BinaryBroadcastParams {
+                len: chunk_len as u32,
+                offset: offset as u32,
+                rank: rank as u32,
+                op: op as u32,
+                out_shape: [AlignedU32::new(0); BCAST_MAX_RANK],
+                a_shape: [AlignedU32::new(0); BCAST_MAX_RANK],
+                b_shape: [AlignedU32::new(0); BCAST_MAX_RANK],
+                a_strides: [AlignedU32::new(0); BCAST_MAX_RANK],
+                b_strides: [AlignedU32::new(0); BCAST_MAX_RANK],
+            };
+            for i in 0..rank {
+                params.out_shape[i] = AlignedU32::new(out_shape[i] as u32);
+                params.a_shape[i] = AlignedU32::new(shape_a[i] as u32);
+                params.b_shape[i] = AlignedU32::new(shape_b[i] as u32);
+                params.a_strides[i] = AlignedU32::new(stride_a[i]);
+                params.b_strides[i] = AlignedU32::new(stride_b[i]);
+            }
+            self.queue_ref()
+                .write_buffer(&params_buffer, 0, bytemuck::bytes_of(&params));
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.binary_broadcast.pipeline,
+                &bind_group,
+                groups,
+            );
+            offset += chunk_len;
+        }
+        let handle = self.register_existing_buffer(out_buffer, out_shape, len);
+        self.telemetry
+            .record_fused_elementwise_duration(start.elapsed());
+        Ok(handle)
+    }
+
 }

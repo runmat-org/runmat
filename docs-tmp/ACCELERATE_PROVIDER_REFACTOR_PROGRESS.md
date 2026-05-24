@@ -23,3 +23,9 @@
 - Verification for Phase 1b:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 1c: moved binary execution helpers into `provider_impl/elementwise.rs`.
+  - moved methods: `binary_op_exec`, `binary_op_broadcast_exec`.
+  - kept the call graph unchanged (`dot_exec`, `cross_exec`, and trait entrypoints still call these helpers exactly as before).
+- Verification for Phase 1c:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
