@@ -274,7 +274,6 @@ fn build_stairs_gpu_plot(
         let marker_params = MarkerGpuParams {
             color: marker.face_color,
             half_width_data: 0.0,
-            thick: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
         };

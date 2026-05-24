@@ -22,8 +22,6 @@ pub struct LineGpuParams {
     pub color: Vec4,
     /// Half-width in *data units* used to extrude thick line triangles.
     pub half_width_data: f32,
-    /// Whether to emit thick triangles (6 verts/segment) instead of thin LineList.
-    pub thick: bool,
     pub line_style: LineStyle,
     pub marker_size: f32,
 }
@@ -35,7 +33,7 @@ struct LineSegmentUniforms {
     count: u32,
     half_width_data: f32,
     line_style: u32,
-    thick: u32,
+    _pad: u32,
 }
 
 #[repr(C)]
@@ -61,14 +59,12 @@ pub fn pack_vertices_from_xy(
     if segments == 0 {
         return Err("plot: unable to construct segments from degenerate input".to_string());
     }
-    let thick = params.thick;
-    let vertices_per_segment = if thick { 6u64 } else { 2u64 };
+    let vertices_per_segment = 6u64;
     let max_vertices = segments as u64 * vertices_per_segment;
     trace!(
         target: "runmat_plot",
-        "line-pack-kernel: dispatch segments={} thick={} max_vertices={} half_width_data={}",
+        "line-pack-kernel: dispatch segments={} max_vertices={} half_width_data={}",
         segments,
-        thick,
         max_vertices,
         params.half_width_data
     );
@@ -150,7 +146,7 @@ pub fn pack_vertices_from_xy(
         count: inputs.len,
         half_width_data: params.half_width_data.max(0.0),
         line_style: line_style_code(params.line_style),
-        thick: if thick { 1 } else { 0 },
+        _pad: 0,
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line-pack-uniforms"),

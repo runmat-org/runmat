@@ -442,19 +442,15 @@ impl LinePlot {
             .as_ref()
             .ok_or_else(|| "missing line bounds".to_string())?;
 
-        let thick_px = self.line_width > 1.0;
+        let stroke_width_px = self.line_width.max(1.0);
         let data_per_px = crate::core::data_units_per_px(bounds, viewport_px);
-        let half_width_data = if thick_px {
-            ((self.line_width.max(0.1)) * 0.5) * data_per_px
-        } else {
-            0.0
-        };
+        let half_width_data = (stroke_width_px * 0.5) * data_per_px;
         trace!(
             target: "runmat_plot",
-            "line-pack: begin len={} line_width_px={} thick={} half_width_data={} viewport_px={:?} bounds=({:?}..{:?})",
+            "line-pack: begin len={} line_width_px={} stroke_width_px={} half_width_data={} viewport_px={:?} bounds=({:?}..{:?})",
             inputs.len,
             self.line_width,
-            thick_px,
+            stroke_width_px,
             half_width_data,
             viewport_px,
             bounds.min,
@@ -464,7 +460,6 @@ impl LinePlot {
         let params = crate::gpu::line::LineGpuParams {
             color: self.color,
             half_width_data,
-            thick: thick_px,
             line_style: self.line_style,
             marker_size: 1.0,
         };
@@ -480,11 +475,7 @@ impl LinePlot {
 
         self.gpu_vertices = Some(packed);
         self.gpu_vertex_count = Some(self.gpu_vertices.as_ref().unwrap().vertex_count);
-        self.gpu_topology = Some(if thick_px {
-            PipelineType::Triangles
-        } else {
-            PipelineType::Lines
-        });
+        self.gpu_topology = Some(PipelineType::Triangles);
         Ok(())
     }
 
@@ -586,64 +577,59 @@ impl LinePlot {
 
     /// Generate render data, using an optional viewport size hint (width, height in pixels).
     ///
-    /// For thick 2D lines we build triangle geometry. The user-facing `line_width` is
-    /// expressed in *pixels*, but triangle extrusion operates in data space. When a viewport
-    /// is supplied we convert pixels → data-units using the current data range and target size.
+    /// With a viewport available, 2D lines are always rendered as triangle strokes so dense
+    /// polylines remain visually continuous at all zoom levels and lengths. The user-facing
+    /// `line_width` is expressed in *pixels*, while extrusion operates in data space.
+    /// We convert pixels -> data-units using the current data range and target size.
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
         if self.gpu_vertices.is_some() {
             // GPU paths already handle sizing via pipeline/state; keep existing behavior.
             return self.render_data();
         }
 
-        let (vertices, vertex_count, pipeline, bounds) = if self.line_width > 1.0 {
-            let Some(viewport_px) = viewport_px else {
-                return self.render_data();
-            };
-            let bounds = self.bounds();
-            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
-            let width_data = (self.line_width.max(0.1)) * data_per_px;
-
-            let base_tris = match self.line_cap {
-                LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
-                    &self.x_data,
-                    &self.y_data,
-                    self.color,
-                    width_data,
-                    self.line_join,
-                ),
-                LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
-                    &self.x_data,
-                    &self.y_data,
-                    self.color,
-                    width_data,
-                ),
-                LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
-                    &self.x_data,
-                    &self.y_data,
-                    self.color,
-                    width_data,
-                    12,
-                ),
-            };
-            let tris = match self.line_style {
-                LineStyle::Solid => base_tris,
-                LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
-                    vertex_utils::create_thick_polyline_dashed(
-                        &self.x_data,
-                        &self.y_data,
-                        self.color,
-                        width_data,
-                        self.line_style,
-                    )
-                }
-            };
-            let count = tris.len();
-            (tris, count, PipelineType::Triangles, self.bounds())
-        } else {
-            let verts = self.generate_vertices().clone();
-            let count = verts.len();
-            (verts, count, PipelineType::Lines, self.bounds())
+        let Some(viewport_px) = viewport_px else {
+            return self.render_data();
         };
+        let bounds = self.bounds();
+        let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+        let stroke_width_px = self.line_width.max(1.0);
+        let width_data = stroke_width_px * data_per_px;
+
+        let base_tris = match self.line_cap {
+            LineCap::Butt => vertex_utils::create_thick_polyline_with_join(
+                &self.x_data,
+                &self.y_data,
+                self.color,
+                width_data,
+                self.line_join,
+            ),
+            LineCap::Square => vertex_utils::create_thick_polyline_square_caps(
+                &self.x_data,
+                &self.y_data,
+                self.color,
+                width_data,
+            ),
+            LineCap::Round => vertex_utils::create_thick_polyline_round_caps(
+                &self.x_data,
+                &self.y_data,
+                self.color,
+                width_data,
+                12,
+            ),
+        };
+        let tris = match self.line_style {
+            LineStyle::Solid => base_tris,
+            LineStyle::Dashed | LineStyle::DashDot | LineStyle::Dotted => {
+                vertex_utils::create_thick_polyline_dashed(
+                    &self.x_data,
+                    &self.y_data,
+                    self.color,
+                    width_data,
+                    self.line_style,
+                )
+            }
+        };
+        let vertex_count = tris.len();
 
         let style_code = match self.line_style {
             LineStyle::Solid => 0.0,
@@ -679,8 +665,8 @@ impl LinePlot {
         };
 
         RenderData {
-            pipeline_type: pipeline,
-            vertices,
+            pipeline_type: PipelineType::Triangles,
+            vertices: tris,
             indices: None,
             gpu_vertices: None,
             bounds: Some(bounds),
@@ -1023,5 +1009,28 @@ mod tests {
         let mut plot = LinePlot::new(x, y).unwrap();
         let render_data = plot.render_data();
         assert_eq!(render_data.vertices.len(), (n - 1) * 2);
+    }
+
+    #[test]
+    fn thin_line_with_viewport_uses_triangle_stroke_geometry() {
+        let x = vec![0.0, 1.0, 2.0];
+        let y = vec![0.0, 1.0, 0.0];
+        let mut plot = LinePlot::new(x, y).unwrap();
+        plot.set_line_width(1.0);
+        let render_data = plot.render_data_with_viewport(Some((800, 600)));
+        assert_eq!(render_data.pipeline_type, PipelineType::Triangles);
+        assert!(render_data.vertices.len() >= 12); // at least 2 segments worth of stroke triangles
+        assert_eq!(render_data.vertices.len() % 3, 0);
+    }
+
+    #[test]
+    fn thin_line_without_viewport_keeps_legacy_line_path() {
+        let x = vec![0.0, 1.0, 2.0];
+        let y = vec![0.0, 1.0, 0.0];
+        let mut plot = LinePlot::new(x, y).unwrap();
+        plot.set_line_width(1.0);
+        let render_data = plot.render_data_with_viewport(None);
+        assert_eq!(render_data.pipeline_type, PipelineType::Lines);
+        assert_eq!(render_data.vertices.len(), 4); // 2 segments * 2 vertices
     }
 }

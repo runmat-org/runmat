@@ -470,7 +470,6 @@ async fn build_line_gpu_plot_async(
         let marker_params = runmat_plot::gpu::line::LineGpuParams {
             color: marker.face_color,
             half_width_data: 0.0,
-            thick: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(1.0),
         };

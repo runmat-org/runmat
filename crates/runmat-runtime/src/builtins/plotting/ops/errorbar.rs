@@ -282,7 +282,6 @@ fn build_errorbar_gpu_plot(
             &MarkerGpuParams {
                 color: marker.face_color,
                 half_width_data: 0.0,
-                thick: false,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },

@@ -9,7 +9,7 @@ struct LineParams {
     count: u32,
     half_width_data: f32,
     line_style: u32,
-    thick: u32,
+    _pad: u32,
 };
 
 @group(0) @binding(0)
@@ -75,14 +75,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         color.w = 0.0;
     }
 
-    let thick = params.thick != 0u;
-    if (!thick) {
-        let base = idx * 2u;
-        write_vertex(base + 0u, p0, color);
-        write_vertex(base + 1u, p1, color);
-        return;
-    }
-
     if (!draw) {
         let base = idx * 6u;
         // Emit fully transparent degenerate geometry for skipped/degenerate segments.
@@ -128,7 +120,7 @@ struct LineParams {
     count: u32,
     half_width_data: f32,
     line_style: u32,
-    thick: u32,
+    _pad: u32,
 };
 
 @group(0) @binding(0)
@@ -192,14 +184,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var color = params.color;
     if (!draw) {
         color.w = 0.0;
-    }
-
-    let thick = params.thick != 0u;
-    if (!thick) {
-        let base = idx * 2u;
-        write_vertex(base + 0u, p0, color);
-        write_vertex(base + 1u, p1, color);
-        return;
     }
 
     if (!draw) {
