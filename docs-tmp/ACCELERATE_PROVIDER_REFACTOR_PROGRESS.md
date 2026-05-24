@@ -107,3 +107,13 @@
   - wired `mod linalg;` and removed the moved method bodies from `provider_impl/mod.rs`.
 - Verification for Phase 5c:
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 5d: moved remaining operation-adjacent helpers out of `provider_impl/mod.rs`.
+  - moved QR device/host helpers into `provider_impl/linalg.rs`.
+  - moved polynomial trim helper into `provider_impl/polynomial.rs`.
+- Phase 6: split provider lifecycle/infrastructure into explicit modules.
+  - added `provider_impl/core.rs` for buffer/readback/submit/register/storage core methods.
+  - added `provider_impl/helpers.rs` for telemetry/pipeline-cache/image-normalize tuning helpers.
+  - added `provider_impl/init.rs` for provider construction/bootstrap (`new_async`/`new`) and residency env parsing.
+  - wired `mod {core,helpers,init};` and removed the monolithic lifecycle impl block from `provider_impl/mod.rs`.
+- Verification for Phase 5d + Phase 6:
+  - `cargo test -p runmat-accelerate --lib` passed.

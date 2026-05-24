@@ -429,3 +429,54 @@ impl WgpuProvider {
         })
     }
 }
+    async fn trim_polynomial_handle(
+        &self,
+        handle: GpuTensorHandle,
+        orientation: PolynomialOrientation,
+    ) -> Result<GpuTensorHandle> {
+        let host = <Self as AccelProvider>::download(self, &handle).await?;
+        let trimmed = trim_leading_zeros_real(&host.data);
+        if trimmed.len() == host.data.len() {
+            return Ok(handle);
+        }
+        let shape_vec = shape_for_orientation(orientation, trimmed.len());
+        let new_handle = if trimmed.is_empty() {
+            self.register_existing_buffer(
+                self.create_storage_buffer(0, "runmat-polyder-trim-empty"),
+                shape_vec,
+                0,
+            )
+        } else {
+            match self.precision {
+                NumericPrecision::F64 => {
+                    let buffer = Arc::new(self.device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-polyder-trim-f64"),
+                            contents: cast_slice(trimmed.as_slice()),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        },
+                    ));
+                    self.register_existing_buffer(buffer, shape_vec, trimmed.len())
+                }
+                NumericPrecision::F32 => {
+                    let data_f32: Vec<f32> = trimmed.iter().map(|v| *v as f32).collect();
+                    let buffer = Arc::new(self.device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-polyder-trim-f32"),
+                            contents: cast_slice(&data_f32),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        },
+                    ));
+                    self.register_existing_buffer(buffer, shape_vec, trimmed.len())
+                }
+            }
+        };
+        self.free(&handle).ok();
+        Ok(new_handle)
+    }
+
+}
