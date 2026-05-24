@@ -1,6 +1,163 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) async fn sort_dim_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        order: SortOrder,
+        comparison: SortComparison,
+    ) -> Result<SortResult> {
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let shape = host.shape.clone();
+        let (values, indices) = sort_host_tensor(&host.data, &host.shape, dim, order, comparison)?;
+        Ok(SortResult {
+            values: HostTensorOwned {
+                data: values,
+                shape: shape.clone(),
+                storage: GpuTensorStorage::Real,
+            },
+            indices: HostTensorOwned {
+                data: indices,
+                shape,
+                storage: GpuTensorStorage::Real,
+            },
+        })
+    }
+
+    pub(crate) async fn sort_rows_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        columns: &[SortRowsColumnSpec],
+        comparison: SortComparison,
+    ) -> Result<SortResult> {
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let SortRowsHostOutputs {
+            values,
+            indices,
+            indices_shape,
+        } = sort_rows_host(&host.data, &host.shape, columns, comparison)?;
+        Ok(SortResult {
+            values: HostTensorOwned {
+                data: values,
+                shape: host.shape.clone(),
+                storage: GpuTensorStorage::Real,
+            },
+            indices: HostTensorOwned {
+                data: indices,
+                shape: indices_shape,
+                storage: GpuTensorStorage::Real,
+            },
+        })
+    }
+
+    pub(crate) async fn unique_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        options: &UniqueOptions,
+    ) -> Result<UniqueResult> {
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let HostTensorOwned { data, shape, .. } = host;
+        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
+        let eval =
+            runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
+                tensor, options,
+            )
+            .map_err(|err| anyhow!("unique: {err}"))?;
+        eval.into_numeric_unique_result()
+            .map_err(|err| anyhow!("unique: {err}"))
+    }
+
+    pub(crate) async fn ismember_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        options: &IsMemberOptions,
+    ) -> Result<IsMemberResult> {
+        let host_a = <Self as AccelProvider>::download(self, a).await?;
+        let host_b = <Self as AccelProvider>::download(self, b).await?;
+        let tensor_a =
+            Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("ismember: {e}"))?;
+        let tensor_b =
+            Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("ismember: {e}"))?;
+        let eval =
+            runmat_runtime::builtins::array::sorting_sets::ismember::ismember_numeric_from_tensors(
+                tensor_a,
+                tensor_b,
+                options.rows,
+            )
+            .map_err(|err| anyhow!("ismember: {err}"))?;
+        eval.into_numeric_ismember_result()
+            .map_err(|err| anyhow!("ismember: {err}"))
+    }
+
+    pub(crate) async fn union_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        options: &UnionOptions,
+    ) -> Result<UnionResult> {
+        let host_a = <Self as AccelProvider>::download(self, a).await?;
+        let host_b = <Self as AccelProvider>::download(self, b).await?;
+        let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
+        let tensor_b = Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
+        let eval =
+            runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
+                tensor_a, tensor_b, options,
+            )
+            .map_err(|err| anyhow!("union: {err}"))?;
+        eval.into_numeric_union_result()
+            .map_err(|err| anyhow!("union: {err}"))
+    }
+
+    pub(crate) async fn setdiff_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        options: &SetdiffOptions,
+    ) -> Result<SetdiffResult> {
+        let host_a = <Self as AccelProvider>::download(self, a).await?;
+        let host_b = <Self as AccelProvider>::download(self, b).await?;
+        let tensor_a =
+            Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
+        let tensor_b =
+            Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
+        let eval =
+            runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
+                tensor_a, tensor_b, options,
+            )
+            .map_err(|err| anyhow!("setdiff: {err}"))?;
+        eval.into_numeric_setdiff_result()
+            .map_err(|err| anyhow!("setdiff: {err}"))
+    }
+
+    pub(crate) fn reshape_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        new_shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let new_len = if new_shape.is_empty() {
+            1
+        } else {
+            product_checked(new_shape)
+                .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?
+        };
+        let mut buffers = self.buffers.lock().expect("buffer mutex poisoned");
+        let entry = buffers
+            .get_mut(&handle.buffer_id)
+            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
+        ensure!(
+            entry.len == new_len,
+            "reshape: product of dimensions ({}) must equal original tensor length ({})",
+            new_len,
+            entry.len
+        );
+        entry.shape = new_shape.to_vec();
+        let mut updated = handle.clone();
+        updated.shape = new_shape.to_vec();
+        Ok(updated)
+    }
+
     pub(crate) fn repmat_exec(
         &self,
         handle: &GpuTensorHandle,

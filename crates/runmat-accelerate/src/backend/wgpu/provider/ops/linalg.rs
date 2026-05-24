@@ -1,6 +1,177 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) fn issymmetric_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        kind: ProviderSymmetryKind,
+        tolerance: f64,
+    ) -> Result<bool> {
+        let entry = self.get_entry(matrix)?;
+        let (rows, cols) =
+            ensure_symmetry_shape(&entry.shape).map_err(|e| anyhow!("issymmetric: {e}"))?;
+        if rows != cols {
+            return Ok(false);
+        }
+        if rows == 0 || cols == 0 {
+            return Ok(true);
+        }
+        let total = rows
+            .checked_mul(cols)
+            .ok_or_else(|| anyhow!("issymmetric: matrix dimensions too large"))?;
+        if total > entry.len {
+            return Err(anyhow!(
+                "issymmetric: shape/product mismatch ({} vs {})",
+                total,
+                entry.len
+            ));
+        }
+        if total as u64 > u32::MAX as u64 {
+            return Err(anyhow!("issymmetric: matrix exceeds GPU limits"));
+        }
+        if !tolerance.is_finite() || tolerance < 0.0 {
+            return Err(anyhow!(
+                "issymmetric: tolerance must be finite and non-negative"
+            ));
+        }
+
+        let mode = match kind {
+            ProviderSymmetryKind::Symmetric => 0u32,
+            ProviderSymmetryKind::Skew => 1u32,
+        };
+
+        let output_init = [1u32];
+        let output_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("runmat-issymmetric-output"),
+                contents: cast_slice(&output_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            });
+
+        let pipeline = &self.pipelines.symmetry;
+        match entry.precision {
+            NumericPrecision::F64 => {
+                let params = SymmetryParamsF64 {
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    len: total as u32,
+                    mode,
+                    tolerance,
+                    _pad: 0.0,
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-issymmetric-params-f64");
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-issymmetric-bind-group-f64"),
+                    layout: &pipeline.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: output_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                let groups =
+                    crate::backend::wgpu::dispatch::common::dispatch_size(total as u32, 256);
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &pipeline.pipeline,
+                    &bind_group,
+                    groups,
+                );
+            }
+            NumericPrecision::F32 => {
+                let tol32 = tolerance.min(f32::MAX as f64).max(0.0) as f32;
+                let params = SymmetryParamsF32 {
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    len: total as u32,
+                    mode,
+                    tolerance: tol32,
+                    _pad: [0.0; 3],
+                };
+                let params_buffer = self.uniform_buffer(&params, "runmat-issymmetric-params-f32");
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-issymmetric-bind-group-f32"),
+                    layout: &pipeline.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: output_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+                let groups =
+                    crate::backend::wgpu::dispatch::common::dispatch_size(total as u32, 256);
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &pipeline.pipeline,
+                    &bind_group,
+                    groups,
+                );
+            }
+        }
+
+        let staging_size = std::mem::size_of::<u32>() as u64;
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("runmat-issymmetric-staging"),
+            size: staging_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("runmat-issymmetric-copy"),
+            });
+        encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging, 0, staging_size);
+        self.submit(encoder);
+
+        let bytes = self.map_readback_bytes_sync(staging, staging_size, "issymmetric")?;
+        let words: &[u32] = cast_slice(&bytes);
+        let flag = words.first().copied().unwrap_or(0);
+        Ok(flag != 0)
+    }
+
+    pub(crate) async fn ishermitian_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        kind: ProviderHermitianKind,
+        tolerance: f64,
+    ) -> Result<bool> {
+        if !tolerance.is_finite() || tolerance < 0.0 {
+            return Err(anyhow!(
+                "ishermitian: tolerance must be finite and non-negative"
+            ));
+        }
+        let host = <Self as AccelProvider>::download(self, matrix).await?;
+        let skew = matches!(kind, ProviderHermitianKind::Skew);
+        ishermitian_host_real_data(&host.shape, &host.data, skew, tolerance).map_err(|e| anyhow!(e))
+    }
+
+    pub(crate) async fn sym_rcm_exec(&self, matrix: &GpuTensorHandle) -> Result<Vec<usize>> {
+        let host = <Self as AccelProvider>::download(self, matrix).await?;
+        symrcm_host_real_data(&host.shape, &host.data).map_err(|e| anyhow!(e))
+    }
+
     pub(crate) fn bandwidth_exec(&self, matrix: &GpuTensorHandle) -> Result<ProviderBandwidth> {
         let entry = self.get_entry(matrix)?;
         let (rows, cols) =
@@ -1950,5 +2121,91 @@ impl WgpuProvider {
             perm_matrix,
             perm_vector,
         })
+    }
+
+    pub(crate) async fn lu_exec(&self, handle: &GpuTensorHandle) -> Result<ProviderLuResult> {
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let LuHostFactors {
+            combined,
+            lower,
+            upper,
+            perm_matrix,
+            pivot_vector,
+            combined_shape,
+            lower_shape,
+            upper_shape,
+            perm_shape,
+            pivot_shape,
+        } = lu_factor_host(&host.data, &host.shape)?;
+        let combined = self.upload(&HostTensorView {
+            data: &combined,
+            shape: &combined_shape,
+        })?;
+        let lower = self.upload(&HostTensorView {
+            data: &lower,
+            shape: &lower_shape,
+        })?;
+        let upper = self.upload(&HostTensorView {
+            data: &upper,
+            shape: &upper_shape,
+        })?;
+        let perm_matrix = self.upload(&HostTensorView {
+            data: &perm_matrix,
+            shape: &perm_shape,
+        })?;
+        let perm_vector = self.upload(&HostTensorView {
+            data: &pivot_vector,
+            shape: &pivot_shape,
+        })?;
+        Ok(ProviderLuResult {
+            combined,
+            lower,
+            upper,
+            perm_matrix,
+            perm_vector,
+        })
+    }
+
+    pub(crate) async fn chol_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        lower: bool,
+    ) -> Result<ProviderCholResult> {
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let tensor =
+            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("chol: {e}"))?;
+        let mut args = Vec::new();
+        if lower {
+            args.push(Value::from("lower"));
+        }
+        let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
+            Value::Tensor(tensor),
+            &args,
+        )
+        .await
+        .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
+        let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
+        let factor = self.upload(&HostTensorView {
+            data: &factor_tensor.data,
+            shape: &factor_tensor.shape,
+        })?;
+        Ok(ProviderCholResult {
+            factor,
+            info: eval.flag_index() as u32,
+        })
+    }
+
+    pub(crate) async fn qr_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        options: ProviderQrOptions,
+    ) -> Result<ProviderQrResult> {
+        if let Some(result) = self.try_qr_device(handle, &options)? {
+            return Ok(result);
+        }
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let tensor =
+            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;
+        self.qr_host_result(tensor, &options).await
     }
 }

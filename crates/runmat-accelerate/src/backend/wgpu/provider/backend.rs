@@ -89,6 +89,8 @@ mod image;
 mod indexing;
 #[path = "init.rs"]
 mod init;
+#[path = "ops/io.rs"]
+mod io;
 #[path = "ops/linalg.rs"]
 mod linalg;
 #[path = "ops/polynomial.rs"]
@@ -101,6 +103,8 @@ mod reduction;
 mod signal;
 #[path = "ops/solve.rs"]
 mod solve;
+#[path = "ops/telemetry.rs"]
+mod telemetry;
 #[path = "ops/tensor.rs"]
 mod tensor;
 #[path = "ops/window.rs"]

@@ -329,24 +329,7 @@
         order: SortOrder,
         comparison: SortComparison,
     ) -> AccelProviderFuture<'a, SortResult> {
-        Box::pin(async move {
-            let host = <Self as AccelProvider>::download(self, a).await?;
-            let shape = host.shape.clone();
-            let (values, indices) =
-                sort_host_tensor(&host.data, &host.shape, dim, order, comparison)?;
-            Ok(SortResult {
-                values: HostTensorOwned {
-                    data: values,
-                    shape: shape.clone(),
-                    storage: GpuTensorStorage::Real,
-                },
-                indices: HostTensorOwned {
-                    data: indices,
-                    shape,
-                    storage: GpuTensorStorage::Real,
-                },
-            })
-        })
+        Box::pin(async move { self.sort_dim_exec(a, dim, order, comparison).await })
     }
     fn sort_rows<'a>(
         &'a self,
@@ -354,26 +337,7 @@
         columns: &'a [SortRowsColumnSpec],
         comparison: SortComparison,
     ) -> AccelProviderFuture<'a, SortResult> {
-        Box::pin(async move {
-            let host = <Self as AccelProvider>::download(self, a).await?;
-            let SortRowsHostOutputs {
-                values,
-                indices,
-                indices_shape,
-            } = sort_rows_host(&host.data, &host.shape, columns, comparison)?;
-            Ok(SortResult {
-                values: HostTensorOwned {
-                    data: values,
-                    shape: host.shape.clone(),
-                    storage: GpuTensorStorage::Real,
-                },
-                indices: HostTensorOwned {
-                    data: indices,
-                    shape: indices_shape,
-                    storage: GpuTensorStorage::Real,
-                },
-            })
-        })
+        Box::pin(async move { self.sort_rows_exec(a, columns, comparison).await })
     }
 
     fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -407,11 +371,11 @@
     }
     fn conv2d(
         &self,
-        _signal: &GpuTensorHandle,
-        _kernel: &GpuTensorHandle,
-        _mode: ProviderConvMode,
+        signal: &GpuTensorHandle,
+        kernel: &GpuTensorHandle,
+        mode: ProviderConvMode,
     ) -> Result<GpuTensorHandle> {
-        Err(anyhow!("conv2d not implemented for the WGPU provider yet"))
+        self.conv2d_exec(signal, kernel, mode)
     }
 
     fn diff_dim(
@@ -506,23 +470,7 @@
         handle: &'a GpuTensorHandle,
         options: &'a UniqueOptions,
     ) -> AccelProviderFuture<'a, UniqueResult> {
-        Box::pin(async move {
-            let host = <Self as AccelProvider>::download(self, handle).await?;
-            let HostTensorOwned { data, shape, .. } = host;
-            let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
-            let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
-                tensor, options,
-            ) {
-                Ok(eval) => eval,
-                Err(err) => {
-                    return Err(anyhow!("unique: {err}"));
-                }
-            };
-            match eval.into_numeric_unique_result() {
-                Ok(result) => Ok(result),
-                Err(err) => Err(anyhow!("unique: {err}")),
-            }
-        })
+        Box::pin(async move { self.unique_exec(handle, options).await })
     }
     fn ismember<'a>(
         &'a self,
@@ -530,28 +478,7 @@
         b: &'a GpuTensorHandle,
         options: &'a IsMemberOptions,
     ) -> AccelProviderFuture<'a, IsMemberResult> {
-        Box::pin(async move {
-            let host_a = <Self as AccelProvider>::download(self, a).await?;
-            let host_b = <Self as AccelProvider>::download(self, b).await?;
-            let tensor_a =
-                Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("ismember: {e}"))?;
-            let tensor_b =
-                Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("ismember: {e}"))?;
-            let eval = match runmat_runtime::builtins::array::sorting_sets::ismember::ismember_numeric_from_tensors(
-                tensor_a,
-                tensor_b,
-                options.rows,
-            ) {
-                Ok(eval) => eval,
-                Err(err) => {
-                    return Err(anyhow!("ismember: {err}"));
-                }
-            };
-            match eval.into_numeric_ismember_result() {
-                Ok(result) => Ok(result),
-                Err(err) => Err(anyhow!("ismember: {err}")),
-            }
-        })
+        Box::pin(async move { self.ismember_exec(a, b, options).await })
     }
 
     fn union<'a>(
@@ -560,26 +487,7 @@
         b: &'a GpuTensorHandle,
         options: &'a UnionOptions,
     ) -> AccelProviderFuture<'a, UnionResult> {
-        Box::pin(async move {
-            let host_a = <Self as AccelProvider>::download(self, a).await?;
-            let host_b = <Self as AccelProvider>::download(self, b).await?;
-            let tensor_a =
-                Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
-            let tensor_b =
-                Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
-            let eval = match runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
-                tensor_a, tensor_b, options,
-            ) {
-                Ok(eval) => eval,
-                Err(err) => {
-                    return Err(anyhow!("union: {err}"));
-                }
-            };
-            match eval.into_numeric_union_result() {
-                Ok(result) => Ok(result),
-                Err(err) => Err(anyhow!("union: {err}")),
-            }
-        })
+        Box::pin(async move { self.union_exec(a, b, options).await })
     }
     fn setdiff<'a>(
         &'a self,
@@ -587,26 +495,7 @@
         b: &'a GpuTensorHandle,
         options: &'a SetdiffOptions,
     ) -> AccelProviderFuture<'a, SetdiffResult> {
-        Box::pin(async move {
-            let host_a = <Self as AccelProvider>::download(self, a).await?;
-            let host_b = <Self as AccelProvider>::download(self, b).await?;
-            let tensor_a =
-                Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
-            let tensor_b =
-                Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
-            let eval = match runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
-                tensor_a, tensor_b, options,
-            ) {
-                Ok(eval) => eval,
-                Err(err) => {
-                    return Err(anyhow!("setdiff: {err}"));
-                }
-            };
-            match eval.into_numeric_setdiff_result() {
-                Ok(result) => Ok(result),
-                Err(err) => Err(anyhow!("setdiff: {err}")),
-            }
-        })
+        Box::pin(async move { self.setdiff_exec(a, b, options).await })
     }
 
     fn cat(&self, dim: usize, inputs: &[GpuTensorHandle]) -> Result<GpuTensorHandle> {
@@ -629,71 +518,11 @@
         self.cross_exec(lhs, rhs, dim)
     }
     fn reshape(&self, handle: &GpuTensorHandle, new_shape: &[usize]) -> Result<GpuTensorHandle> {
-        let new_len = if new_shape.is_empty() {
-            1
-        } else {
-            product_checked(new_shape)
-                .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?
-        };
-        let mut buffers = self.buffers.lock().expect("buffer mutex poisoned");
-        let entry = buffers
-            .get_mut(&handle.buffer_id)
-            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
-        ensure!(
-            entry.len == new_len,
-            "reshape: product of dimensions ({}) must equal original tensor length ({})",
-            new_len,
-            entry.len
-        );
-        entry.shape = new_shape.to_vec();
-        let mut updated = handle.clone();
-        updated.shape = new_shape.to_vec();
-        Ok(updated)
+        self.reshape_exec(handle, new_shape)
     }
 
     fn lu<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, ProviderLuResult> {
-        Box::pin(async move {
-            let host = <Self as AccelProvider>::download(self, a).await?;
-            let LuHostFactors {
-                combined,
-                lower,
-                upper,
-                perm_matrix,
-                pivot_vector,
-                combined_shape,
-                lower_shape,
-                upper_shape,
-                perm_shape,
-                pivot_shape,
-            } = lu_factor_host(&host.data, &host.shape)?;
-            let combined = self.upload(&HostTensorView {
-                data: &combined,
-                shape: &combined_shape,
-            })?;
-            let lower = self.upload(&HostTensorView {
-                data: &lower,
-                shape: &lower_shape,
-            })?;
-            let upper = self.upload(&HostTensorView {
-                data: &upper,
-                shape: &upper_shape,
-            })?;
-            let perm_matrix = self.upload(&HostTensorView {
-                data: &perm_matrix,
-                shape: &perm_shape,
-            })?;
-            let perm_vector = self.upload(&HostTensorView {
-                data: &pivot_vector,
-                shape: &pivot_shape,
-            })?;
-            Ok(ProviderLuResult {
-                combined,
-                lower,
-                upper,
-                perm_matrix,
-                perm_vector,
-            })
-        })
+        Box::pin(async move { self.lu_exec(a).await })
     }
 
     fn chol<'a>(
@@ -701,43 +530,12 @@
         a: &'a GpuTensorHandle,
         lower: bool,
     ) -> AccelProviderFuture<'a, ProviderCholResult> {
-        Box::pin(async move {
-            let host = <Self as AccelProvider>::download(self, a).await?;
-            let tensor = Tensor::new(host.data.clone(), host.shape.clone())
-                .map_err(|e| anyhow!("chol: {e}"))?;
-            let mut args = Vec::new();
-            if lower {
-                args.push(Value::from("lower"));
-            }
-            let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
-                Value::Tensor(tensor),
-                &args,
-            )
-            .await
-            .map_err(|err| runtime_flow_to_anyhow("chol", err))?;
-            let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
-            let factor = self.upload(&HostTensorView {
-                data: &factor_tensor.data,
-                shape: &factor_tensor.shape,
-            })?;
-            Ok(ProviderCholResult {
-                factor,
-                info: eval.flag_index() as u32,
-            })
-        })
+        Box::pin(async move { self.chol_exec(a, lower).await })
     }
     fn qr<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
         options: ProviderQrOptions,
     ) -> AccelProviderFuture<'a, ProviderQrResult> {
-        Box::pin(async move {
-            if let Some(result) = self.try_qr_device(handle, &options)? {
-                return Ok(result);
-            }
-            let host = <Self as AccelProvider>::download(self, handle).await?;
-            let tensor = Tensor::new(host.data.clone(), host.shape.clone())
-                .map_err(|e| anyhow!("qr: {e}"))?;
-            self.qr_host_result(tensor, &options).await
-        })
+        Box::pin(async move { self.qr_exec(handle, options).await })
     }

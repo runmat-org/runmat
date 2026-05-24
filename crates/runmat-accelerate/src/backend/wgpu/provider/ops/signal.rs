@@ -1,6 +1,15 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) fn conv2d_exec(
+        &self,
+        _signal: &GpuTensorHandle,
+        _kernel: &GpuTensorHandle,
+        _mode: ProviderConvMode,
+    ) -> Result<GpuTensorHandle> {
+        Err(anyhow!("conv2d not implemented for the WGPU provider yet"))
+    }
+
     pub(crate) fn conv1d_exec(
         &self,
         signal: &GpuTensorHandle,
