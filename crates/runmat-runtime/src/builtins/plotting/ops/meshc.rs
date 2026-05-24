@@ -7,12 +7,12 @@ use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
-use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::contour::{build_contour_plot, default_level_count, ContourLevelSpec, ContourLineColor};
 use super::mesh::build_mesh_surface;
 use super::op_common::surface_composite::contour_for_surface_axes_input;
 use super::op_common::surface_inputs::{
-    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args,
+    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
@@ -34,10 +34,11 @@ const BUILTIN_NAME: &str = "meshc";
     builtin_path = "crate::builtins::plotting::meshc"
 )]
 pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
+    let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "meshc")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
-    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) =
+        surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
     let style = Arc::new(parse_surface_style_args(
         "meshc",
         &rest,
@@ -98,7 +99,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                     let z_tensor =
                         super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
                     let grid =
-                        tensor_to_surface_grid(z_tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
+                        tensor_to_surface_grid_matlab_xy(z_tensor, rows, cols, BUILTIN_NAME)?;
                     let mut surface =
                         build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())?;
                     style.apply_to_plot(&mut surface);
@@ -121,8 +122,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
                 let z_tensor =
                     super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
-                let grid =
-                    tensor_to_surface_grid(z_tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
+                let grid = tensor_to_surface_grid_matlab_xy(z_tensor, rows, cols, BUILTIN_NAME)?;
                 let mut surface = build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())?;
                 style.apply_to_plot(&mut surface);
                 let base_z = surface.bounds().min.z;
@@ -141,10 +141,10 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         }
     } else {
         let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-        let grid = tensor_to_surface_grid(
+        let grid = tensor_to_surface_grid_matlab_xy(
             z_input.into_tensor(BUILTIN_NAME)?,
-            x_host.len(),
-            y_host.len(),
+            rows,
+            cols,
             BUILTIN_NAME,
         )?;
         let mut surface = build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())?;

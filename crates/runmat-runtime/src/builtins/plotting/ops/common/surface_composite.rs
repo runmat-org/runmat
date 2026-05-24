@@ -1,7 +1,7 @@
 use runmat_plot::plots::ContourPlot;
 
 use crate::builtins::plotting::common::{
-    gather_tensor_from_gpu_async, tensor_to_surface_grid, SurfaceDataInput,
+    gather_tensor_from_gpu_async, tensor_to_surface_grid_matlab_xy, SurfaceDataInput,
 };
 use crate::builtins::plotting::contour::{
     build_contour_gpu_plot, build_contour_gpu_plot_with_axes, build_contour_plot, ContourLevelSpec,
@@ -38,7 +38,7 @@ pub async fn contour_for_surface_input(
         SurfaceDataInput::Host(t) => t.clone(),
         SurfaceDataInput::Gpu(h) => gather_tensor_from_gpu_async(h.clone(), builtin).await?,
     };
-    let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), builtin)?;
+    let grid = tensor_to_surface_grid_matlab_xy(z_tensor, y_axis.len(), x_axis.len(), builtin)?;
     build_contour_plot(
         builtin,
         x_axis,

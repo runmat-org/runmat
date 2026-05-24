@@ -15,9 +15,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::op_common::surface_inputs::{
-    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args, AxisSource,
+    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
+    AxisSource,
 };
 use super::perf::compute_surface_lod;
 use super::plotting_error;
@@ -72,14 +73,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::surf"
 )]
 pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
+    let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "surf")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
 
     // Prefer a no-download path for vector-like gpuArray axes: keep X/Y on-device and pass
     // their buffers through to the GPU vertex packer. If X/Y are meshgrid matrices, we still
     // need to validate and extract axes on the host.
-    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) =
+        surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
 
     let style = Arc::new(parse_surface_style_args(
         "surf",
@@ -121,18 +123,18 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                     warn!("surf GPU path unavailable: {err}");
                     let (x_host, y_host) =
                         axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                    build_surface_cpu(&z_input, x_host, y_host).await?
+                    build_surface_cpu(&z_input, x_host, y_host, rows, cols).await?
                 }
             },
             Err(err) => {
                 warn!("surf GPU bounds unavailable: {err}");
                 let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                build_surface_cpu(&z_input, x_host, y_host).await?
+                build_surface_cpu(&z_input, x_host, y_host, rows, cols).await?
             }
         }
     } else {
         let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-        build_surface_cpu(&z_input, x_host, y_host).await?
+        build_surface_cpu(&z_input, x_host, y_host, rows, cols).await?
     };
 
     style.apply_to_plot(&mut surface);
@@ -165,6 +167,8 @@ async fn build_surface_cpu(
     z_input: &SurfaceDataInput,
     x_axis: Vec<f64>,
     y_axis: Vec<f64>,
+    rows: usize,
+    cols: usize,
 ) -> BuiltinResult<SurfacePlot> {
     let z_tensor = match z_input.clone() {
         SurfaceDataInput::Host(tensor) => tensor,
@@ -172,7 +176,7 @@ async fn build_surface_cpu(
             super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
         }
     };
-    let grid = tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
+    let grid = tensor_to_surface_grid_matlab_xy(z_tensor, rows, cols, BUILTIN_NAME)?;
     build_surface(x_axis, y_axis, grid)
 }
 
@@ -479,7 +483,7 @@ pub(crate) mod tests {
         assert_eq!(y_axis.len(), 2);
 
         // With extracted axes, Z should validate and reshape into a surface grid.
-        let grid = tensor_to_surface_grid(z, y_axis.len(), x_axis.len(), BUILTIN_NAME);
+        let grid = tensor_to_surface_grid_matlab_xy(z, y_axis.len(), x_axis.len(), BUILTIN_NAME);
         assert!(
             grid.is_ok(),
             "expected Z to be compatible with extracted axes"
@@ -498,7 +502,7 @@ pub(crate) mod tests {
         })]));
         assert!(out.is_ok() || out.is_err());
         let (x, y, z, rest) =
-            crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args(
+            crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
                 vec![Value::Tensor(Tensor {
                     data: vec![1.0, 2.0, 3.0, 4.0],
                     shape: vec![2, 2],
@@ -513,6 +517,25 @@ pub(crate) mod tests {
         assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0]);
         assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0]);
         assert_eq!(Tensor::try_from(&z).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn surf_z_only_shorthand_uses_matlab_xy_for_non_square_grid() {
+        let (x, y, _, rest) =
+            crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
+                vec![Value::Tensor(Tensor {
+                    data: (1..=12).map(|v| v as f64).collect(),
+                    shape: vec![3, 4],
+                    rows: 3,
+                    cols: 4,
+                    dtype: runmat_builtins::NumericDType::F64,
+                })],
+                BUILTIN_NAME,
+            )
+            .unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0, 3.0]);
     }
 
     #[test]

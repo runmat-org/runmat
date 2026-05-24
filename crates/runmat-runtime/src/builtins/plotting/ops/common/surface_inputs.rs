@@ -36,6 +36,39 @@ pub fn parse_surface_call_args(
     }
 }
 
+/// Parse surface-like call arguments using MATLAB's X/Y convention:
+/// X indexes columns of Z, Y indexes rows of Z.
+pub fn parse_surface_call_args_matlab_xy(
+    args: Vec<Value>,
+    builtin: &'static str,
+) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
+    match args.len() {
+        0 => Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected Z or X,Y,Z input"),
+        )),
+        1 => {
+            let z = args.into_iter().next().expect("one arg");
+            let (rows, cols) = inferred_grid_shape(&z, builtin)?;
+            let x = Value::Tensor(default_surface_axis(cols));
+            let y = Value::Tensor(default_surface_axis(rows));
+            Ok((x, y, z, Vec::new()))
+        }
+        2 => Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected Z or X,Y,Z input"),
+        )),
+        _ => {
+            let mut it = args.into_iter();
+            let x = it.next().expect("x");
+            let y = it.next().expect("y");
+            let z = it.next().expect("z");
+            let rest = it.collect();
+            Ok((x, y, z, rest))
+        }
+    }
+}
+
 fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize)> {
     match value {
         Value::GpuTensor(handle) => {
@@ -98,6 +131,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_surface_call_args_matlab_xy_uses_column_then_row_defaults() {
+        let z = Value::Tensor(Tensor {
+            data: (1..=12).map(|v| v as f64).collect(),
+            shape: vec![3, 4],
+            rows: 3,
+            cols: 4,
+            dtype: runmat_builtins::NumericDType::F64,
+        });
+        let (x, y, _, rest) = parse_surface_call_args_matlab_xy(vec![z], "surf").unwrap();
+        let x = Tensor::try_from(&x).unwrap();
+        let y = Tensor::try_from(&y).unwrap();
+        assert_eq!(x.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(y.data, vec![1.0, 2.0, 3.0]);
+        assert!(rest.is_empty());
+    }
+
     #[tokio::test]
     async fn image_axis_sources_expand_two_element_extents() {
         let x = Value::Tensor(Tensor {
@@ -128,6 +178,31 @@ mod tests {
             y_vals,
             vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
         );
+    }
+
+    #[tokio::test]
+    async fn surface_axis_sources_enforce_matlab_vector_lengths() {
+        let x = Value::Tensor(Tensor {
+            data: vec![1.0, 2.0],
+            shape: vec![2],
+            rows: 2,
+            cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        });
+        let y = Value::Tensor(Tensor {
+            data: vec![1.0, 2.0, 3.0, 4.0],
+            shape: vec![4],
+            rows: 4,
+            cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        });
+        let err = match surface_axis_sources_from_xy_values(x, y, 3, 4, "surf").await {
+            Ok(_) => panic!("expected size(Z) contract validation"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("X must have length 4 and Y must have length 3"));
     }
 }
 
@@ -216,6 +291,27 @@ pub async fn axis_sources_from_xy_values(
             }
         }
     }
+}
+
+pub async fn surface_axis_sources_from_xy_values(
+    x: Value,
+    y: Value,
+    rows: usize,
+    cols: usize,
+    builtin: &'static str,
+) -> BuiltinResult<(AxisSource, AxisSource)> {
+    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, builtin).await?;
+    let expected_x_len = cols;
+    let expected_y_len = rows;
+    if x_axis.len() != expected_x_len || y_axis.len() != expected_y_len {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: X must have length {expected_x_len} and Y must have length {expected_y_len} to match size(Z) = {rows}x{cols}"
+            ),
+        ));
+    }
+    Ok((x_axis, y_axis))
 }
 
 pub async fn image_axis_sources_from_xy_values(

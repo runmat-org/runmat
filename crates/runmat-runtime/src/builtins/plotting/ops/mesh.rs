@@ -12,9 +12,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::op_common::surface_inputs::{
-    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args, AxisSource,
+    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
+    AxisSource,
 };
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -65,13 +66,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::mesh"
 )]
 pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
+    let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "mesh")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
 
     // Match surf semantics: keep vector-like gpuArray axes on-device when possible; otherwise
     // gather to validate meshgrid matrix inputs and extract axis vectors.
-    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) =
+        surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
 
     let style = Arc::new(parse_surface_style_args(
         "mesh",
@@ -111,16 +113,16 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 Ok(surface_gpu) => surface_gpu,
                 Err(err) => {
                     warn!("mesh GPU path unavailable: {err}");
-                    build_mesh_cpu(&z_input, &x_axis, &y_axis).await?
+                    build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols).await?
                 }
             },
             Err(err) => {
                 warn!("mesh GPU bounds unavailable: {err}");
-                build_mesh_cpu(&z_input, &x_axis, &y_axis).await?
+                build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols).await?
             }
         }
     } else {
-        build_mesh_cpu(&z_input, &x_axis, &y_axis).await?
+        build_mesh_cpu(&z_input, &x_axis, &y_axis, rows, cols).await?
     };
 
     surface = surface
@@ -158,6 +160,8 @@ async fn build_mesh_cpu(
     z_input: &SurfaceDataInput,
     x_axis: &AxisSource,
     y_axis: &AxisSource,
+    rows: usize,
+    cols: usize,
 ) -> BuiltinResult<SurfacePlot> {
     let (x_host, y_host) = axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME).await?;
     let z_tensor = match z_input {
@@ -166,7 +170,7 @@ async fn build_mesh_cpu(
             super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?
         }
     };
-    let grid = tensor_to_surface_grid(z_tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
+    let grid = tensor_to_surface_grid_matlab_xy(z_tensor, rows, cols, BUILTIN_NAME)?;
     build_mesh_surface(x_host, y_host, grid)
 }
 
