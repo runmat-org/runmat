@@ -16,6 +16,7 @@ backend/wgpu/
   provider_impl.rs
   provider_impl/
     fft.rs
+    rnd.rs
     solve.rs
     window.rs
   pipelines.rs
@@ -37,9 +38,18 @@ backend/wgpu/
 - a very large `impl AccelProvider for WgpuProvider`
 - many private execution helpers across unrelated operation families
 
-The file is already partially dissolved into `provider_impl/fft.rs`, `provider_impl/solve.rs`, and `provider_impl/window.rs`, and the top-of-file comment in `provider_impl.rs` explicitly indicates that new implementation work should go into submodules.
+The file is already partially dissolved into `provider_impl/fft.rs`, `provider_impl/rnd.rs`, `provider_impl/solve.rs`, and `provider_impl/window.rs`, and the top-of-file comment in `provider_impl.rs` explicitly indicates that new implementation work should go into submodules.
 
 At this point, `provider_impl.rs` is still effectively monolithic.
+
+## Drift Notes (Repo-Verified)
+
+These updates reflect current repository reality:
+
+- `backend/wgpu/provider.rs` already exists and is the public registration/facade module.
+- Renaming `provider_impl.rs` directly to `provider/mod.rs` would collide with that existing module unless the facade is renamed in the same change.
+- Multiple tests and internal imports currently reference `backend::wgpu::provider_impl::*`; a package rename is therefore not a pure local file move.
+- `rnd.rs` already exists as a partial random-family extraction.
 
 ## Refactor Principles
 
@@ -66,24 +76,22 @@ Do not:
 
 ## Naming Recommendation
 
-The current `provider_impl` name was reasonable when the implementation was primarily one file. It becomes less helpful as the implementation is dissolved into a real module tree.
+Use a single canonical `provider` module tree as the final architecture.
 
-Recommended rename:
+- `backend/wgpu/provider.rs` remains the parent module.
+- implementation modules live under `backend/wgpu/provider/*`.
+- no permanent split between `provider` (facade) and `provider_impl` (implementation package).
 
-- `backend/wgpu/provider_impl.rs` -> `backend/wgpu/provider/mod.rs`
-- `backend/wgpu/provider_impl/` -> `backend/wgpu/provider/`
+Transition strategy:
 
-Keep:
-
-- `backend/wgpu/provider.rs`
-
-`provider.rs` should remain the public facade used for provider registration and public re-exports.
+- During extraction, keep paths stable as needed.
+- Finalization includes a coordinated rename from `provider_impl` into `provider/*` with import/test updates in one pass.
 
 Why not rename directly to `ops/`?
 
 Because a large portion of the current file is not operations code. It includes provider bootstrapping, buffer lifecycle, upload/download/free, warmup, metrics, and shared infrastructure. An `ops/` name would describe only part of the implementation.
 
-If needed later, `provider/ops/` can be introduced under `provider/`, but it should not be the first restructuring step.
+Use `provider/ops/` as the stable long-term operations layer; the sequencing still starts with extraction, not immediate large-scale path churn.
 
 ## Target Layout
 
@@ -98,21 +106,30 @@ backend/wgpu/
     init.rs
     core.rs
     helpers.rs
-    elementwise.rs
-    reduction.rs
-    tensor_ops.rs
-    indexing.rs
-    random.rs
-    constructors.rs
-    polynomial.rs
-    image.rs
-    linalg.rs
+    ops/
+      elementwise.rs
+      reduction.rs
+      tensor.rs
+      indexing.rs
+      random.rs
+      constructors.rs
+      polynomial.rs
+      image.rs
+      linalg.rs
     fft.rs
+    random_dist.rs
     solve.rs
     window.rs
 ```
 
 This is the intended end state, not necessarily the first landing step.
+
+Design boundaries in the final layout:
+
+- `provider/{init,core,helpers}` own provider lifecycle and cross-cutting infrastructure.
+- `provider/ops/*` own operation semantics and provider-level orchestration by family.
+- `dispatch/*` stays kernel-launch plumbing and parameter binding mechanics.
+- `shaders/*` stays shader source/constants only.
 
 ## What Should Live In Each Module
 
@@ -175,7 +192,7 @@ Small non-semantic helper utilities that reduce repetition:
 
 This file should stay small and practical.
 
-### `provider/elementwise.rs`
+### `provider/ops/elementwise.rs`
 
 Operation family:
 
@@ -190,7 +207,7 @@ Operation family:
 
 This is the best first extraction candidate because the family is large, internally coherent, and has a lot of low-risk repetition.
 
-### `provider/reduction.rs`
+### `provider/ops/reduction.rs`
 
 Operation family:
 
@@ -205,7 +222,7 @@ Operation family:
 
 This is a major cohesion win after `elementwise.rs`.
 
-### `provider/tensor_ops.rs`
+### `provider/ops/tensor.rs`
 
 Operation family:
 
@@ -220,7 +237,7 @@ Operation family:
 - tril/triu
 - reshape-related helper paths that are operational rather than lifecycle-related
 
-### `provider/indexing.rs`
+### `provider/ops/indexing.rs`
 
 Operation family:
 
@@ -230,7 +247,7 @@ Operation family:
 - scatter row/column
 - gather/index-select related helpers if present
 
-### `provider/random.rs`
+### `provider/ops/random.rs`
 
 Operation family:
 
@@ -241,7 +258,7 @@ Operation family:
 - RNG synchronization helpers
 - stochastic evolution
 
-### `provider/constructors.rs`
+### `provider/ops/constructors.rs`
 
 Operation family:
 
@@ -255,7 +272,7 @@ Operation family:
 
 `window.rs` can remain separate because it is already clean and self-contained.
 
-### `provider/polynomial.rs`
+### `provider/ops/polynomial.rs`
 
 Operation family:
 
@@ -265,7 +282,7 @@ Operation family:
 
 This can stay small.
 
-### `provider/image.rs`
+### `provider/ops/image.rs`
 
 Operation family:
 
@@ -274,7 +291,7 @@ Operation family:
 
 If image normalization remains deeply tied to backend-specific tuning and dynamic pipelines, some supporting code may still stay closer to provider core.
 
-### `provider/linalg.rs`
+### `provider/ops/linalg.rs`
 
 Operation family:
 
@@ -294,6 +311,7 @@ This should not be the first extraction because it is broad and more tightly cou
 - `provider/fft.rs`
 - `provider/solve.rs`
 - `provider/window.rs`
+- `provider/random_dist.rs` (distribution-specific helpers; fold/route cleanly into `ops/random.rs`)
 
 These already match the desired direction.
 
@@ -420,7 +438,7 @@ But this should come after elementwise because reduction code is more coupled to
 
 ## Third Extraction Recommendation
 
-Extract `tensor_ops.rs`.
+Extract the tensor operations family (`provider/ops/tensor.rs`).
 
 Why:
 
@@ -460,7 +478,7 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - exported device/context helpers
 - telemetry snapshot/reset if they remain tightly coupled to core caches
 
-### `provider/elementwise.rs`
+### `provider/ops/elementwise.rs`
 
 - unary execution helpers
 - scalar execution helpers
@@ -473,7 +491,7 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - `not_nan_mask`
 - inline WGSL logical/comparison shader references after they move to `shaders/`
 
-### `provider/reduction.rs`
+### `provider/ops/reduction.rs`
 
 - `reduce_global_exec`
 - `reduce_dim_sum_mean_exec`
@@ -485,7 +503,7 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - `fused_reduction`
 - reduction wrapper entrypoints in `impl AccelProvider`
 
-### `provider/tensor_ops.rs`
+### `provider/ops/tensor.rs`
 
 - transpose / permute / reshape-related execution helpers
 - flip / circshift
@@ -494,7 +512,7 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - tril / triu
 - cat-related helpers
 
-### `provider/indexing.rs`
+### `provider/ops/indexing.rs`
 
 - `find_exec`
 - `scatter_column_exec`
@@ -502,13 +520,13 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - `sub2ind_exec`
 - `ind2sub_exec`
 
-### `provider/random.rs`
+### `provider/ops/random.rs`
 
 - random uniform / normal / integer / permutation execution helpers
 - RNG state setting
 - stochastic evolution
 
-### `provider/constructors.rs`
+### `provider/ops/constructors.rs`
 
 - `fill`
 - `eye`
@@ -517,18 +535,18 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 - `peaks_xy`
 - `fspecial`
 
-### `provider/polynomial.rs`
+### `provider/ops/polynomial.rs`
 
 - `polyval`
 - `polyder`
 - `polyint`
 
-### `provider/image.rs`
+### `provider/ops/image.rs`
 
 - `imfilter`
 - image normalize provider-facing helpers if not better placed elsewhere
 
-### `provider/linalg.rs`
+### `provider/ops/linalg.rs`
 
 - matmul helpers if still local here
 - pagefun mtimes
@@ -540,19 +558,20 @@ This mapping is intentionally approximate. It is meant to guide extraction bound
 
 ## Proposed Refactor Sequence
 
-### Phase 0: Pure rename and path stabilization
+### Phase 0: Path stabilization without public path churn
 
-1. Rename `provider_impl.rs` to `provider/mod.rs`.
-2. Rename `provider_impl/` to `provider/`.
-3. Keep code otherwise unchanged except module paths.
+1. Keep current public API/paths stable while extraction starts.
+2. Normalize monolith file layout to module-friendly form (same module path; no behavior changes).
+3. Keep code otherwise unchanged except local path normalization.
 
-This creates the right structural landing zone before more extraction.
+This creates the right structural landing zone before more extraction, without forcing import-path updates.
 
 ### Phase 1: Extract `elementwise.rs`
 
 1. Move elementwise and logical/comparison execution helpers.
 2. Move inline WGSL logical/comparison shader strings into `shaders/`.
 3. Extract only small local helper functions needed to reduce repetition.
+4. Place extracted logic under `provider/ops/elementwise.rs` in the final tree.
 
 Expected result:
 
@@ -565,16 +584,18 @@ Expected result:
 1. Move reduction execution helpers.
 2. Keep provider-core synchronization behavior unchanged.
 3. Keep tuning and thresholds exactly as they are.
+4. Place extracted logic under `provider/ops/reduction.rs` in the final tree.
 
 Expected result:
 
 - another large monolith reduction
 - clearer separation between elementwise and reduction families
 
-### Phase 3: Extract `tensor_ops.rs` and `indexing.rs`
+### Phase 3: Extract `tensor` and `indexing` operation families
 
 1. Move structural tensor transforms.
 2. Move indexing/scatter/find helpers.
+3. Place extracted logic under `provider/ops/tensor.rs` and `provider/ops/indexing.rs`.
 
 Expected result:
 
@@ -583,21 +604,34 @@ Expected result:
 ### Phase 4: Extract `random.rs`, `constructors.rs`, `polynomial.rs`
 
 1. Move creation and math utility families.
-2. Keep `window.rs` as-is.
+2. Fold existing random distribution logic (`rnd`) into final random-family structure.
+3. Keep `window.rs` as-is.
+4. Place extracted logic under `provider/ops/{random,constructors,polynomial}.rs`.
 
 ### Phase 5: Extract `linalg.rs` carefully
 
 1. Move the remaining higher-coupling math paths.
 2. Keep provider core logic stable.
+3. Place extracted logic under `provider/ops/linalg.rs`.
 
-### Phase 6: Optional split of `provider/mod.rs`
+### Phase 6: Split provider root into explicit lifecycle modules
 
-If `provider/mod.rs` still carries too much non-operational logic, split it further into:
+Split provider root so non-operational provider lifecycle code is explicitly organized into:
 
 - `init.rs`
 - `core.rs`
 
-This should happen only after the larger operation families are gone.
+This happens after the larger operation families are extracted.
+
+### Phase 7: Coordinated finalization to canonical `provider` tree
+
+After structural extraction is stable:
+
+1. Move implementation package into `provider/*` under a single module root.
+2. Preserve `provider.rs` as the public parent module and re-export surface.
+3. Update all internal and test imports in one coordinated pass.
+
+This is part of the plan of record for final naming clarity and long-term maintainability.
 
 ## Verification Strategy
 
@@ -619,18 +653,29 @@ Important:
 
 ## Bottom Line
 
-The right cleanup is not to keep slowly dissolving `provider_impl` under its current name forever.
+The right cleanup is to keep behavior fixed while finishing extraction by operation family first, and then complete lifecycle split + naming cleanup to reach the final resting state.
 
-The clean target is:
+Execution target during extraction:
 
-- `provider.rs` as the public facade
-- `provider/` as the real implementation package
-- provider core kept near the root
-- operation families extracted one at a time
+- `provider.rs` remains the public facade
+- `provider_impl/` remains the implementation package during extraction
+- provider core stays near the root
+- operation families are extracted one at a time
+
+Final resting state (plan of record):
+
+- single canonical `provider` module tree
+- explicit lifecycle split (`init.rs`, `core.rs`, `helpers.rs`)
+- explicit operation-family layer (`provider/ops/*`)
+- strict domain boundaries:
+  - ops semantics in `provider/ops/*`
+  - launch plumbing in `dispatch/*`
+  - shader sources in `shaders/*`
+- normalized random naming (no long-term `rnd` abbreviation drift)
 
 Recommended first move:
 
-1. rename `provider_impl` -> `provider`
+1. keep `provider_impl` naming stable
 2. extract `elementwise.rs`
 
 That gives the best improvement-to-risk ratio while keeping the refactor firmly in the “logic cleanup only” category.
