@@ -71,3 +71,9 @@
 - Verification for Phase 3b:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 3c: moved tensor transform operations into `provider_impl/tensor.rs`.
+  - moved: `permute_exec`, `circshift_exec`, `tril_exec` (+ fallback), `triu_exec` (+ fallback), `flip_exec`.
+  - left `conv1d`/`iir`/`diff`/`gradient` in `mod.rs` for a later signal-family extraction.
+- Verification for Phase 3c:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
