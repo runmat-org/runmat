@@ -29,3 +29,9 @@
 - Verification for Phase 1c:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 1d: moved fused elementwise kernel executors into `provider_impl/elementwise.rs`.
+  - moved methods: `fused_elementwise_exec`, `fused_elementwise_multi_exec`.
+  - reduction methods remain in `provider_impl/mod.rs` for the Phase 2 extraction.
+- Verification for Phase 1d:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
