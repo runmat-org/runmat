@@ -41,3 +41,9 @@
 - Verification for Phase 2a:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 3a: created `backend/wgpu/provider_impl/indexing.rs` and moved indexing/scatter helpers out of `provider_impl/mod.rs`.
+  - moved: `scatter_{column,row}_exec`, `sub2ind_exec`, `ind2sub_exec`, `gather_linear_exec`, `scatter_linear_exec`, `find_exec`.
+  - preserved trait impl boundary in `mod.rs` (`impl WgpuProvider` closed before `impl AccelProvider for WgpuProvider`).
+- Verification for Phase 3a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
