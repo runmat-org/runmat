@@ -306,7 +306,7 @@ impl Scatter3Plot {
             indices: None,
             gpu_vertices: self.gpu_vertices.clone(),
             bounds: Some(bounds),
-            material: material,
+            material,
             draw_calls: vec![DrawCall {
                 vertex_offset: 0,
                 vertex_count,

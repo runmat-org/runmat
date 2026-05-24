@@ -1,5 +1,15 @@
 use super::*;
 
+pub(crate) struct FusedReductionTelemetryRequest<'a> {
+    pub(crate) shader: &'a str,
+    pub(crate) inputs: &'a [GpuTensorHandle],
+    pub(crate) output_shape: &'a [usize],
+    pub(crate) reduce_len: usize,
+    pub(crate) num_slices: usize,
+    pub(crate) workgroup_size: u32,
+    pub(crate) flavor: ReductionFlavor,
+}
+
 impl WgpuProvider {
     pub(crate) fn fused_elementwise_with_telemetry_exec(
         &self,
@@ -92,14 +102,17 @@ impl WgpuProvider {
 
     pub(crate) fn fused_reduction_with_telemetry_exec(
         &self,
-        shader: &str,
-        inputs: &[GpuTensorHandle],
-        output_shape: &[usize],
-        reduce_len: usize,
-        num_slices: usize,
-        workgroup_size: u32,
-        flavor: ReductionFlavor,
+        request: FusedReductionTelemetryRequest<'_>,
     ) -> Result<GpuTensorHandle> {
+        let FusedReductionTelemetryRequest {
+            shader,
+            inputs,
+            output_shape,
+            reduce_len,
+            num_slices,
+            workgroup_size,
+            flavor,
+        } = request;
         let start = Instant::now();
         let result = self.fused_reduction_exec(
             shader,

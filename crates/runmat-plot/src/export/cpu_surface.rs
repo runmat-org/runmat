@@ -77,8 +77,8 @@ impl Canvas {
             self.pixels[p..p + 4].copy_from_slice(&[0, 0, 0, 0]);
             return;
         }
-        for i in 0..3 {
-            let src = rgba[i] as f32 / 255.0;
+        for (i, src_u8) in rgba.iter().take(3).enumerate() {
+            let src = *src_u8 as f32 / 255.0;
             let dst = self.pixels[p + i] as f32 / 255.0;
             let out = (src * src_a + dst * dst_a * (1.0 - src_a)) / out_a;
             self.pixels[p + i] = (out.clamp(0.0, 1.0) * 255.0) as u8;
@@ -435,7 +435,7 @@ fn compute_tiled_viewports(
 fn compute_plot_rect(viewport: (u32, u32, u32, u32), has_3d: bool) -> (u32, u32, u32, u32) {
     let (vx, vy, vw, vh) = viewport;
     let left = if has_3d { 48 } else { 62 };
-    let right = if has_3d { 24 } else { 24 };
+    let right = 24;
     let top = if has_3d { 34 } else { 40 };
     let bottom = if has_3d { 48 } else { 54 };
 

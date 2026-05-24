@@ -92,15 +92,9 @@ impl LineStyleCycle {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct LineColorCycle {
     cursor: usize,
-}
-
-impl Default for LineColorCycle {
-    fn default() -> Self {
-        Self { cursor: 0 }
-    }
 }
 
 impl LineColorCycle {

@@ -1327,13 +1327,15 @@ impl AccelProvider for WgpuProvider {
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
         self.fused_reduction_with_telemetry_exec(
-            shader,
-            inputs,
-            output_shape,
-            reduce_len,
-            num_slices,
-            workgroup_size,
-            flavor,
+            crate::backend::wgpu::provider::backend::telemetry::FusedReductionTelemetryRequest {
+                shader,
+                inputs,
+                output_shape,
+                reduce_len,
+                num_slices,
+                workgroup_size,
+                flavor,
+            },
         )
     }
     fn warmup(&self) {

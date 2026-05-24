@@ -32,7 +32,7 @@ pub fn line_style_includes_segment(segment: usize, style: LineStyle) -> bool {
     match style {
         LineStyle::Solid => true,
         LineStyle::Dashed => (segment % 4) < 2,
-        LineStyle::Dotted => (segment % 4) == 0,
+        LineStyle::Dotted => segment.is_multiple_of(4),
         LineStyle::DashDot => {
             let m = segment % 6;
             m < 2 || m == 3

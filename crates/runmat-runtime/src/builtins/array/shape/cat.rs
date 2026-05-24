@@ -952,7 +952,7 @@ fn concat_column_major<T: Clone>(
 }
 
 fn is_true_empty_neutral_shape(shape: &[usize]) -> bool {
-    shape.iter().any(|&dim| dim == 0) && shape.iter().all(|&dim| dim <= 1)
+    shape.contains(&0) && shape.iter().all(|&dim| dim <= 1)
 }
 
 fn normalize_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
