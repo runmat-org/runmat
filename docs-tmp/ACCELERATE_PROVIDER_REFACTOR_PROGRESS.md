@@ -35,3 +35,9 @@
 - Verification for Phase 1d:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 2a: created `backend/wgpu/provider_impl/reduction.rs` and moved reduction-family internals from `provider_impl/mod.rs`.
+  - moved: fused reduction execution/tuning helpers, global/dim/std reductions, and ND mean/moments helpers.
+  - kept indexing/tensor family methods in `mod.rs` (next extraction phases).
+- Verification for Phase 2a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
