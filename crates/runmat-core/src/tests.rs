@@ -423,10 +423,14 @@ roots = ["."]
     let outcome = block_on(session.execute_outcome("v = 1;")).expect("exec succeeds");
     session.set_source_name_override(None);
 
-    assert!(outcome.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "RunMat:ProjectSymbolPreloadSkipped"
-            && matches!(diagnostic.severity, abi::DiagnosticSeverity::Warning)
-    }));
+    assert!(
+        outcome.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "RunMat:ProjectSymbolPreloadSkipped"
+                && matches!(diagnostic.severity, abi::DiagnosticSeverity::Warning)
+        }),
+        "expected project-symbol preload warning, got diagnostics: {:?}",
+        outcome.diagnostics
+    );
 }
 
 #[test]
