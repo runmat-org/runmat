@@ -319,4 +319,3 @@ impl ImageNormalizeKey {
         }
     }
 }
-

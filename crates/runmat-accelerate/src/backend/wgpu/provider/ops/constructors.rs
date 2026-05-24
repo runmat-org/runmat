@@ -1,7 +1,6 @@
 use super::*;
 
 impl WgpuProvider {
-
     pub(crate) fn eye_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let normalized = normalize_eye_shape(shape);
         if normalized.len() < 2 {

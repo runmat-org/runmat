@@ -77,7 +77,11 @@ impl WgpuProvider {
         Ok(buffer)
     }
 
-    pub(super) fn create_storage_buffer_checked(&self, len: usize, label: &str) -> Result<Arc<wgpu::Buffer>> {
+    pub(super) fn create_storage_buffer_checked(
+        &self,
+        len: usize,
+        label: &str,
+    ) -> Result<Arc<wgpu::Buffer>> {
         self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
     }
 
@@ -100,7 +104,11 @@ impl WgpuProvider {
         }
     }
 
-    pub(super) fn select_image_normalize_tuning(&self, batches: u32, plane: u32) -> ImageNormalizeTuning {
+    pub(super) fn select_image_normalize_tuning(
+        &self,
+        batches: u32,
+        plane: u32,
+    ) -> ImageNormalizeTuning {
         let batches = batches.max(1);
         let plane = plane.max(1);
         let mut lane =
@@ -291,7 +299,11 @@ impl WgpuProvider {
         );
     }
 
-    pub(super) fn cached_bind_group_layout<F>(&self, key: &str, build: F) -> Arc<wgpu::BindGroupLayout>
+    pub(super) fn cached_bind_group_layout<F>(
+        &self,
+        key: &str,
+        build: F,
+    ) -> Arc<wgpu::BindGroupLayout>
     where
         F: FnOnce(&wgpu::Device) -> wgpu::BindGroupLayout,
     {
@@ -311,7 +323,10 @@ impl WgpuProvider {
         layout
     }
 
-    pub(super) fn cached_bind_group_layout_for_tag(&self, tag: &str) -> Option<Arc<wgpu::BindGroupLayout>> {
+    pub(super) fn cached_bind_group_layout_for_tag(
+        &self,
+        tag: &str,
+    ) -> Option<Arc<wgpu::BindGroupLayout>> {
         if let Ok(cache) = self.bind_group_layout_cache.lock() {
             if let Some(layout) = cache.get(tag).cloned() {
                 return Some(layout);
@@ -330,7 +345,10 @@ impl WgpuProvider {
         Some(layout)
     }
 
-    pub(super) fn cached_fusion_bind_group_layout(&self, inputs_len: usize) -> Arc<wgpu::BindGroupLayout> {
+    pub(super) fn cached_fusion_bind_group_layout(
+        &self,
+        inputs_len: usize,
+    ) -> Arc<wgpu::BindGroupLayout> {
         let key = format!("runmat-fusion-layout-{}", inputs_len);
         self.cached_bind_group_layout(&key, |device| {
             crate::backend::wgpu::bindings::build_fusion_bgl(device, inputs_len)
@@ -518,5 +536,4 @@ impl WgpuProvider {
             );
         }
     }
-
 }

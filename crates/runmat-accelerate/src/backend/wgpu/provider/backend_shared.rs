@@ -148,7 +148,6 @@ mod compute_binding_count_tests {
     }
 }
 
-
 fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

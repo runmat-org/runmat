@@ -254,15 +254,7 @@
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            if self.precision != NumericPrecision::F64 {
-                return Err(anyhow!(
-                    "wgpu provider: shader-f64 unavailable; cannot materialise double precision"
-                ));
-            }
-            let entry = self.get_entry(a)?;
-            Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
-        })
+        Box::pin(async move { self.unary_double_exec(a) })
     }
 
     fn unary_single<'a>(
@@ -278,14 +270,7 @@
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let out = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)?;
-            // Record squared->base mapping for later reduction fusion (moments reuse)
-            if let Ok(mut map) = self.pow2_of.lock() {
-                map.insert(out.buffer_id, a.buffer_id);
-            }
-            Ok(out)
-        })
+        Box::pin(async move { self.unary_pow2_exec(a) })
     }
 
     fn unary_nextpow2<'a>(
@@ -302,17 +287,7 @@
         mantissa: &GpuTensorHandle,
         exponent: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if mantissa.shape != exponent.shape {
-            return Err(anyhow!("pow2_scale requires matching shapes"));
-        }
-        let pow = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, exponent)?;
-        let result = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            mantissa,
-            &pow,
-        );
-        let _ = self.free(&pow);
-        result
+        self.pow2_scale_exec(mantissa, exponent)
     }
 
     fn scalar_rsub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
@@ -766,4 +741,3 @@
             self.qr_host_result(tensor, &options).await
         })
     }
-

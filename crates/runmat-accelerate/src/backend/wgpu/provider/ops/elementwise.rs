@@ -1,6 +1,61 @@
-use super::*;
+use anyhow::{anyhow, ensure, Result};
+use runmat_accelerate_api::GpuTensorHandle;
+use std::sync::Arc;
+
+use super::backend_shared::{
+    checked_binding_count, gpu_dispatch_length_limit_error, validate_compute_binding_counts,
+};
+use super::backend_types::{NumericPrecision, WgpuProvider};
+use crate::backend::wgpu::shaders::logical::{
+    ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
+    ELEM_GT_SHADER_F32, ELEM_GT_SHADER_F64, ELEM_LE_SHADER_F32, ELEM_LE_SHADER_F64,
+    ELEM_LT_SHADER_F32, ELEM_LT_SHADER_F64, ELEM_NE_SHADER_F32, ELEM_NE_SHADER_F64,
+    LOGICAL_AND_SHADER_F32, LOGICAL_AND_SHADER_F64, LOGICAL_ISFINITE_SHADER_F32,
+    LOGICAL_ISFINITE_SHADER_F64, LOGICAL_ISINF_SHADER_F32, LOGICAL_ISINF_SHADER_F64,
+    LOGICAL_ISNAN_SHADER_F32, LOGICAL_ISNAN_SHADER_F64, LOGICAL_NOT_SHADER_F32,
+    LOGICAL_NOT_SHADER_F64, LOGICAL_OR_SHADER_F32, LOGICAL_OR_SHADER_F64, LOGICAL_XOR_SHADER_F32,
+    LOGICAL_XOR_SHADER_F64,
+};
 
 impl WgpuProvider {
+    pub(crate) fn unary_double_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        if self.precision != NumericPrecision::F64 {
+            return Err(anyhow!(
+                "wgpu provider: shader-f64 unavailable; cannot materialise double precision"
+            ));
+        }
+        let entry = self.get_entry(a)?;
+        Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
+    }
+
+    pub(crate) fn unary_pow2_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let out = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, a)?;
+        // Record squared->base mapping for later reduction fusion (moments reuse).
+        if let Ok(mut map) = self.pow2_of.lock() {
+            map.insert(out.buffer_id, a.buffer_id);
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn pow2_scale_exec(
+        &self,
+        mantissa: &GpuTensorHandle,
+        exponent: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            mantissa.shape == exponent.shape,
+            "pow2_scale requires matching shapes"
+        );
+        let pow = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Pow2, exponent)?;
+        let result = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            mantissa,
+            &pow,
+        );
+        let _ = self.free(&pow);
+        result
+    }
+
     pub(crate) fn elem_eq_exec(
         &self,
         a: &GpuTensorHandle,
@@ -1279,5 +1334,4 @@ impl WgpuProvider {
         }
         Ok(handles)
     }
-
 }

@@ -10,8 +10,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 use super::{
-    canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode, ImageNormalizeTuning,
-    NumericPrecision, ReductionTwoPassMode, WgpuProvider, WgpuProviderOptions, WorkgroupConfig,
+    canonical_vendor_name, install_device_error_handlers, parse_two_pass_mode,
+    ImageNormalizeTuning, NumericPrecision, ReductionTwoPassMode, WgpuProvider,
+    WgpuProviderOptions, WorkgroupConfig,
 };
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
@@ -424,5 +425,4 @@ impl WgpuProvider {
             opts
         ))
     }
-
 }

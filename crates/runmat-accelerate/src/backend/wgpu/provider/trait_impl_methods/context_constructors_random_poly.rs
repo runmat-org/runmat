@@ -1,37 +1,18 @@
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
-        match kind {
-            AccelContextKind::Plotting => Some(AccelContextHandle::Wgpu(WgpuContextHandle {
-                instance: self.instance.clone(),
-                device: self.device.clone(),
-                queue: self.queue.clone(),
-                adapter: self.adapter.clone(),
-                adapter_info: self.adapter_info.clone(),
-                limits: self.adapter_limits.clone(),
-                features: self.device.features(),
-            })),
-        }
+        self.export_context_exec(kind)
     }
 
     #[cfg(feature = "wgpu")]
     fn export_wgpu_buffer(&self, handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
-        self.get_entry(handle).ok().map(|entry| WgpuBufferRef {
-            buffer: entry.buffer,
-            len: entry.len,
-            shape: entry.shape,
-            element_size: self.element_size,
-            precision: match entry.precision {
-                NumericPrecision::F32 => ProviderPrecision::F32,
-                NumericPrecision::F64 => ProviderPrecision::F64,
-            },
-        })
+        self.export_wgpu_buffer_exec(handle)
     }
 
     fn device_id(&self) -> u32 {
-        self.runtime_device_id
+        self.device_id_exec()
     }
 
     fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
-        SpawnHandleConcurrency::SynchronizedMutation
+        self.spawn_handle_concurrency_exec()
     }
 
     fn gather_linear(
@@ -60,10 +41,7 @@
         self.zeros_exec(&prototype.shape)
     }
     fn precision(&self) -> ProviderPrecision {
-        match self.precision {
-            NumericPrecision::F32 => ProviderPrecision::F32,
-            NumericPrecision::F64 => ProviderPrecision::F64,
-        }
+        self.provider_precision_exec()
     }
 
     fn fill(&self, shape: &[usize], value: f64) -> Result<GpuTensorHandle> {
@@ -163,11 +141,7 @@
     }
 
     fn set_rng_state(&self, state: u64) -> Result<()> {
-        let mut guard = rng_state()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("wgpu provider: RNG mutex poisoned"))?;
-        *guard = if state == 0 { RNG_DEFAULT_SEED } else { state };
-        Ok(())
+        self.set_rng_state_exec(state)
     }
 
     fn random_permutation(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
@@ -199,29 +173,7 @@
         degree: usize,
         weights: Option<&'a GpuTensorHandle>,
     ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
-        Box::pin(async move {
-            let x_host = <Self as AccelProvider>::download(self, x).await?;
-            let y_host = <Self as AccelProvider>::download(self, y).await?;
-            ensure!(
-                x_host.data.len() == y_host.data.len(),
-                "polyfit: X and Y vectors must match in length"
-            );
-            let weights_host = match weights {
-                Some(handle) => Some(<Self as AccelProvider>::download(self, handle).await?),
-                None => None,
-            };
-            let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
-            let host_result =
-                polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
-                    .map_err(|err| anyhow!(err))?;
-            Ok(ProviderPolyfitResult {
-                coefficients: host_result.coefficients,
-                r_matrix: host_result.r_matrix,
-                normr: host_result.normr,
-                df: host_result.df,
-                mu: host_result.mu,
-            })
-        })
+        Box::pin(async move { self.polyfit_exec(x, y, degree, weights).await })
     }
 
     fn polyder_single<'a>(

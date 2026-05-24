@@ -1,7 +1,6 @@
 use super::*;
 
 impl WgpuProvider {
-
     pub(crate) fn scatter_column_exec(
         &self,
         matrix: &GpuTensorHandle,

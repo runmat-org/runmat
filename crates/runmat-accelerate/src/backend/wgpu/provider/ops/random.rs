@@ -8,6 +8,18 @@ use super::{
 };
 
 impl WgpuProvider {
+    pub(crate) fn set_rng_state_exec(&self, state: u64) -> Result<()> {
+        let mut guard = rng_state()
+            .lock()
+            .map_err(|_| anyhow!("wgpu provider: RNG mutex poisoned"))?;
+        *guard = if state == 0 {
+            super::RNG_DEFAULT_SEED
+        } else {
+            state
+        };
+        Ok(())
+    }
+
     pub(crate) fn random_exponential_exec(
         &self,
         mu: f64,

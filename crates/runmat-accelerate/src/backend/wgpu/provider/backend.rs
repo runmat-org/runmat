@@ -73,6 +73,8 @@ use wgpu::util::DeviceExt;
 
 #[path = "ops/constructors.rs"]
 mod constructors;
+#[path = "ops/context.rs"]
+mod context;
 #[path = "core.rs"]
 mod core;
 #[path = "ops/elementwise.rs"]
@@ -133,8 +135,8 @@ use crate::backend::wgpu::shaders::logical::{
     LOGICAL_AND_SHADER_F32, LOGICAL_AND_SHADER_F64, LOGICAL_ISFINITE_SHADER_F32,
     LOGICAL_ISFINITE_SHADER_F64, LOGICAL_ISINF_SHADER_F32, LOGICAL_ISINF_SHADER_F64,
     LOGICAL_ISNAN_SHADER_F32, LOGICAL_ISNAN_SHADER_F64, LOGICAL_NOT_SHADER_F32,
-    LOGICAL_NOT_SHADER_F64, LOGICAL_OR_SHADER_F32, LOGICAL_OR_SHADER_F64,
-    LOGICAL_XOR_SHADER_F32, LOGICAL_XOR_SHADER_F64,
+    LOGICAL_NOT_SHADER_F64, LOGICAL_OR_SHADER_F32, LOGICAL_OR_SHADER_F64, LOGICAL_XOR_SHADER_F32,
+    LOGICAL_XOR_SHADER_F64,
 };
 use crate::backend::wgpu::types::NumericPrecision;
 const QR_DEVICE_MAX_COLS: usize = 64;
@@ -144,11 +146,10 @@ use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
 
-
-#[path = "backend_types.rs"]
-pub(crate) mod backend_types;
 #[path = "backend_shared.rs"]
 pub(crate) mod backend_shared;
+#[path = "backend_types.rs"]
+pub(crate) mod backend_types;
 #[path = "trait_impl.rs"]
 mod trait_impl;
 

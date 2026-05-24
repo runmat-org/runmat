@@ -2,18 +2,49 @@ use anyhow::{anyhow, ensure, Result};
 use bytemuck::cast_slice;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderConv1dOptions, ProviderConvMode,
-    ProviderPolyderQuotient, ProviderPolyvalOptions,
+    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
 };
+use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use super::{
-    conv1d_output_shape, conv1d_window, conv_orientation_for, polynomial_orientation, product_checked,
-    shape_for_orientation, trim_leading_zeros_real, NumericPrecision, PolyderParams,
-    PolyintParamsF32, PolyintParamsF64, PolynomialOrientation, WgpuProvider,
+    conv1d_output_shape, conv1d_window, conv_orientation_for, polynomial_orientation,
+    product_checked, shape_for_orientation, trim_leading_zeros_real, NumericPrecision,
+    PolyderParams, PolyintParamsF32, PolyintParamsF64, PolynomialOrientation, WgpuProvider,
 };
 
 impl WgpuProvider {
+    pub(crate) async fn polyfit_exec(
+        &self,
+        x: &GpuTensorHandle,
+        y: &GpuTensorHandle,
+        degree: usize,
+        weights: Option<&GpuTensorHandle>,
+    ) -> Result<ProviderPolyfitResult> {
+        let x_host = <Self as AccelProvider>::download(self, x).await?;
+        let y_host = <Self as AccelProvider>::download(self, y).await?;
+        ensure!(
+            x_host.data.len() == y_host.data.len(),
+            "polyfit: X and Y vectors must match in length"
+        );
+        let weights_host = match weights {
+            Some(handle) => Some(<Self as AccelProvider>::download(self, handle).await?),
+            None => None,
+        };
+        let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
+        let host_result =
+            polyfit_host_real_for_provider(&x_host.data, &y_host.data, degree, weights_slice)
+                .map_err(|err| anyhow!(err))?;
+        Ok(ProviderPolyfitResult {
+            coefficients: host_result.coefficients,
+            r_matrix: host_result.r_matrix,
+            normr: host_result.normr,
+            df: host_result.df,
+            mu: host_result.mu,
+        })
+    }
+
     pub(crate) fn polyval_exec(
         &self,
         coeffs: &GpuTensorHandle,
@@ -491,5 +522,4 @@ impl WgpuProvider {
         self.free(&handle).ok();
         Ok(new_handle)
     }
-
 }
