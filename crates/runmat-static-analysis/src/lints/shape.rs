@@ -157,6 +157,33 @@ impl ShapeLintContext {
                     int_vector: None,
                 }
             }
+            runmat_mir::MirRvalue::ShortCircuit {
+                left,
+                right_temps,
+                right,
+                ..
+            } => {
+                self.infer_mir_operand(body, left);
+                for stmt in right_temps {
+                    match &stmt.kind {
+                        runmat_mir::MirStmtKind::Assign { place, value } => {
+                            let inferred = self.infer_mir_rvalue(body, value, stmt.span);
+                            if let runmat_mir::MirPlace::Local(local) = place {
+                                self.record_mir_value(body, *local, inferred);
+                            }
+                        }
+                        runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                        | runmat_mir::MirStmtKind::Expr(value) => {
+                            self.infer_mir_rvalue(body, value, stmt.span);
+                        }
+                        runmat_mir::MirStmtKind::PlaceMutation(_)
+                        | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+                        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}
+                    }
+                }
+                self.infer_mir_operand(body, right);
+                MirShapeValue::default()
+            }
             runmat_mir::MirRvalue::Range { start, step, end } => {
                 let start = self.infer_mir_operand(body, start).number;
                 let step = step

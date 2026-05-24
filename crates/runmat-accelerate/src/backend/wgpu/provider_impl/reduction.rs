@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::HashSet;
+use std::time::Duration;
 
 impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
@@ -1665,7 +1667,7 @@ impl WgpuProvider {
     }
 }
 impl WgpuProvider {
-    async fn reduce_nd_mean_exec(
+    pub(crate) async fn reduce_nd_mean_exec(
         &self,
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
@@ -1937,7 +1939,7 @@ impl WgpuProvider {
         Ok(self.register_existing_buffer(out_buffer, out_shape, cols))
     }
 
-    fn reduce_moments_nd_exec(
+    pub(crate) fn reduce_moments_nd_exec(
         &self,
         a: &GpuTensorHandle,
         dims_zero_based: &[usize],
@@ -2128,5 +2130,3 @@ impl WgpuProvider {
         })
     }
 }
-
-#[cfg(not(target_arch = "wasm32"))]

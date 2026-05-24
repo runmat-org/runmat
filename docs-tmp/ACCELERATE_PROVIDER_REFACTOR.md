@@ -15,9 +15,15 @@ backend/wgpu/
   provider.rs
   provider_impl/
     mod.rs
+    constructors.rs
+    elementwise.rs
     fft.rs
+    indexing.rs
+    polynomial.rs
+    reduction.rs
     rnd.rs
     solve.rs
+    tensor.rs
     window.rs
   pipelines.rs
   resources.rs
@@ -38,9 +44,11 @@ backend/wgpu/
 - a very large `impl AccelProvider for WgpuProvider`
 - many private execution helpers across unrelated operation families
 
-The file is already partially dissolved into `provider_impl/fft.rs`, `provider_impl/rnd.rs`, `provider_impl/solve.rs`, and `provider_impl/window.rs`, and the top-of-file comment in `provider_impl/mod.rs` explicitly indicates that new implementation work should go into submodules.
+The file is already partially dissolved into operation-family submodules (`elementwise`, `reduction`, `indexing`, `tensor`, `constructors`, `polynomial`) plus existing focused modules (`fft`, `rnd`, `solve`, `window`), and the top-of-file comment in `provider_impl/mod.rs` explicitly indicates that new implementation work should go into submodules.
 
 At this point, `provider_impl/mod.rs` is still effectively monolithic.
+
+As of 2026-05-24, extraction is materially underway and `provider_impl/mod.rs` has been reduced significantly, but it still contains mixed concerns (remaining operation families + provider lifecycle).
 
 ## Drift Notes (Repo-Verified)
 
@@ -584,6 +592,8 @@ Expected result:
 - minimal semantic risk
 - immediate readability win
 
+Status: completed on 2026-05-24.
+
 ### Phase 2: Extract `reduction.rs`
 
 1. Move reduction execution helpers.
@@ -596,6 +606,8 @@ Expected result:
 - another large monolith reduction
 - clearer separation between elementwise and reduction families
 
+Status: completed on 2026-05-24.
+
 ### Phase 3: Extract `tensor` and `indexing` operation families
 
 1. Move structural tensor transforms.
@@ -606,6 +618,8 @@ Expected result:
 
 - provider root becomes much easier to scan
 
+Status: completed on 2026-05-24.
+
 ### Phase 4: Extract `random.rs`, `constructors.rs`, `polynomial.rs`
 
 1. Move creation and math utility families.
@@ -613,11 +627,16 @@ Expected result:
 3. Keep `window.rs` as-is.
 4. Place extracted logic under `provider/ops/{random,constructors,polynomial}.rs`.
 
-### Phase 5: Extract `linalg.rs` carefully
+Status: completed on 2026-05-24.
 
-1. Move the remaining higher-coupling math paths.
-2. Keep provider core logic stable.
-3. Place extracted logic under `provider/ops/linalg.rs`.
+### Phase 5: Extract remaining operation families from `provider_impl/mod.rs`
+
+1. Extract signal/transform-style operations into a dedicated module (for example, `signal.rs`) so `conv1d`/`iir`/`diff`/`gradient` and related helpers are co-located.
+2. Extract image-oriented provider orchestration (`imfilter` and provider-facing image normalization helpers) into `image.rs`.
+3. Extract higher-coupling linear algebra and matrix-structure operations into `linalg.rs`.
+4. Preserve exact fallback behavior, dispatch ordering, and kernel parameterization while moving.
+
+This phase is still logic-preserving refactor only; no behavior changes.
 
 ### Phase 6: Split provider root into explicit lifecycle modules
 
@@ -680,7 +699,8 @@ Final resting state (plan of record):
 
 Next move:
 
-1. keep `provider_impl` naming stable through extraction phases
-2. extract `elementwise.rs` as Phase 1
+1. finish Phase 5 extraction (`signal` + `image` + `linalg`) from `provider_impl/mod.rs`
+2. split lifecycle code into explicit `init/core/helpers` ownership (Phase 6)
+3. execute the coordinated naming finalization pass (Phase 7)
 
-That gives the best improvement-to-risk ratio while keeping the refactor firmly in the “logic cleanup only” category.
+This keeps the work in clean domain boundaries while preserving current behavior end to end.

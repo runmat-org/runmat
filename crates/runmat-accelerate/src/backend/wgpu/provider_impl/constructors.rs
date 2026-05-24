@@ -185,6 +185,7 @@ impl WgpuProvider {
         }
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+    }
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let len: usize = shape.iter().copied().product();
@@ -280,7 +281,6 @@ impl WgpuProvider {
         }
 
         Ok(ProviderMeshgridResult { outputs })
-    }
     }
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         let spec =
@@ -574,7 +574,6 @@ impl WgpuProvider {
         }
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
-    }
     }
     pub(crate) fn linspace_exec(
         &self,

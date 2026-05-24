@@ -1031,8 +1031,10 @@ fn test_jit_direct_semantic_function_call() {
         var_count: 2,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1085,8 +1087,10 @@ fn test_jit_named_call_resolves_semantic_registry() {
         var_count: 2,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1142,8 +1146,10 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
         var_count: 2,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1201,8 +1207,10 @@ fn test_jit_semantic_multi_output_call() {
         var_count: 3,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1, 2],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1260,8 +1268,10 @@ fn test_jit_named_semantic_multi_output_call() {
         var_count: 3,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1, 2],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1320,8 +1330,10 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
         var_count: 2,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1387,8 +1399,10 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
         var_count: 3,
         input_slots: vec![0],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![1, 2],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1455,8 +1469,10 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
         var_count: 3,
         input_slots: vec![0, 1],
         varargin_slot: None,
+        implicit_nargin_slot: None,
         output_slots: vec![2],
         varargout_slot: None,
+        implicit_nargout_slot: None,
         capture_slots: Vec::new(),
     };
 
@@ -1666,8 +1682,10 @@ fn test_jit_mixed_execution_patterns() {
             var_count: 2,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -1739,8 +1757,10 @@ fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
             var_count: 3,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1, 2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -1808,8 +1828,10 @@ fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_displa
             var_count: 3,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1, 2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -1887,8 +1909,10 @@ fn test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_na
             var_count: 3,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1, 2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -1965,8 +1989,10 @@ fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
             var_count: 3,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1, 2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2037,8 +2063,10 @@ fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity
             var_count: 3,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1, 2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2185,8 +2213,10 @@ fn test_jit_simple_function_compilation() {
             var_count: 2,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2262,8 +2292,10 @@ fn test_jit_nested_function_calls_compilation() {
             var_count: 3,
             input_slots: vec![0, 1],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2288,8 +2320,10 @@ fn test_jit_nested_function_calls_compilation() {
             var_count: 2,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2359,8 +2393,10 @@ fn test_jit_function_parameter_validation() {
             var_count: 3,
             input_slots: vec![0, 1],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![2],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2444,8 +2480,10 @@ fn test_jit_function_variable_isolation() {
             var_count: 2,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2519,8 +2557,10 @@ fn test_jit_function_compilation_performance() {
             var_count: 3,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );
@@ -2604,8 +2644,10 @@ fn test_jit_function_error_handling() {
             var_count: 2,
             input_slots: vec![0],
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots: vec![1],
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         },
     );

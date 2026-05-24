@@ -617,6 +617,8 @@ impl WgpuProvider {
             groups,
         );
         Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
+    }
+
     pub(crate) fn gather_linear_exec(
         &self,
         source: &GpuTensorHandle,

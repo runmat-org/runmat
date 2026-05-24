@@ -77,3 +77,18 @@
 - Verification for Phase 3c:
   - `cargo test -p runmat-accelerate --test provider_init` passed.
   - `cargo test -p runmat-accelerate --lib` passed.
+- Plan refresh pass completed (doc-only):
+  - marked Phases 1-4 complete in the plan-of-record sequence.
+  - updated current-state module listing to match extracted files now present in `provider_impl/`.
+  - rewrote remaining sequence to explicitly cover:
+    - Phase 5: remaining operation family extractions (`signal`, `image`, `linalg`)
+    - Phase 6: lifecycle split (`init/core/helpers`)
+    - Phase 7: coordinated canonical `provider` tree finalization
+  - updated next-move guidance to match the new remaining slices (no optional branch).
+- Stabilization pass before remaining extractions:
+  - fixed extraction follow-on syntax/import visibility issues across `provider_impl/{constructors,indexing,reduction,rnd,mod}.rs`.
+  - updated cross-crate compile fixtures for current MIR/bytecode shape (`runmat-static-analysis`, `runmat-turbine` tests/helpers).
+- Verification for stabilization pass:
+  - `cargo test -p runmat-accelerate --lib` passed.
+  - `cargo test -p runmat-turbine --tests` passed.
+  - `cargo test -p runmat-static-analysis --lib` blocked by a pre-existing warning-as-error in `runmat-runtime` (`ImpulseResponse.discrete` dead-code), not introduced by this refactor.

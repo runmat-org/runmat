@@ -60,7 +60,7 @@ use runmat_time::Instant;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
@@ -68,7 +68,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
@@ -2995,8 +2994,6 @@ impl WgpuProvider {
 
         Ok(ProviderBandwidth { lower, upper })
     }
-
-    }
     pub(crate) fn conv1d_exec(
         &self,
         signal: &GpuTensorHandle,
@@ -5004,7 +5001,6 @@ impl WgpuProvider {
         let _ = self.free(&std_outer);
 
         Ok(correlation)
-    }
     }
     pub(crate) fn cumsum_exec(
         &self,

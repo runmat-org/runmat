@@ -633,6 +633,7 @@ impl WgpuProvider {
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len))
+    }
 
     pub(crate) fn random_integer_range_exec(
         &self,
@@ -812,6 +813,5 @@ impl WgpuProvider {
         drop(rng_guard);
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, effective_k))
-
-}
+    }
 }

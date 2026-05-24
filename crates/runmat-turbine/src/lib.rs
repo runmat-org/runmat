@@ -1977,8 +1977,10 @@ mod tests {
             var_count,
             input_slots,
             varargin_slot: None,
+            implicit_nargin_slot: None,
             output_slots,
             varargout_slot: None,
+            implicit_nargout_slot: None,
             capture_slots: Vec::new(),
         }
     }
