@@ -1,3 +1,5 @@
+macro_rules! elementwise_tensor_signal_methods {
+    () => {
     fn logical_and(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.logical_and_exec(a, b)
     }
@@ -537,3 +539,6 @@
     ) -> AccelProviderFuture<'a, ProviderQrResult> {
         Box::pin(async move { self.qr_exec(handle, options).await })
     }
+
+    };
+}

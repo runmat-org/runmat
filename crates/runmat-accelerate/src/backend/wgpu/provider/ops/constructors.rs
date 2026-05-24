@@ -1,3 +1,5 @@
+use runmat_accelerate_api::AccelProvider;
+
 use super::*;
 
 impl WgpuProvider {

@@ -1,3 +1,5 @@
+macro_rules! linalg_reduction_core_methods {
+    () => {
     fn take_matmul_sources(
         &self,
         product: &GpuTensorHandle,
@@ -36,3 +38,6 @@
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.matmul_epilogue_exec(a, b, ep).await })
     }
+
+    };
+}

@@ -1,10 +1,10 @@
 use super::*;
 
-fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
+pub(super) fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
-fn validate_compute_binding_counts(
+pub(super) fn validate_compute_binding_counts(
     operation: &str,
     storage_bindings: usize,
     total_bindings: usize,
@@ -31,7 +31,7 @@ fn validate_compute_binding_counts(
     Ok(())
 }
 
-fn checked_binding_count(operation: &str, left: usize, right: usize) -> Result<usize> {
+pub(super) fn checked_binding_count(operation: &str, left: usize, right: usize) -> Result<usize> {
     left.checked_add(right)
         .ok_or_else(|| anyhow!("{}: binding count overflow", operation))
 }
@@ -48,7 +48,7 @@ pub(super) fn gpu_per_buffer_limit_error(
     )
 }
 
-fn gpu_dispatch_length_limit_error(operation: &str, len: usize) -> anyhow::Error {
+pub(super) fn gpu_dispatch_length_limit_error(operation: &str, len: usize) -> anyhow::Error {
     anyhow!(
         "{operation}: tensor length {len} exceeds the current GPU kernel indexing limit of {} elements. Split the operation into smaller chunks and process iteratively.",
         u32::MAX
@@ -148,7 +148,7 @@ mod compute_binding_count_tests {
     }
 }
 
-fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
+pub(super) fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -161,7 +161,7 @@ fn parse_two_pass_mode(raw: &str) -> Option<ReductionTwoPassMode> {
     }
 }
 
-fn build_matrix_operand_view(
+pub(super) fn build_matrix_operand_view(
     handle: &GpuTensorHandle,
     entry: &BufferEntry,
 ) -> Result<MatrixOperandView> {
@@ -201,7 +201,7 @@ fn build_matrix_operand_view(
     }
 }
 
-fn canonical_vendor_name(info: &wgpu::AdapterInfo) -> String {
+pub(super) fn canonical_vendor_name(info: &wgpu::AdapterInfo) -> String {
     match info.vendor {
         0x10DE => "NVIDIA".to_string(),
         0x1002 | 0x1022 => "AMD".to_string(),
@@ -225,16 +225,16 @@ fn canonical_vendor_name(info: &wgpu::AdapterInfo) -> String {
     }
 }
 
-const POLYDER_EPS: f64 = 1.0e-12;
+pub(super) const POLYDER_EPS: f64 = 1.0e-12;
 
 #[derive(Clone, Copy)]
-enum PolynomialOrientation {
+pub(super) enum PolynomialOrientation {
     Scalar,
     Row,
     Column,
 }
 
-fn polynomial_orientation(shape: &[usize]) -> Result<PolynomialOrientation> {
+pub(super) fn polynomial_orientation(shape: &[usize]) -> Result<PolynomialOrientation> {
     let mut non_unit = 0usize;
     let mut orientation = PolynomialOrientation::Scalar;
     for (idx, &dim) in shape.iter().enumerate() {
@@ -256,14 +256,14 @@ fn polynomial_orientation(shape: &[usize]) -> Result<PolynomialOrientation> {
     }
 }
 
-fn conv_orientation_for(orientation: PolynomialOrientation) -> ProviderConvOrientation {
+pub(super) fn conv_orientation_for(orientation: PolynomialOrientation) -> ProviderConvOrientation {
     match orientation {
         PolynomialOrientation::Column => ProviderConvOrientation::Column,
         PolynomialOrientation::Scalar | PolynomialOrientation::Row => ProviderConvOrientation::Row,
     }
 }
 
-fn shape_for_orientation(orientation: PolynomialOrientation, len: usize) -> Vec<usize> {
+pub(super) fn shape_for_orientation(orientation: PolynomialOrientation, len: usize) -> Vec<usize> {
     if len <= 1 {
         return vec![1, 1];
     }
@@ -273,7 +273,7 @@ fn shape_for_orientation(orientation: PolynomialOrientation, len: usize) -> Vec<
     }
 }
 
-fn trim_leading_zeros_real(coeffs: &[f64]) -> Vec<f64> {
+pub(super) fn trim_leading_zeros_real(coeffs: &[f64]) -> Vec<f64> {
     if coeffs.is_empty() {
         return vec![0.0];
     }
@@ -286,31 +286,31 @@ fn trim_leading_zeros_real(coeffs: &[f64]) -> Vec<f64> {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PolyderParams {
-    input_len: u32,
-    output_len: u32,
-    _pad0: u32,
-    _pad1: u32,
+pub(super) struct PolyderParams {
+    pub(super) input_len: u32,
+    pub(super) output_len: u32,
+    pub(super) _pad0: u32,
+    pub(super) _pad1: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PolyintParamsF64 {
-    input_len: u32,
-    output_len: u32,
-    constant: f64,
+pub(super) struct PolyintParamsF64 {
+    pub(super) input_len: u32,
+    pub(super) output_len: u32,
+    pub(super) constant: f64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PolyintParamsF32 {
-    input_len: u32,
-    output_len: u32,
-    constant: f32,
-    _pad0: f32,
+pub(super) struct PolyintParamsF32 {
+    pub(super) input_len: u32,
+    pub(super) output_len: u32,
+    pub(super) constant: f32,
+    pub(super) _pad0: f32,
 }
 
-fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {
+pub(super) fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {
     match shape.len() {
         0 => normalize_scalar_shape(shape),
         1 => {
@@ -321,7 +321,7 @@ fn normalize_eye_shape(shape: &[usize]) -> Vec<usize> {
     }
 }
 
-fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
+pub(super) fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> {
     if shape.is_empty() {
         return normalize_scalar_shape(&shape);
     }
@@ -332,11 +332,11 @@ fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> 
     normalize_scalar_shape(&shape)
 }
 
-fn normalize_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
+pub(super) fn normalize_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
     matlab_gradient_shape(shape, len)
 }
 
-fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
+pub(super) fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
     match (orientation, len) {
         (ProviderConvOrientation::Row, 0) => vec![1, 0],
         (ProviderConvOrientation::Row, _) => vec![1, len],
@@ -345,7 +345,7 @@ fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<
     }
 }
 
-fn conv1d_window(
+pub(super) fn conv1d_window(
     signal_len: usize,
     kernel_len: usize,
     mode: ProviderConvMode,
@@ -389,12 +389,12 @@ fn conv1d_window(
     Ok((output_len, start_offset, full_len))
 }
 
-fn product_checked(dims: &[usize]) -> Option<usize> {
+pub(super) fn product_checked(dims: &[usize]) -> Option<usize> {
     dims.iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
 }
 
-fn canonical_matrix_shape(shape: &[usize]) -> Vec<usize> {
+pub(super) fn canonical_matrix_shape(shape: &[usize]) -> Vec<usize> {
     match shape.len() {
         0 => vec![1, 1],
         1 => vec![1, shape[0]],
@@ -408,7 +408,7 @@ fn canonical_matrix_shape(shape: &[usize]) -> Vec<usize> {
     }
 }
 
-fn pad_dims(mut dims: Vec<usize>, rank: usize) -> Vec<usize> {
+pub(super) fn pad_dims(mut dims: Vec<usize>, rank: usize) -> Vec<usize> {
     if dims.len() < rank {
         dims.resize(rank, 1);
     } else if dims.len() > rank {
@@ -417,7 +417,7 @@ fn pad_dims(mut dims: Vec<usize>, rank: usize) -> Vec<usize> {
     dims
 }
 
-fn compute_page_strides(dims: &[usize]) -> Vec<usize> {
+pub(super) fn compute_page_strides(dims: &[usize]) -> Vec<usize> {
     let mut stride = 1usize;
     let mut out = Vec::with_capacity(dims.len());
     for &dim in dims {
@@ -427,7 +427,7 @@ fn compute_page_strides(dims: &[usize]) -> Vec<usize> {
     out
 }
 
-fn decode_multi_index(mut index: usize, dims: &[usize], out: &mut [usize]) {
+pub(super) fn decode_multi_index(mut index: usize, dims: &[usize], out: &mut [usize]) {
     for (dim, &extent) in dims.iter().enumerate() {
         if extent == 0 {
             out[dim] = 0;
@@ -438,7 +438,11 @@ fn decode_multi_index(mut index: usize, dims: &[usize], out: &mut [usize]) {
     }
 }
 
-fn broadcast_linear_index(dims: &[usize], strides: &[usize], multi_index: &[usize]) -> usize {
+pub(super) fn broadcast_linear_index(
+    dims: &[usize],
+    strides: &[usize],
+    multi_index: &[usize],
+) -> usize {
     let mut linear = 0usize;
     for ((&extent, &stride), &coord) in dims.iter().zip(strides.iter()).zip(multi_index.iter()) {
         if extent == 0 {
@@ -450,7 +454,7 @@ fn broadcast_linear_index(dims: &[usize], strides: &[usize], multi_index: &[usiz
     linear
 }
 
-fn gaussian_normalizer(rows: usize, cols: usize, sigma: f64) -> f64 {
+pub(super) fn gaussian_normalizer(rows: usize, cols: usize, sigma: f64) -> f64 {
     if sigma <= 0.0 {
         return 0.0;
     }
@@ -472,7 +476,7 @@ fn gaussian_normalizer(rows: usize, cols: usize, sigma: f64) -> f64 {
     }
 }
 
-fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
+pub(super) fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
     let max_len = expected.len().max(actual.len());
     for idx in 0..max_len {
         let e = expected.get(idx).copied().unwrap_or(1);
@@ -484,7 +488,11 @@ fn shapes_compatible(expected: &[usize], actual: &[usize]) -> bool {
     true
 }
 
-fn filter_state_shape(mut base: Vec<usize>, dim_idx: usize, state_len: usize) -> Vec<usize> {
+pub(super) fn filter_state_shape(
+    mut base: Vec<usize>,
+    dim_idx: usize,
+    state_len: usize,
+) -> Vec<usize> {
     if base.len() <= dim_idx {
         base.extend(std::iter::repeat_n(1, dim_idx + 1 - base.len()));
     }
@@ -510,7 +518,7 @@ pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor
     }
 }
 
-fn median_from_slice(values: &[f64]) -> f64 {
+pub(super) fn median_from_slice(values: &[f64]) -> f64 {
     if values.is_empty() || values.iter().any(|v| v.is_nan()) {
         f64::NAN
     } else {
@@ -519,7 +527,7 @@ fn median_from_slice(values: &[f64]) -> f64 {
     }
 }
 
-fn diag_offset_abs(offset: isize) -> usize {
+pub(super) fn diag_offset_abs(offset: isize) -> usize {
     if offset >= 0 {
         offset as usize
     } else {
@@ -527,7 +535,7 @@ fn diag_offset_abs(offset: isize) -> usize {
         magnitude as usize
     }
 }
-fn diag_matrix_size_checked(len: usize, offset: isize) -> Result<(usize, usize)> {
+pub(super) fn diag_matrix_size_checked(len: usize, offset: isize) -> Result<(usize, usize)> {
     let shift = diag_offset_abs(offset);
     let size = len
         .checked_add(shift)
@@ -538,7 +546,7 @@ fn diag_matrix_size_checked(len: usize, offset: isize) -> Result<(usize, usize)>
     Ok((size, total))
 }
 
-fn diag_length(rows: usize, cols: usize, offset: isize) -> usize {
+pub(super) fn diag_length(rows: usize, cols: usize, offset: isize) -> usize {
     if rows == 0 || cols == 0 {
         return 0;
     }
@@ -559,7 +567,7 @@ fn diag_length(rows: usize, cols: usize, offset: isize) -> usize {
     }
 }
 
-fn diag_rows_cols(shape: &[usize]) -> (usize, usize) {
+pub(super) fn diag_rows_cols(shape: &[usize]) -> (usize, usize) {
     match shape.len() {
         0 => (1, 1),
         1 => (shape[0], 1),
@@ -567,10 +575,10 @@ fn diag_rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn diag_is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
+pub(super) fn diag_is_vector_like(rows: usize, cols: usize, dims: usize) -> bool {
     rows == 1 || cols == 1 || dims <= 1
 }
-fn diag_ensure_shape(shape: &[usize]) -> Result<()> {
+pub(super) fn diag_ensure_shape(shape: &[usize]) -> Result<()> {
     if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
         Err(anyhow!("diag: input must be 2-D"))
     } else {
@@ -578,7 +586,7 @@ fn diag_ensure_shape(shape: &[usize]) -> Result<()> {
     }
 }
 
-fn apply_tril_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Result<()> {
+pub(super) fn apply_tril_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Result<()> {
     if data.is_empty() {
         return Ok(());
     }
@@ -631,7 +639,7 @@ fn apply_tril_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Res
     Ok(())
 }
 
-fn apply_triu_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Result<()> {
+pub(super) fn apply_triu_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Result<()> {
     if data.is_empty() {
         return Ok(());
     }
@@ -686,7 +694,7 @@ fn apply_triu_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Res
     Ok(())
 }
 
-fn stride_before_for(shape: &[usize], dim: usize) -> usize {
+pub(super) fn stride_before_for(shape: &[usize], dim: usize) -> usize {
     if dim == 0 {
         return 1;
     }
@@ -697,7 +705,7 @@ fn stride_before_for(shape: &[usize], dim: usize) -> usize {
         .fold(1usize, |acc, extent| acc.saturating_mul(extent.max(1)))
 }
 
-fn stride_after_for(shape: &[usize], dim: usize) -> usize {
+pub(super) fn stride_after_for(shape: &[usize], dim: usize) -> usize {
     if dim + 1 >= shape.len() {
         return 1;
     }
@@ -706,10 +714,10 @@ fn stride_after_for(shape: &[usize], dim: usize) -> usize {
         .copied()
         .fold(1usize, |acc, extent| acc.saturating_mul(extent.max(1)))
 }
-fn dimension_length_zero_based(shape: &[usize], dim: usize) -> usize {
+pub(super) fn dimension_length_zero_based(shape: &[usize], dim: usize) -> usize {
     shape.get(dim).copied().unwrap_or(1)
 }
-fn compare_values_for_sort(
+pub(super) fn compare_values_for_sort(
     a: f64,
     b: f64,
     order: SortOrder,
@@ -729,7 +737,7 @@ fn compare_values_for_sort(
     }
 }
 
-fn compare_finite_for_sort(
+pub(super) fn compare_finite_for_sort(
     a: f64,
     b: f64,
     order: SortOrder,
@@ -757,7 +765,7 @@ fn compare_finite_for_sort(
     }
 }
 
-fn sort_host_tensor(
+pub(super) fn sort_host_tensor(
     data: &[f64],
     shape: &[usize],
     dim: usize,
@@ -815,12 +823,12 @@ fn sort_host_tensor(
 
     Ok((sorted, indices))
 }
-const RNG_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
-const MAX_SAFE_INTEGER: u64 = 1 << 53;
-const RNG_MULTIPLIER: u64 = 6364136223846793005;
-const RNG_INCREMENT: u64 = 1;
+pub(super) const RNG_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
+pub(super) const MAX_SAFE_INTEGER: u64 = 1 << 53;
+pub(super) const RNG_MULTIPLIER: u64 = 6364136223846793005;
+pub(super) const RNG_INCREMENT: u64 = 1;
 
-fn advance_rng_state(state: u64, mut delta: u64) -> u64 {
+pub(super) fn advance_rng_state(state: u64, mut delta: u64) -> u64 {
     let mut acc_mult = 1u64;
     let mut acc_plus = 0u64;
     let mut cur_mult = RNG_MULTIPLIER;
@@ -838,7 +846,7 @@ fn advance_rng_state(state: u64, mut delta: u64) -> u64 {
 
     acc_mult.wrapping_mul(state).wrapping_add(acc_plus)
 }
-fn seed_from_state(state: u64) -> u32 {
+pub(super) fn seed_from_state(state: u64) -> u32 {
     let high = (state >> 32) as u32;
     let low = state as u32;
     let mut seed = low ^ high.rotate_left(13);
@@ -848,7 +856,7 @@ fn seed_from_state(state: u64) -> u32 {
     seed | 1
 }
 
-fn philox_keys_from_state(state: u64) -> (u32, u32) {
+pub(super) fn philox_keys_from_state(state: u64) -> (u32, u32) {
     let lo = state as u32;
     let hi = (state >> 32) as u32;
     let mut key0 = lo ^ hi.rotate_left(7);
@@ -862,7 +870,7 @@ fn philox_keys_from_state(state: u64) -> (u32, u32) {
     (key0, key1)
 }
 
-fn rng_state() -> &'static Mutex<u64> {
+pub(super) fn rng_state() -> &'static Mutex<u64> {
     static RNG: OnceCell<Mutex<u64>> = OnceCell::new();
     RNG.get_or_init(|| Mutex::new(RNG_DEFAULT_SEED))
 }

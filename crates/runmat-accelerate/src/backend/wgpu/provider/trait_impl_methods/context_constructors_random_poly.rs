@@ -1,3 +1,5 @@
+macro_rules! context_constructors_random_poly_methods {
+    () => {
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }
@@ -360,3 +362,6 @@
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.elem_ne_exec(a, b) })
     }
+
+    };
+}

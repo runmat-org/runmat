@@ -4,7 +4,6 @@ use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
-use runmat_time::Instant;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 #[cfg(target_arch = "wasm32")]
@@ -13,7 +12,8 @@ use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
-use super::backend_types::{BufferEntry, BufferUsageClass, WgpuProvider};
+use super::backend_types::{BufferEntry, WgpuProvider};
+use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::fusion::active_fusion;
 
 impl WgpuProvider {

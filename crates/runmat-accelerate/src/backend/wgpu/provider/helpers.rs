@@ -1,11 +1,19 @@
-use anyhow::Result;
-use log::debug;
+use runmat_accelerate_api::AccelProvider;
+
+use anyhow::{ensure, Result};
+use log::{debug, info};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use super::backend_shared::gpu_per_buffer_limit_error;
-use super::backend_types::{
-    BufferUsageClass, ImageNormalizeKey, ImageNormalizeTuning, NumericPrecision, WgpuProvider,
+use super::backend_types::{ImageNormalizeKey, ImageNormalizeTuning, WgpuProvider};
+use crate::backend::wgpu::cache::{key as cache_key, persist as cache_persist};
+use crate::backend::wgpu::residency::BufferUsageClass;
+use crate::backend::wgpu::shaders::image_normalize::{
+    IMAGE_NORMALIZE_SHADER_F32, IMAGE_NORMALIZE_SHADER_F64,
 };
+use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
     pub(super) fn precision_tag(&self) -> &'static str {

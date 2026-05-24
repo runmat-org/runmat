@@ -1,11 +1,17 @@
+use runmat_accelerate_api::AccelProvider;
+
 use anyhow::{anyhow, ensure, Result};
+use bytemuck::bytes_of;
 use runmat_accelerate_api::GpuTensorHandle;
+use runmat_time::Instant;
 use std::sync::Arc;
 
 use super::backend_shared::{
     checked_binding_count, gpu_dispatch_length_limit_error, validate_compute_binding_counts,
 };
-use super::backend_types::{NumericPrecision, WgpuProvider};
+use super::backend_types::WgpuProvider;
+use crate::backend::wgpu::residency::BufferUsageClass;
+use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::shaders::logical::{
     ELEM_EQ_SHADER_F32, ELEM_EQ_SHADER_F64, ELEM_GE_SHADER_F32, ELEM_GE_SHADER_F64,
     ELEM_GT_SHADER_F32, ELEM_GT_SHADER_F64, ELEM_LE_SHADER_F32, ELEM_LE_SHADER_F64,
@@ -16,6 +22,7 @@ use crate::backend::wgpu::shaders::logical::{
     LOGICAL_NOT_SHADER_F64, LOGICAL_OR_SHADER_F32, LOGICAL_OR_SHADER_F64, LOGICAL_XOR_SHADER_F32,
     LOGICAL_XOR_SHADER_F64,
 };
+use crate::backend::wgpu::types::NumericPrecision;
 
 impl WgpuProvider {
     pub(crate) fn logical_islogical_exec(&self, a: &GpuTensorHandle) -> Result<bool> {

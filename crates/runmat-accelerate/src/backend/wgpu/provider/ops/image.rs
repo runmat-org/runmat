@@ -1,9 +1,15 @@
 use anyhow::{anyhow, ensure, Result};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ImfilterOptions, ImfilterPadding};
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, HostTensorView, ImfilterOptions, ImfilterPadding,
+};
 use runmat_builtins::Tensor;
 use wgpu::util::DeviceExt;
 
-use crate::backend::wgpu::provider::backend_types::{NumericPrecision, WgpuProvider};
+use super::WgpuProvider;
+use crate::backend::wgpu::types::NumericPrecision;
+use runmat_runtime::builtins::image::filters::imfilter::{
+    apply_imfilter_tensor as runtime_apply_imfilter_tensor, build_imfilter_plan,
+};
 
 impl WgpuProvider {
     pub(crate) async fn imfilter_exec(
@@ -36,7 +42,7 @@ impl WgpuProvider {
 
         let plan = match build_imfilter_plan(&image_shape, &kernel_tensor, options, "imfilter") {
             Ok(plan) => plan,
-            Err(err) => return Err(anyhow!(err)),
+            Err(err) => return Err(anyhow!("{err}")),
         };
 
         if plan.rank > crate::backend::wgpu::params::IMFILTER_MAX_RANK {
@@ -313,7 +319,7 @@ impl WgpuProvider {
 
         let result =
             runtime_apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, "imfilter")
-                .map_err(|err| anyhow!(err))?;
+                .map_err(|err| anyhow!("{err}"))?;
         let data_owned = result.data;
         let shape_owned = result.shape;
         let view = HostTensorView {

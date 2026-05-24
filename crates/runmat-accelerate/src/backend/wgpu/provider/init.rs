@@ -3,8 +3,6 @@ use log::{info, warn};
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};

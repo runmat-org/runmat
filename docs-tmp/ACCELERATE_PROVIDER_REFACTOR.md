@@ -22,21 +22,36 @@ backend/wgpu/
   provider.rs
   provider/
     backend.rs
+    backend_shared.rs
+    backend_types.rs
+    trait_impl.rs
+    trait_impl_methods/
+      context_constructors_random_poly.rs
+      elementwise_tensor_signal.rs
+      indexing_io_telemetry.rs
+      linalg_advanced_pagefun.rs
+      linalg_reduction_core.rs
     core.rs
     fft.rs
     helpers.rs
     init.rs
     ops/
+      context.rs
       constructors.rs
       elementwise.rs
+      fft.rs
       image.rs
       indexing.rs
+      io.rs
       linalg.rs
       polynomial.rs
       random.rs
       reduction.rs
       signal.rs
+      solve.rs
+      telemetry.rs
       tensor.rs
+      window.rs
     solve.rs
     window.rs
   dispatch/*
@@ -52,7 +67,7 @@ What is already complete:
 
 What is still pending:
 
-- Final workspace-wide green verification after all in-flight changes are committed.
+- Full workspace verification pass and closeout artifacts.
 
 ## Plan-of-Record Decisions
 
@@ -61,8 +76,10 @@ These are mandatory, not optional:
 1. Final provider implementation root is `backend/wgpu/provider/*`.
 2. Operation semantics live in `backend/wgpu/provider/ops/*`.
 3. Lifecycle/infrastructure stays explicit at provider root (`init.rs`, `core.rs`, `helpers.rs`, plus `backend.rs`).
-4. Launch plumbing remains in `dispatch/*`; shader source remains in `shaders/*`.
-5. Random module naming is normalized (`random.rs`), avoiding long-term `rnd` abbreviation drift.
+4. Backend shape/support types live in dedicated files (`backend_types.rs`, `backend_shared.rs`), not mixed into operation semantics.
+5. Trait method surface is split by domain (`trait_impl_methods/*`) and remains dispatch-only.
+6. Launch plumbing remains in `dispatch/*`; shader source remains in `shaders/*`.
+7. Random module naming is normalized (`random.rs`), avoiding long-term `rnd` abbreviation drift.
 
 ## Final Target Layout
 
@@ -72,20 +89,35 @@ backend/wgpu/
   provider.rs
   provider/
     backend.rs
+    backend_shared.rs
+    backend_types.rs
+    trait_impl.rs
+    trait_impl_methods/
+      context_constructors_random_poly.rs
+      elementwise_tensor_signal.rs
+      indexing_io_telemetry.rs
+      linalg_advanced_pagefun.rs
+      linalg_reduction_core.rs
     init.rs
     core.rs
     helpers.rs
     ops/
+      context.rs
       elementwise.rs
       reduction.rs
       tensor.rs
       indexing.rs
+      io.rs
+      telemetry.rs
       random.rs
       constructors.rs
       polynomial.rs
       image.rs
       linalg.rs
       signal.rs
+      fft.rs
+      solve.rs
+      window.rs
     fft.rs
     solve.rs
     window.rs
@@ -99,7 +131,13 @@ Notes:
 ## Domain Boundaries
 
 - `provider/backend.rs`:
-  - `WgpuProvider`, `WgpuProviderOptions`, `BufferEntry`, trait impl surface, top-level orchestration.
+  - `WgpuProvider`, `WgpuProviderOptions`, top-level orchestration, module wiring.
+- `provider/backend_types.rs`:
+  - backend data carriers and operation-facing request/response structs.
+- `provider/backend_shared.rs`:
+  - backend-wide constants/helpers that are not operation-family semantics.
+- `provider/trait_impl.rs` + `provider/trait_impl_methods/*`:
+  - trait surface organization and thin dispatch into domain exec methods.
 - `provider/init.rs`:
   - provider initialization/bootstrap/env parsing/autotune+warmup setup.
 - `provider/core.rs`:
@@ -107,7 +145,7 @@ Notes:
 - `provider/helpers.rs`:
   - small cross-family provider utilities (non-semantic helpers only).
 - `provider/ops/*`:
-  - operation-family semantics and provider-level orchestration.
+  - operation-family semantics and provider-level orchestration (`*_exec` methods).
 - `dispatch/*`:
   - launch mechanics/bindings/workgroup dispatch plumbing.
 - `shaders/*`:
@@ -135,4 +173,4 @@ After each structural phase:
 
 ## Bottom Line
 
-The refactor is in the final stretch. The implementation has already moved off the monolith and into `provider/*`. The remaining plan-of-record work is to finish the explicit `ops/*` layout and normalized random naming, then close out with full workspace-green verification.
+The refactor structure is now in place with dispatch-only trait slices and operation logic extracted into `ops/*`. Remaining plan-of-record work is verification and closeout evidence.

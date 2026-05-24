@@ -1,3 +1,5 @@
+macro_rules! linalg_advanced_pagefun_methods {
+    () => {
     fn pagefun(&self, request: &PagefunRequest) -> Result<GpuTensorHandle> {
         self.pagefun_exec(request)
     }
@@ -299,3 +301,6 @@
             self.reduce_dim_minmax_exec(a, dim, crate::backend::wgpu::types::DimReduceExtrema::Max)
         })
     }
+
+    };
+}

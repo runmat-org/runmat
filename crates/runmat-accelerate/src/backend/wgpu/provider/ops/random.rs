@@ -1,3 +1,5 @@
+use runmat_accelerate_api::AccelProvider;
+
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_time::Instant;

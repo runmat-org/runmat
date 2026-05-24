@@ -15,50 +15,51 @@ impl Default for WgpuProviderOptions {
     }
 }
 
-type MomentsKey = (u64, Vec<usize>);
-type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
-type MomentsCache = HashMap<MomentsKey, MomentsValue>;
+pub(super) type MomentsKey = (u64, Vec<usize>);
+pub(super) type MomentsValue = (GpuTensorHandle, GpuTensorHandle);
+pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
-    instance: Arc<wgpu::Instance>,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    adapter: Arc<wgpu::Adapter>,
-    adapter_info: wgpu::AdapterInfo,
-    adapter_limits: wgpu::Limits,
-    workgroup_config: WorkgroupConfig,
-    buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
-    buffer_residency: BufferResidency,
-    buffer_residency_max_poolable_bytes: u64,
-    next_id: AtomicU64,
-    pipelines: WgpuPipelines,
-    runtime_device_id: u32,
-    cache_device_id: u32,
-    precision: NumericPrecision,
-    element_size: usize,
-    fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
-    bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
-    bind_group_layout_tags: Mutex<HashMap<usize, String>>,
-    bind_group_cache: BindGroupCache,
-    kernel_resources: KernelResourceRegistry,
-    metrics: crate::backend::wgpu::metrics::WgpuMetrics,
-    telemetry: AccelTelemetry,
-    reduction_two_pass_mode: ReductionTwoPassMode,
-    reduction_two_pass_threshold: usize,
-    reduction_workgroup_size_default: u32,
-    pipeline_cache_dir: Option<std::path::PathBuf>,
-    reduction_autotune: AutotuneController<ReductionAutotuneKey, ReductionTuning>,
-    image_norm_autotune: AutotuneController<ImageNormalizeKey, ImageNormalizeTuning>,
-    image_norm_pipeline_cache: Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
+    pub(super) instance: Arc<wgpu::Instance>,
+    pub(super) device: Arc<wgpu::Device>,
+    pub(super) queue: Arc<wgpu::Queue>,
+    pub(super) adapter: Arc<wgpu::Adapter>,
+    pub(super) adapter_info: wgpu::AdapterInfo,
+    pub(super) adapter_limits: wgpu::Limits,
+    pub(super) workgroup_config: WorkgroupConfig,
+    pub(super) buffers: Mutex<HashMap<u64, BufferEntry>>, // in-memory handle table
+    pub(super) buffer_residency: BufferResidency,
+    pub(super) buffer_residency_max_poolable_bytes: u64,
+    pub(super) next_id: AtomicU64,
+    pub(super) pipelines: WgpuPipelines,
+    pub(super) runtime_device_id: u32,
+    pub(super) cache_device_id: u32,
+    pub(super) precision: NumericPrecision,
+    pub(super) element_size: usize,
+    pub(super) fused_pipeline_cache: Mutex<HashMap<u64, Arc<wgpu::ComputePipeline>>>,
+    pub(super) bind_group_layout_cache: Mutex<HashMap<String, Arc<wgpu::BindGroupLayout>>>,
+    pub(super) bind_group_layout_tags: Mutex<HashMap<usize, String>>,
+    pub(super) bind_group_cache: BindGroupCache,
+    pub(super) kernel_resources: KernelResourceRegistry,
+    pub(super) metrics: crate::backend::wgpu::metrics::WgpuMetrics,
+    pub(super) telemetry: AccelTelemetry,
+    pub(super) reduction_two_pass_mode: ReductionTwoPassMode,
+    pub(super) reduction_two_pass_threshold: usize,
+    pub(super) reduction_workgroup_size_default: u32,
+    pub(super) pipeline_cache_dir: Option<std::path::PathBuf>,
+    pub(super) reduction_autotune: AutotuneController<ReductionAutotuneKey, ReductionTuning>,
+    pub(super) image_norm_autotune: AutotuneController<ImageNormalizeKey, ImageNormalizeTuning>,
+    pub(super) image_norm_pipeline_cache:
+        Mutex<HashMap<ImageNormalizeTuning, Arc<wgpu::ComputePipeline>>>,
     #[allow(dead_code)]
-    autotune_base_dir: Option<PathBuf>,
+    pub(super) autotune_base_dir: Option<PathBuf>,
     #[allow(dead_code)]
-    autotune_device_tag: String,
+    pub(super) autotune_device_tag: String,
     // Optimization caches
-    pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
-    moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
-    fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
+    pub(super) pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
+    pub(super) moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
+    pub(super) fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -67,37 +68,37 @@ unsafe impl Send for WgpuProvider {}
 unsafe impl Sync for WgpuProvider {}
 
 #[derive(Clone)]
-struct BufferEntry {
-    buffer: Arc<wgpu::Buffer>,
-    len: usize,
-    shape: Vec<usize>,
-    storage: GpuTensorStorage,
-    precision: NumericPrecision,
-    usage: BufferUsageClass,
-    last_submission_id: Option<u32>,
+pub(super) struct BufferEntry {
+    pub(super) buffer: Arc<wgpu::Buffer>,
+    pub(super) len: usize,
+    pub(super) shape: Vec<usize>,
+    pub(super) storage: GpuTensorStorage,
+    pub(super) precision: NumericPrecision,
+    pub(super) usage: BufferUsageClass,
+    pub(super) last_submission_id: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
-struct MatrixOperandView {
-    rows: usize,
-    cols: usize,
-    lda: u32,
-    transpose: bool,
+pub(super) struct MatrixOperandView {
+    pub(super) rows: usize,
+    pub(super) cols: usize,
+    pub(super) lda: u32,
+    pub(super) transpose: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct WorkgroupConfig {
-    scalar: u32,
-    reduction_default: u32,
-    matmul_tile: u32,
-    max_x: u32,
-    max_y: u32,
-    max_z: u32,
-    adapter_max_invocations: u32,
+pub(super) struct WorkgroupConfig {
+    pub(super) scalar: u32,
+    pub(super) reduction_default: u32,
+    pub(super) matmul_tile: u32,
+    pub(super) max_x: u32,
+    pub(super) max_y: u32,
+    pub(super) max_z: u32,
+    pub(super) adapter_max_invocations: u32,
 }
 
 impl WorkgroupConfig {
-    fn new(
+    pub(super) fn new(
         limits: &wgpu::Limits,
         requested_scalar: u32,
         requested_reduction: u32,
@@ -201,7 +202,7 @@ impl WorkgroupConfig {
         1 << (31 - value.leading_zeros())
     }
 
-    fn sanitize_image_normalize_tuning(
+    pub(super) fn sanitize_image_normalize_tuning(
         &self,
         mut tuning: ImageNormalizeTuning,
         batches: u32,
@@ -248,25 +249,25 @@ impl WorkgroupConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-enum ReductionMode {
+pub(super) enum ReductionMode {
     SinglePass,
     TwoPass { chunk_rows: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct ReductionTuning {
-    mode: ReductionMode,
+pub(super) struct ReductionTuning {
+    pub(super) mode: ReductionMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct ReductionAutotuneKey {
-    precision: u8,
-    slices_bucket: u32,
-    reduce_bucket: u32,
+pub(super) struct ReductionAutotuneKey {
+    pub(super) precision: u8,
+    pub(super) slices_bucket: u32,
+    pub(super) reduce_bucket: u32,
 }
 
 impl ReductionAutotuneKey {
-    fn new(precision: NumericPrecision, num_slices: usize, reduce_len: usize) -> Self {
+    pub(super) fn new(precision: NumericPrecision, num_slices: usize, reduce_len: usize) -> Self {
         Self {
             precision: match precision {
                 NumericPrecision::F64 => 64,
@@ -278,7 +279,7 @@ impl ReductionAutotuneKey {
     }
 }
 
-fn bucketize_dimension(value: usize) -> u32 {
+pub(super) fn bucketize_dimension(value: usize) -> u32 {
     if value == 0 {
         return 0;
     }
@@ -291,23 +292,23 @@ fn bucketize_dimension(value: usize) -> u32 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct ImageNormalizeTuning {
-    batch_tile: u32,
-    values_per_thread: u32,
-    lane_count: u32,
-    spatial_tile: u32,
+pub(super) struct ImageNormalizeTuning {
+    pub(super) batch_tile: u32,
+    pub(super) values_per_thread: u32,
+    pub(super) lane_count: u32,
+    pub(super) spatial_tile: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-struct ImageNormalizeKey {
-    version: u8,
-    precision: u8,
-    plane_bucket: u32,
-    batch_bucket: u32,
+pub(super) struct ImageNormalizeKey {
+    pub(super) version: u8,
+    pub(super) precision: u8,
+    pub(super) plane_bucket: u32,
+    pub(super) batch_bucket: u32,
 }
 
 impl ImageNormalizeKey {
-    fn new(precision: NumericPrecision, batches: u32, plane: u32) -> Self {
+    pub(super) fn new(precision: NumericPrecision, batches: u32, plane: u32) -> Self {
         Self {
             version: WgpuProvider::IMAGE_NORMALIZE_AUTOTUNE_VERSION,
             precision: match precision {

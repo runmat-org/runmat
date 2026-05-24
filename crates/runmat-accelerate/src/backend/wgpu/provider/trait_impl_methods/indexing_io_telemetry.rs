@@ -1,3 +1,5 @@
+macro_rules! indexing_io_telemetry_methods {
+    () => {
     fn find(
         &self,
         a: &GpuTensorHandle,
@@ -182,4 +184,6 @@
     fn device_info_struct(&self) -> ApiDeviceInfo {
         self.device_info_struct_exec()
     }
+
+    };
 }
