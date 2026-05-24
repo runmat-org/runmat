@@ -1,4 +1,17 @@
-use super::*;
+use anyhow::{anyhow, ensure, Result};
+use bytemuck::cast_slice;
+use runmat_accelerate_api::{
+    AccelProvider, GpuTensorHandle, ProviderConv1dOptions, ProviderConvMode,
+    ProviderPolyderQuotient, ProviderPolyvalOptions,
+};
+use std::sync::Arc;
+use wgpu::util::DeviceExt;
+
+use super::{
+    conv1d_output_shape, conv1d_window, conv_orientation_for, polynomial_orientation, product_checked,
+    shape_for_orientation, trim_leading_zeros_real, NumericPrecision, PolyderParams,
+    PolyintParamsF32, PolyintParamsF64, PolynomialOrientation, WgpuProvider,
+};
 
 impl WgpuProvider {
     pub(crate) fn polyval_exec(
