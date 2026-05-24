@@ -18,6 +18,16 @@ use crate::backend::wgpu::shaders::logical::{
 };
 
 impl WgpuProvider {
+    pub(crate) fn logical_islogical_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
+        let _ = self.get_entry(a)?;
+        Ok(runmat_accelerate_api::handle_is_logical(a))
+    }
+
+    pub(crate) fn logical_isreal_exec(&self, a: &GpuTensorHandle) -> Result<bool> {
+        let _ = self.get_entry(a)?;
+        Ok(true)
+    }
+
     pub(crate) fn unary_double_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         if self.precision != NumericPrecision::F64 {
             return Err(anyhow!(

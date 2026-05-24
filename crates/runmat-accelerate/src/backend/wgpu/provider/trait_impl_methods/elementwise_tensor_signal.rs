@@ -15,13 +15,11 @@
     }
 
     fn logical_islogical(&self, a: &GpuTensorHandle) -> Result<bool> {
-        let _ = self.get_entry(a)?;
-        Ok(runmat_accelerate_api::handle_is_logical(a))
+        self.logical_islogical_exec(a)
     }
 
     fn logical_isreal(&self, a: &GpuTensorHandle) -> Result<bool> {
-        let _ = self.get_entry(a)?;
-        Ok(true)
+        self.logical_isreal_exec(a)
     }
 
     fn logical_isfinite(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {

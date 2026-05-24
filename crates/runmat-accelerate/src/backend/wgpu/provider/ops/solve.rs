@@ -1,6 +1,216 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) async fn linsolve_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        options: &ProviderLinsolveOptions,
+    ) -> Result<ProviderLinsolveResult> {
+        if let Some(result) = self.try_linsolve_device(lhs, rhs, options).await? {
+            return Ok(result);
+        }
+        let start = Instant::now();
+        let HostTensorOwned {
+            data: lhs_data,
+            shape: lhs_shape,
+            ..
+        } = <Self as AccelProvider>::download(self, lhs).await?;
+        let HostTensorOwned {
+            data: rhs_data,
+            shape: rhs_shape,
+            ..
+        } = <Self as AccelProvider>::download(self, rhs).await?;
+
+        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
+        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
+
+        let (solution, rcond) = linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
+            .map_err(|e| anyhow!("{e}"))?;
+        self.telemetry.record_linsolve_duration(start.elapsed());
+        self.telemetry
+            .record_solve_fallback("linsolve:host_reupload");
+
+        let handle = self.upload(&HostTensorView {
+            data: &solution.data,
+            shape: &solution.shape,
+        })?;
+
+        Ok(ProviderLinsolveResult {
+            solution: handle,
+            reciprocal_condition: rcond,
+        })
+    }
+
+    pub(crate) async fn inv_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let HostTensorOwned { data, shape, .. } =
+            <Self as AccelProvider>::download(self, matrix).await?;
+        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
+        let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+        self.upload(&HostTensorView {
+            data: &result.data,
+            shape: &result.shape,
+        })
+    }
+
+    pub(crate) async fn pinv_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        options: ProviderPinvOptions,
+    ) -> Result<GpuTensorHandle> {
+        let HostTensorOwned { data, shape, .. } =
+            <Self as AccelProvider>::download(self, matrix).await?;
+        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
+        let result =
+            pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
+        self.upload(&HostTensorView {
+            data: &result.data,
+            shape: &result.shape,
+        })
+    }
+
+    pub(crate) async fn cond_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        norm: ProviderCondNorm,
+    ) -> Result<GpuTensorHandle> {
+        let HostTensorOwned { data, shape, .. } =
+            <Self as AccelProvider>::download(self, matrix).await?;
+        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("cond: {e}"))?;
+        let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
+        let scalar = [cond_value];
+        let shape = [1usize, 1usize];
+        self.upload(&HostTensorView {
+            data: &scalar,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) async fn norm_exec(
+        &self,
+        tensor: &GpuTensorHandle,
+        order: ProviderNormOrder,
+    ) -> Result<GpuTensorHandle> {
+        let HostTensorOwned { data, shape, .. } =
+            <Self as AccelProvider>::download(self, tensor).await?;
+        let host_tensor = Tensor::new(data, shape).map_err(|e| anyhow!("norm: {e}"))?;
+        let value = norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
+        let scalar = [value];
+        let shape = [1usize, 1usize];
+        self.upload(&HostTensorView {
+            data: &scalar,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) async fn rank_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        tolerance: Option<f64>,
+    ) -> Result<GpuTensorHandle> {
+        let HostTensorOwned { data, shape, .. } =
+            <Self as AccelProvider>::download(self, matrix).await?;
+        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rank: {e}"))?;
+        let rank =
+            rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
+        let scalar = [rank];
+        let shape = [1usize, 1usize];
+        self.upload(&HostTensorView {
+            data: &scalar,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) async fn rcond_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let HostTensorOwned { data, shape, .. } =
+            <Self as AccelProvider>::download(self, matrix).await?;
+        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
+        let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
+        let scalar = [estimate];
+        let shape = [1usize, 1usize];
+        self.upload(&HostTensorView {
+            data: &scalar,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) async fn mldivide_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let start = Instant::now();
+        if let Some(result) = self
+            .try_linsolve_device(lhs, rhs, &ProviderLinsolveOptions::default())
+            .await?
+        {
+            self.telemetry.record_mldivide_duration(start.elapsed());
+            return Ok(result.solution);
+        }
+        let HostTensorOwned {
+            data: lhs_data,
+            shape: lhs_shape,
+            ..
+        } = <Self as AccelProvider>::download(self, lhs).await?;
+        let HostTensorOwned {
+            data: rhs_data,
+            shape: rhs_shape,
+            ..
+        } = <Self as AccelProvider>::download(self, rhs).await?;
+
+        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
+        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
+
+        let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+            .map_err(|e| anyhow!("{e}"))?;
+        self.telemetry.record_mldivide_duration(start.elapsed());
+        self.telemetry
+            .record_solve_fallback("mldivide:host_reupload");
+
+        let handle = self.upload(&HostTensorView {
+            data: &result.data,
+            shape: &result.shape,
+        })?;
+        Ok(handle)
+    }
+
+    pub(crate) async fn mrdivide_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        let start = Instant::now();
+        if let Some(result) = self.try_mrdivide_device(lhs, rhs).await? {
+            self.telemetry.record_mrdivide_duration(start.elapsed());
+            return Ok(result);
+        }
+        let HostTensorOwned {
+            data: lhs_data,
+            shape: lhs_shape,
+            ..
+        } = <Self as AccelProvider>::download(self, lhs).await?;
+        let HostTensorOwned {
+            data: rhs_data,
+            shape: rhs_shape,
+            ..
+        } = <Self as AccelProvider>::download(self, rhs).await?;
+
+        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
+        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
+
+        let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
+            .map_err(|e| anyhow!("{e}"))?;
+        self.telemetry.record_mrdivide_duration(start.elapsed());
+        self.telemetry
+            .record_solve_fallback("mrdivide:host_reupload");
+
+        let handle = self.upload(&HostTensorView {
+            data: &result.data,
+            shape: &result.shape,
+        })?;
+        Ok(handle)
+    }
+
     fn matrix_dims_for_solve(shape: &[usize]) -> Result<(usize, usize)> {
         match shape.len() {
             0 => Ok((1, 1)),

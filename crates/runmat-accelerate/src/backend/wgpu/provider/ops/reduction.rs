@@ -3,6 +3,34 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 impl WgpuProvider {
+    pub(crate) fn reduce_any_dim_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        let op = if omit_nan {
+            crate::backend::wgpu::types::DimReduceOp::AnyOmit
+        } else {
+            crate::backend::wgpu::types::DimReduceOp::AnyInclude
+        };
+        self.reduce_dim_sum_mean_exec(a, dim, op)
+    }
+
+    pub(crate) fn reduce_all_dim_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        let op = if omit_nan {
+            crate::backend::wgpu::types::DimReduceOp::AllOmit
+        } else {
+            crate::backend::wgpu::types::DimReduceOp::AllInclude
+        };
+        self.reduce_dim_sum_mean_exec(a, dim, op)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn fused_reduction_exec(
         &self,

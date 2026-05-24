@@ -1,6 +1,1237 @@
 use super::*;
 
 impl WgpuProvider {
+    pub(crate) fn take_matmul_sources_exec(
+        &self,
+        product: &GpuTensorHandle,
+    ) -> Option<(GpuTensorHandle, GpuTensorHandle)> {
+        let res = self.kernel_resources.take_matmul_sources(product);
+        log::debug!(
+            "take_matmul_sources: product={} found={} active_fusion={:?}",
+            product.buffer_id,
+            res.is_some(),
+            active_fusion()
+        );
+        res
+    }
+
+    pub(crate) async fn qr_power_iter_exec(
+        &self,
+        product: &GpuTensorHandle,
+        product_lhs: Option<&GpuTensorHandle>,
+        q_handle: &GpuTensorHandle,
+        options: &ProviderQrOptions,
+    ) -> Result<Option<ProviderQrPowerIterResult>> {
+        let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
+        if !options.economy {
+            return Ok(None);
+        }
+
+        let product_entry = self.get_entry(product)?;
+        if product_entry.shape.len() != 2 {
+            return Ok(None);
+        }
+        let rows = product_entry.shape[0];
+        let cols = product_entry.shape[1];
+        if rows == 0 || cols == 0 {
+            return Ok(None);
+        }
+        if cols > QR_DEVICE_MAX_COLS {
+            if debug_qr {
+                log::debug!(
+                    "qr_power_iter: column count {} exceeds device kernel limit {}; falling back",
+                    cols,
+                    QR_DEVICE_MAX_COLS
+                );
+            }
+            return Ok(None);
+        }
+        if self.precision() != ProviderPrecision::F32 {
+            if debug_qr {
+                log::debug!(
+                    "qr_power_iter: precision {:?} unsupported for device QR kernel; falling back",
+                    self.precision()
+                );
+            }
+            return Ok(None);
+        }
+        let q_entry = self.get_entry(q_handle)?;
+        if q_entry.shape != product_entry.shape {
+            return Ok(None);
+        }
+        let k = cols;
+
+        let mut pre_product_max = match <Self as AccelProvider>::download(self, product).await {
+            Ok(host) => Some(
+                host.data
+                    .iter()
+                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
+            ),
+            Err(err) => {
+                log::warn!("qr_power_iter pre-download failed: {err}");
+                None
+            }
+        };
+
+        let pre_q_max = match <Self as AccelProvider>::download(self, q_handle).await {
+            Ok(host) => Some(
+                host.data
+                    .iter()
+                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
+            ),
+            Err(err) => {
+                log::warn!("qr_power_iter q-handle pre-download failed: {err}");
+                None
+            }
+        };
+
+        const PRODUCT_EPS: f64 = 1.0e-12;
+        const Q_EPS: f64 = 1.0e-6;
+        if pre_product_max.unwrap_or(0.0) <= PRODUCT_EPS && pre_q_max.unwrap_or(0.0) > Q_EPS {
+            let debug_zero_host = std::env::var("RUNMAT_DEBUG_QR_ZEROHOST").is_ok();
+            if debug_zero_host {
+                if let Some(lhs_handle) = product_lhs {
+                    let lhs_download = <Self as AccelProvider>::download(self, lhs_handle).await;
+                    let q_download = <Self as AccelProvider>::download(self, q_handle).await;
+                    match (lhs_download, q_download) {
+                        (Ok(lhs_host), Ok(q_host)) => {
+                            let lhs_rows = lhs_host.shape.first().copied().unwrap_or(0);
+                            let lhs_cols = lhs_host.shape.get(1).copied().unwrap_or(0);
+                            let q_rows = q_host.shape.first().copied().unwrap_or(0);
+                            let q_cols = q_host.shape.get(1).copied().unwrap_or(0);
+                            if lhs_rows == q_rows
+                                && lhs_cols == q_rows
+                                && q_rows == rows
+                                && q_cols == cols
+                            {
+                                let mut max_host_product = 0.0f64;
+                                for col in 0..cols {
+                                    for row in 0..rows {
+                                        let mut sum = 0.0f64;
+                                        for k_idx in 0..lhs_cols {
+                                            let lhs_idx = row + k_idx * lhs_rows;
+                                            let q_idx = k_idx + col * q_rows;
+                                            sum += lhs_host.data[lhs_idx] * q_host.data[q_idx];
+                                        }
+                                        max_host_product = max_host_product.max(sum.abs());
+                                    }
+                                }
+                                log::info!(
+                                    "qr_power_iter host check: rows={} cols={} host_max_product={:.6e}",
+                                    rows,
+                                    cols,
+                                    max_host_product
+                                );
+                            } else {
+                                log::info!(
+                                    "qr_power_iter host check skipped: lhs_shape={:?} q_shape={:?} rows={} cols={}",
+                                    lhs_host.shape,
+                                    q_host.shape,
+                                    rows,
+                                    cols
+                                );
+                            }
+                        }
+                        (lhs_res, q_res) => {
+                            log::info!(
+                                "qr_power_iter host check download failed: lhs={:?} q={:?} product_id={}",
+                                lhs_res.err(),
+                                q_res.err(),
+                                product.buffer_id
+                            );
+                        }
+                    }
+                } else {
+                    log::info!(
+                        "qr_power_iter host check skipped: product_lhs unavailable (product_id={})",
+                        product.buffer_id
+                    );
+                }
+            }
+            if let Some(lhs_handle) = product_lhs {
+                log::warn!(
+                    "qr_power_iter: detected zero matmul product (product_id={} max_product_abs_pre={:?} max_q_abs_pre={:?}); recomputing",
+                    product.buffer_id,
+                    pre_product_max,
+                    pre_q_max
+                );
+                if let Ok(lhs_entry) = self.get_entry(lhs_handle) {
+                    if let Ok(rhs_entry) = self.get_entry(q_handle) {
+                        let lhs_view = build_matrix_operand_view(lhs_handle, &lhs_entry).unwrap_or(
+                            MatrixOperandView {
+                                rows: 0,
+                                cols: 0,
+                                lda: 0,
+                                transpose: false,
+                            },
+                        );
+                        let rhs_view = build_matrix_operand_view(q_handle, &rhs_entry).unwrap_or(
+                            MatrixOperandView {
+                                rows: 0,
+                                cols: 0,
+                                lda: 0,
+                                transpose: false,
+                            },
+                        );
+                        log::info!(
+                            "qr_power_iter recompute operands: product_id={} lhs_shape={:?} rhs_shape={:?} lhs_view={{rows:{} cols:{} lda:{} transpose:{}}} rhs_view={{rows:{} cols:{} lda:{} transpose:{}}}",
+                            product.buffer_id,
+                            lhs_entry.shape,
+                            rhs_entry.shape,
+                            lhs_view.rows,
+                            lhs_view.cols,
+                            lhs_view.lda,
+                            lhs_view.transpose,
+                            rhs_view.rows,
+                            rhs_view.cols,
+                            rhs_view.lda,
+                            rhs_view.transpose
+                        );
+                        log::info!(
+                            "qr_power_iter recompute buffers: product_id={} lhs_ptr={:p} rhs_ptr={:p}",
+                            product.buffer_id,
+                            lhs_entry.buffer.as_ref(),
+                            rhs_entry.buffer.as_ref()
+                        );
+                    }
+                }
+                let recomputed =
+                    self.matmul_exec_with_usage(lhs_handle, q_handle, BufferUsageClass::FusionOut)?;
+                let mut recomputed_max: Option<f64> = None;
+                if debug_zero_host {
+                    match <Self as AccelProvider>::download(self, &recomputed).await {
+                        Ok(host) => {
+                            let max_recomputed = host
+                                .data
+                                .iter()
+                                .fold(0.0f64, |acc, value| acc.max(value.abs()));
+                            log::info!(
+                                "qr_power_iter recompute check: product_id={} max_recomputed_abs={:.6e}",
+                                product.buffer_id,
+                                max_recomputed
+                            );
+                            recomputed_max = Some(max_recomputed);
+                        }
+                        Err(err) => {
+                            log::info!(
+                                "qr_power_iter recompute check failed: product_id={} err={}",
+                                product.buffer_id,
+                                err
+                            );
+                        }
+                    }
+                }
+                let recomputed_entry = self.get_entry(&recomputed)?;
+                log::info!(
+                    "qr_power_iter recompute start: product_id={} original_len={} recomputed_len={}",
+                    product.buffer_id,
+                    product_entry.len,
+                    recomputed_entry.len
+                );
+                let bytes = (recomputed_entry.len as u64) * self.element_size as u64;
+                log::info!(
+                    "qr_power_iter recompute copy detail: product_id={} product_ptr={:p} recomputed_ptr={:p}",
+                    product.buffer_id,
+                    product_entry.buffer.as_ref(),
+                    recomputed_entry.buffer.as_ref()
+                );
+                if bytes > 0 {
+                    let mut encoder =
+                        self.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-qr-product-recompute"),
+                            });
+                    encoder.copy_buffer_to_buffer(
+                        recomputed_entry.buffer.as_ref(),
+                        0,
+                        product_entry.buffer.as_ref(),
+                        0,
+                        bytes,
+                    );
+                    self.submit(encoder);
+                }
+
+                let max_val = if let Some(val) = recomputed_max {
+                    val
+                } else {
+                    match <Self as AccelProvider>::download(self, product).await {
+                        Ok(host) => host
+                            .data
+                            .iter()
+                            .fold(0.0f64, |acc, value| acc.max(value.abs())),
+                        Err(err) => {
+                            log::warn!("qr_power_iter recompute verification failed: {err}");
+                            0.0
+                        }
+                    }
+                };
+                log::info!(
+                    "qr_power_iter recompute copy: product_id={} bytes={} post_max={:.6e}",
+                    product.buffer_id,
+                    bytes,
+                    max_val
+                );
+                if max_val == 0.0 {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let q_download = <Self as AccelProvider>::download(self, q_handle).await;
+                        if let Ok(lhs_dump) =
+                            <Self as AccelProvider>::download(self, lhs_handle).await
+                        {
+                            if let Ok(ref q_dump) = q_download {
+                                let dump_dir = Path::new("target/matmul_zero");
+                                let _ = fs::create_dir_all(dump_dir);
+                                let lhs_path = dump_dir.join(format!(
+                                    "lhs_{}_{}.bin",
+                                    product.buffer_id,
+                                    lhs_dump.data.len()
+                                ));
+                                let rhs_path = dump_dir.join(format!(
+                                    "rhs_{}_{}.bin",
+                                    product.buffer_id,
+                                    q_dump.data.len()
+                                ));
+                                let _ = fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
+                                let _ = fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
+                                log::warn!(
+                                    "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
+                                    product.buffer_id,
+                                    lhs_path.display(),
+                                    rhs_path.display()
+                                );
+                            }
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        log::warn!("qr_power_iter: skipping matmul dump because filesystem APIs are unavailable on wasm");
+                    }
+                    log::warn!(
+                        "qr_power_iter: recomputed product is still zero; falling back to host QR"
+                    );
+                    let _ = self.free(&recomputed);
+                    if let Some(handle) = self.qr_power_iter_host(product, options).await? {
+                        return Ok(Some(handle));
+                    }
+                    return Ok(None);
+                }
+                pre_product_max = Some(max_val);
+
+                let _ = self.free(&recomputed);
+            } else {
+                log::warn!(
+                    "qr_power_iter: zero product detected for buffer {} without lhs handle; proceeding with existing data",
+                    product.buffer_id
+                );
+            }
+        }
+
+        let (q_result, r_handle, mut r_inv_opt) =
+            self.qr_factor_device(product, rows, cols, Some(q_handle), "runmat-qr-power", true)?;
+
+        let mut fallback_needed = false;
+        if let Ok(host_r) = <Self as AccelProvider>::download(self, &r_handle).await {
+            for col in 0..cols {
+                let diag = host_r.data[col + col * cols];
+                if !diag.is_finite() || diag.abs() <= 1.0e-12 {
+                    fallback_needed = true;
+                    break;
+                }
+            }
+        }
+
+        if fallback_needed {
+            if let Some(handle) = r_inv_opt.take() {
+                let _ = self.free(&handle);
+            }
+            let _ = self.free(&q_result);
+            let _ = self.free(&r_handle);
+            return self.qr_power_iter_host(product, options).await;
+        }
+
+        if pre_product_max.unwrap_or(0.0) <= 1.0e-8 {
+            if let Some(handle) = r_inv_opt.take() {
+                let _ = self.free(&handle);
+            }
+            let _ = self.free(&q_result);
+            let _ = self.free(&r_handle);
+            return self.qr_power_iter_host(product, options).await;
+        }
+
+        if debug_qr {
+            if let Err(err) = self
+                .debug_qr_power_iter(
+                    product,
+                    &product_entry,
+                    pre_product_max,
+                    pre_q_max,
+                    &q_result,
+                    &r_handle,
+                    r_inv_opt
+                        .as_ref()
+                        .expect("retain_r_inv=true must provide inverse handle"),
+                    None::<&runmat_accelerate_api::HostTensorOwned>,
+                    rows,
+                    cols,
+                )
+                .await
+            {
+                log::warn!("qr_power_iter debug failed: {err}");
+            }
+        }
+
+        if let Some(handle) = r_inv_opt.take() {
+            let _ = self.free(&handle);
+        }
+
+        let mut perm_matrix = vec![0.0f64; k * k];
+        for i in 0..k {
+            perm_matrix[i + i * k] = 1.0;
+        }
+        let perm_vector: Vec<f64> = (1..=k).map(|v| v as f64).collect();
+
+        let perm_matrix_shape = [k, k];
+        let perm_matrix_handle = self.upload(&HostTensorView {
+            data: &perm_matrix,
+            shape: &perm_matrix_shape,
+        })?;
+        let perm_vector_shape = vec![k, 1];
+        let perm_vector_handle = self.upload(&HostTensorView {
+            data: &perm_vector,
+            shape: &perm_vector_shape,
+        })?;
+
+        let _ = self.free(product);
+
+        Ok(Some(ProviderQrPowerIterResult {
+            q: q_result,
+            r: r_handle,
+            perm_matrix: perm_matrix_handle,
+            perm_vector: perm_vector_handle,
+        }))
+    }
+
+    pub(crate) async fn matmul_epilogue_exec(
+        &self,
+        a: &GpuTensorHandle,
+        b: &GpuTensorHandle,
+        ep: &runmat_accelerate_api::MatmulEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        use runmat_accelerate_api::ProviderPrecision;
+        let entry_a = self.get_entry(a)?;
+        let entry_b = self.get_entry(b)?;
+        if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
+            return Err(anyhow!("matmul_epilogue: only 2D tensors supported"));
+        }
+        let view_a =
+            build_matrix_operand_view(a, &entry_a).map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
+        let view_b =
+            build_matrix_operand_view(b, &entry_b).map_err(|e| anyhow!("matmul_epilogue: {e}"))?;
+
+        if view_a.cols != view_b.rows {
+            return Err(anyhow!("matmul_epilogue: inner dimensions must match"));
+        }
+        let m = view_a.rows;
+        let n = view_b.cols;
+        let k = view_a.cols;
+
+        let out_shape = vec![m, n];
+        let len = m * n;
+        let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-epilogue-out")?;
+        if len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
+        }
+
+        let start = Instant::now();
+
+        let m_u32 =
+            u32::try_from(m).map_err(|_| anyhow!("matmul_epilogue: m exceeds GPU limits"))?;
+        let n_u32 =
+            u32::try_from(n).map_err(|_| anyhow!("matmul_epilogue: n exceeds GPU limits"))?;
+        let k_u32 =
+            u32::try_from(k).map_err(|_| anyhow!("matmul_epilogue: k exceeds GPU limits"))?;
+        let mut flags = 0u32;
+        if view_a.transpose {
+            flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
+        }
+        if view_b.transpose {
+            flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
+        }
+
+        let params = crate::backend::wgpu::params::MatmulParams {
+            m: m_u32,
+            n: n_u32,
+            k: k_u32,
+            lda: view_a.lda,
+            ldb: view_b.lda,
+            ldc: m_u32,
+            offset_a: 0,
+            offset_b: 0,
+            offset_out: 0,
+            flags,
+        };
+        let params_buffer = self.uniform_buffer(&params, "runmat-matmul-epilogue-params");
+
+        use crate::backend::wgpu::params::{
+            MATMUL_EPILOGUE_FLAG_CLAMP_MAX, MATMUL_EPILOGUE_FLAG_CLAMP_MIN,
+            MATMUL_EPILOGUE_FLAG_COL_DIV, MATMUL_EPILOGUE_FLAG_COL_SCALE,
+            MATMUL_EPILOGUE_FLAG_DIAG_WRITE, MATMUL_EPILOGUE_FLAG_POW,
+            MATMUL_EPILOGUE_FLAG_ROW_DIV, MATMUL_EPILOGUE_FLAG_ROW_SCALE,
+        };
+        let has_row = ep.row_scale.is_some();
+        let has_col = ep.col_scale.is_some();
+        let dummy_rowcol = self.create_storage_buffer(1, "runmat-matmul-epilogue-dummy-scale");
+        let row_buf = match &ep.row_scale {
+            Some(h) => self.get_entry(h)?.buffer.clone(),
+            None => dummy_rowcol.clone(),
+        };
+        let col_buf = match &ep.col_scale {
+            Some(h) => self.get_entry(h)?.buffer.clone(),
+            None => dummy_rowcol.clone(),
+        };
+
+        let (diag_rows, diag_stride, diag_offset, has_diag) = match &ep.diag_output {
+            Some(_) => {
+                return Err(anyhow!(
+                    "matmul_epilogue: diag_output is not supported by the WGPU provider yet"
+                ));
+            }
+            None => (0u32, 1u32, 0u32, false),
+        };
+
+        let mut flags: u32 = 0;
+        if has_row {
+            flags |= MATMUL_EPILOGUE_FLAG_ROW_SCALE;
+            if matches!(ep.row_op, runmat_accelerate_api::ScaleOp::Divide) {
+                flags |= MATMUL_EPILOGUE_FLAG_ROW_DIV;
+            }
+        }
+        if has_col {
+            flags |= MATMUL_EPILOGUE_FLAG_COL_SCALE;
+            if matches!(ep.col_op, runmat_accelerate_api::ScaleOp::Divide) {
+                flags |= MATMUL_EPILOGUE_FLAG_COL_DIV;
+            }
+        }
+
+        let mut clamp_min = 0.0f64;
+        if let Some(v) = ep.clamp_min {
+            clamp_min = v;
+            flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MIN;
+        }
+        let mut clamp_max = 0.0f64;
+        if let Some(v) = ep.clamp_max {
+            clamp_max = v;
+            flags |= MATMUL_EPILOGUE_FLAG_CLAMP_MAX;
+        }
+        let mut pow_exponent = 1.0f64;
+        if let Some(v) = ep.pow_exponent {
+            pow_exponent = v;
+            flags |= MATMUL_EPILOGUE_FLAG_POW;
+        }
+        if has_diag {
+            flags |= MATMUL_EPILOGUE_FLAG_DIAG_WRITE;
+        }
+
+        let tile = crate::backend::wgpu::config::effective_matmul_tile();
+        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n as u32, tile);
+        let groups_y = crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile);
+
+        let layout_tag = format!("runmat-matmul-epilogue-layout-flags-{flags:08x}");
+        let (shader_src, ep_buf, pipeline_layout) = match self.precision() {
+            ProviderPrecision::F64 => {
+                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF64 {
+                    alpha: ep.alpha,
+                    beta: ep.beta,
+                    clamp_min,
+                    clamp_max,
+                    pow_exponent,
+                    flags,
+                    diag_offset,
+                    diag_stride,
+                    diag_rows,
+                    _pad: 0,
+                    _pad2: 0,
+                };
+                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                    self.device_ref(),
+                    "runmat-matmul-epilogue-pl",
+                    &self.pipelines.matmul_epilogue.layout,
+                );
+                (
+                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64,
+                    ep_buf,
+                    pl,
+                )
+            }
+            ProviderPrecision::F32 => {
+                let ep_params = crate::backend::wgpu::params::MatmulEpilogueParamsF32 {
+                    alpha: ep.alpha as f32,
+                    beta: ep.beta as f32,
+                    clamp_min: clamp_min as f32,
+                    clamp_max: clamp_max as f32,
+                    pow_exponent: pow_exponent as f32,
+                    flags,
+                    diag_offset,
+                    diag_stride,
+                    diag_rows,
+                    _pad: 0,
+                };
+                let ep_buf = self.uniform_buffer(&ep_params, "runmat-matmul-epilogue-uniform");
+                let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                    self.device_ref(),
+                    "runmat-matmul-epilogue-pl",
+                    &self.pipelines.matmul_epilogue.layout,
+                );
+                (
+                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32,
+                    ep_buf,
+                    pl,
+                )
+            }
+        };
+
+        let module = crate::backend::wgpu::pipelines::create_shader_module(
+            self.device_ref(),
+            "runmat-matmul-epilogue-module",
+            shader_src,
+        );
+        let key = self.compute_pipeline_hash_bytes(shader_src.as_bytes(), &layout_tag, Some(tile));
+        let pipeline = self.get_or_create_pipeline(
+            key,
+            &pipeline_layout,
+            &module,
+            "runmat-matmul-epilogue",
+            Some(shader_src.as_bytes()),
+            Some(&layout_tag),
+            Some(tile),
+        );
+
+        let bg = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-matmul-epilogue-bind"),
+                layout: &self.pipelines.matmul_epilogue.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry_a.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: entry_b.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: row_buf.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: col_buf.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: ep_buf.as_entire_binding(),
+                    },
+                ],
+            });
+        crate::backend::wgpu::dispatch::matmul::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &pipeline,
+            &bg,
+            groups_x,
+            groups_y,
+        );
+        let handle = self.register_existing_buffer_with_usage(
+            out_buffer,
+            out_shape,
+            len,
+            BufferUsageClass::FusionOut,
+        );
+
+        self.telemetry.record_matmul_duration(start.elapsed());
+
+        Ok(handle)
+    }
+
+    pub(crate) async fn image_normalize_exec(
+        &self,
+        input: &GpuTensorHandle,
+        desc: &runmat_accelerate_api::ImageNormalizeDescriptor,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(input)?;
+        ensure!(
+            entry.shape.len() == 3,
+            "image_normalize: expected 3-D tensor, got {:?}",
+            entry.shape
+        );
+        ensure!(
+            entry.shape[0] == desc.batch
+                && entry.shape[1] == desc.height
+                && entry.shape[2] == desc.width,
+            "image_normalize: descriptor dims {:?} do not match tensor shape {:?}",
+            (desc.batch, desc.height, desc.width),
+            entry.shape
+        );
+
+        if entry.len == 0 {
+            return self.image_normalize_cpu_fallback(input, desc).await;
+        }
+
+        match self.precision {
+            NumericPrecision::F64 => self.image_normalize_cpu_fallback(input, desc).await,
+            NumericPrecision::F32 => {
+                ensure!(
+                    desc.epsilon.is_finite(),
+                    "image_normalize: epsilon must be finite"
+                );
+                ensure!(
+                    desc.epsilon >= 0.0,
+                    "image_normalize: epsilon must be non-negative"
+                );
+
+                let batches = entry.shape[0];
+                let height = entry.shape[1];
+                let width = entry.shape[2];
+                let plane = height
+                    .checked_mul(width)
+                    .ok_or_else(|| anyhow!("image_normalize: height*width overflow"))?;
+                ensure!(
+                    entry.len == plane * batches,
+                    "image_normalize: inconsistent tensor length {} vs dims {:?}",
+                    entry.len,
+                    entry.shape
+                );
+
+                let stride_h = batches;
+                let stride_w = batches
+                    .checked_mul(height)
+                    .ok_or_else(|| anyhow!("image_normalize: stride overflow"))?;
+
+                let batches_u32 = u32::try_from(batches)
+                    .map_err(|_| anyhow!("image_normalize: batch size too large"))?;
+                let height_u32 = u32::try_from(height)
+                    .map_err(|_| anyhow!("image_normalize: height too large"))?;
+                let width_u32 = u32::try_from(width)
+                    .map_err(|_| anyhow!("image_normalize: width too large"))?;
+                let plane_u32 = u32::try_from(plane)
+                    .map_err(|_| anyhow!("image_normalize: plane size too large"))?;
+                let stride_h_u32 = u32::try_from(stride_h)
+                    .map_err(|_| anyhow!("image_normalize: stride_h too large"))?;
+                let stride_w_u32 = u32::try_from(stride_w)
+                    .map_err(|_| anyhow!("image_normalize: stride_w too large"))?;
+                let (tuning, cache_hit) =
+                    self.resolve_image_normalize_tuning(batches_u32, plane_u32);
+                log::debug!(
+                    "image_normalize tuning batches={} plane={} lane={} spatial={} values/thread={} cache_hit={}",
+                    batches_u32,
+                    plane_u32,
+                    tuning.lane_count,
+                    tuning.spatial_tile,
+                    tuning.values_per_thread,
+                    cache_hit
+                );
+                let pipeline = self.image_normalize_pipeline(&tuning)?;
+
+                let mut flags = 0u32;
+                if desc.gain.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_GAIN;
+                }
+                if desc.bias.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_BIAS;
+                }
+                if desc.gamma.is_some() {
+                    flags |= IMAGE_NORMALIZE_FLAG_GAMMA;
+                }
+
+                let mut uniforms = ImageNormalizeUniforms {
+                    batch_count: 0,
+                    height: height_u32,
+                    width: width_u32,
+                    plane: plane_u32,
+                    stride_h: stride_h_u32,
+                    stride_w: stride_w_u32,
+                    flags,
+                    batch_stride: batches_u32,
+                    batch_offset: 0,
+                    _pad0: 0,
+                    epsilon: desc.epsilon as f32,
+                    gain: desc.gain.unwrap_or(1.0) as f32,
+                    bias: desc.bias.unwrap_or(0.0) as f32,
+                    gamma: desc.gamma.unwrap_or(1.0) as f32,
+                    _pad1: 0,
+                };
+
+                let out_buffer = self.create_storage_buffer_checked_with_usage(
+                    entry.len,
+                    "runmat-image-normalize-out",
+                    BufferUsageClass::FusionOut,
+                )?;
+                let uniform_buf = self.kernel_resources.uniform_buffer(
+                    self.device_ref(),
+                    UniformBufferKey::ImageNormalizeUniforms,
+                    std::mem::size_of::<ImageNormalizeUniforms>() as u64,
+                    "runmat-image-normalize-uniform",
+                );
+                let stream_hot_cap = self
+                    .image_normalize_hot_stream_cap(plane_u32, batches_u32)
+                    .max(1);
+                let cold_cap = stream_hot_cap.min((Self::IMAGE_NORMALIZE_STREAM_COLD_CAP).max(1));
+                let chunk_limit = if cache_hit {
+                    stream_hot_cap
+                } else {
+                    cold_cap.max(1)
+                };
+
+                let bind_entries = [
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                ];
+                let layout = &self.pipelines.image_normalize.layout;
+                let bind_group =
+                    self.bind_group_cache
+                        .get_or_create(layout, &bind_entries, || {
+                            Arc::new(self.device_ref().create_bind_group(
+                                &wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-image-normalize-bind"),
+                                    layout,
+                                    entries: &bind_entries,
+                                },
+                            ))
+                        });
+
+                let mut offset = 0u32;
+                while offset < batches_u32 {
+                    let remaining = batches_u32 - offset;
+                    let chunk = remaining.min(chunk_limit).max(1);
+                    uniforms.batch_count = chunk;
+                    uniforms.batch_offset = offset;
+                    self.queue
+                        .write_buffer(uniform_buf.as_ref(), 0, bytes_of(&uniforms));
+                    crate::backend::wgpu::dispatch::image_normalize::run(
+                        self.device_ref(),
+                        self.queue_ref(),
+                        pipeline.as_ref(),
+                        bind_group.as_ref(),
+                        chunk,
+                        tuning.batch_tile,
+                    );
+                    offset += chunk;
+                }
+
+                Ok(self.register_existing_buffer_with_usage(
+                    out_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                    BufferUsageClass::FusionOut,
+                ))
+            }
+        }
+    }
+
+    pub(crate) async fn matmul_power_step_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        epilogue: &runmat_accelerate_api::PowerStepEpilogue,
+    ) -> Result<GpuTensorHandle> {
+        let rhs_entry = self.get_entry(rhs)?;
+        let product = self.matmul_exec(lhs, rhs)?;
+        let squared = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &product,
+            &product,
+        )?;
+        let mut sum_sq = self.reduce_dim_sum_mean_exec(
+            &squared,
+            0,
+            crate::backend::wgpu::types::DimReduceOp::Sum,
+        )?;
+        let _ = self.free(&squared);
+        if epilogue.epsilon != 0.0 {
+            let eps = self.fill_exec(&sum_sq.shape, epilogue.epsilon)?;
+            let adjusted = self.binary_op_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Add,
+                &sum_sq,
+                &eps,
+            )?;
+            let _ = self.free(&sum_sq);
+            let _ = self.free(&eps);
+            sum_sq = adjusted;
+        }
+        let norms = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &sum_sq)?;
+        let _ = self.free(&sum_sq);
+        let normalized = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Div,
+            &product,
+            &norms,
+        )?;
+        let _ = self.free(&product);
+        let _ = self.free(&norms);
+
+        let mut reused = false;
+        let rhs_shape_match = rhs_entry.shape == normalized.shape;
+        let rhs_transposed = runmat_accelerate_api::handle_transpose_info(rhs).is_some();
+        let rhs_ref_count = Arc::strong_count(&rhs_entry.buffer);
+        if rhs_shape_match && !rhs_transposed && rhs_entry.len > 0 && rhs_ref_count <= 2 {
+            if let Ok(normalized_entry) = self.get_entry(&normalized) {
+                let bytes = (rhs_entry.len as u64) * self.element_size as u64;
+                if bytes > 0 {
+                    let mut encoder =
+                        self.device_ref()
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-power-step-copy"),
+                            });
+                    encoder.copy_buffer_to_buffer(
+                        normalized_entry.buffer.as_ref(),
+                        0,
+                        rhs_entry.buffer.as_ref(),
+                        0,
+                        bytes,
+                    );
+                    self.submit(encoder);
+                }
+                let _ = self.free(&normalized);
+                self.mark_buffer_usage(rhs, BufferUsageClass::FusionOut);
+                log::debug!(
+                    "matmul_power_step: reused rhs buffer {} for normalized output (len={})",
+                    rhs.buffer_id,
+                    rhs_entry.len
+                );
+                reused = true;
+            }
+        }
+
+        if reused {
+            Ok(rhs.clone())
+        } else {
+            log::debug!(
+                "matmul_power_step: fallback reuse (shape_match={} transpose={} len={} ref_count={})",
+                rhs_shape_match,
+                rhs_transposed,
+                rhs_entry.len,
+                rhs_ref_count
+            );
+            Ok(normalized)
+        }
+    }
+
+    pub(crate) async fn covariance_with_optional_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+        second: Option<&GpuTensorHandle>,
+        weights: Option<&GpuTensorHandle>,
+        options: &CovarianceOptions,
+    ) -> Result<GpuTensorHandle> {
+        if options.rows != CovRows::All {
+            return Err(anyhow!(
+                "covariance: rows option {:?} not supported by WGPU provider",
+                options.rows
+            ));
+        }
+        if options.has_weight_vector || weights.is_some() {
+            return Err(anyhow!(
+                "covariance: weight vectors are not supported by WGPU provider"
+            ));
+        }
+
+        let combined = if let Some(rhs) = second {
+            let left_entry = self.get_entry(matrix)?;
+            let right_entry = self.get_entry(rhs)?;
+
+            let rows_left = match left_entry.shape.len() {
+                0 => 1usize,
+                1 => left_entry.shape[0],
+                2 => left_entry.shape[0],
+                _ => {
+                    return Err(anyhow!(
+                        "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
+                        left_entry.shape
+                    ))
+                }
+            };
+            let rows_right = match right_entry.shape.len() {
+                0 => 1usize,
+                1 => right_entry.shape[0],
+                2 => right_entry.shape[0],
+                _ => {
+                    return Err(anyhow!(
+                        "covariance: inputs must be 2-D matrices or vectors (got shape {:?})",
+                        right_entry.shape
+                    ))
+                }
+            };
+
+            ensure!(
+                rows_left == rows_right,
+                "covariance: inputs must have the same number of rows (got {} and {})",
+                rows_left,
+                rows_right
+            );
+
+            let cat_inputs = vec![matrix.clone(), rhs.clone()];
+            Some(self.cat_exec(2, &cat_inputs)?)
+        } else {
+            None
+        };
+
+        let result = {
+            let source = combined.as_ref().unwrap_or(matrix);
+            self.covariance_exec(source, options).await
+        };
+
+        if let Some(handle) = combined {
+            let _ = self.free(&handle);
+        }
+
+        result
+    }
+
+    pub(crate) async fn eig_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        compute_left: bool,
+    ) -> Result<ProviderEigResult> {
+        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let tensor =
+            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("eig: {e}"))?;
+        let eval = runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
+            Value::Tensor(tensor),
+            &[],
+            compute_left,
+        )
+        .await
+        .map_err(|err| runtime_flow_to_anyhow("eig", err))?;
+
+        let eigenvalues_tensor = host_tensor_from_value("eig", eval.eigenvalues())?;
+        let diagonal_tensor = host_tensor_from_value("eig", eval.diagonal_matrix())?;
+        let right_tensor = host_tensor_from_value("eig", eval.right())?;
+
+        let left_value = if compute_left {
+            Some(
+                eval.left()
+                    .map_err(|err| runtime_flow_to_anyhow("eig", err))?,
+            )
+        } else {
+            None
+        };
+
+        let left_tensor = match left_value {
+            Some(value) => Some(host_tensor_from_value("eig", value)?),
+            None => None,
+        };
+
+        let eigenvalues = self.upload(&HostTensorView {
+            data: &eigenvalues_tensor.data,
+            shape: &eigenvalues_tensor.shape,
+        })?;
+        let diagonal = self.upload(&HostTensorView {
+            data: &diagonal_tensor.data,
+            shape: &diagonal_tensor.shape,
+        })?;
+        let right = self.upload(&HostTensorView {
+            data: &right_tensor.data,
+            shape: &right_tensor.shape,
+        })?;
+        let left = match left_tensor {
+            Some(tensor) => Some(self.upload(&HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            })?),
+            None => None,
+        };
+
+        if compute_left && left.is_none() {
+            return Err(anyhow!(
+                "eig: left eigenvectors are not available for the requested matrix"
+            ));
+        }
+
+        Ok(ProviderEigResult {
+            eigenvalues,
+            diagonal,
+            right,
+            left,
+        })
+    }
+
+    pub(crate) fn reduce_any_exec(
+        &self,
+        a: &GpuTensorHandle,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        let op = if omit_nan {
+            crate::backend::wgpu::types::DimReduceOp::AnyOmit
+        } else {
+            crate::backend::wgpu::types::DimReduceOp::AnyInclude
+        };
+        let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
+        match self.reduce_dim_sum_mean_exec(&first, 1, op) {
+            Ok(handle) => {
+                let _ = self.free(&first);
+                Ok(handle)
+            }
+            Err(err) => {
+                let _ = self.free(&first);
+                Err(err)
+            }
+        }
+    }
+
+    pub(crate) fn reduce_all_exec(
+        &self,
+        a: &GpuTensorHandle,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        let op = if omit_nan {
+            crate::backend::wgpu::types::DimReduceOp::AllOmit
+        } else {
+            crate::backend::wgpu::types::DimReduceOp::AllInclude
+        };
+        let total_elems = if a.shape.is_empty() {
+            1
+        } else {
+            product_checked(&a.shape)
+                .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
+        };
+        if total_elems == 0 {
+            return self.fill(&[1usize, 1usize], f64::NAN);
+        }
+        if a.shape.len() <= 2 {
+            let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
+            match self.reduce_dim_sum_mean_exec(&first, 1, op) {
+                Ok(handle) => {
+                    let _ = self.free(&first);
+                    Ok(handle)
+                }
+                Err(err) => {
+                    let _ = self.free(&first);
+                    Err(err)
+                }
+            }
+        } else {
+            let original_shape = a.shape.clone();
+            let flattened_shape = vec![total_elems, 1usize];
+            let flattened = self.reshape(a, &flattened_shape)?;
+            let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
+            let _ = self.reshape(a, &original_shape);
+            result
+        }
+    }
+
+    pub(crate) async fn reduce_median_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let host = <Self as AccelProvider>::download(self, a).await?;
+        let median = median_from_slice(&host.data);
+        let data = [median];
+        let shape = [1usize, 1usize];
+        self.upload(&HostTensorView {
+            data: &data,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) async fn reduce_median_dim_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+    ) -> Result<GpuTensorHandle> {
+        let host = <Self as AccelProvider>::download(self, a).await?;
+        if host.shape.len() != 2 {
+            return Err(anyhow!("reduce_median_dim: only 2D supported"));
+        }
+        let rows = host.shape[0];
+        let cols = host.shape[1];
+        let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
+        let (out, shape) = if dim <= 1 {
+            let mut values = vec![f64::NAN; cols];
+            for (c, value) in values.iter_mut().enumerate().take(cols) {
+                scratch.clear();
+                let mut saw_nan = false;
+                for r in 0..rows {
+                    let v = host.data[r + c * rows];
+                    if v.is_nan() {
+                        saw_nan = true;
+                        scratch.clear();
+                        break;
+                    }
+                    scratch.push(v);
+                }
+                *value = if saw_nan || scratch.is_empty() {
+                    f64::NAN
+                } else {
+                    compute_median_inplace(&mut scratch)
+                };
+            }
+            (values, vec![1usize, cols])
+        } else {
+            let mut values = vec![f64::NAN; rows];
+            for (r, value) in values.iter_mut().enumerate().take(rows) {
+                scratch.clear();
+                let mut saw_nan = false;
+                for c in 0..cols {
+                    let v = host.data[r + c * rows];
+                    if v.is_nan() {
+                        saw_nan = true;
+                        scratch.clear();
+                        break;
+                    }
+                    scratch.push(v);
+                }
+                *value = if saw_nan || scratch.is_empty() {
+                    f64::NAN
+                } else {
+                    compute_median_inplace(&mut scratch)
+                };
+            }
+            (values, vec![rows, 1usize])
+        };
+        self.upload(&HostTensorView {
+            data: &out,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) fn reduce_mean_global_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let sum_handle =
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
+        let total_elems: usize = self.get_entry(a)?.len.max(1);
+        let scalar = 1.0 / (total_elems as f64);
+        let out = self.scalar_op_exec(
+            crate::backend::wgpu::types::ScalarOpCode::Mul,
+            &sum_handle,
+            scalar,
+        )?;
+        let _ = self.free(&sum_handle);
+        Ok(out)
+    }
+
     pub(crate) fn issymmetric_exec(
         &self,
         matrix: &GpuTensorHandle,
