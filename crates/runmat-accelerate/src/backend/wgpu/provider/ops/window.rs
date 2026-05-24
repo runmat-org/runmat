@@ -1,4 +1,7 @@
-use super::*;
+use anyhow::Result;
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+
+use crate::backend::wgpu::provider::backend_types::WgpuProvider;
 
 #[derive(Clone, Copy)]
 pub(crate) enum WindowKind {
