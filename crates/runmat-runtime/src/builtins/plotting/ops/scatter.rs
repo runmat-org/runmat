@@ -806,6 +806,7 @@ pub(crate) mod tests {
                 appearance,
                 requires_cpu_fallback: false,
                 line_style_explicit: false,
+                color_explicit: false,
                 line_style_order: None,
                 label: None,
             },

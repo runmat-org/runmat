@@ -17,7 +17,8 @@ use super::op_common::line_inputs::NumericInput;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
 use super::state::{
-    current_axes_state, current_hold_enabled, next_line_style_for_axes, render_active_plot,
+    current_axes_state, current_hold_enabled, line_color_for_series_index,
+    next_line_color_for_axes, next_line_style_for_axes, render_active_plot,
     set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
@@ -95,14 +96,16 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             plan.appearance.line_style = if hold_enabled {
                 next_line_style_for_axes(axes)
             } else {
-                match series_idx % 4 {
-                    0 => LineStyle::Solid,
-                    1 => LineStyle::Dashed,
-                    2 => LineStyle::Dotted,
-                    _ => LineStyle::DashDot,
-                }
+                LineStyle::Solid
             };
             plan.line_style_explicit = true;
+        }
+        if !plan.color_explicit {
+            plan.appearance.color = if hold_enabled {
+                next_line_color_for_axes(axes)
+            } else {
+                line_color_for_series_index(series_idx)
+            };
         }
         let inferred_label = plan
             .label
@@ -300,6 +303,7 @@ fn parse_series_specs(
             appearance: parsed_style.appearance,
             requires_cpu: parsed_style.requires_cpu_fallback,
             line_style_explicit: parsed_style.line_style_explicit,
+            color_explicit: parsed_style.color_explicit,
             label: parsed_style.label.clone(),
             source_y_arg_index: Some(y_arg_index),
         });
@@ -521,6 +525,7 @@ struct SeriesRenderPlan {
     appearance: LineAppearance,
     requires_cpu: bool,
     line_style_explicit: bool,
+    color_explicit: bool,
     label: Option<String>,
     source_y_arg_index: Option<usize>,
 }
@@ -554,7 +559,8 @@ pub(crate) mod tests {
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::state::PlotTestLockGuard;
     use crate::builtins::plotting::state::{
-        clear_figure, current_axes_handle_for_figure, reset_hold_state_for_run,
+        clear_figure, current_axes_handle_for_figure, line_color_for_series_index,
+        reset_hold_state_for_run, set_hold, HoldMode,
     };
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
@@ -810,6 +816,74 @@ pub(crate) mod tests {
         assert!(order.is_none());
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].appearance.line_style, LineStyle::Dashed);
+    }
+
+    #[test]
+    fn plot_builtin_multi_series_cycles_color_and_keeps_solid_default_style() {
+        let _guard = setup_plot_tests();
+        let result = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[2.0, 3.0])),
+        ]));
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
+        }
+
+        let fig = clone_figure(current_figure_handle()).expect("figure exists");
+        let plots = fig.plots().collect::<Vec<_>>();
+        assert_eq!(plots.len(), 3);
+        for (idx, element) in plots.iter().enumerate() {
+            let PlotElement::Line(line) = element else {
+                panic!("expected line plot")
+            };
+            assert_eq!(
+                line.line_style,
+                LineStyle::Solid,
+                "series {} style",
+                idx + 1
+            );
+            assert_eq!(
+                line.color,
+                line_color_for_series_index(idx),
+                "series {} color",
+                idx + 1
+            );
+        }
+    }
+
+    #[test]
+    fn plot_builtin_hold_on_advances_implicit_color_cycle() {
+        let _guard = setup_plot_tests();
+        set_hold(HoldMode::On);
+
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+        ]))
+        .expect("first plot");
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]))
+        .expect("second plot");
+
+        let fig = clone_figure(current_figure_handle()).expect("figure exists");
+        let plots = fig.plots().collect::<Vec<_>>();
+        assert_eq!(plots.len(), 2);
+        let PlotElement::Line(first) = plots[0] else {
+            panic!("expected first line")
+        };
+        let PlotElement::Line(second) = plots[1] else {
+            panic!("expected second line")
+        };
+        assert_eq!(first.color, line_color_for_series_index(0));
+        assert_eq!(second.color, line_color_for_series_index(1));
+        assert_eq!(first.line_style, LineStyle::Solid);
+        assert_eq!(second.line_style, LineStyle::Solid);
     }
 
     #[test]
