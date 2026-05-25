@@ -192,15 +192,15 @@ await initRunMat({ plotCanvas: canvas });
 or attach one later via the exported helpers:
 
 ```ts
-import { attachPlotCanvas, deregisterPlotCanvas, plotRendererReady } from "@runmat/wasm";
+import { createPlotSurface, destroyPlotSurface, plotRendererReady } from "@runmat/wasm";
 
-await attachPlotCanvas(canvas);
+const surfaceId = await createPlotSurface(canvas);
 if (!await plotRendererReady()) {
   console.warn("Plotting not initialized yet.");
 }
 
 // Later, when the canvas is unmounted:
-await deregisterPlotCanvas();
+await destroyPlotSurface(surfaceId);
 ```
 
 Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat REPL renders directly into that surface without any additional JS shims.
@@ -220,12 +220,11 @@ These map directly to the runtime setters (`set_scatter_target_points`, `set_sur
 
 ### Multi-figure canvases & events
 
-- `registerFigureCanvas(handle, canvas)` wires a specific `<canvas>` to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
-- `deregisterFigureCanvas(handle)` detaches the renderer for a given handle when a tab is hidden or destroyed, freeing GPU resources until the UI reattaches.
+- `createPlotSurface(canvas)` allocates a renderer surface for a specific `<canvas>` and returns a stable `surfaceId`.
+- `bindSurfaceToFigure(surfaceId, handle)` maps that surface to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
+- `destroyPlotSurface(surfaceId)` detaches the surface and frees renderer resources when a tab/canvas is destroyed.
 - `renderCurrentFigureScene(handle)` forces the renderer to redraw the most recent scene for that figure handle (handy after host-driven resizes or when reactivating a tab that stayed attached to an OffscreenCanvas).
 - `onFigureEvent(listener)` registers a callback that now receives `FigureEvent { handle, kind, figure?: { layout, metadata, plots[] } }`. Metadata contains axis/grid flags, legend entries (including RGBA + plot kind), background/theme info, and optional labels. Plot descriptors enumerate every series (`kind`, `label`, `axesIndex`, `colorRgba`, `visible`). Pass `null` to unsubscribe.
-
-Prefer `createPlotSurface` + `bindSurfaceToFigure` for all new hosts. Existing single-canvas helpers remain available for compatibility, but are not the primary integration path.
 
 ### Figure orchestration helpers
 

@@ -47,8 +47,7 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
 }
 
 impl RunMatSession {
-    /// Parse, lower, compile, and execute input through the runtime/workspace ABI boundary.
-    pub async fn run(
+    async fn run(
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {

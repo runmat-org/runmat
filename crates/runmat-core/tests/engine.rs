@@ -3,7 +3,6 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use futures::executor::block_on;
 use runmat_core::{RunError, RunMatSession};
 use runmat_gc::{gc_test_context, GcConfig};
 
@@ -313,31 +312,34 @@ fn test_execution_result_structure() {
 }
 
 #[test]
-fn test_format_tokens_compatibility() {
-    // Test the legacy format_tokens function for backward compatibility
-    let result = runmat_core::format_tokens("x = 1 + 2");
-    assert!(!result.is_empty());
-    assert!(result.contains("Ident"));
-    assert!(result.contains("Assign"));
-    assert!(result.contains("Integer"));
-    assert!(result.contains("Plus"));
+fn test_tokenize_detailed_compatibility() {
+    let tokens = runmat_lexer::tokenize_detailed("x = 1 + 2");
+    assert!(!tokens.is_empty());
+    let labels = tokens
+        .into_iter()
+        .map(|token| format!("{:?}", token.token))
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"Ident".to_string()));
+    assert!(labels.contains(&"Assign".to_string()));
+    assert!(labels.contains(&"Integer".to_string()));
+    assert!(labels.contains(&"Plus".to_string()));
 }
 
 #[test]
-fn test_execute_and_format_function() {
+fn test_direct_execute_request_function() {
     gc_test_context(|| {
-        let result = block_on(runmat_core::execute_and_format("x = 1 + 2"));
-        // Should not be an error string
-        assert!(!result.starts_with("Error:"));
-        assert!(!result.starts_with("Engine Error:"));
+        let mut engine = RunMatSession::new().unwrap();
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = 1 + 2")
+            .expect("execution should succeed");
+        assert!(result.error.is_none());
     });
 }
 
 #[test]
-fn test_execute_and_format_error_handling() {
+fn test_direct_execute_request_error_handling() {
     gc_test_context(|| {
-        let result = block_on(runmat_core::execute_and_format("invalid syntax $"));
-        // Should return an error string
-        assert!(result.starts_with("Error:") || result.starts_with("Engine Error:"));
+        let mut engine = RunMatSession::new().unwrap();
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "invalid syntax $");
+        assert!(result.is_err());
     });
 }

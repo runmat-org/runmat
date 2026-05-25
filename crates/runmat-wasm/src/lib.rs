@@ -8,14 +8,13 @@ mod wire;
 pub use api::init::init_runmat;
 // Plotting and figure APIs.
 pub use api::plot::{
-    bind_surface_to_figure, create_plot_surface, deregister_figure_canvas, deregister_plot_canvas,
-    destroy_plot_surface, fit_plot_surface_extents, get_plot_surface_camera_state,
-    handle_plot_surface_event, on_figure_event, plot_renderer_ready, present_figure_on_surface,
-    present_surface, register_figure_canvas, register_plot_canvas, render_current_figure_scene,
-    reset_plot_surface_camera, resize_figure_canvas, resize_plot_surface,
-    set_plot_surface_camera_state, set_plot_theme_config, wasm_clear_figure, wasm_close_figure,
-    wasm_configure_subplot, wasm_current_axes_info, wasm_current_figure_handle,
-    wasm_new_figure_handle, wasm_render_figure_image, wasm_render_figure_image_with_camera_state,
+    bind_surface_to_figure, create_plot_surface, destroy_plot_surface, fit_plot_surface_extents,
+    get_plot_surface_camera_state, handle_plot_surface_event, on_figure_event, plot_renderer_ready,
+    present_figure_on_surface, present_surface, render_current_figure_scene,
+    reset_plot_surface_camera, resize_plot_surface, set_plot_surface_camera_state,
+    set_plot_theme_config, wasm_clear_figure, wasm_close_figure, wasm_configure_subplot,
+    wasm_current_axes_info, wasm_current_figure_handle, wasm_new_figure_handle,
+    wasm_render_figure_image, wasm_render_figure_image_with_camera_state,
     wasm_render_figure_image_with_textmark, wasm_select_figure, wasm_set_hold_mode,
 };
 // Stateful session wrapper.

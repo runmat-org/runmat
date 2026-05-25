@@ -710,11 +710,6 @@ export interface PlotSurfaceCameraState {
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
-  // Legacy plot canvas bindings (handle-based).
-  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterPlotCanvas?: () => void;
-  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterFigureCanvas?: (handle: number) => void;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null;
@@ -865,22 +860,6 @@ export async function plotRendererReady(): Promise<boolean> {
     return false;
   }
   return native.plotRendererReady();
-}
-
-export async function deregisterPlotCanvas(): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.deregisterPlotCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not expose deregisterPlotCanvas.");
-  }
-  native.deregisterPlotCanvas();
-}
-
-export async function deregisterFigureCanvas(handle: number): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.deregisterFigureCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not expose deregisterFigureCanvas.");
-  }
-  native.deregisterFigureCanvas(handle);
 }
 
 export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {

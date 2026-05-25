@@ -48,11 +48,6 @@ pub(crate) static LOG_FILTER_OVERRIDE: OnceLock<String> = OnceLock::new();
 
 pub(crate) static PLOT_SURFACE_NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
-runmat_thread_local! {
-    pub(crate) static LEGACY_PLOT_SURFACE_ID: RefCell<Option<u32>> = RefCell::new(None);
-    pub(crate) static LEGACY_FIGURE_SURFACES: RefCell<HashMap<u32, u32>> = RefCell::new(HashMap::new());
-}
-
 pub(crate) fn clear_figure_event_callback() {
     FIGURE_EVENT_CALLBACK.with(|slot| {
         slot.replace(None);

@@ -3,7 +3,13 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_core::format_tokens;
+fn format_tokens(input: &str) -> String {
+    runmat_lexer::tokenize_detailed(input)
+        .into_iter()
+        .map(|t| format!("{:?}", t.token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 #[test]
 fn tokenize_simple_input() {

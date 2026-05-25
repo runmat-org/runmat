@@ -3,8 +3,6 @@ import * as defaultFs from "./fs/default.js";
 import {
   __internals,
   initRunMat,
-  deregisterFigureCanvas,
-  deregisterPlotCanvas,
   renderFigureImage,
   exportFigureScene,
   importFigureScene,
@@ -277,7 +275,6 @@ describe("initRunMat wiring", () => {
     const captured: any[] = [];
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -300,7 +297,6 @@ describe("initRunMat wiring", () => {
     });
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return nativeSession;
@@ -323,7 +319,6 @@ describe("initRunMat wiring", () => {
     const captured: any[] = [];
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -347,7 +342,6 @@ describe("initRunMat wiring", () => {
     const captured: any[] = [];
     const native: NativeModule = {
       default: async () => { },
-      registerFsProvider: () => { },
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -369,7 +363,6 @@ describe("initRunMat wiring", () => {
     const captured: any[] = [];
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async (opts: any) => {
         captured.push(opts);
         return createMockNativeSession();
@@ -442,39 +435,10 @@ describe("initRunMat wiring", () => {
     expect(createSurfaceSpy).toHaveBeenCalledWith(canvas);
   });
 
-  it("deregisters the default plot canvas when requested", async () => {
-    const deregisterSpy = vi.fn();
+  it("surfaces structured errors from createPlotSurface", async () => {
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
-      initRunMat: async () => createMockNativeSession(),
-      deregisterPlotCanvas: deregisterSpy
-    } as NativeModule;
-    __internals.setNativeModuleOverride(native);
-
-    await deregisterPlotCanvas();
-    expect(deregisterSpy).toHaveBeenCalledOnce();
-  });
-
-  it("deregisters figure-specific canvases", async () => {
-    const deregisterSpy = vi.fn();
-    const native: NativeModule = {
-      default: async () => {},
-      registerFsProvider: () => {},
-      initRunMat: async () => createMockNativeSession(),
-      deregisterFigureCanvas: deregisterSpy
-    } as NativeModule;
-    __internals.setNativeModuleOverride(native);
-
-    await deregisterFigureCanvas(42);
-    expect(deregisterSpy).toHaveBeenCalledWith(42);
-  });
-
-  it("surfaces structured errors from registerPlotCanvas", async () => {
-    const native: NativeModule = {
-      default: async () => {},
-      registerFsProvider: () => {},
-      registerPlotCanvas: async () => {
+      createPlotSurface: async () => {
         const err = new Error("canvas failed") as Error & { code?: string };
         err.code = "PlotCanvas";
         throw err;
@@ -492,7 +456,6 @@ describe("initRunMat wiring", () => {
     const disposeSpy = vi.fn();
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           dispose: disposeSpy
@@ -512,7 +475,6 @@ describe("initRunMat wiring", () => {
   it("exposes memory usage stats from the native session", async () => {
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           memoryUsage: () => ({ bytes: 1024, pages: 16 })
@@ -708,7 +670,6 @@ describe("workspace replay bindings", () => {
     const importSpy = vi.fn(() => true);
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           exportWorkspaceState: exportSpy,
@@ -771,7 +732,6 @@ describe("ExecuteResult passthroughs", () => {
     };
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           executeRequest: () => ({
@@ -793,7 +753,6 @@ describe("ExecuteResult passthroughs", () => {
   it("preserves clear-screen stdout control entries from the native session", async () => {
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           executeRequest: () => ({
@@ -921,7 +880,6 @@ describe("materializeVariable wiring", () => {
     }));
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           materializeVariable: spy
@@ -952,7 +910,6 @@ describe("materializeVariable wiring", () => {
     }));
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           materializeVariable: spy
@@ -976,7 +933,6 @@ describe("setFusionPlanEnabled", () => {
     const spy = vi.fn();
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
           setFusionPlanEnabled: spy

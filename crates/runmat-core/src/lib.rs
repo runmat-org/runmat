@@ -1,7 +1,5 @@
 #![allow(clippy::result_large_err)]
 
-use runmat_lexer::tokenize_detailed;
-
 #[cfg(all(test, target_arch = "wasm32"))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
@@ -33,44 +31,6 @@ pub use workspace::*;
 
 #[cfg(test)]
 mod tests;
-
-/// Tokenize the input string and return a space separated string of token names.
-/// This is kept for backward compatibility with existing tests.
-pub fn format_tokens(input: &str) -> String {
-    tokenize_detailed(input)
-        .into_iter()
-        .map(|t| format!("{:?}", t.token))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Execute MATLAB/Octave code and return the result as a formatted string
-pub async fn execute_and_format(input: &str) -> String {
-    match RunMatSession::new() {
-        Ok(mut engine) => {
-            let request = abi::ExecutionRequest::for_source(
-                abi::SourceInput::Text {
-                    name: "<format>".to_string(),
-                    text: input.to_string(),
-                },
-                engine.compat_mode(),
-                abi::HostExecutionPolicy::default(),
-                engine.workspace_handle(),
-            );
-            match engine.execute_request(request).await {
-                Ok(outcome) => match outcome.diagnostics.first() {
-                    Some(diagnostic) => format!("Error: {}", diagnostic.message),
-                    None => match outcome.flow {
-                        abi::RuntimeFlow::Single(value) => format!("{value:?}"),
-                        _ => "".to_string(),
-                    },
-                },
-                Err(e) => format!("Error: {e}"),
-            }
-        }
-        Err(e) => format!("Engine Error: {e}"),
-    }
-}
 
 /// Test-only helper that executes a text source via `ExecutionRequest`.
 #[cfg(not(target_arch = "wasm32"))]

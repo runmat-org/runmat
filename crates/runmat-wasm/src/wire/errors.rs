@@ -12,7 +12,6 @@ pub(crate) enum InitErrorCode {
     SnapshotResolution,
     FilesystemProvider,
     SessionCreation,
-    PlotCanvas,
 }
 
 impl InitErrorCode {
@@ -22,7 +21,6 @@ impl InitErrorCode {
             InitErrorCode::SnapshotResolution => "SnapshotResolution",
             InitErrorCode::FilesystemProvider => "FilesystemProvider",
             InitErrorCode::SessionCreation => "SessionCreation",
-            InitErrorCode::PlotCanvas => "PlotCanvas",
         }
     }
 }
