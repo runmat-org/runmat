@@ -1,9 +1,3 @@
-// Internal note: this file has become a bit too large.
-// Subsequent provider call implementations that would otherwise
-// be added in this file should, going forwards, be added to
-// ./provider/*.rs instead. This module will be refactored into
-// submodules in that manner in the future.
-
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use futures::channel::oneshot;
@@ -110,10 +104,9 @@ use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::bind_group::BindGroupCache;
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, ImageNormalizeUniforms,
-    LinearGatherParams, LinearScatterParams, QrPowerIterParams, SymmetryParamsF32,
-    SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN,
-    IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
+    DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, LinearGatherParams,
+    LinearScatterParams, QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams,
+    SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::WgpuPipelines;
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};

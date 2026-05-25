@@ -3,6 +3,156 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 impl WgpuProvider {
+    pub(crate) fn reduce_any_exec(
+        &self,
+        a: &GpuTensorHandle,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        let op = if omit_nan {
+            crate::backend::wgpu::types::DimReduceOp::AnyOmit
+        } else {
+            crate::backend::wgpu::types::DimReduceOp::AnyInclude
+        };
+        let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
+        match self.reduce_dim_sum_mean_exec(&first, 1, op) {
+            Ok(handle) => {
+                let _ = self.free_exec(&first);
+                Ok(handle)
+            }
+            Err(err) => {
+                let _ = self.free_exec(&first);
+                Err(err)
+            }
+        }
+    }
+
+    pub(crate) fn reduce_all_exec(
+        &self,
+        a: &GpuTensorHandle,
+        omit_nan: bool,
+    ) -> Result<GpuTensorHandle> {
+        let op = if omit_nan {
+            crate::backend::wgpu::types::DimReduceOp::AllOmit
+        } else {
+            crate::backend::wgpu::types::DimReduceOp::AllInclude
+        };
+        let total_elems = if a.shape.is_empty() {
+            1
+        } else {
+            product_checked(&a.shape)
+                .ok_or_else(|| anyhow!("reduce_all: tensor size exceeds GPU limits"))?
+        };
+        if total_elems == 0 {
+            return self.fill_exec(&[1usize, 1usize], f64::NAN);
+        }
+        if a.shape.len() <= 2 {
+            let first = self.reduce_dim_sum_mean_exec(a, 0, op)?;
+            match self.reduce_dim_sum_mean_exec(&first, 1, op) {
+                Ok(handle) => {
+                    let _ = self.free_exec(&first);
+                    Ok(handle)
+                }
+                Err(err) => {
+                    let _ = self.free_exec(&first);
+                    Err(err)
+                }
+            }
+        } else {
+            let original_shape = a.shape.clone();
+            let flattened_shape = vec![total_elems, 1usize];
+            let flattened = self.reshape_exec(a, &flattened_shape)?;
+            let result = self.reduce_dim_sum_mean_exec(&flattened, 0, op);
+            let _ = self.reshape_exec(a, &original_shape);
+            result
+        }
+    }
+
+    pub(crate) async fn reduce_median_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let host = self.download_exec(a).await?;
+        let median = median_from_slice(&host.data);
+        let data = [median];
+        let shape = [1usize, 1usize];
+        self.upload_exec(&HostTensorView {
+            data: &data,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) async fn reduce_median_dim_exec(
+        &self,
+        a: &GpuTensorHandle,
+        dim: usize,
+    ) -> Result<GpuTensorHandle> {
+        let host = self.download_exec(a).await?;
+        if host.shape.len() != 2 {
+            return Err(anyhow!("reduce_median_dim: only 2D supported"));
+        }
+        let rows = host.shape[0];
+        let cols = host.shape[1];
+        let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
+        let (out, shape) = if dim <= 1 {
+            let mut values = vec![f64::NAN; cols];
+            for (c, value) in values.iter_mut().enumerate().take(cols) {
+                scratch.clear();
+                let mut saw_nan = false;
+                for r in 0..rows {
+                    let v = host.data[r + c * rows];
+                    if v.is_nan() {
+                        saw_nan = true;
+                        scratch.clear();
+                        break;
+                    }
+                    scratch.push(v);
+                }
+                *value = if saw_nan || scratch.is_empty() {
+                    f64::NAN
+                } else {
+                    compute_median_inplace(&mut scratch)
+                };
+            }
+            (values, vec![1usize, cols])
+        } else {
+            let mut values = vec![f64::NAN; rows];
+            for (r, value) in values.iter_mut().enumerate().take(rows) {
+                scratch.clear();
+                let mut saw_nan = false;
+                for c in 0..cols {
+                    let v = host.data[r + c * rows];
+                    if v.is_nan() {
+                        saw_nan = true;
+                        scratch.clear();
+                        break;
+                    }
+                    scratch.push(v);
+                }
+                *value = if saw_nan || scratch.is_empty() {
+                    f64::NAN
+                } else {
+                    compute_median_inplace(&mut scratch)
+                };
+            }
+            (values, vec![rows, 1usize])
+        };
+        self.upload_exec(&HostTensorView {
+            data: &out,
+            shape: &shape,
+        })
+    }
+
+    pub(crate) fn reduce_mean_global_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        let sum_handle =
+            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
+        let total_elems: usize = self.get_entry(a)?.len.max(1);
+        let scalar = 1.0 / (total_elems as f64);
+        let out = self.scalar_op_exec(
+            crate::backend::wgpu::types::ScalarOpCode::Mul,
+            &sum_handle,
+            scalar,
+        )?;
+        let _ = self.free_exec(&sum_handle);
+        Ok(out)
+    }
+
     pub(crate) fn reduce_any_dim_exec(
         &self,
         a: &GpuTensorHandle,
