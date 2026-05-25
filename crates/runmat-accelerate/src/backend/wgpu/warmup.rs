@@ -2,18 +2,69 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use futures::executor::block_on;
+
 use super::bindings::build_bgl_for_layout_tag;
 use super::cache::persist::PipelineMeta;
 use super::cache::persist::PIPELINE_CACHE_VERSION;
 use super::types::NumericPrecision;
 
-pub fn warmup_from_disk<FHash, FCreate, FNoop>(
+#[cfg(not(target_arch = "wasm32"))]
+fn pop_validation_scope(device: &wgpu::Device) -> Option<wgpu::Error> {
+    device.poll(wgpu::Maintain::Wait);
+    block_on(device.pop_error_scope())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ValidationScopeGuard<'a> {
+    device: &'a wgpu::Device,
+    active: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<'a> ValidationScopeGuard<'a> {
+    fn new(device: &'a wgpu::Device) -> Self {
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        Self {
+            device,
+            active: true,
+        }
+    }
+
+    fn pop(mut self) -> Option<wgpu::Error> {
+        self.active = false;
+        pop_validation_scope(self.device)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for ValidationScopeGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        // Never leak validation scopes on unwind. Suppress any panic while
+        // draining to avoid aborting during double-panic.
+        let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = pop_validation_scope(self.device);
+        }));
+    }
+}
+
+fn remove_cache_entry(meta_path: &Path, wgsl_path: &Path) {
+    let _ = std::fs::remove_file(meta_path);
+    let _ = std::fs::remove_file(wgsl_path);
+}
+
+pub fn warmup_from_disk<FHash, FCreate, FNoop, FRemove>(
     device: &wgpu::Device,
     cache_dir: Option<&Path>,
     target_precision: NumericPrecision,
     compute_hash: FHash,
     get_or_create: FCreate,
     after_create_noop: FNoop,
+    remove_cached_pipeline: FRemove,
 ) where
     FHash: Fn(&[u8], &str, Option<u32>) -> u64,
     FCreate: Fn(
@@ -26,6 +77,7 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
         Option<u32>,
     ) -> Arc<wgpu::ComputePipeline>,
     FNoop: Fn(&wgpu::ComputePipeline),
+    FRemove: Fn(u64),
 {
     let Some(dir) = cache_dir else {
         return;
@@ -94,7 +146,9 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             wgsl_str,
         );
         let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
-        let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| {
+        let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| -> bool {
+            #[cfg(not(target_arch = "wasm32"))]
+            let validation_scope = ValidationScopeGuard::new(device);
             let pipeline = get_or_create(
                 key,
                 &pl,
@@ -104,19 +158,48 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
                 Some(layout_tag),
                 meta.workgroup_size,
             );
+
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(err) = validation_scope.pop() {
+                log::warn!(
+                    "warmup: invalid cached compute pipeline {}: {}; removing incompatible cache entry",
+                    stem,
+                    err
+                );
+                remove_cached_pipeline(key);
+                remove_cache_entry(&path, &wgsl_path);
+                return false;
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            let noop_validation_scope = ValidationScopeGuard::new(device);
             after_create_noop(&pipeline);
+
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(err) = noop_validation_scope.pop() {
+                log::warn!(
+                    "warmup: cached pipeline {} failed noop validation: {}; removing incompatible cache entry",
+                    stem,
+                    err
+                );
+                remove_cached_pipeline(key);
+                remove_cache_entry(&path, &wgsl_path);
+                return false;
+            }
+            true
         }));
         match compiled_pipeline {
-            Ok(_) => {
+            Ok(true) => {
                 compiled += 1;
             }
+            Ok(false) => continue,
             Err(_) => {
                 log::warn!(
                     "warmup: failed to precompile pipeline {}; removing incompatible cache entry",
                     stem
                 );
-                let _ = std::fs::remove_file(&path);
-                let _ = std::fs::remove_file(&wgsl_path);
+                remove_cached_pipeline(key);
+                remove_cache_entry(&path, &wgsl_path);
                 continue;
             }
         }

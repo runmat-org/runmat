@@ -2353,6 +2353,11 @@ impl WgpuProvider {
             |pipeline| {
                 crate::backend::wgpu::warmup::noop_after_create(&self.device, &self.queue, pipeline)
             },
+            |key| {
+                if let Ok(mut guard) = self.fused_pipeline_cache.try_lock() {
+                    guard.remove(&key);
+                }
+            },
         );
     }
 
