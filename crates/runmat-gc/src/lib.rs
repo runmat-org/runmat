@@ -1,9 +1,3 @@
-//! RunMat High-Performance Generational Garbage Collector
-//!
-//! A production-quality, thread-safe generational garbage collector designed for
-//! high-performance interpreters. Features safe object management with handle-based
-//! access instead of raw pointers to avoid undefined behavior.
-
 use parking_lot::{Mutex, RwLock};
 // Use a local trait-alias shim to avoid compile-time dependency ordering issues.
 // Downstream crates in the workspace provide runmat_builtins; during GC unit tests, we provide a minimal Value.
@@ -108,8 +102,8 @@ pub type Result<T> = std::result::Result<T, GcError>;
 
 // Legacy handle/object table removed in favor of allocator-backed pointers and address-keyed maps
 
-/// High-performance garbage collector with safe handle-based design
-pub struct HighPerformanceGC {
+/// Garbage collector with safe handle-based design
+pub struct GarbageCollector {
     /// Configuration
     config: Arc<RwLock<GcConfig>>,
 
@@ -129,7 +123,7 @@ pub struct HighPerformanceGC {
     stats: Arc<GcStats>,
 }
 
-impl HighPerformanceGC {
+impl GarbageCollector {
     pub fn new() -> Result<Self> {
         Self::with_config(GcConfig::default())
     }
@@ -365,12 +359,12 @@ impl HighPerformanceGC {
 }
 
 // Safety: All shared data is protected by proper synchronization
-unsafe impl Send for HighPerformanceGC {}
-unsafe impl Sync for HighPerformanceGC {}
+unsafe impl Send for GarbageCollector {}
+unsafe impl Sync for GarbageCollector {}
 
 /// Global garbage collector instance
-static GC: once_cell::sync::Lazy<Arc<HighPerformanceGC>> =
-    once_cell::sync::Lazy::new(|| Arc::new(HighPerformanceGC::new().expect("Failed to create GC")));
+static GC: once_cell::sync::Lazy<Arc<GarbageCollector>> =
+    once_cell::sync::Lazy::new(|| Arc::new(GarbageCollector::new().expect("Failed to create GC")));
 static ROOT_SCANNER: once_cell::sync::Lazy<Arc<RootScanner>> =
     once_cell::sync::Lazy::new(|| Arc::new(RootScanner::new()));
 
