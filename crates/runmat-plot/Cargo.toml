@@ -52,11 +52,9 @@ eframe = { version = "0.27.2", optional = true, features = ["glow"] }
 # Serialization and config
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
 
 # Image processing for export
 image = { version = "0.24", features = ["png", "jpeg"] }
-base64 = "0.22"
 font8x8 = "0.3"
 rfd = { version = "0.14", optional = true }
 

@@ -55,7 +55,6 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         PlotMode::Gui => true,
         PlotMode::Auto => !config.plotting.force_headless && is_gui_available(),
         PlotMode::Headless => false,
-        _ => false,
     };
 
     let _gui_initialized = if wants_gui {
@@ -218,7 +217,6 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
             PlotMode::Auto => "auto",
             PlotMode::Gui => "gui",
             PlotMode::Headless => "headless",
-            _ => "headless",
         };
         std::env::set_var("RUNMAT_PLOT_MODE", env_value);
     }

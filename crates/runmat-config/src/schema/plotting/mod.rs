@@ -1,13 +1,6 @@
-mod jupyter;
-
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
-pub use jupyter::{
-    JupyterConfig, JupyterOutputFormat, JupyterPerformanceConfig, JupyterStaticConfig,
-    JupyterWidgetConfig,
-};
 
 pub(super) use super::defaults::default_true;
 
@@ -63,8 +56,6 @@ pub struct ExportConfig {
     pub dpi: u32,
     /// Default output directory
     pub output_dir: Option<PathBuf>,
-    /// Jupyter notebook configuration
-    pub jupyter: Option<JupyterConfig>,
 }
 
 /// Plotting mode enumeration
@@ -77,8 +68,6 @@ pub enum PlotMode {
     Gui,
     /// Force headless/static mode
     Headless,
-    /// Jupyter notebook mode
-    Jupyter,
 }
 
 /// Plot backend enumeration
@@ -136,7 +125,6 @@ impl Default for ExportConfig {
             format: ExportFormat::Png,
             dpi: default_dpi(),
             output_dir: None,
-            jupyter: Some(JupyterConfig::default()),
         }
     }
 }

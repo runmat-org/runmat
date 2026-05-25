@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AccelerateConfig, GcConfig, JitConfig, KernelConfig, LanguageConfig, LoggingConfig,
-    PlottingConfig, RuntimeConfig, TelemetryConfig,
+    AccelerateConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig, PlottingConfig,
+    RuntimeConfig, TelemetryConfig,
 };
 
 /// Main RunMat configuration
@@ -25,8 +25,6 @@ pub struct RunMatConfig {
     pub gc: GcConfig,
     /// Plotting configuration
     pub plotting: PlottingConfig,
-    /// Kernel configuration
-    pub kernel: KernelConfig,
     /// Logging configuration
     pub logging: LoggingConfig,
 }

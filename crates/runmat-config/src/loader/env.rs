@@ -213,7 +213,6 @@ pub(crate) fn apply_environment_variables(config: &mut RunMatConfig) -> Result<(
             "auto" => PlotMode::Auto,
             "gui" => PlotMode::Gui,
             "headless" => PlotMode::Headless,
-            "jupyter" => PlotMode::Jupyter,
             _ => config.plotting.mode,
         };
     }
@@ -246,15 +245,6 @@ pub(crate) fn apply_environment_variables(config: &mut RunMatConfig) -> Result<(
             "trace" => LogLevel::Trace,
             _ => config.logging.level,
         };
-    }
-
-    // Kernel settings
-    if let Some(ip) = env_value("RUNMAT_KERNEL_IP", &[]) {
-        config.kernel.ip = ip;
-    }
-
-    if let Some(key) = env_value("RUNMAT_KERNEL_KEY", &[]) {
-        config.kernel.key = Some(key);
     }
 
     Ok(())

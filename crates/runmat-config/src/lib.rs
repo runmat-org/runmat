@@ -27,9 +27,7 @@ pub use project::{
 pub use schema::{
     error_namespace_for_language_compat, AccelPowerPreference, AccelerateConfig,
     AccelerateProviderPreference, AutoOffloadConfig, AutoOffloadLogLevel, ExportConfig,
-    ExportFormat, GcConfig, GcPreset, GuiConfig, JitConfig, JitOptLevel, JupyterConfig,
-    JupyterOutputFormat, JupyterPerformanceConfig, JupyterStaticConfig, JupyterWidgetConfig,
-    KernelConfig, KernelPorts, LanguageCompatMode, LanguageConfig, LogLevel, LoggingConfig,
-    PlotBackend, PlotMode, PlottingConfig, RunMatConfig, RuntimeConfig, TelemetryConfig,
-    TelemetryDrainMode,
+    ExportFormat, GcConfig, GcPreset, GuiConfig, JitConfig, JitOptLevel, LanguageCompatMode,
+    LanguageConfig, LogLevel, LoggingConfig, PlotBackend, PlotMode, PlottingConfig, RunMatConfig,
+    RuntimeConfig, TelemetryConfig, TelemetryDrainMode,
 };

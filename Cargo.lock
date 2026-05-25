@@ -5712,7 +5712,6 @@ name = "runmat-plot"
 version = "0.4.1"
 dependencies = [
  "atty",
- "base64 0.22.1",
  "bytemuck",
  "eframe",
  "egui",
@@ -5739,7 +5738,6 @@ dependencies = [
  "runmat-time",
  "serde",
  "serde_json",
- "serde_yaml",
  "serial_test",
  "tempfile",
  "thiserror 1.0.69",
