@@ -173,28 +173,6 @@ fn test_runmat_gc_stats_env_var() {
 }
 
 #[test]
-fn test_kernel_ip_env_var() {
-    let mut env = HashMap::new();
-    env.insert("RUNMAT_KERNEL_IP", "192.168.1.100");
-
-    let output = run_runmat_with_env(&["kernel", "--help"], env);
-    assert!(output.status.success());
-
-    // Help should work regardless of environment variables
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Jupyter kernel"));
-}
-
-#[test]
-fn test_kernel_key_env_var() {
-    let mut env = HashMap::new();
-    env.insert("RUNMAT_KERNEL_KEY", "test-key-12345");
-
-    let output = run_runmat_with_env(&["kernel", "--help"], env);
-    assert!(output.status.success());
-}
-
-#[test]
 fn test_multiple_env_vars_combined() {
     let mut env = HashMap::new();
     env.insert("RUNMAT_DEBUG", "1");
@@ -285,7 +263,6 @@ fn test_env_var_case_sensitivity() {
 #[test]
 fn test_empty_env_var_values() {
     let mut env = HashMap::new();
-    env.insert("RUNMAT_KERNEL_KEY", "");
     env.insert("RUNMAT_LOG_LEVEL", "");
 
     let output = run_runmat_with_env(&["info"], env);
@@ -326,28 +303,6 @@ fn test_config_file_values_are_not_overridden_by_cli_defaults() {
     assert!(stdout.contains("JIT Threshold: 25"));
     assert!(stdout.contains("JIT Optimization: Size"));
     assert!(stdout.contains("GC Statistics: true"));
-}
-
-#[test]
-fn test_port_env_vars_for_kernel() {
-    let port_vars = [
-        "RUNMAT_SHELL_PORT",
-        "RUNMAT_IOPUB_PORT",
-        "RUNMAT_STDIN_PORT",
-        "RUNMAT_CONTROL_PORT",
-        "RUNMAT_HB_PORT",
-    ];
-
-    for port_var in &port_vars {
-        let mut env = HashMap::new();
-        env.insert(*port_var, "8888");
-
-        let output = run_runmat_with_env(&["kernel", "--help"], env);
-        assert!(
-            output.status.success(),
-            "Failed with port env var: {port_var}"
-        );
-    }
 }
 
 #[test]

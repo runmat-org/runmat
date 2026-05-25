@@ -6,7 +6,6 @@ use runmat_config::{self as config, ConfigLoader, PlotMode, RunMatConfig};
 
 use crate::app::dispatch;
 use crate::cli::{Cli, CliOverrideSources, GcPreset, LogLevel, OptLevel};
-use crate::commands::jupyter;
 use crate::logging::format_log_record;
 use crate::telemetry;
 
@@ -15,10 +14,6 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         let sample_config = ConfigLoader::generate_sample_config();
         println!("{sample_config}");
         return Ok(());
-    }
-
-    if cli.install_kernel {
-        return jupyter::install_jupyter_kernel().await;
     }
 
     let mut config = match load_configuration(&cli) {
@@ -59,7 +54,8 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     let wants_gui = match config.plotting.mode {
         PlotMode::Gui => true,
         PlotMode::Auto => !config.plotting.force_headless && is_gui_available(),
-        PlotMode::Headless | PlotMode::Jupyter => false,
+        PlotMode::Headless => false,
+        _ => false,
     };
 
     let _gui_initialized = if wants_gui {
@@ -222,7 +218,7 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
             PlotMode::Auto => "auto",
             PlotMode::Gui => "gui",
             PlotMode::Headless => "headless",
-            PlotMode::Jupyter => "jupyter",
+            _ => "headless",
         };
         std::env::set_var("RUNMAT_PLOT_MODE", env_value);
     }

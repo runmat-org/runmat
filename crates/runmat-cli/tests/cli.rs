@@ -362,17 +362,6 @@ fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_kernel_command_help() {
-    let output = run_runmat(&["kernel", "--help"]);
-    assert!(output.status.success());
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Jupyter kernel"));
-    assert!(stdout.contains("--ip"));
-    assert!(stdout.contains("--key"));
-}
-
-#[test]
 fn test_project_command_help_includes_fs_namespace() {
     let output = run_runmat(&["project", "--help"]);
     assert!(output.status.success());

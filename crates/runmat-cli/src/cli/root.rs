@@ -26,7 +26,6 @@ Key features:
 • JIT compilation with Cranelift for optimal performance
 • Generational garbage collection with configurable policies
 • High-performance BLAS/LAPACK operations
-• Jupyter kernel protocol support with async execution
 • Fast startup with snapshotting capabilities
 • World-class error messages and debugging
 • Compatible with MATLAB/Octave syntax and semantics
@@ -44,17 +43,12 @@ Examples:
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
   runmat --emit-bytecode script.m           # Emit bytecode disassembly
-  runmat --install-kernel                  # Install as Jupyter kernel
-  runmat kernel                            # Start Jupyter kernel
-  runmat kernel-connection connection.json # Start with connection file
   runmat version --detailed                # Show detailed version information
 "#,
     after_help = r#"
 Environment Variables:
   RUNMAT_DEBUG=1              Enable debug logging
   RUNMAT_LOG_LEVEL=debug      Set log level (error, warn, info, debug, trace)
-  RUNMAT_KERNEL_IP=127.0.0.1  Kernel IP address  
-  RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUNMAT_TIMEOUT=300          Execution timeout in seconds
   RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
   RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix override
@@ -194,10 +188,6 @@ pub struct Cli {
     #[arg(long)]
     pub generate_config: bool,
 
-    /// Install RunMat as a Jupyter kernel
-    #[arg(long)]
-    pub install_kernel: bool,
-
     /// Command to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -246,44 +236,6 @@ pub enum Commands {
         /// Enable verbose output
         #[arg(short, long)]
         verbose: bool,
-    },
-    /// Start Jupyter kernel
-    Kernel {
-        /// Kernel IP address
-        #[arg(long, env = "RUNMAT_KERNEL_IP", default_value = "127.0.0.1")]
-        ip: String,
-        /// Kernel authentication key
-        #[arg(long, env = "RUNMAT_KERNEL_KEY")]
-        key: Option<String>,
-        /// Transport protocol
-        #[arg(long, default_value = "tcp")]
-        transport: String,
-        /// Signature scheme
-        #[arg(long, default_value = "hmac-sha256")]
-        signature_scheme: String,
-        /// Shell socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_SHELL_PORT", default_value = "0")]
-        shell_port: u16,
-        /// IOPub socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_IOPUB_PORT", default_value = "0")]
-        iopub_port: u16,
-        /// Stdin socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_STDIN_PORT", default_value = "0")]
-        stdin_port: u16,
-        /// Control socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_CONTROL_PORT", default_value = "0")]
-        control_port: u16,
-        /// Heartbeat socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_HB_PORT", default_value = "0")]
-        hb_port: u16,
-        /// Write connection file to path
-        #[arg(long)]
-        connection_file: Option<PathBuf>,
-    },
-    /// Start kernel with connection file
-    KernelConnection {
-        /// Path to Jupyter connection file
-        connection_file: PathBuf,
     },
     /// Execute MATLAB script file
     Run {
