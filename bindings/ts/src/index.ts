@@ -358,11 +358,21 @@ export type RuntimeFlow =
   | { kind: "comma-list"; values: unknown[] }
   | { kind: "dynamic-list"; id: string };
 
+export interface ExecuteRequestTextSource {
+  kind: "text";
+  name: string;
+  text: string;
+}
+
+export interface ExecuteRequestPathSource {
+  kind: "path";
+  path: string;
+}
+
+export type ExecuteRequestSource = ExecuteRequestTextSource | ExecuteRequestPathSource;
+
 export interface ExecuteRequest {
-  source: {
-    name: string;
-    text: string;
-  };
+  source: ExecuteRequestSource;
   compatibility?: LanguageCompatMode;
   hostPolicy?: {
     topLevelAwait?: boolean;

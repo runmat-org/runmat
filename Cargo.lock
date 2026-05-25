@@ -5535,6 +5535,7 @@ dependencies = [
  "runmat-async",
  "runmat-builtins",
  "runmat-config",
+ "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
  "runmat-lexer",

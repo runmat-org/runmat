@@ -86,7 +86,7 @@ impl RunMatSession {
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
         let requested_outputs = request.requested_outputs.clone();
         let source_input = request.source.clone();
-        let (source_name, source_text) = source_input_text(request.source)?;
+        let (source_name, source_text) = source_input_text(request.source).await?;
         let previous_compat = self.compat_mode;
         let previous_top_level_await_enabled = self.top_level_await_enabled;
         let previous_source_name = self.active_source_name.clone();
@@ -1233,37 +1233,30 @@ struct SessionExecution {
     workspace_snapshot: WorkspaceSnapshot,
 }
 
-fn source_input_text(
+async fn source_input_text(
     source: crate::abi::SourceInput,
 ) -> std::result::Result<(String, String), RunError> {
     match source {
         crate::abi::SourceInput::Text { name, text } => Ok((name, text)),
         crate::abi::SourceInput::Path(path) => {
             #[cfg(not(target_arch = "wasm32"))]
-            {
-                let resolved_path = resolve_path_source_input(&path)?;
-                let text = std::fs::read_to_string(&resolved_path).map_err(|err| {
+            let source_path = resolve_path_source_input(&path)?;
+            #[cfg(target_arch = "wasm32")]
+            let source_path = std::path::PathBuf::from(path);
+
+            let text = runmat_filesystem::read_to_string_async(&source_path)
+                .await
+                .map_err(|err| {
                     RunError::Runtime(
                         build_runtime_error(format!(
                             "failed to read source path '{}': {err}",
-                            resolved_path.display()
+                            source_path.display()
                         ))
                         .with_identifier("RunMat:SourceReadFailed")
                         .build(),
                     )
                 })?;
-                Ok((resolved_path.to_string_lossy().to_string(), text))
-            }
-
-            #[cfg(target_arch = "wasm32")]
-            {
-                let _ = &path;
-                Err(RunError::Runtime(
-                    build_runtime_error("path source execution is unavailable on wasm")
-                        .with_identifier("RunMat:PathSourceUnavailable")
-                        .build(),
-                ))
-            }
+            Ok((source_path.to_string_lossy().to_string(), text))
         }
     }
 }
@@ -1339,8 +1332,9 @@ path = "src/main"
         .unwrap();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
-        let (source_name, source_text) = source_input_text(SourceInput::Path("main".to_string()))
-            .expect("named entrypoint should resolve");
+        let (source_name, source_text) =
+            futures::executor::block_on(source_input_text(SourceInput::Path("main".to_string())))
+                .expect("named entrypoint should resolve");
         std::env::set_current_dir(original).unwrap();
         let resolved = std::path::PathBuf::from(source_name)
             .canonicalize()
@@ -1363,9 +1357,10 @@ path = "src/main"
         let prev = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
 
-        let (source_name, source_text) =
-            source_input_text(SourceInput::Path("src/main".to_string()))
-                .expect("path without extension should infer .m");
+        let (source_name, source_text) = futures::executor::block_on(source_input_text(
+            SourceInput::Path("src/main".to_string()),
+        ))
+        .expect("path without extension should infer .m");
 
         std::env::set_current_dir(prev).unwrap();
 
@@ -1397,8 +1392,9 @@ function = "main"
         .unwrap();
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
-        let err = source_input_text(SourceInput::Path("server".to_string()))
-            .expect_err("invalid module/function entrypoint should report resolve error");
+        let err =
+            futures::executor::block_on(source_input_text(SourceInput::Path("server".to_string())))
+                .expect_err("invalid module/function entrypoint should report resolve error");
         std::env::set_current_dir(original).unwrap();
         let RunError::Runtime(runtime_err) = err else {
             panic!("expected runtime error");

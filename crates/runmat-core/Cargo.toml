@@ -27,6 +27,7 @@ log = "0.4"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"], default-features = false }
 runmat-time = { workspace = true }
+runmat-filesystem = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
 version = "1"

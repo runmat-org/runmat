@@ -42,6 +42,7 @@ fn init_options(enable_gpu: bool) -> JsValue {
 fn execute_request(script: &str) -> JsValue {
     serde_wasm_bindgen::to_value(&serde_json::json!({
         "source": {
+            "kind": "text",
             "name": "gradient_gpu_test.m",
             "text": script,
         }

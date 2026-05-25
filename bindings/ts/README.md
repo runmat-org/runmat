@@ -126,6 +126,27 @@ If you already have a telemetry/analytics identifier (e.g., the ID that the surr
 
 Call `await session.memoryUsage()` to inspect the current WebAssembly heap. The method returns `{ bytes, pages }`, where `pages` are 64 KiB units. Hosts can poll this to detect runaway `memory.grow` usage and decide when to reset or dispose of sessions.
 
+## Execution requests
+
+RunMat now uses one explicit execution API: `executeRequest(request)`.
+
+- REPL/snippet execution:
+  - `source: { kind: "text", name, text }`
+- File/project execution through the configured filesystem provider:
+  - `source: { kind: "path", path }`
+
+Examples:
+
+```ts
+await session.executeRequest({
+  source: { kind: "text", name: "<repl>", text: "disp(1 + 1)" }
+});
+
+await session.executeRequest({
+  source: { kind: "path", path: "src/main.m" }
+});
+```
+
 ## Execution streaming & interaction
 
 - `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `executeRequest()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.

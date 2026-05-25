@@ -91,10 +91,10 @@ impl RunMatWasm {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExecuteRequestSourcePayload {
-    name: String,
-    text: String,
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum ExecuteRequestSourcePayload {
+    Text { name: String, text: String },
+    Path { path: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,7 +118,10 @@ impl RunMatWasm {
     pub async fn execute_request_js(&self, request_value: JsValue) -> Result<JsValue, JsValue> {
         let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)
             .map_err(|err| js_error(&format!("executeRequest payload parse failed: {err}")))?;
-        let source = request_payload.source.text.clone();
+        let source = match &request_payload.source {
+            ExecuteRequestSourcePayload::Text { text, .. } => text.clone(),
+            ExecuteRequestSourcePayload::Path { path } => path.clone(),
+        };
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",
@@ -172,9 +175,13 @@ impl RunMatWasm {
         };
 
         let mut request = runmat_core::abi::ExecutionRequest::for_source(
-            runmat_core::abi::SourceInput::Text {
-                name: request_payload.source.name,
-                text: source.clone(),
+            match request_payload.source {
+                ExecuteRequestSourcePayload::Text { name, text } => {
+                    runmat_core::abi::SourceInput::Text { name, text }
+                }
+                ExecuteRequestSourcePayload::Path { path } => {
+                    runmat_core::abi::SourceInput::Path(path)
+                }
             },
             self.config.borrow().language_compat,
             runmat_core::abi::HostExecutionPolicy::default(),

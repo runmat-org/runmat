@@ -790,7 +790,7 @@ describe("ExecuteResult passthroughs", () => {
 
     const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
     const result = await session.executeRequest({
-      source: { name: "<test>", text: "disp('prompt')" }
+      source: { kind: "text", name: "<test>", text: "disp('prompt')" }
     });
     expect(result.stdinRequested).toEqual(request);
     expect(result.stdinRequested?.waitingMs).toBe(1500);
@@ -812,7 +812,7 @@ describe("ExecuteResult passthroughs", () => {
 
     const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
     const result = await session.executeRequest({
-      source: { name: "<test>", text: "clc;" }
+      source: { kind: "text", name: "<test>", text: "clc;" }
     });
     expect(result.stdout).toEqual([{ stream: "clear", text: "", timestampMs: 123 }]);
   });

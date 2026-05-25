@@ -41,6 +41,7 @@ async fn execute_script(script: &str) -> ExecPayload {
         .expect("initialize wasm runtime");
     let request = serde_wasm_bindgen::to_value(&serde_json::json!({
         "source": {
+            "kind": "text",
             "name": "symptom_regression.m",
             "text": script,
         }
