@@ -15,7 +15,7 @@ Hosts call one method: `executeRequest(request)`.
 - path mode (filesystem-backed execution)
   - `{ kind: "path", path: string }`
 
-All other request fields (`compatibility`, `hostPolicy`, `requestedOutputs`, workspace handle, resolver handle) apply identically in either mode.
+All other request fields (`compatibility`, `hostPolicy`, `requestedOutputs`, workspace handle) apply identically in either mode.
 
 ## Semantics
 

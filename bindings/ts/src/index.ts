@@ -620,6 +620,7 @@ interface NativeInitOptions {
   callstackLimit?: number;
   errorNamespace?: string;
   languageCompat?: LanguageCompatMode;
+  fsProvider?: RunMatFilesystemProvider;
 }
 
 interface RunMatNativeSession {
@@ -709,7 +710,6 @@ export interface PlotSurfaceCameraState {
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
-  registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
   // Legacy plot canvas bindings (handle-based).
   registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
   deregisterPlotCanvas?: () => void;
@@ -803,18 +803,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   const native = await loadNativeModule(options.wasmModule);
   const snapshotResolution = await resolveSnapshotSource(options.snapshot);
   const fsProvider = await resolveFsProvider(options.fsProvider);
-  if (fsProvider) {
-    if (typeof native.registerFsProvider !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support filesystem providers yet.");
-    }
-    native.registerFsProvider(fsProvider);
-  }
   if (options.plotCanvas) {
-    if (typeof native.registerPlotCanvas === "function") {
-      // Legacy binding: register the default plot canvas before initializing the session.
-      await native.registerPlotCanvas(options.plotCanvas);
-    } else if (typeof native.createPlotSurface === "function") {
-      // New binding: create a surface for the provided canvas. The caller is responsible for binding/presenting.
+    if (typeof native.createPlotSurface === "function") {
       await native.createPlotSurface(options.plotCanvas);
     } else {
       const err = new Error(
@@ -863,7 +853,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     emitFusionPlan: options.emitFusionPlan ?? false,
     callstackLimit: options.callstackLimit,
     errorNamespace: options.errorNamespace,
-    languageCompat: options.language?.compat
+    languageCompat: options.language?.compat,
+    fsProvider
   });
   return new WebRunMatSession(session);
 }

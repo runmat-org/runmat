@@ -255,18 +255,12 @@ describe("initRunMat wiring", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers provided fs provider before native init", async () => {
-    const order: string[] = [];
+  it("passes provided fs provider into native init options", async () => {
     const options: any[] = [];
     const fsProvider = createFsProviderStub();
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: (provider: RunMatFilesystemProvider) => {
-        order.push("registerFsProvider");
-        expect(provider).toBe(fsProvider);
-      },
       initRunMat: async (opts: any) => {
-        order.push("initRunMat");
         options.push(opts);
         return createMockNativeSession();
       }
@@ -275,8 +269,8 @@ describe("initRunMat wiring", () => {
 
     await initRunMat({ snapshot: { bytes: new Uint8Array([1, 2, 3]) }, fsProvider, enableGpu: false });
 
-    expect(order).toEqual(["registerFsProvider", "initRunMat"]);
     expect(options[0].snapshotBytes).toBeDefined();
+    expect(options[0].fsProvider).toBe(fsProvider);
   });
 
   it("passes snapshot bytes and telemetry flag through to native init", async () => {
@@ -408,11 +402,11 @@ describe("initRunMat wiring", () => {
     const defaultSpy = vi
       .spyOn(defaultFs, "createDefaultFsProvider")
       .mockResolvedValue(autoProvider);
-    const registerSpy = vi.fn();
+    const captured: any[] = [];
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: registerSpy,
       initRunMat: async (opts: any) => {
+        captured.push(opts);
         expect(opts.snapshotBytes).toBeDefined();
         return createMockNativeSession();
       }
@@ -422,18 +416,18 @@ describe("initRunMat wiring", () => {
     await initRunMat({ snapshot: { bytes: new Uint8Array([7]) }, enableGpu: false });
 
     expect(defaultSpy).toHaveBeenCalledOnce();
-    expect(registerSpy).toHaveBeenCalledWith(autoProvider);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].fsProvider).toBe(autoProvider);
   });
 
-  it("registers plotCanvas before calling initRunMat", async () => {
+  it("creates a plot surface before calling initRunMat", async () => {
     const order: string[] = [];
-    const registerSpy = vi.fn(async () => {
-      order.push("registerPlotCanvas");
+    const createSurfaceSpy = vi.fn(async () => {
+      order.push("createPlotSurface");
     });
     const native: NativeModule = {
       default: async () => {},
-      registerFsProvider: () => {},
-      registerPlotCanvas: registerSpy,
+      createPlotSurface: createSurfaceSpy,
       initRunMat: async () => {
         order.push("initRunMat");
         return createMockNativeSession();
@@ -444,8 +438,8 @@ describe("initRunMat wiring", () => {
     const canvas = { id: "canvas" } as unknown as HTMLCanvasElement;
     await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, plotCanvas: canvas, enableGpu: false });
 
-    expect(order).toEqual(["registerPlotCanvas", "initRunMat"]);
-    expect(registerSpy).toHaveBeenCalledWith(canvas);
+    expect(order).toEqual(["createPlotSurface", "initRunMat"]);
+    expect(createSurfaceSpy).toHaveBeenCalledWith(canvas);
   });
 
   it("deregisters the default plot canvas when requested", async () => {

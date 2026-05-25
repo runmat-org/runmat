@@ -5,7 +5,7 @@ mod api;
 mod runtime;
 mod wire;
 
-pub use api::init::{init_runmat, register_fs_provider};
+pub use api::init::init_runmat;
 // Plotting and figure APIs.
 pub use api::plot::{
     bind_surface_to_figure, create_plot_surface, deregister_figure_canvas, deregister_plot_canvas,

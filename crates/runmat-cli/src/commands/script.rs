@@ -43,10 +43,16 @@ pub async fn execute_script_with_args(
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
-    let content = fs::read_to_string(&script)
-        .with_context(|| format!("Failed to read script file: {script:?}"))?;
+    if let Some(path) = &emit_bytecode_path {
+        let content = fs::read_to_string(&script)
+            .with_context(|| format!("Failed to read script file: {script:?}"))?;
+        let output = emit_bytecode(&content, config, Some(script.to_string_lossy().as_ref()))
+            .with_context(|| format!("Failed to emit bytecode for {script:?}"))?;
+        write_bytecode_output(path, &output)?;
+        return Ok(());
+    }
 
-    execute_script_contents(script, content, emit_bytecode_path, cli, config).await
+    execute_script_path(script, cli, config).await
 }
 
 fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
@@ -78,6 +84,32 @@ pub(crate) async fn execute_script_contents(
         return Ok(());
     }
 
+    let source_name = script.to_string_lossy().to_string();
+    execute_script_request(
+        script,
+        SourceInput::Text {
+            name: source_name,
+            text: content.clone(),
+        },
+        Some(content),
+        cli,
+        config,
+    )
+    .await
+}
+
+async fn execute_script_path(script: PathBuf, cli: &Cli, config: &RunMatConfig) -> Result<()> {
+    let source_name = script.to_string_lossy().to_string();
+    execute_script_request(script, SourceInput::Path(source_name), None, cli, config).await
+}
+
+async fn execute_script_request(
+    script: PathBuf,
+    request_source: SourceInput,
+    diagnostic_source_text: Option<String>,
+    cli: &Cli,
+    config: &RunMatConfig,
+) -> Result<()> {
     let enable_jit = config.jit.enabled;
     let mut engine = create_session(
         enable_jit,
@@ -92,13 +124,8 @@ pub(crate) async fn execute_script_contents(
         accelerate_enabled: config.accelerate.enabled,
     });
     let start_time = Instant::now();
-    let source_name = script.to_string_lossy().to_string();
-    let content_for_diagnostics = content.clone();
     let request = ExecutionRequest::for_source(
-        SourceInput::Text {
-            name: source_name.clone(),
-            text: content,
-        },
+        request_source,
         crate::diagnostics::parser_compat(config.language.compat),
         HostExecutionPolicy::default(),
         engine.workspace_handle(),
@@ -119,6 +146,9 @@ pub(crate) async fn execute_script_contents(
                     provider: capture_provider_snapshot(),
                 });
             }
+            let source_name = script.to_string_lossy().to_string();
+            let content_for_diagnostics = diagnostic_source_text
+                .unwrap_or_else(|| fs::read_to_string(&script).unwrap_or_default());
             if let Some(diag) =
                 format_frontend_error(&err, source_name.as_str(), &content_for_diagnostics)
             {
@@ -178,12 +208,13 @@ pub(crate) async fn execute_script_contents(
         if let RuntimeFlow::Single(value) = outcome.flow {
             if config.runtime.verbose {
                 println!("{value:?}");
+            } else {
+                println!("{value}");
             }
         }
     }
 
     dump_provider_telemetry_if_requested();
-
     Ok(())
 }
 

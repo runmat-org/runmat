@@ -20,17 +20,6 @@ use crate::runtime::logging::{init_logging_once, set_log_filter_override};
 use crate::runtime::snapshot::resolve_snapshot_bytes;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
 
-#[wasm_bindgen(js_name = registerFsProvider)]
-pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
-    install_fs_provider_value(bindings).map_err(|err| {
-        init_error_with_details(
-            InitErrorCode::FilesystemProvider,
-            "Failed to register filesystem provider",
-            Some(err),
-        )
-    })
-}
-
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     let mut parsed_opts: InitOptions = if options.is_null() || options.is_undefined() {
@@ -226,7 +215,7 @@ pub(crate) fn install_fs_provider_value(bindings: JsValue) -> Result<(), JsValue
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
     Err(crate::wire::errors::js_error(
-        "registerFsProvider is only available when targeting wasm32",
+        "filesystem provider installation is only available when targeting wasm32",
     ))
 }
 

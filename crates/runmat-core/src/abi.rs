@@ -13,12 +13,6 @@ pub enum SourceInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EntrypointSelector {
-    Auto,
-    Named(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostExecutionPolicy {
     pub top_level_await: bool,
 }
@@ -34,25 +28,13 @@ impl Default for HostExecutionPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WorkspaceHandle(pub Uuid);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ResolverHandle(pub Uuid);
-
-impl Default for ResolverHandle {
-    fn default() -> Self {
-        Self(Uuid::nil())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ExecutionRequest {
     pub source: SourceInput,
-    pub entrypoint: EntrypointSelector,
     pub compatibility: CompatMode,
     pub host_policy: HostExecutionPolicy,
-    pub inputs: RuntimeFlow,
     pub requested_outputs: runmat_hir::RequestedOutputCount,
     pub workspace: WorkspaceHandle,
-    pub resolver: ResolverHandle,
 }
 
 impl ExecutionRequest {
@@ -64,13 +46,10 @@ impl ExecutionRequest {
     ) -> Self {
         Self {
             source,
-            entrypoint: EntrypointSelector::Auto,
             compatibility,
             host_policy,
-            inputs: RuntimeFlow::NoValue,
             requested_outputs: runmat_hir::RequestedOutputCount::One,
             workspace,
-            resolver: ResolverHandle::default(),
         }
     }
 }

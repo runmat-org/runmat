@@ -1239,10 +1239,7 @@ async fn source_input_text(
     match source {
         crate::abi::SourceInput::Text { name, text } => Ok((name, text)),
         crate::abi::SourceInput::Path(path) => {
-            #[cfg(not(target_arch = "wasm32"))]
-            let source_path = resolve_path_source_input(&path)?;
-            #[cfg(target_arch = "wasm32")]
-            let source_path = std::path::PathBuf::from(path);
+            let source_path = resolve_path_source_input(&path).await?;
 
             let text = runmat_filesystem::read_to_string_async(&source_path)
                 .await
@@ -1261,12 +1258,15 @@ async fn source_input_text(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathBuf, RunError> {
-    use runmat_config::resolve_project_source_input_from;
-    use std::path::Path;
+async fn resolve_path_source_input(
+    path: &str,
+) -> std::result::Result<std::path::PathBuf, RunError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use runmat_config::resolve_project_source_input_from;
+        use std::path::Path;
 
-    let cwd = std::env::current_dir().map_err(|err| {
+        let cwd = runmat_filesystem::current_dir().map_err(|err| {
         RunError::Runtime(
             build_runtime_error(format!(
                 "failed to resolve current working directory while resolving source path '{path}': {err}"
@@ -1276,18 +1276,57 @@ fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathB
         )
     })?;
 
-    resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
-        RunError::Runtime(
-            build_runtime_error(format!(
-                "failed to resolve source input '{}' from working directory {}: {}",
-                path,
-                cwd.display(),
-                err
-            ))
-            .with_identifier("RunMat:EntrypointResolveFailed")
-            .build(),
-        )
-    })
+        resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
+            RunError::Runtime(
+                build_runtime_error(format!(
+                    "failed to resolve source input '{}' from working directory {}: {}",
+                    path,
+                    cwd.display(),
+                    err
+                ))
+                .with_identifier("RunMat:EntrypointResolveFailed")
+                .build(),
+            )
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::path::PathBuf;
+
+        let cwd = runmat_filesystem::current_dir().map_err(|err| {
+            RunError::Runtime(
+                build_runtime_error(format!(
+                    "failed to resolve current working directory while resolving source path '{path}': {err}"
+                ))
+                .with_identifier("RunMat:SourceResolveFailed")
+                .build(),
+            )
+        })?;
+        let source_path = PathBuf::from(path);
+        let candidate = if source_path.is_absolute() {
+            source_path.clone()
+        } else {
+            cwd.join(&source_path)
+        };
+
+        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
+            if metadata.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        if source_path.extension().is_none() {
+            let with_ext = candidate.with_extension("m");
+            if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
+                if metadata.is_file() {
+                    return Ok(with_ext);
+                }
+            }
+        }
+
+        Ok(candidate)
+    }
 }
 
 #[cfg(test)]

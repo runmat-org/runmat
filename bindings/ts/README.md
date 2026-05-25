@@ -225,7 +225,7 @@ These map directly to the runtime setters (`set_scatter_target_points`, `set_sur
 - `renderCurrentFigureScene(handle)` forces the renderer to redraw the most recent scene for that figure handle (handy after host-driven resizes or when reactivating a tab that stayed attached to an OffscreenCanvas).
 - `onFigureEvent(listener)` registers a callback that now receives `FigureEvent { handle, kind, figure?: { layout, metadata, plots[] } }`. Metadata contains axis/grid flags, legend entries (including RGBA + plot kind), background/theme info, and optional labels. Plot descriptors enumerate every series (`kind`, `label`, `axesIndex`, `colorRgba`, `visible`). Pass `null` to unsubscribe.
 
-The default `registerPlotCanvas` continues to serve the legacy single-canvas flow; hosts can mix both APIs as needed.
+Prefer `createPlotSurface` + `bindSurfaceToFigure` for all new hosts. Existing single-canvas helpers remain available for compatibility, but are not the primary integration path.
 
 ### Figure orchestration helpers
 
