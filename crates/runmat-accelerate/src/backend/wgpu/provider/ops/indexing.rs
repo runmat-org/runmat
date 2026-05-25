@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use super::*;
 
 impl WgpuProvider {
@@ -174,7 +172,7 @@ impl WgpuProvider {
             },
         ));
 
-        let (scalar_ty, epsilon) = match self.precision() {
+        let (scalar_ty, epsilon) = match self.provider_precision_exec() {
             runmat_accelerate_api::ProviderPrecision::F64 => ("f64", "1.0e-12"),
             runmat_accelerate_api::ProviderPrecision::F32 => ("f32", "1.0e-5"),
         };
@@ -374,7 +372,7 @@ impl WgpuProvider {
             },
         ));
 
-        let (scalar_ty, epsilon) = match self.precision() {
+        let (scalar_ty, epsilon) = match self.provider_precision_exec() {
             runmat_accelerate_api::ProviderPrecision::F64 => ("f64", "1.0e-12"),
             runmat_accelerate_api::ProviderPrecision::F32 => ("f32", "1.0e-5"),
         };

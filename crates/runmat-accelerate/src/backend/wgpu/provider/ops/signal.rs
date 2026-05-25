@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use super::*;
 
 impl WgpuProvider {
@@ -128,8 +126,8 @@ impl WgpuProvider {
             "iir_filter: denominator coefficients must not be empty"
         );
 
-        let b_host = <Self as AccelProvider>::download(self, b).await?;
-        let a_host = <Self as AccelProvider>::download(self, a).await?;
+        let b_host = self.download_exec(b).await?;
+        let a_host = self.download_exec(a).await?;
         let a0 = *a_host
             .data
             .first()
@@ -284,7 +282,7 @@ impl WgpuProvider {
                 data: &b_norm,
                 shape: &b_shape,
             };
-            let b_norm_handle = self.upload(&b_view)?;
+            let b_norm_handle = self.upload_exec(&b_view)?;
             cleanup_handles.push(b_norm_handle.clone());
 
             let a_shape = [order, 1usize];
@@ -292,7 +290,7 @@ impl WgpuProvider {
                 data: &a_norm,
                 shape: &a_shape,
             };
-            let a_norm_handle = self.upload(&a_view)?;
+            let a_norm_handle = self.upload_exec(&a_view)?;
             cleanup_handles.push(a_norm_handle.clone());
 
             let b_norm_entry = self.get_entry(&b_norm_handle)?;
@@ -411,7 +409,7 @@ impl WgpuProvider {
         })();
 
         for handle in cleanup_handles {
-            let _ = self.free(&handle);
+            let _ = self.free_exec(&handle);
         }
 
         result
@@ -560,7 +558,7 @@ impl WgpuProvider {
         for _ in 0..order {
             let next = self.diff_once_exec(&current, dim)?;
             if owns_current {
-                let _ = self.free(&current);
+                let _ = self.free_exec(&current);
             }
             current = next;
             owns_current = true;
@@ -721,9 +719,9 @@ impl WgpuProvider {
             let flipped_in = self.flip_exec(handle, &[dim])?;
             let forward =
                 self.cumsum_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
-            let _ = self.free(&flipped_in);
+            let _ = self.free_exec(&flipped_in);
             let flipped_out = self.flip_exec(&forward, &[dim])?;
-            let _ = self.free(&forward);
+            let _ = self.free_exec(&forward);
             return Ok(flipped_out);
         }
         let entry = self.get_entry(handle)?;
@@ -862,9 +860,9 @@ impl WgpuProvider {
             let flipped_in = self.flip_exec(handle, &[dim])?;
             let forward =
                 self.cumprod_exec(&flipped_in, dim, ProviderScanDirection::Forward, nan_mode)?;
-            let _ = self.free(&flipped_in);
+            let _ = self.free_exec(&flipped_in);
             let flipped_out = self.flip_exec(&forward, &[dim])?;
-            let _ = self.free(&forward);
+            let _ = self.free_exec(&forward);
             return Ok(flipped_out);
         }
         let entry = self.get_entry(handle)?;

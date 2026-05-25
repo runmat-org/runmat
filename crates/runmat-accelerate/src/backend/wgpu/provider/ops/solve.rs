@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use super::*;
 
 impl WgpuProvider {
@@ -17,12 +15,12 @@ impl WgpuProvider {
             data: lhs_data,
             shape: lhs_shape,
             ..
-        } = <Self as AccelProvider>::download(self, lhs).await?;
+        } = self.download_exec(lhs).await?;
         let HostTensorOwned {
             data: rhs_data,
             shape: rhs_shape,
             ..
-        } = <Self as AccelProvider>::download(self, rhs).await?;
+        } = self.download_exec(rhs).await?;
 
         let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
         let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
@@ -33,7 +31,7 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("linsolve:host_reupload");
 
-        let handle = self.upload(&HostTensorView {
+        let handle = self.upload_exec(&HostTensorView {
             data: &solution.data,
             shape: &solution.shape,
         })?;
@@ -45,11 +43,10 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn inv_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, matrix).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
         let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        self.upload(&HostTensorView {
+        self.upload_exec(&HostTensorView {
             data: &result.data,
             shape: &result.shape,
         })
@@ -60,12 +57,11 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         options: ProviderPinvOptions,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, matrix).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
         let result =
             pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
-        self.upload(&HostTensorView {
+        self.upload_exec(&HostTensorView {
             data: &result.data,
             shape: &result.shape,
         })
@@ -76,13 +72,12 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         norm: ProviderCondNorm,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, matrix).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("cond: {e}"))?;
         let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
         let scalar = [cond_value];
         let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
+        self.upload_exec(&HostTensorView {
             data: &scalar,
             shape: &shape,
         })
@@ -93,13 +88,12 @@ impl WgpuProvider {
         tensor: &GpuTensorHandle,
         order: ProviderNormOrder,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, tensor).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(tensor).await?;
         let host_tensor = Tensor::new(data, shape).map_err(|e| anyhow!("norm: {e}"))?;
         let value = norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
         let scalar = [value];
         let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
+        self.upload_exec(&HostTensorView {
             data: &scalar,
             shape: &shape,
         })
@@ -110,27 +104,25 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         tolerance: Option<f64>,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, matrix).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rank: {e}"))?;
         let rank =
             rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
         let scalar = [rank];
         let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
+        self.upload_exec(&HostTensorView {
             data: &scalar,
             shape: &shape,
         })
     }
 
     pub(crate) async fn rcond_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, matrix).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
         let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
         let scalar = [estimate];
         let shape = [1usize, 1usize];
-        self.upload(&HostTensorView {
+        self.upload_exec(&HostTensorView {
             data: &scalar,
             shape: &shape,
         })
@@ -153,12 +145,12 @@ impl WgpuProvider {
             data: lhs_data,
             shape: lhs_shape,
             ..
-        } = <Self as AccelProvider>::download(self, lhs).await?;
+        } = self.download_exec(lhs).await?;
         let HostTensorOwned {
             data: rhs_data,
             shape: rhs_shape,
             ..
-        } = <Self as AccelProvider>::download(self, rhs).await?;
+        } = self.download_exec(rhs).await?;
 
         let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
         let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
@@ -169,7 +161,7 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("mldivide:host_reupload");
 
-        let handle = self.upload(&HostTensorView {
+        let handle = self.upload_exec(&HostTensorView {
             data: &result.data,
             shape: &result.shape,
         })?;
@@ -190,12 +182,12 @@ impl WgpuProvider {
             data: lhs_data,
             shape: lhs_shape,
             ..
-        } = <Self as AccelProvider>::download(self, lhs).await?;
+        } = self.download_exec(lhs).await?;
         let HostTensorOwned {
             data: rhs_data,
             shape: rhs_shape,
             ..
-        } = <Self as AccelProvider>::download(self, rhs).await?;
+        } = self.download_exec(rhs).await?;
 
         let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
         let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
@@ -206,7 +198,7 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("mrdivide:host_reupload");
 
-        let handle = self.upload(&HostTensorView {
+        let handle = self.upload_exec(&HostTensorView {
             data: &result.data,
             shape: &result.shape,
         })?;
@@ -267,8 +259,7 @@ impl WgpuProvider {
         label: &str,
         handle: &GpuTensorHandle,
     ) -> Result<Tensor> {
-        let HostTensorOwned { data, shape, .. } =
-            <Self as AccelProvider>::download(self, handle).await?;
+        let HostTensorOwned { data, shape, .. } = self.download_exec(handle).await?;
         Tensor::new(data, shape).map_err(|e| anyhow!("{label}: {e}"))
     }
 
@@ -488,7 +479,7 @@ impl WgpuProvider {
             );
             std::mem::swap(&mut current, &mut scratch);
         }
-        let _ = self.free(&scratch);
+        let _ = self.free_exec(&scratch);
         Ok(ProviderLinsolveResult {
             solution: current,
             reciprocal_condition: f64::NAN,
@@ -628,7 +619,7 @@ impl WgpuProvider {
         if !options.posdef || options.lower || options.upper || options.rectangular {
             return Ok(None);
         }
-        if self.precision() != ProviderPrecision::F32 {
+        if self.provider_precision_exec() != ProviderPrecision::F32 {
             return Ok(None);
         }
 
@@ -651,15 +642,15 @@ impl WgpuProvider {
             let factor_rcond = match self.svd_rcond("linsolve_posdef_rcond", &r_handle).await {
                 Ok(value) => value,
                 Err(err) => {
-                    let _ = self.free(&r_handle);
-                    let _ = self.free(&r_inv_handle);
+                    let _ = self.free_exec(&r_handle);
+                    let _ = self.free_exec(&r_inv_handle);
                     return Err(err);
                 }
             };
             let rcond = factor_rcond * factor_rcond;
             if let Err(err) = self.enforce_device_rcond(options, rcond) {
-                let _ = self.free(&r_handle);
-                let _ = self.free(&r_inv_handle);
+                let _ = self.free_exec(&r_handle);
+                let _ = self.free_exec(&r_inv_handle);
                 return Err(err);
             }
             rcond
@@ -669,8 +660,8 @@ impl WgpuProvider {
         let projected_rhs = match self.run_triangular_linsolve_device(&r_handle, rhs, true, true) {
             Ok(value) => value,
             Err(err) => {
-                let _ = self.free(&r_handle);
-                let _ = self.free(&r_inv_handle);
+                let _ = self.free_exec(&r_handle);
+                let _ = self.free_exec(&r_inv_handle);
                 return Err(err);
             }
         };
@@ -682,15 +673,15 @@ impl WgpuProvider {
         ) {
             Ok(value) => value,
             Err(err) => {
-                let _ = self.free(&projected_rhs.solution);
-                let _ = self.free(&r_handle);
-                let _ = self.free(&r_inv_handle);
+                let _ = self.free_exec(&projected_rhs.solution);
+                let _ = self.free_exec(&r_handle);
+                let _ = self.free_exec(&r_inv_handle);
                 return Err(err);
             }
         };
-        let _ = self.free(&projected_rhs.solution);
-        let _ = self.free(&r_handle);
-        let _ = self.free(&r_inv_handle);
+        let _ = self.free_exec(&projected_rhs.solution);
+        let _ = self.free_exec(&r_handle);
+        let _ = self.free_exec(&r_inv_handle);
         solution.reciprocal_condition = rcond;
 
         self.telemetry.record_linsolve_duration(start.elapsed());
@@ -716,7 +707,7 @@ impl WgpuProvider {
         if options.lower || options.upper {
             return Ok(None);
         }
-        if self.precision() != ProviderPrecision::F32 {
+        if self.provider_precision_exec() != ProviderPrecision::F32 {
             return Ok(None);
         }
 
@@ -763,14 +754,14 @@ impl WgpuProvider {
                     let rcond = match self.svd_rcond("linsolve_tall_qr_rcond", &r_handle).await {
                         Ok(value) => value,
                         Err(err) => {
-                            let _ = self.free(&q_handle);
-                            let _ = self.free(&r_handle);
+                            let _ = self.free_exec(&q_handle);
+                            let _ = self.free_exec(&r_handle);
                             return Err(err);
                         }
                     };
                     if let Err(err) = self.enforce_device_rcond(options, rcond) {
-                        let _ = self.free(&q_handle);
-                        let _ = self.free(&r_handle);
+                        let _ = self.free_exec(&q_handle);
+                        let _ = self.free_exec(&r_handle);
                         return Err(err);
                     }
                     rcond
@@ -782,10 +773,10 @@ impl WgpuProvider {
                     self.matmul_exec_with_usage(&q_t_handle, rhs, BufferUsageClass::FusionOut)?;
                 let mut triangular =
                     self.run_triangular_linsolve_device(&r_handle, &projected_rhs, false, false)?;
-                let _ = self.free(&projected_rhs);
-                let _ = self.free(&q_t_handle);
-                let _ = self.free(&q_handle);
-                let _ = self.free(&r_handle);
+                let _ = self.free_exec(&projected_rhs);
+                let _ = self.free_exec(&q_t_handle);
+                let _ = self.free_exec(&q_handle);
+                let _ = self.free_exec(&r_handle);
                 triangular.reciprocal_condition = rcond;
                 self.telemetry.record_linsolve_duration(start.elapsed());
                 let shape = [
@@ -826,16 +817,16 @@ impl WgpuProvider {
                 let rcond = match self.svd_rcond("linsolve_wide_qr_rcond", &r_handle).await {
                     Ok(value) => value,
                     Err(err) => {
-                        let _ = self.free(&q_handle);
-                        let _ = self.free(&r_handle);
-                        let _ = self.free(&lhs_t);
+                        let _ = self.free_exec(&q_handle);
+                        let _ = self.free_exec(&r_handle);
+                        let _ = self.free_exec(&lhs_t);
                         return Err(err);
                     }
                 };
                 if let Err(err) = self.enforce_device_rcond(options, rcond) {
-                    let _ = self.free(&q_handle);
-                    let _ = self.free(&r_handle);
-                    let _ = self.free(&lhs_t);
+                    let _ = self.free_exec(&q_handle);
+                    let _ = self.free_exec(&r_handle);
+                    let _ = self.free_exec(&lhs_t);
                     return Err(err);
                 }
                 rcond
@@ -848,10 +839,10 @@ impl WgpuProvider {
                 &intermediate.solution,
                 BufferUsageClass::FusionOut,
             )?;
-            let _ = self.free(&intermediate.solution);
-            let _ = self.free(&q_handle);
-            let _ = self.free(&r_handle);
-            let _ = self.free(&lhs_t);
+            let _ = self.free_exec(&intermediate.solution);
+            let _ = self.free_exec(&q_handle);
+            let _ = self.free_exec(&r_handle);
+            let _ = self.free_exec(&lhs_t);
             self.telemetry.record_linsolve_duration(start.elapsed());
             let shape = [
                 ("rows", lhs_rows as u64),
@@ -870,7 +861,7 @@ impl WgpuProvider {
         }
         .await;
         if let Some(handle) = transposed_lhs.as_ref() {
-            let _ = self.free(handle);
+            let _ = self.free_exec(handle);
         }
         result
     }
@@ -972,13 +963,13 @@ impl WgpuProvider {
             .await?;
         let output = if let Some(result) = result {
             let transposed = self.permute_exec(&result.solution, &[1, 0])?;
-            let _ = self.free(&result.solution);
+            let _ = self.free_exec(&result.solution);
             Some(transposed)
         } else {
             None
         };
-        let _ = self.free(&rhs_t);
-        let _ = self.free(&lhs_t);
+        let _ = self.free_exec(&rhs_t);
+        let _ = self.free_exec(&lhs_t);
         Ok(output)
     }
 }

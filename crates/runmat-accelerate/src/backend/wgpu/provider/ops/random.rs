@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_time::Instant;
@@ -345,7 +343,7 @@ impl WgpuProvider {
                     as f64
                     / 4294967296.0f64;
             }
-            return self.upload(&HostTensorView { data: &out, shape });
+            return self.upload_exec(&HostTensorView { data: &out, shape });
         }
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-uniform-out")?;
         if total_len == 0 {
@@ -451,7 +449,7 @@ impl WgpuProvider {
                 }
                 i += 2;
             }
-            return self.upload(&HostTensorView { data: &out, shape });
+            return self.upload_exec(&HostTensorView { data: &out, shape });
         }
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normal-out")?;
         if total_len == 0 {

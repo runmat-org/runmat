@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use anyhow::Result;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 
@@ -23,7 +21,7 @@ impl WgpuProvider {
         let shape_vec = vec![len, 1];
         if len == 1 {
             let one = [1.0f64];
-            return self.upload(&HostTensorView {
+            return self.upload_exec(&HostTensorView {
                 data: &one,
                 shape: &[1, 1],
             });

@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::bytes_of;
 use runmat_accelerate_api::GpuTensorHandle;
@@ -69,7 +67,7 @@ impl WgpuProvider {
             mantissa,
             &pow,
         );
-        let _ = self.free(&pow);
+        let _ = self.free_exec(&pow);
         result
     }
 
@@ -92,7 +90,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_EQ_SHADER_F64,
                 NumericPrecision::F32 => ELEM_EQ_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -117,7 +120,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_NE_SHADER_F64,
                 NumericPrecision::F32 => ELEM_NE_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -141,7 +149,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_LT_SHADER_F64,
                 NumericPrecision::F32 => ELEM_LT_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -166,7 +179,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_LE_SHADER_F64,
                 NumericPrecision::F32 => ELEM_LE_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -191,7 +209,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_GT_SHADER_F64,
                 NumericPrecision::F32 => ELEM_GT_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -216,7 +239,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => ELEM_GE_SHADER_F64,
                 NumericPrecision::F32 => ELEM_GE_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -241,7 +269,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_AND_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_AND_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -266,7 +299,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_OR_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_OR_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -290,7 +328,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_XOR_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_XOR_SHADER_F32,
             };
-            self.fused_elementwise(shader, &[a.clone(), b.clone()], &entry_a.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                &[a.clone(), b.clone()],
+                &entry_a.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -307,7 +350,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_NOT_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_NOT_SHADER_F32,
             };
-            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                std::slice::from_ref(a),
+                &entry.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -324,7 +372,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISFINITE_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISFINITE_SHADER_F32,
             };
-            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                std::slice::from_ref(a),
+                &entry.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -341,7 +394,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISNAN_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISNAN_SHADER_F32,
             };
-            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                std::slice::from_ref(a),
+                &entry.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -358,7 +416,12 @@ impl WgpuProvider {
                 NumericPrecision::F64 => LOGICAL_ISINF_SHADER_F64,
                 NumericPrecision::F32 => LOGICAL_ISINF_SHADER_F32,
             };
-            self.fused_elementwise(shader, std::slice::from_ref(a), &entry.shape, len)?
+            self.fused_elementwise_with_telemetry_exec(
+                shader,
+                std::slice::from_ref(a),
+                &entry.shape,
+                len,
+            )?
         };
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
@@ -484,7 +547,7 @@ impl WgpuProvider {
         while offset < len {
             let remaining = len - offset;
             let chunk_len = remaining.min(chunk_capacity);
-            let params_buffer = match self.precision() {
+            let params_buffer = match self.provider_precision_exec() {
                 runmat_accelerate_api::ProviderPrecision::F64 => {
                     let params = crate::backend::wgpu::params::ScalarParamsF64 {
                         len: chunk_len as u32,

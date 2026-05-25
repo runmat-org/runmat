@@ -1,8 +1,8 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::cast_slice;
 use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, ProviderConv1dOptions, ProviderConvMode,
-    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    GpuTensorHandle, ProviderConv1dOptions, ProviderConvMode, ProviderPolyderQuotient,
+    ProviderPolyfitResult, ProviderPolyvalOptions,
 };
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
 use std::sync::Arc;
@@ -22,14 +22,14 @@ impl WgpuProvider {
         degree: usize,
         weights: Option<&GpuTensorHandle>,
     ) -> Result<ProviderPolyfitResult> {
-        let x_host = <Self as AccelProvider>::download(self, x).await?;
-        let y_host = <Self as AccelProvider>::download(self, y).await?;
+        let x_host = self.download_exec(x).await?;
+        let y_host = self.download_exec(y).await?;
         ensure!(
             x_host.data.len() == y_host.data.len(),
             "polyfit: X and Y vectors must match in length"
         );
         let weights_host = match weights {
-            Some(handle) => Some(<Self as AccelProvider>::download(self, handle).await?),
+            Some(handle) => Some(self.download_exec(handle).await?),
             None => None,
         };
         let weights_slice = weights_host.as_ref().map(|w| w.data.as_slice());
@@ -417,10 +417,10 @@ impl WgpuProvider {
             &term1,
             &term2,
         )?;
-        self.free(&dp).ok();
-        self.free(&dq).ok();
-        self.free(&term1).ok();
-        self.free(&term2).ok();
+        self.free_exec(&dp).ok();
+        self.free_exec(&dq).ok();
+        self.free_exec(&term1).ok();
+        self.free_exec(&term2).ok();
         self.trim_polynomial_handle(result, orientation).await
     }
 
@@ -456,10 +456,10 @@ impl WgpuProvider {
             &term2,
         )?;
         let denominator_handle = self.conv1d_exec(v, v, options_den)?;
-        self.free(&du).ok();
-        self.free(&dv).ok();
-        self.free(&term1).ok();
-        self.free(&term2).ok();
+        self.free_exec(&du).ok();
+        self.free_exec(&dv).ok();
+        self.free_exec(&term1).ok();
+        self.free_exec(&term2).ok();
 
         let numerator = self
             .trim_polynomial_handle(numerator_handle, orientation_u)
@@ -478,7 +478,7 @@ impl WgpuProvider {
         handle: GpuTensorHandle,
         orientation: PolynomialOrientation,
     ) -> Result<GpuTensorHandle> {
-        let host = <Self as AccelProvider>::download(self, &handle).await?;
+        let host = self.download_exec(&handle).await?;
         let trimmed = trim_leading_zeros_real(&host.data);
         if trimmed.len() == host.data.len() {
             return Ok(handle);
@@ -519,7 +519,7 @@ impl WgpuProvider {
                 }
             }
         };
-        self.free(&handle).ok();
+        self.free_exec(&handle).ok();
         Ok(new_handle)
     }
 }

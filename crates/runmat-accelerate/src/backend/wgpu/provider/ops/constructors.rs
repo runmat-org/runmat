@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use super::*;
 
 impl WgpuProvider {
@@ -267,8 +265,8 @@ impl WgpuProvider {
             data: &y_data,
             shape: shape_slice,
         };
-        let x_handle = <Self as AccelProvider>::upload(self, &x_view)?;
-        let y_handle = <Self as AccelProvider>::upload(self, &y_view)?;
+        let x_handle = self.upload_exec(&x_view)?;
+        let y_handle = self.upload_exec(&y_view)?;
 
         let mut outputs = vec![x_handle, y_handle];
 
@@ -277,7 +275,7 @@ impl WgpuProvider {
                 data: &z_vec,
                 shape: shape_slice,
             };
-            let z_handle = <Self as AccelProvider>::upload(self, &z_view)?;
+            let z_handle = self.upload_exec(&z_view)?;
             outputs.push(z_handle);
         }
 

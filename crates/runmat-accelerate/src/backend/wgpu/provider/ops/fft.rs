@@ -1,7 +1,7 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod};
 use num_complex::Complex;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use rustfft::FftPlanner;
 use std::sync::Arc;
@@ -1068,12 +1068,12 @@ impl WgpuProvider {
             foff += chunk_len;
         }
 
-        self.free(&a_handle).ok();
-        self.free(&b_handle).ok();
-        self.free(&a_fft).ok();
-        self.free(&b_fft).ok();
-        self.free(&c_fft_handle).ok();
-        self.free(&c_time).ok();
+        self.free_exec(&a_handle).ok();
+        self.free_exec(&b_handle).ok();
+        self.free_exec(&a_fft).ok();
+        self.free_exec(&b_fft).ok();
+        self.free_exec(&c_fft_handle).ok();
+        self.free_exec(&c_time).ok();
 
         let mut out_shape = shape;
         out_shape[dim] = target_len;
@@ -1855,7 +1855,7 @@ impl WgpuProvider {
             data,
             mut shape,
             storage,
-        } = <Self as AccelProvider>::download(self, handle).await?;
+        } = self.download_exec(handle).await?;
         let mut complex_axis = false;
         if storage == GpuTensorStorage::ComplexInterleaved {
             complex_axis = true;

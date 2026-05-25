@@ -12,7 +12,7 @@ Refactor the WGPU provider implementation into a clear module tree with strict d
 
 This remains a logic-preserving cleanup.
 
-## Repo-Verified Current State (2026-05-24)
+## Repo-Verified Current State (2026-05-25)
 
 Current WGPU layout:
 
@@ -25,14 +25,7 @@ backend/wgpu/
     backend_shared.rs
     backend_types.rs
     trait_impl.rs
-    trait_impl_methods/
-      context_constructors_random_poly.rs
-      elementwise_tensor_signal.rs
-      indexing_io_telemetry.rs
-      linalg_advanced_pagefun.rs
-      linalg_reduction_core.rs
     core.rs
-    fft.rs
     helpers.rs
     init.rs
     ops/
@@ -43,6 +36,8 @@ backend/wgpu/
       image.rs
       indexing.rs
       io.rs
+      linalg/
+        decomposition.rs
       linalg.rs
       polynomial.rs
       random.rs
@@ -52,8 +47,6 @@ backend/wgpu/
       telemetry.rs
       tensor.rs
       window.rs
-    solve.rs
-    window.rs
   dispatch/*
   shaders/*
 ```
@@ -65,9 +58,11 @@ What is already complete:
 - Canonical package rename from `provider_impl/*` to `provider/*` is complete.
 - Public facade remains `backend/wgpu/provider.rs`.
 
-What is still pending:
+Verification status:
 
-- Full workspace verification pass and closeout artifacts.
+- `cargo check --workspace --all-targets` is green.
+- `cargo test --workspace --all-targets` is green.
+- `cargo clippy --workspace --all-targets -- -D warnings` is green.
 
 ## Plan-of-Record Decisions
 
@@ -77,7 +72,7 @@ These are mandatory, not optional:
 2. Operation semantics live in `backend/wgpu/provider/ops/*`.
 3. Lifecycle/infrastructure stays explicit at provider root (`init.rs`, `core.rs`, `helpers.rs`, plus `backend.rs`).
 4. Backend shape/support types live in dedicated files (`backend_types.rs`, `backend_shared.rs`), not mixed into operation semantics.
-5. Trait method surface is split by domain (`trait_impl_methods/*`) and remains dispatch-only.
+5. Trait method surface is centralized in `provider/trait_impl.rs` and remains dispatch-only.
 6. Launch plumbing remains in `dispatch/*`; shader source remains in `shaders/*`.
 7. Random module naming is normalized (`random.rs`), avoiding long-term `rnd` abbreviation drift.
 
@@ -92,12 +87,6 @@ backend/wgpu/
     backend_shared.rs
     backend_types.rs
     trait_impl.rs
-    trait_impl_methods/
-      context_constructors_random_poly.rs
-      elementwise_tensor_signal.rs
-      indexing_io_telemetry.rs
-      linalg_advanced_pagefun.rs
-      linalg_reduction_core.rs
     init.rs
     core.rs
     helpers.rs
@@ -113,14 +102,13 @@ backend/wgpu/
       constructors.rs
       polynomial.rs
       image.rs
+      linalg/
+        decomposition.rs
       linalg.rs
       signal.rs
       fft.rs
       solve.rs
       window.rs
-    fft.rs
-    solve.rs
-    window.rs
 ```
 
 Notes:
@@ -136,7 +124,7 @@ Notes:
   - backend data carriers and operation-facing request/response structs.
 - `provider/backend_shared.rs`:
   - backend-wide constants/helpers that are not operation-family semantics.
-- `provider/trait_impl.rs` + `provider/trait_impl_methods/*`:
+- `provider/trait_impl.rs`:
   - trait surface organization and thin dispatch into domain exec methods.
 - `provider/init.rs`:
   - provider initialization/bootstrap/env parsing/autotune+warmup setup.
@@ -153,15 +141,11 @@ Notes:
 
 ## Remaining Execution Plan
 
-### Phase 9: Verification + Closeout
+### Phase 10: Post-Refactor Quality Pass
 
-1. Run accelerate-focused verification:
-   - `cargo test -p runmat-accelerate --lib`
-   - `cargo test -p runmat-accelerate --tests`
-2. Run full workspace verification:
-   - `cargo test --workspace --all-targets`
-3. Resolve any non-refactor incidental failures blocking green.
-4. Update progress log with final commit hashes and verification results.
+1. Continue reducing trait-surface usage inside `ops/*` (prefer internal `*_exec` APIs).
+2. Keep splitting oversized operation modules (`ops/linalg.rs`, `ops/reduction.rs`) into focused submodules.
+3. Deduplicate repeated numerical pipelines where behavior is identical.
 
 ## Verification Requirements
 
@@ -173,4 +157,4 @@ After each structural phase:
 
 ## Bottom Line
 
-The refactor structure is now in place with dispatch-only trait slices and operation logic extracted into `ops/*`. Remaining plan-of-record work is verification and closeout evidence.
+The refactor structure is now in place with dispatch centralized in `trait_impl.rs`, operation logic extracted into `ops/*`, and full workspace validation green. Remaining work is quality/maintainability refinement, not structural migration.

@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use super::*;
 
 impl WgpuProvider {
@@ -10,7 +8,7 @@ impl WgpuProvider {
         order: SortOrder,
         comparison: SortComparison,
     ) -> Result<SortResult> {
-        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let host = self.download_exec(handle).await?;
         let shape = host.shape.clone();
         let (values, indices) = sort_host_tensor(&host.data, &host.shape, dim, order, comparison)?;
         Ok(SortResult {
@@ -33,7 +31,7 @@ impl WgpuProvider {
         columns: &[SortRowsColumnSpec],
         comparison: SortComparison,
     ) -> Result<SortResult> {
-        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let host = self.download_exec(handle).await?;
         let SortRowsHostOutputs {
             values,
             indices,
@@ -58,7 +56,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         options: &UniqueOptions,
     ) -> Result<UniqueResult> {
-        let host = <Self as AccelProvider>::download(self, handle).await?;
+        let host = self.download_exec(handle).await?;
         let HostTensorOwned { data, shape, .. } = host;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
         let eval =
@@ -76,8 +74,8 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         options: &IsMemberOptions,
     ) -> Result<IsMemberResult> {
-        let host_a = <Self as AccelProvider>::download(self, a).await?;
-        let host_b = <Self as AccelProvider>::download(self, b).await?;
+        let host_a = self.download_exec(a).await?;
+        let host_b = self.download_exec(b).await?;
         let tensor_a =
             Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("ismember: {e}"))?;
         let tensor_b =
@@ -99,8 +97,8 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         options: &UnionOptions,
     ) -> Result<UnionResult> {
-        let host_a = <Self as AccelProvider>::download(self, a).await?;
-        let host_b = <Self as AccelProvider>::download(self, b).await?;
+        let host_a = self.download_exec(a).await?;
+        let host_b = self.download_exec(b).await?;
         let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
         let tensor_b = Tensor::new(host_b.data, host_b.shape).map_err(|e| anyhow!("union: {e}"))?;
         let eval =
@@ -118,8 +116,8 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         options: &SetdiffOptions,
     ) -> Result<SetdiffResult> {
-        let host_a = <Self as AccelProvider>::download(self, a).await?;
-        let host_b = <Self as AccelProvider>::download(self, b).await?;
+        let host_a = self.download_exec(a).await?;
+        let host_b = self.download_exec(b).await?;
         let tensor_a =
             Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("setdiff: {e}"))?;
         let tensor_b =
@@ -1227,13 +1225,13 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let HostTensorOwned {
             mut data, shape, ..
-        } = <Self as AccelProvider>::download(self, handle).await?;
+        } = self.download_exec(handle).await?;
         apply_tril_mask_host(&mut data, &shape, offset)?;
         let view = HostTensorView {
             data: &data,
             shape: &shape,
         };
-        <Self as AccelProvider>::upload(self, &view)
+        self.upload_exec(&view)
     }
 
     pub(crate) async fn triu_exec(
@@ -1369,13 +1367,13 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let HostTensorOwned {
             mut data, shape, ..
-        } = <Self as AccelProvider>::download(self, handle).await?;
+        } = self.download_exec(handle).await?;
         apply_triu_mask_host(&mut data, &shape, offset)?;
         let view = HostTensorView {
             data: &data,
             shape: &shape,
         };
-        <Self as AccelProvider>::upload(self, &view)
+        self.upload_exec(&view)
     }
     pub(crate) fn flip_exec(
         &self,

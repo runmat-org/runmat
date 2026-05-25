@@ -1,5 +1,3 @@
-use runmat_accelerate_api::AccelProvider;
-
 use super::*;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -410,7 +408,7 @@ impl WgpuProvider {
         chunk_rows: u32,
         flavor: ReductionFlavor,
     ) -> Result<GpuTensorHandle> {
-        let scalar_ty = match self.precision() {
+        let scalar_ty = match self.provider_precision_exec() {
             runmat_accelerate_api::ProviderPrecision::F64 => "f64",
             _ => "f32",
         };
@@ -982,12 +980,12 @@ impl WgpuProvider {
                     let elapsed = start.elapsed();
                     if best_time.is_none_or(|t| elapsed < t) {
                         if let Some(existing) = best_handle.replace(handle) {
-                            let _ = self.free(&existing);
+                            let _ = self.free_exec(&existing);
                         }
                         best_time = Some(elapsed);
                         best_tuning = Some(sanitized);
                     } else {
-                        let _ = self.free(&handle);
+                        let _ = self.free_exec(&handle);
                     }
                 }
                 Err(err) => {
@@ -1037,7 +1035,7 @@ impl WgpuProvider {
                 data: &data,
                 shape: &shape,
             };
-            return self.upload(&view);
+            return self.upload_exec(&view);
         }
         let mut current = if std::env::var("RUNMAT_PROVIDER_REDUCTION_SNAPSHOT").is_ok() {
             let size_bytes = (entry.len * self.element_size) as u64;
@@ -1473,6 +1471,92 @@ impl WgpuProvider {
             indices: indices_handle,
         })
     }
+
+    fn finish_std_from_sums_exec(
+        &self,
+        sum_handle: GpuTensorHandle,
+        sum_sq_handle: GpuTensorHandle,
+        sample_count: usize,
+        normalization: ProviderStdNormalization,
+        nan_shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let inv_len = 1.0 / (sample_count as f64);
+
+        let sum_squared = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &sum_handle,
+            &sum_handle,
+        )?;
+        let _ = self.free_exec(&sum_handle);
+
+        let sum_shape = self.get_entry(&sum_squared)?.shape.clone();
+        let scale_tensor = self.fill_exec(&sum_shape, inv_len)?;
+        let sum_squared_scaled = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &sum_squared,
+            &scale_tensor,
+        )?;
+        let _ = self.free_exec(&scale_tensor);
+        let variance_numer = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Sub,
+            &sum_sq_handle,
+            &sum_squared_scaled,
+        )?;
+        let _ = self.free_exec(&sum_sq_handle);
+        let _ = self.free_exec(&sum_squared);
+        let _ = self.free_exec(&sum_squared_scaled);
+
+        let denom = match normalization {
+            ProviderStdNormalization::Sample => {
+                if sample_count > 1 {
+                    (sample_count - 1) as f64
+                } else {
+                    1.0
+                }
+            }
+            ProviderStdNormalization::Population => sample_count as f64,
+        };
+        if denom == 0.0 {
+            let _ = self.free_exec(&variance_numer);
+            return self.fill_exec(nan_shape, f64::NAN);
+        }
+
+        let variance_shape = self.get_entry(&variance_numer)?.shape.clone();
+        let denom_tensor = self.fill_exec(&variance_shape, denom)?;
+        let variance = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Div,
+            &variance_numer,
+            &denom_tensor,
+        )?;
+        let _ = self.free_exec(&denom_tensor);
+        let _ = self.free_exec(&variance_numer);
+
+        let abs_variance =
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, &variance)?;
+        let variance_plus_abs = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Add,
+            &variance,
+            &abs_variance,
+        )?;
+        let _ = self.free_exec(&abs_variance);
+        let _ = self.free_exec(&variance);
+
+        let half_shape = self.get_entry(&variance_plus_abs)?.shape.clone();
+        let half_tensor = self.fill_exec(&half_shape, 0.5)?;
+        let clamped = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &variance_plus_abs,
+            &half_tensor,
+        )?;
+        let _ = self.free_exec(&half_tensor);
+        let _ = self.free_exec(&variance_plus_abs);
+
+        let std_handle =
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &clamped)?;
+        let _ = self.free_exec(&clamped);
+        Ok(std_handle)
+    }
+
     pub(crate) fn reduce_std_dim_exec(
         &self,
         a: &GpuTensorHandle,
@@ -1505,8 +1589,6 @@ impl WgpuProvider {
             return self.fill_exec(&out_shape, f64::NAN);
         }
 
-        let inv_len = 1.0 / (reduce_len as f64);
-
         let sum_handle =
             self.reduce_dim_sum_mean_exec(a, dim, crate::backend::wgpu::types::DimReduceOp::Sum)?;
         let squared = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, a)?;
@@ -1515,82 +1597,14 @@ impl WgpuProvider {
             dim,
             crate::backend::wgpu::types::DimReduceOp::Sum,
         )?;
-        let _ = self.free(&squared);
-
-        let sum_squared = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &sum_handle,
-            &sum_handle,
-        )?;
-        let _ = self.free(&sum_handle);
-
-        let sum_shape = self.get_entry(&sum_squared)?.shape.clone();
-        let scale_tensor = self.fill_exec(&sum_shape, inv_len)?;
-        let sum_squared_scaled = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &sum_squared,
-            &scale_tensor,
-        )?;
-        let _ = self.free(&scale_tensor);
-        let variance_numer = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Sub,
-            &sum_sq_handle,
-            &sum_squared_scaled,
-        )?;
-        let _ = self.free(&sum_sq_handle);
-        let _ = self.free(&sum_squared);
-        let _ = self.free(&sum_squared_scaled);
-
-        let denom = match normalization {
-            ProviderStdNormalization::Sample => {
-                if reduce_len > 1 {
-                    (reduce_len - 1) as f64
-                } else {
-                    1.0
-                }
-            }
-            ProviderStdNormalization::Population => reduce_len as f64,
-        };
-        if denom == 0.0 {
-            let _ = self.free(&variance_numer);
-            return self.fill_exec(&out_shape, f64::NAN);
-        }
-
-        let variance_shape = self.get_entry(&variance_numer)?.shape.clone();
-        let denom_tensor = self.fill_exec(&variance_shape, denom)?;
-        let variance = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Div,
-            &variance_numer,
-            &denom_tensor,
-        )?;
-        let _ = self.free(&denom_tensor);
-        let _ = self.free(&variance_numer);
-
-        let abs_variance =
-            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, &variance)?;
-        let variance_plus_abs = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Add,
-            &variance,
-            &abs_variance,
-        )?;
-        let _ = self.free(&abs_variance);
-        let _ = self.free(&variance);
-
-        let half_shape = self.get_entry(&variance_plus_abs)?.shape.clone();
-        let half_tensor = self.fill_exec(&half_shape, 0.5)?;
-        let clamped = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &variance_plus_abs,
-            &half_tensor,
-        )?;
-        let _ = self.free(&half_tensor);
-        let _ = self.free(&variance_plus_abs);
-
-        let std_handle =
-            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &clamped)?;
-        let _ = self.free(&clamped);
-
-        Ok(std_handle)
+        let _ = self.free_exec(&squared);
+        self.finish_std_from_sums_exec(
+            sum_handle,
+            sum_sq_handle,
+            reduce_len,
+            normalization,
+            &out_shape,
+        )
     }
 
     pub(crate) fn reduce_std_exec(
@@ -1611,89 +1625,13 @@ impl WgpuProvider {
             return self.fill_exec(&scalar_shape, f64::NAN);
         }
 
-        let inv_len = 1.0 / (len as f64);
-
         let sum_handle =
             self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
         let squared = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, a, a)?;
         let sum_sq_handle =
             self.reduce_global_exec(&squared, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
-        let _ = self.free(&squared);
-
-        let sum_squared = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &sum_handle,
-            &sum_handle,
-        )?;
-        let _ = self.free(&sum_handle);
-
-        let sum_shape = self.get_entry(&sum_squared)?.shape.clone();
-        let scale_tensor = self.fill_exec(&sum_shape, inv_len)?;
-        let sum_squared_scaled = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &sum_squared,
-            &scale_tensor,
-        )?;
-        let _ = self.free(&scale_tensor);
-        let variance_numer = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Sub,
-            &sum_sq_handle,
-            &sum_squared_scaled,
-        )?;
-        let _ = self.free(&sum_sq_handle);
-        let _ = self.free(&sum_squared);
-        let _ = self.free(&sum_squared_scaled);
-
-        let denom = match normalization {
-            ProviderStdNormalization::Sample => {
-                if len > 1 {
-                    (len - 1) as f64
-                } else {
-                    1.0
-                }
-            }
-            ProviderStdNormalization::Population => len as f64,
-        };
-        if denom == 0.0 {
-            let _ = self.free(&variance_numer);
-            return self.fill_exec(&scalar_shape, f64::NAN);
-        }
-
-        let variance_shape = self.get_entry(&variance_numer)?.shape.clone();
-        let denom_tensor = self.fill_exec(&variance_shape, denom)?;
-        let variance = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Div,
-            &variance_numer,
-            &denom_tensor,
-        )?;
-        let _ = self.free(&denom_tensor);
-        let _ = self.free(&variance_numer);
-
-        let abs_variance =
-            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, &variance)?;
-        let variance_plus_abs = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Add,
-            &variance,
-            &abs_variance,
-        )?;
-        let _ = self.free(&abs_variance);
-        let _ = self.free(&variance);
-
-        let half_shape = self.get_entry(&variance_plus_abs)?.shape.clone();
-        let half_tensor = self.fill_exec(&half_shape, 0.5)?;
-        let clamped = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Mul,
-            &variance_plus_abs,
-            &half_tensor,
-        )?;
-        let _ = self.free(&half_tensor);
-        let _ = self.free(&variance_plus_abs);
-
-        let std_handle =
-            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Sqrt, &clamped)?;
-        let _ = self.free(&clamped);
-
-        Ok(std_handle)
+        let _ = self.free_exec(&squared);
+        self.finish_std_from_sums_exec(sum_handle, sum_sq_handle, len, normalization, &scalar_shape)
     }
 }
 impl WgpuProvider {
@@ -1801,7 +1739,7 @@ impl WgpuProvider {
             for &d in &reduce {
                 let next = self.reduce_mean_dim(&current, d).await?;
                 if owned {
-                    let _ = self.free(&current);
+                    let _ = self.free_exec(&current);
                 }
                 current = next;
                 owned = true;

@@ -1,7 +1,5 @@
 use anyhow::{anyhow, ensure, Result};
-use runmat_accelerate_api::{
-    AccelProvider, GpuTensorHandle, HostTensorView, ImfilterOptions, ImfilterPadding,
-};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ImfilterOptions, ImfilterPadding};
 use runmat_builtins::Tensor;
 use wgpu::util::DeviceExt;
 
@@ -30,7 +28,7 @@ impl WgpuProvider {
             return self.imfilter_exec_fallback(image, kernel, options).await;
         }
         let image_entry = self.get_entry(image)?;
-        let kernel_host = <Self as AccelProvider>::download(self, kernel).await?;
+        let kernel_host = self.download_exec(kernel).await?;
         let kernel_tensor = Tensor::new(kernel_host.data.clone(), kernel_host.shape.clone())
             .map_err(|e| anyhow!("imfilter: {e}"))?;
 
@@ -309,8 +307,8 @@ impl WgpuProvider {
         kernel: &GpuTensorHandle,
         options: &ImfilterOptions,
     ) -> Result<GpuTensorHandle> {
-        let image_host = <Self as AccelProvider>::download(self, image).await?;
-        let kernel_host = <Self as AccelProvider>::download(self, kernel).await?;
+        let image_host = self.download_exec(image).await?;
+        let kernel_host = self.download_exec(kernel).await?;
 
         let image_tensor = Tensor::new(image_host.data.clone(), image_host.shape.clone())
             .map_err(|e| anyhow!("imfilter: {e}"))?;
@@ -326,7 +324,7 @@ impl WgpuProvider {
             data: &data_owned,
             shape: &shape_owned,
         };
-        let handle = <Self as AccelProvider>::upload(self, &view)?;
+        let handle = self.upload_exec(&view)?;
         Ok(handle)
     }
 }
