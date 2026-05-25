@@ -237,3 +237,212 @@ fn qr_power_iter_device_path_avoids_host_downloads() {
     let _ = provider.free(&qr.perm_matrix);
     let _ = provider.free(&qr.perm_vector);
 }
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn qr_power_iter_zero_product_path_remains_stable() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+    std::env::remove_var("RUNMAT_DEBUG_QR");
+    std::env::remove_var("RUNMAT_DEBUG_QR_ZEROHOST");
+
+    let provider = register_provider();
+
+    let n = 16usize;
+    let k = 4usize;
+    let mut lhs = vec![0.0f64; n * n];
+    for i in 0..n {
+        lhs[i + i * n] = 1.0;
+    }
+    let q0 = vec![0.0f64; n * k];
+
+    let lhs_handle = provider
+        .upload(&HostTensorView {
+            data: &lhs,
+            shape: &[n, n],
+        })
+        .expect("upload lhs");
+    let q_handle = provider
+        .upload(&HostTensorView {
+            data: &q0,
+            shape: &[n, k],
+        })
+        .expect("upload q");
+    let product = block_on(provider.matmul(&lhs_handle, &q_handle)).expect("matmul");
+
+    provider.reset_telemetry();
+    let options = ProviderQrOptions {
+        economy: true,
+        pivot: ProviderQrPivot::Matrix,
+    };
+    let qr = block_on(provider.qr_power_iter(&product, Some(&lhs_handle), &q_handle, &options))
+        .expect("qr_power_iter call")
+        .expect("qr result");
+    let telemetry = provider.telemetry_snapshot();
+    assert!(
+        telemetry.download_bytes > 0,
+        "expected host fallback download for zero-product qr_power_iter edge path"
+    );
+
+    let q_host = block_on(provider.download(&qr.q)).expect("download q");
+    let r_host = block_on(provider.download(&qr.r)).expect("download r");
+    assert!(
+        q_host.data.iter().all(|v| v.is_finite()),
+        "Q contained non-finite values in zero-product edge path"
+    );
+    assert!(
+        r_host.data.iter().all(|v| v.is_finite()),
+        "R contained non-finite values in zero-product edge path"
+    );
+
+    let _ = provider.free(&lhs_handle);
+    let _ = provider.free(&q_handle);
+    let _ = provider.free(&qr.q);
+    let _ = provider.free(&qr.r);
+    let _ = provider.free(&qr.perm_matrix);
+    let _ = provider.free(&qr.perm_vector);
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn qr_power_iter_rank_deficient_path_remains_finite() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+    std::env::remove_var("RUNMAT_DEBUG_QR");
+    std::env::remove_var("RUNMAT_DEBUG_QR_ZEROHOST");
+
+    let provider = register_provider();
+
+    let n = 16usize;
+    let k = 4usize;
+    let mut lhs = vec![0.0f64; n * n];
+    for i in 0..n {
+        lhs[i + i * n] = 1.0;
+    }
+    let mut q0 = vec![0.0f64; n * k];
+    for r in 0..n {
+        let base = ((r + 1) as f64) * 0.01;
+        q0[r] = base;
+        q0[r + n] = base;
+        q0[r + 2 * n] = base * 2.0;
+        q0[r + 3 * n] = base * 3.0;
+    }
+
+    let lhs_handle = provider
+        .upload(&HostTensorView {
+            data: &lhs,
+            shape: &[n, n],
+        })
+        .expect("upload lhs");
+    let q_handle = provider
+        .upload(&HostTensorView {
+            data: &q0,
+            shape: &[n, k],
+        })
+        .expect("upload q");
+    let product = block_on(provider.matmul(&lhs_handle, &q_handle)).expect("matmul");
+
+    provider.reset_telemetry();
+    let options = ProviderQrOptions {
+        economy: true,
+        pivot: ProviderQrPivot::Matrix,
+    };
+    let qr = block_on(provider.qr_power_iter(&product, Some(&lhs_handle), &q_handle, &options))
+        .expect("qr_power_iter call")
+        .expect("qr result");
+
+    let telemetry = provider.telemetry_snapshot();
+    assert_eq!(
+        telemetry.download_bytes, 0,
+        "rank-deficient qr_power_iter should stay on the device path for this case"
+    );
+
+    let q_host = block_on(provider.download(&qr.q)).expect("download q");
+    let r_host = block_on(provider.download(&qr.r)).expect("download r");
+    assert!(
+        q_host.data.iter().all(|v| v.is_finite()),
+        "Q contained non-finite values in rank-deficient edge path"
+    );
+    assert!(
+        r_host.data.iter().all(|v| v.is_finite()),
+        "R contained non-finite values in rank-deficient edge path"
+    );
+
+    let _ = provider.free(&lhs_handle);
+    let _ = provider.free(&q_handle);
+    let _ = provider.free(&qr.q);
+    let _ = provider.free(&qr.r);
+    let _ = provider.free(&qr.perm_matrix);
+    let _ = provider.free(&qr.perm_vector);
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn qr_device_column_limit_boundary_uses_expected_path() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+    let provider = register_provider();
+
+    let options = ProviderQrOptions {
+        economy: true,
+        pivot: ProviderQrPivot::Matrix,
+    };
+
+    let rows = 80usize;
+    let cols_device = 64usize;
+    let mut data_64 = vec![0.0f64; rows * cols_device];
+    for c in 0..cols_device {
+        for r in 0..rows {
+            data_64[r + c * rows] = ((r + 1 + c) as f64).sin() + (c as f64) * 0.01;
+        }
+    }
+    let h64 = provider
+        .upload(&HostTensorView {
+            data: &data_64,
+            shape: &[rows, cols_device],
+        })
+        .expect("upload 64-col matrix");
+    provider.reset_telemetry();
+    let qr64 = block_on(provider.qr(&h64, options)).expect("qr 64-col");
+    let telem64 = provider.telemetry_snapshot();
+    assert_eq!(
+        telem64.download_bytes, 0,
+        "cols=64 should use device QR path without host download"
+    );
+    assert_eq!(qr64.q.shape, vec![rows, cols_device]);
+    assert_eq!(qr64.r.shape, vec![cols_device, cols_device]);
+
+    let cols_host = 65usize;
+    let mut data_65 = vec![0.0f64; rows * cols_host];
+    for c in 0..cols_host {
+        for r in 0..rows {
+            data_65[r + c * rows] = ((r + 1 + c) as f64).cos() + (c as f64) * 0.01;
+        }
+    }
+    let h65 = provider
+        .upload(&HostTensorView {
+            data: &data_65,
+            shape: &[rows, cols_host],
+        })
+        .expect("upload 65-col matrix");
+    provider.reset_telemetry();
+    let qr65 = block_on(provider.qr(&h65, options)).expect("qr 65-col");
+    let telem65 = provider.telemetry_snapshot();
+    assert!(
+        telem65.download_bytes > 0,
+        "cols=65 should bypass device QR kernel and use host fallback path"
+    );
+    assert_eq!(qr65.q.shape, vec![rows, cols_host]);
+    assert_eq!(qr65.r.shape, vec![cols_host, cols_host]);
+
+    let _ = provider.free(&h64);
+    let _ = provider.free(&h65);
+    let _ = provider.free(&qr64.q);
+    let _ = provider.free(&qr64.r);
+    let _ = provider.free(&qr64.perm_matrix);
+    let _ = provider.free(&qr64.perm_vector);
+    let _ = provider.free(&qr65.q);
+    let _ = provider.free(&qr65.r);
+    let _ = provider.free(&qr65.perm_matrix);
+    let _ = provider.free(&qr65.perm_vector);
+}
