@@ -36,7 +36,7 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("/"))
     } else {
-        match std::env::current_dir() {
+        match runmat_filesystem::current_dir() {
             Ok(cwd) => cwd,
             Err(_) => return HashSet::new(),
         }

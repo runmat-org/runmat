@@ -29,7 +29,7 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
     use runmat_config::discover_known_project_symbols_from_source_name;
     use std::path::{Path, PathBuf};
 
-    let Ok(cwd) = std::env::current_dir() else {
+    let Ok(cwd) = runmat_filesystem::current_dir() else {
         let Some(source_name) = source_name else {
             return HashSet::new();
         };
