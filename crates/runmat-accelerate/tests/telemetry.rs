@@ -3,7 +3,14 @@ use futures::executor::block_on;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
-use runmat_accelerate_api::{AccelProvider, HostTensorView};
+use runmat_accelerate_api::{
+    AccelProvider, CorrcoefOptions, HostTensorView, ProviderQrOptions, ProviderQrPivot,
+};
+#[cfg(feature = "wgpu")]
+use std::sync::Mutex;
+
+#[cfg(feature = "wgpu")]
+static TELEMETRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(feature = "wgpu")]
 fn register_provider() -> &'static dyn AccelProvider {
@@ -15,6 +22,7 @@ fn register_provider() -> &'static dyn AccelProvider {
 #[cfg(feature = "wgpu")]
 #[test]
 fn telemetry_records_basic_dispatches() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
     let provider = register_provider();
     provider.reset_telemetry();
 
@@ -91,6 +99,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 #[cfg(feature = "wgpu")]
 #[test]
 fn telemetry_records_chunked_matmul_activity() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
     let provider = register_provider();
     provider.reset_telemetry();
 
@@ -131,4 +140,100 @@ fn telemetry_records_chunked_matmul_activity() {
     let _ = provider.free(&a);
     let _ = provider.free(&b);
     let _ = provider.free(&c);
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn corrcoef_device_path_avoids_host_downloads() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    let provider = register_provider();
+
+    let rows = 64usize;
+    let cols = 4usize;
+    let mut data = vec![0.0f64; rows * cols];
+    for c in 0..cols {
+        for r in 0..rows {
+            let x = (r + 1) as f64;
+            data[r + c * rows] = x + (c as f64) * 0.25 + x.powi((c as i32) + 1) * 1.0e-4;
+        }
+    }
+    let input = provider
+        .upload(&HostTensorView {
+            data: &data,
+            shape: &[rows, cols],
+        })
+        .expect("upload corrcoef input");
+
+    provider.reset_telemetry();
+    let options = CorrcoefOptions::default();
+    let out = block_on(provider.corrcoef(&input, &options)).expect("corrcoef");
+    let telemetry = provider.telemetry_snapshot();
+    assert_eq!(
+        telemetry.download_bytes, 0,
+        "corrcoef device path should not download tensors to host"
+    );
+
+    let _ = provider.free(&input);
+    let _ = provider.free(&out);
+}
+
+#[cfg(feature = "wgpu")]
+#[test]
+fn qr_power_iter_device_path_avoids_host_downloads() {
+    let _guard = TELEMETRY_TEST_LOCK.lock().expect("telemetry test lock");
+    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+    std::env::remove_var("RUNMAT_DEBUG_QR");
+    std::env::remove_var("RUNMAT_DEBUG_QR_ZEROHOST");
+
+    let provider = register_provider();
+
+    let n = 16usize;
+    let k = 4usize;
+    let mut lhs = vec![0.0f64; n * n];
+    for i in 0..n {
+        lhs[i + i * n] = 1.0;
+    }
+    let mut q0 = vec![0.0f64; n * k];
+    for c in 0..k {
+        for r in 0..n {
+            q0[r + c * n] = ((r + 1 + c) as f64).sin() + (c as f64) * 0.05;
+        }
+    }
+
+    let lhs_handle = provider
+        .upload(&HostTensorView {
+            data: &lhs,
+            shape: &[n, n],
+        })
+        .expect("upload lhs");
+    let q_handle = provider
+        .upload(&HostTensorView {
+            data: &q0,
+            shape: &[n, k],
+        })
+        .expect("upload q");
+    let product = block_on(provider.matmul(&lhs_handle, &q_handle)).expect("matmul");
+
+    provider.reset_telemetry();
+    let options = ProviderQrOptions {
+        economy: true,
+        pivot: ProviderQrPivot::Matrix,
+    };
+    let qr = block_on(provider.qr_power_iter(&product, Some(&lhs_handle), &q_handle, &options))
+        .expect("qr_power_iter call")
+        .expect("device qr result");
+    let telemetry = provider.telemetry_snapshot();
+    assert_eq!(
+        telemetry.download_bytes, 0,
+        "qr_power_iter device path should not download tensors to host"
+    );
+    assert_eq!(qr.q.shape, vec![n, k], "unexpected Q shape");
+    assert_eq!(qr.r.shape, vec![k, k], "unexpected R shape");
+
+    let _ = provider.free(&lhs_handle);
+    let _ = provider.free(&q_handle);
+    let _ = provider.free(&qr.q);
+    let _ = provider.free(&qr.r);
+    let _ = provider.free(&qr.perm_matrix);
+    let _ = provider.free(&qr.perm_vector);
 }

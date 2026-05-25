@@ -681,19 +681,25 @@ impl WgpuProvider {
             &inv_var,
         )?;
 
-        // Clamp tiny negative variances to zero to stabilise sqrt
-        let mut host_variance = self.download_exec(&variance).await?;
-        for value in host_variance.data.iter_mut() {
-            if *value < 0.0 && *value > -1.0e-12 {
-                *value = 0.0;
-            }
-        }
-        let view = HostTensorView {
-            data: &host_variance.data,
-            shape: &host_variance.shape,
-        };
-        let variance_adjusted = self.upload_exec(&view)?;
-        self.free_exec(&variance)?;
+        // Clamp negatives to zero on-device before sqrt:
+        // max(x, 0) = 0.5 * (x + |x|)
+        let abs_variance =
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, &variance)?;
+        let variance_plus_abs = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Add,
+            &variance,
+            &abs_variance,
+        )?;
+        let _ = self.free_exec(&abs_variance);
+        let half_tensor = self.fill_exec(&self.get_entry(&variance_plus_abs)?.shape, 0.5)?;
+        let variance_adjusted = self.binary_op_exec(
+            crate::backend::wgpu::types::BinaryOpCode::Mul,
+            &variance_plus_abs,
+            &half_tensor,
+        )?;
+        let _ = self.free_exec(&half_tensor);
+        let _ = self.free_exec(&variance_plus_abs);
+        let _ = self.free_exec(&variance);
 
         let std = self.unary_op_exec(
             crate::backend::wgpu::types::UnaryOpCode::Sqrt,

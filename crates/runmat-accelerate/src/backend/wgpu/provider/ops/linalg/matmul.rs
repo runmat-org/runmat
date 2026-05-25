@@ -15,6 +15,16 @@ impl WgpuProvider {
         res
     }
 
+    fn tensor_max_abs_scalar_exec(&self, tensor: &GpuTensorHandle) -> Result<f64> {
+        let abs = self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Abs, tensor)?;
+        let max =
+            self.reduce_global_exec(&abs, crate::backend::wgpu::types::GlobalReduceOp::Max)?;
+        let value = self.read_scalar_exec(&max, 0);
+        let _ = self.free_exec(&max);
+        let _ = self.free_exec(&abs);
+        value
+    }
+
     pub(crate) async fn qr_power_iter_exec(
         &self,
         product: &GpuTensorHandle,
@@ -61,29 +71,8 @@ impl WgpuProvider {
         }
         let k = cols;
 
-        let mut pre_product_max = match self.download_exec(product).await {
-            Ok(host) => Some(
-                host.data
-                    .iter()
-                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
-            ),
-            Err(err) => {
-                log::warn!("qr_power_iter pre-download failed: {err}");
-                None
-            }
-        };
-
-        let pre_q_max = match self.download_exec(q_handle).await {
-            Ok(host) => Some(
-                host.data
-                    .iter()
-                    .fold(0.0f64, |acc, value| acc.max(value.abs())),
-            ),
-            Err(err) => {
-                log::warn!("qr_power_iter q-handle pre-download failed: {err}");
-                None
-            }
-        };
+        let mut pre_product_max = self.tensor_max_abs_scalar_exec(product).ok();
+        let pre_q_max = self.tensor_max_abs_scalar_exec(q_handle).ok();
 
         const PRODUCT_EPS: f64 = 1.0e-12;
         const Q_EPS: f64 = 1.0e-6;
@@ -197,28 +186,19 @@ impl WgpuProvider {
                 }
                 let recomputed =
                     self.matmul_exec_with_usage(lhs_handle, q_handle, BufferUsageClass::FusionOut)?;
-                let mut recomputed_max: Option<f64> = None;
+                let recomputed_max = self.tensor_max_abs_scalar_exec(&recomputed).ok();
                 if debug_zero_host {
-                    match self.download_exec(&recomputed).await {
-                        Ok(host) => {
-                            let max_recomputed = host
-                                .data
-                                .iter()
-                                .fold(0.0f64, |acc, value| acc.max(value.abs()));
-                            log::info!(
-                                "qr_power_iter recompute check: product_id={} max_recomputed_abs={:.6e}",
-                                product.buffer_id,
-                                max_recomputed
-                            );
-                            recomputed_max = Some(max_recomputed);
-                        }
-                        Err(err) => {
-                            log::info!(
-                                "qr_power_iter recompute check failed: product_id={} err={}",
-                                product.buffer_id,
-                                err
-                            );
-                        }
+                    if let Some(max_recomputed) = recomputed_max {
+                        log::info!(
+                            "qr_power_iter recompute check: product_id={} max_recomputed_abs={:.6e}",
+                            product.buffer_id,
+                            max_recomputed
+                        );
+                    } else {
+                        log::info!(
+                            "qr_power_iter recompute check failed: product_id={}",
+                            product.buffer_id
+                        );
                     }
                 }
                 let recomputed_entry = self.get_entry(&recomputed)?;
@@ -251,20 +231,7 @@ impl WgpuProvider {
                     self.submit(encoder);
                 }
 
-                let max_val = if let Some(val) = recomputed_max {
-                    val
-                } else {
-                    match self.download_exec(product).await {
-                        Ok(host) => host
-                            .data
-                            .iter()
-                            .fold(0.0f64, |acc, value| acc.max(value.abs())),
-                        Err(err) => {
-                            log::warn!("qr_power_iter recompute verification failed: {err}");
-                            0.0
-                        }
-                    }
-                };
+                let max_val = recomputed_max.unwrap_or(0.0);
                 log::info!(
                     "qr_power_iter recompute copy: product_id={} bytes={} post_max={:.6e}",
                     product.buffer_id,
@@ -272,38 +239,6 @@ impl WgpuProvider {
                     max_val
                 );
                 if max_val == 0.0 {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let q_download = self.download_exec(q_handle).await;
-                        if let Ok(lhs_dump) = self.download_exec(lhs_handle).await {
-                            if let Ok(ref q_dump) = q_download {
-                                let dump_dir = Path::new("target/matmul_zero");
-                                let _ = fs::create_dir_all(dump_dir);
-                                let lhs_path = dump_dir.join(format!(
-                                    "lhs_{}_{}.bin",
-                                    product.buffer_id,
-                                    lhs_dump.data.len()
-                                ));
-                                let rhs_path = dump_dir.join(format!(
-                                    "rhs_{}_{}.bin",
-                                    product.buffer_id,
-                                    q_dump.data.len()
-                                ));
-                                let _ = fs::write(&lhs_path, cast_slice(lhs_dump.data.as_slice()));
-                                let _ = fs::write(&rhs_path, cast_slice(q_dump.data.as_slice()));
-                                log::warn!(
-                                    "qr_power_iter dump written: product_id={} lhs_path={} rhs_path={}",
-                                    product.buffer_id,
-                                    lhs_path.display(),
-                                    rhs_path.display()
-                                );
-                            }
-                        }
-                    }
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        log::warn!("qr_power_iter: skipping matmul dump because filesystem APIs are unavailable on wasm");
-                    }
                     log::warn!(
                         "qr_power_iter: recomputed product is still zero; falling back to host QR"
                     );
@@ -328,12 +263,10 @@ impl WgpuProvider {
             self.qr_factor_device(product, rows, cols, Some(q_handle), "runmat-qr-power", true)?;
 
         let mut fallback_needed = false;
-        if let Ok(host_r) = self.download_exec(&r_handle).await {
-            for col in 0..cols {
-                let diag = host_r.data[col + col * cols];
-                if !diag.is_finite() || diag.abs() <= 1.0e-12 {
+        if let Some(r_inv_handle) = r_inv_opt.as_ref() {
+            if let Ok(max_r_inv_abs) = self.tensor_max_abs_scalar_exec(r_inv_handle) {
+                if !max_r_inv_abs.is_finite() {
                     fallback_needed = true;
-                    break;
                 }
             }
         }
