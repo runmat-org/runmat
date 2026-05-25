@@ -230,8 +230,6 @@ pub async fn execute_benchmark(
         });
     }
 
-    engine.set_source_name_override(None);
-
     Ok(())
 }
 

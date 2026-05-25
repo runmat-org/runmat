@@ -89,10 +89,6 @@ impl RunMatSession {
         runmat_hir::set_error_namespace(&namespace);
     }
 
-    pub fn set_source_name_override(&mut self, name: Option<String>) {
-        self.source_name_override = name;
-    }
-
     /// Configure garbage collector
     pub fn configure_gc(&self, config: GcConfig) -> Result<()> {
         gc_configure(config)

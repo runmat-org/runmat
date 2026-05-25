@@ -128,11 +128,11 @@ Call `await session.memoryUsage()` to inspect the current WebAssembly heap. The 
 
 ## Execution streaming & interaction
 
-- `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `execute()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
+- `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `executeRequest()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
 - `ExecuteResult.warnings` exposes structured `{ identifier, message }` entries pulled from MATLAB's warning store, `stdinEvents` captures every prompt/response emitted during the run for transcript panes, and `stdinRequested` is populated when the interpreter suspends while waiting for input.
 - Call `session.cancelExecution()` to cooperatively interrupt a long-running script (e.g., when users press the stop button). The runtime raises `ExecutionCancelled` error, matching desktop builds.
 - `session.setInputHandler(handler)` registers a synchronous callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and can return a string/number/boolean, `{ kind: "keyPress" }`, or `{ error }` to reject the prompt. Returning `null`, `undefined`, `{ pending: true }`, or a Promise signals that the handler will respond asynchronously.
-- When a handler defers, `execute()` resolves with `stdinRequested` containing `{ id, request, waitingMs }`. Call `session.resumeInput(id, value)` once the UI collects the user's response (value follows the same shape as the input handler). `waitingMs` starts at zero and grows until the prompt is satisfied so UIs can show “still waiting…” nudges without forcing a timeout. Use `session.pendingStdinRequests()` to list outstanding prompts (useful when rehydrating a UI after refresh) — each entry carries the same `waitingMs` counter.
+- When a handler defers, `executeRequest()` resolves with `stdinRequested` containing `{ id, request, waitingMs }`. Call `session.resumeInput(id, value)` once the UI collects the user's response (value follows the same shape as the input handler). `waitingMs` starts at zero and grows until the prompt is satisfied so UIs can show “still waiting…” nudges without forcing a timeout. Use `session.pendingStdinRequests()` to list outstanding prompts (useful when rehydrating a UI after refresh) — each entry carries the same `waitingMs` counter.
 
 ## Workspace metadata & variable inspection
 
@@ -186,7 +186,7 @@ Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat R
 
 ## Lifecycle
 
-Each `RunMatSessionHandle` now exposes `session.dispose()`. Call it when tearing down the editor/REPL view so the runtime can cancel pending executions, release stdin handlers, and drop any registered plot canvases. The wrapper marks the instance as disposed and throws helpful errors if a host accidentally calls `execute()` afterwards. `dispose()` is idempotent, so repeated calls are safe.
+Each `RunMatSessionHandle` now exposes `session.dispose()`. Call it when tearing down the editor/REPL view so the runtime can cancel pending executions, release stdin handlers, and drop any registered plot canvases. The wrapper marks the instance as disposed and throws helpful errors if a host accidentally calls `executeRequest()` afterwards. `dispose()` is idempotent, so repeated calls are safe.
 
 ### Plotting performance knobs
 

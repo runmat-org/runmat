@@ -358,6 +358,18 @@ export type RuntimeFlow =
   | { kind: "comma-list"; values: unknown[] }
   | { kind: "dynamic-list"; id: string };
 
+export interface ExecuteRequest {
+  source: {
+    name: string;
+    text: string;
+  };
+  compatibility?: LanguageCompatMode;
+  hostPolicy?: {
+    topLevelAwait?: boolean;
+  };
+  requestedOutputs?: number;
+}
+
 export interface ExecuteResult {
   flow: RuntimeFlow;
   valueText?: string;
@@ -542,7 +554,7 @@ export interface MemoryUsage {
 }
 
 export interface RunMatSessionHandle {
-  execute(source: string): Promise<ExecuteResult>;
+  executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
   clearWorkspace(): void;
@@ -601,7 +613,7 @@ interface NativeInitOptions {
 }
 
 interface RunMatNativeSession {
-  execute(source: string): Promise<ExecuteResult>;
+  executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
@@ -1199,10 +1211,10 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
-  async execute(source: string): Promise<ExecuteResult> {
+  async executeRequest(request: ExecuteRequest): Promise<ExecuteResult> {
     this.ensureActive();
     try {
-      return await this.native.execute(source);
+      return await this.native.executeRequest(request);
     } catch (error) {
       throw coerceRunMatError(error);
     }
@@ -1811,5 +1823,5 @@ export const __internals = {
 };
 
 function isNativeSession(value: unknown): value is RunMatNativeSession {
-  return Boolean(value && typeof (value as RunMatNativeSession).execute === "function");
+  return Boolean(value && typeof (value as RunMatNativeSession).executeRequest === "function");
 }

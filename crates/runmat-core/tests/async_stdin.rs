@@ -1,7 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use anyhow::Result;
-use futures::executor::block_on;
 use runmat_builtins::Value;
 use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
@@ -59,9 +58,11 @@ fn input_prompts_return_value() -> Result<()> {
         }
     });
 
-    let result =
-        block_on(session.execute("value = input('Enter value: '); value = value + 1; value"))
-            .map_err(anyhow::Error::new)?;
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut session,
+        "value = input('Enter value: '); value = value + 1; value",
+    )
+    .map_err(anyhow::Error::new)?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(42.0));
     assert_eq!(result.stdin_events.len(), 1);
@@ -92,8 +93,9 @@ fn multiple_inputs_call_handler_in_order() -> Result<()> {
         }
     });
 
-    let result = block_on(
-        session.execute("first = input('First: '); second = input('Second: ', \"s\"); second"),
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut session,
+        "first = input('First: '); second = input('Second: ', \"s\"); second",
     )
     .map_err(anyhow::Error::new)?;
     let value = result
@@ -110,7 +112,8 @@ fn char_literal_round_trips() -> Result<()> {
     let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
-    let result = block_on(session.execute("'s'")).map_err(anyhow::Error::new)?;
+    let result = runmat_core::execute_text_request_for_testing(&mut session, "'s'")
+        .map_err(anyhow::Error::new)?;
     let value = result.value.expect("char literal should return a value");
     assert_eq!(value_as_char_row(&value), Some("s".to_string()));
     Ok(())
@@ -133,7 +136,8 @@ fn pause_uses_keypress_handler() -> Result<()> {
     });
 
     let result =
-        block_on(session.execute("pause; value = 1; value")).map_err(anyhow::Error::new)?;
+        runmat_core::execute_text_request_for_testing(&mut session, "pause; value = 1; value")
+            .map_err(anyhow::Error::new)?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(1.0));
     assert_eq!(result.stdin_events.len(), 1);
@@ -154,7 +158,8 @@ fn pending_handler_returns_error() -> Result<()> {
         Err("input handler is unavailable".to_string())
     });
 
-    let result = block_on(session.execute("pause; value = 1; value"));
+    let result =
+        runmat_core::execute_text_request_for_testing(&mut session, "pause; value = 1; value");
     match result {
         Err(RunError::Runtime(err)) => {
             assert_eq!(
@@ -190,10 +195,11 @@ fn spawn_of_async_function_triggers_pause_handler_before_await() -> Result<()> {
         }
     });
 
-    let result = block_on(session.execute(
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut session,
         "async function y = wait_for_key(); pause; y = 1; end; \
          t = spawn(wait_for_key()); marker = 7;",
-    ))
+    )
     .map_err(anyhow::Error::new)?;
     assert!(
         result.error.is_none(),
@@ -209,7 +215,8 @@ fn spawn_of_async_function_triggers_pause_handler_before_await() -> Result<()> {
         [InputRequestKind::KeyPress]
     ));
 
-    let marker = block_on(session.execute("marker")).map_err(anyhow::Error::new)?;
+    let marker = runmat_core::execute_text_request_for_testing(&mut session, "marker")
+        .map_err(anyhow::Error::new)?;
     let marker_value = marker
         .value
         .expect("marker readback should produce a value");
@@ -244,11 +251,12 @@ fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
         }
     });
 
-    let result = block_on(session.execute(
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut session,
         "async function y = first(); input('first: '); y = 1; end; \
          async function y = second(); input('second: '); y = 2; end; \
          t1 = spawn(first()); t2 = spawn(second()); out2 = await(t2); out1 = await(t1);",
-    ))
+    )
     .map_err(anyhow::Error::new)?;
     assert!(
         result.error.is_none(),
@@ -257,11 +265,13 @@ fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
     assert_eq!(result.stdin_events.len(), 2);
     assert_eq!(prompts.lock().unwrap().as_slice(), &["first: ", "second: "]);
 
-    let out1 = block_on(session.execute("out1")).map_err(anyhow::Error::new)?;
+    let out1 = runmat_core::execute_text_request_for_testing(&mut session, "out1")
+        .map_err(anyhow::Error::new)?;
     let out1_value = out1.value.expect("out1 readback should produce a value");
     assert_eq!(value_as_f64(&out1_value), Some(1.0));
 
-    let out2 = block_on(session.execute("out2")).map_err(anyhow::Error::new)?;
+    let out2 = runmat_core::execute_text_request_for_testing(&mut session, "out2")
+        .map_err(anyhow::Error::new)?;
     let out2_value = out2.value.expect("out2 readback should produce a value");
     assert_eq!(value_as_f64(&out2_value), Some(2.0));
     Ok(())
@@ -283,11 +293,12 @@ fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
         }
     });
 
-    let result = block_on(session.execute(
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut session,
         "async function y = first(); input('first: '); y = 1; end; \
          async function y = second(); input('second: '); y = 2; end; \
          t1 = spawn(first()); t2 = spawn(second()); marker = 7;",
-    ));
+    );
 
     match result {
         Err(RunError::Runtime(err)) => {
@@ -323,10 +334,11 @@ fn async_call_without_await_or_spawn_stays_lazy_until_await() -> Result<()> {
         }
     });
 
-    let result = block_on(session.execute(
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut session,
         "async function y = asks(); input('lazy: '); y = 1; end; \
          fut = asks(); marker = 9;",
-    ))
+    )
     .map_err(anyhow::Error::new)?;
     assert!(
         result.error.is_none(),
@@ -342,18 +354,21 @@ fn async_call_without_await_or_spawn_stays_lazy_until_await() -> Result<()> {
         "direct async call should not prompt until awaited or spawned"
     );
 
-    let marker = block_on(session.execute("marker")).map_err(anyhow::Error::new)?;
+    let marker = runmat_core::execute_text_request_for_testing(&mut session, "marker")
+        .map_err(anyhow::Error::new)?;
     let marker_value = marker
         .value
         .expect("marker readback should produce a value");
     assert_eq!(value_as_f64(&marker_value), Some(9.0));
 
-    let fut = block_on(session.execute("out = await(fut);")).map_err(anyhow::Error::new)?;
+    let fut = runmat_core::execute_text_request_for_testing(&mut session, "out = await(fut);")
+        .map_err(anyhow::Error::new)?;
     assert!(
         fut.error.is_none(),
         "awaiting deferred future should complete without runtime error"
     );
-    let out = block_on(session.execute("out")).map_err(anyhow::Error::new)?;
+    let out = runmat_core::execute_text_request_for_testing(&mut session, "out")
+        .map_err(anyhow::Error::new)?;
     let fut_value = out
         .value
         .expect("awaited future result should be materialized in out");
@@ -386,10 +401,11 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
         }
     });
 
-    let deferred = block_on(session.execute(
+    let deferred = runmat_core::execute_text_request_for_testing(
+        &mut session,
         "async function y = asks(); input('spawned: '); y = 5; end; \
          fut = asks(); marker = 3;",
-    ))
+    )
     .map_err(anyhow::Error::new)?;
     assert!(
         deferred.error.is_none(),
@@ -405,8 +421,11 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
         "future creation should not trigger input prompts"
     );
 
-    let spawned = block_on(session.execute("t = spawn(fut); marker_after_spawn = 7;"))
-        .map_err(anyhow::Error::new)?;
+    let spawned = runmat_core::execute_text_request_for_testing(
+        &mut session,
+        "t = spawn(fut); marker_after_spawn = 7;",
+    )
+    .map_err(anyhow::Error::new)?;
     assert!(
         spawned.error.is_none(),
         "spawning deferred future should not raise runtime errors"
@@ -422,7 +441,8 @@ fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
         "spawn should forward deferred future prompt through input handler"
     );
 
-    let marker = block_on(session.execute("marker_after_spawn")).map_err(anyhow::Error::new)?;
+    let marker = runmat_core::execute_text_request_for_testing(&mut session, "marker_after_spawn")
+        .map_err(anyhow::Error::new)?;
     let marker_value = marker
         .value
         .expect("spawn follow-up marker should be readable");

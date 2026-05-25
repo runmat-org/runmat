@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use crate::execution::{
     ExecutionStats, ExecutionStreamEntry, ExecutionStreamKind, InputRequest, InputRequestKind,
-    InputResponse, SessionExecutionResult, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
+    InputResponse, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
 };
 use crate::fusion::{build_fusion_snapshot, FusionPlanSnapshot};
 use crate::profiling::{gather_profiling, reset_provider_telemetry};
@@ -90,10 +90,8 @@ pub struct RunMatSession {
     callstack_limit: usize,
     /// Namespace prefix for runtime/semantic error identifiers.
     error_namespace: String,
-    /// Default source name used for diagnostics.
-    default_source_name: String,
-    /// Override source name for the current execution.
-    source_name_override: Option<String>,
+    /// Active source name for diagnostics (set from execution requests).
+    active_source_name: String,
     pub(crate) telemetry_consent: bool,
     pub(crate) telemetry_client_id: Option<String>,
     pub(crate) telemetry_platform: TelemetryPlatformInfo,

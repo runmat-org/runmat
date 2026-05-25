@@ -1,6 +1,5 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use futures::executor::block_on;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
 use std::path::PathBuf;
@@ -41,7 +40,7 @@ fn fprintf_rm138_repro_is_stable_end_to_end() {
         x = single(3.14);
         fprintf("Value: %.4f\n", double(x));
     "#;
-    let result = block_on(engine.execute(script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, script).unwrap();
     assert_eq!(stdout_stream(&result), "Price: $42.50\nValue: 3.1400\n");
 }
 
@@ -52,7 +51,7 @@ fn disp_inline_cast_argument_is_stable_end_to_end() {
         x = single(3.14);
         disp(double(x));
     "#;
-    let result = block_on(engine.execute(script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, script).unwrap();
     let rendered = stdout_stream(&result);
     let parsed: f64 = rendered
         .trim()
@@ -72,7 +71,11 @@ fn disp_inline_cast_argument_is_stable_end_to_end() {
 #[test]
 fn fprintf_stream_routing_is_correct() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = block_on(engine.execute("fprintf('out'); fprintf(2, 'err');")).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "fprintf('out'); fprintf(2, 'err');",
+    )
+    .unwrap();
     assert_eq!(stdout_stream(&result), "out");
     assert_eq!(stderr_stream(&result), "err");
 }
@@ -80,7 +83,11 @@ fn fprintf_stream_routing_is_correct() {
 #[test]
 fn fprintf_grouping_and_i_flag_smoke() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = block_on(engine.execute("fprintf('%''d|%Id', 12345, 42);")).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "fprintf('%''d|%Id', 12345, 42);",
+    )
+    .unwrap();
     assert_eq!(stdout_stream(&result), "12,345|42");
 }
 
@@ -93,7 +100,7 @@ fn fprintf_file_roundtrip_and_count_work_end_to_end() {
         "fid = fopen('{}', 'w'); n = fprintf(fid, 'hello-%d', 7); fclose(fid); fprintf('|%d|', n);",
         path_text
     );
-    let result = block_on(engine.execute(&script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, &script).unwrap();
     assert!(
         result.error.is_none(),
         "expected no execution error, got {:?}",
@@ -114,7 +121,7 @@ fn fprintf_encoding_alias_smoke_utf8_underscore() {
         "fid = fopen('{}', 'w', 'native', 'utf_8'); fprintf(fid, '%s', 'é'); fclose(fid);",
         path_text
     );
-    let result = block_on(engine.execute(&script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, &script).unwrap();
     assert!(
         result.error.is_none(),
         "expected no execution error, got {:?}",
@@ -128,7 +135,7 @@ fn fprintf_encoding_alias_smoke_utf8_underscore() {
 #[test]
 fn fprintf_format_error_propagates_to_session_boundary() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = block_on(engine.execute("fprintf('%q', 1);"));
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, "fprintf('%q', 1);");
     match result {
         Ok(exec) => {
             let identifier = exec.error.as_ref().and_then(|err| err.identifier());

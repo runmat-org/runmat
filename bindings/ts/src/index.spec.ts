@@ -16,6 +16,7 @@ import {
   type RunMatSessionHandle,
   type RunMatFilesystemProvider,
   type RunMatSnapshotSource,
+  type ExecuteRequest,
   type ExecuteResult,
   type GpuStatus,
   type SessionStats,
@@ -190,7 +191,7 @@ describe("coerceFigureError", () => {
 type NativeModule = Parameters<typeof __internals.setNativeModuleOverride>[0];
 
 interface NativeSession {
-  execute(source: string): ExecuteResult;
+  executeRequest(request: ExecuteRequest): ExecuteResult;
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
@@ -219,7 +220,7 @@ const baseExecuteResult: ExecuteResult = {
 
 function createMockNativeSession(overrides: Partial<NativeSession> = {}): NativeSession {
   return {
-    execute: () => baseExecuteResult,
+    executeRequest: () => baseExecuteResult,
     resetSession: () => {},
     stats: () => ({
       totalExecutions: 0,
@@ -779,7 +780,7 @@ describe("ExecuteResult passthroughs", () => {
       registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
-          execute: () => ({
+          executeRequest: () => ({
             ...baseExecuteResult,
             stdinRequested: request
           })
@@ -788,7 +789,9 @@ describe("ExecuteResult passthroughs", () => {
     __internals.setNativeModuleOverride(native);
 
     const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
-    const result = await session.execute("disp('prompt')");
+    const result = await session.executeRequest({
+      source: { name: "<test>", text: "disp('prompt')" }
+    });
     expect(result.stdinRequested).toEqual(request);
     expect(result.stdinRequested?.waitingMs).toBe(1500);
   });
@@ -799,7 +802,7 @@ describe("ExecuteResult passthroughs", () => {
       registerFsProvider: () => {},
       initRunMat: async () =>
         createMockNativeSession({
-          execute: () => ({
+          executeRequest: () => ({
             ...baseExecuteResult,
             stdout: [{ stream: "clear", text: "", timestampMs: 123 }]
           })
@@ -808,7 +811,9 @@ describe("ExecuteResult passthroughs", () => {
     __internals.setNativeModuleOverride(native);
 
     const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
-    const result = await session.execute("clc;");
+    const result = await session.executeRequest({
+      source: { name: "<test>", text: "clc;" }
+    });
     expect(result.stdout).toEqual([{ stream: "clear", text: "", timestampMs: 123 }]);
   });
 });

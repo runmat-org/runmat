@@ -112,7 +112,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
-    session.set_source_name_override(Some("<wasm>".to_string()));
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,

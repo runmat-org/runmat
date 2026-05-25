@@ -22,6 +22,7 @@ use runmat_runtime::{
     runtime_plot_export_figure_scene, runtime_plot_import_figure_scene_async,
     runtime_plot_import_figure_scene_from_path_async, ReplayErrorKind,
 };
+use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use tracing::{info, info_span};
 use wasm_bindgen::prelude::*;
@@ -89,10 +90,35 @@ impl RunMatWasm {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteRequestSourcePayload {
+    name: String,
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteHostPolicyPayload {
+    top_level_await: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecuteRequestPayload {
+    source: ExecuteRequestSourcePayload,
+    compatibility: Option<String>,
+    host_policy: Option<ExecuteHostPolicyPayload>,
+    requested_outputs: Option<u32>,
+}
+
 #[wasm_bindgen]
 impl RunMatWasm {
-    #[wasm_bindgen(js_name = execute)]
-    pub async fn execute(&self, source: String) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = executeRequest)]
+    pub async fn execute_request_js(&self, request_value: JsValue) -> Result<JsValue, JsValue> {
+        let request_payload: ExecuteRequestPayload = serde_wasm_bindgen::from_value(request_value)
+            .map_err(|err| js_error(&format!("executeRequest payload parse failed: {err}")))?;
+        let source = request_payload.source.text.clone();
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",
@@ -145,15 +171,36 @@ impl RunMatWasm {
             std::mem::take(&mut *slot)
         };
 
-        let request = runmat_core::abi::ExecutionRequest::for_source(
+        let mut request = runmat_core::abi::ExecutionRequest::for_source(
             runmat_core::abi::SourceInput::Text {
-                name: "<wasm>".to_string(),
+                name: request_payload.source.name,
                 text: source.clone(),
             },
             self.config.borrow().language_compat,
             runmat_core::abi::HostExecutionPolicy::default(),
             session.workspace_handle(),
         );
+        if let Some(compatibility) = request_payload.compatibility.as_deref() {
+            if let Some(parsed) = parse_language_compat_from_str(compatibility) {
+                request.compatibility = parsed;
+            } else {
+                return Err(js_error(&format!(
+                    "executeRequest compatibility is invalid: {compatibility}"
+                )));
+            }
+        }
+        if let Some(host_policy) = request_payload.host_policy {
+            if let Some(top_level_await) = host_policy.top_level_await {
+                request.host_policy.top_level_await = top_level_await;
+            }
+        }
+        if let Some(requested_outputs) = request_payload.requested_outputs {
+            request.requested_outputs = match requested_outputs {
+                0 => runmat_hir::RequestedOutputCount::Zero,
+                1 => runmat_hir::RequestedOutputCount::One,
+                count => runmat_hir::RequestedOutputCount::Exactly(count as usize),
+            };
+        }
         let exec_result = session.execute_request(request).await;
         *self.session.borrow_mut() = session;
         let payload = match exec_result {
@@ -275,7 +322,6 @@ impl RunMatWasm {
         session.set_compat_mode(config.language_compat);
         session.set_callstack_limit(config.callstack_limit);
         session.set_error_namespace(config.error_namespace.clone());
-        session.set_source_name_override(Some("<wasm>".to_string()));
         if self.telemetry_sink.is_some() {
             session.set_telemetry_platform_info(TelemetryPlatformInfo {
                 os: Some("web".to_string()),

@@ -229,6 +229,19 @@ fn insert_registry_function_without_replacing_name(
 }
 
 impl RunMatSession {
+    #[cfg(test)]
+    pub(crate) fn compile_input_for_source_name(
+        &mut self,
+        source_name: &str,
+        input: &str,
+    ) -> std::result::Result<PreparedExecution, RunError> {
+        let previous_source_name = self.active_source_name.clone();
+        self.active_source_name = source_name.to_string();
+        let result = self.compile_input(input);
+        self.active_source_name = previous_source_name;
+        result
+    }
+
     pub(crate) fn compile_input(
         &mut self,
         input: &str,

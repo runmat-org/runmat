@@ -47,16 +47,69 @@ pub fn format_tokens(input: &str) -> String {
 /// Execute MATLAB/Octave code and return the result as a formatted string
 pub async fn execute_and_format(input: &str) -> String {
     match RunMatSession::new() {
-        Ok(mut engine) => match engine.execute_outcome(input).await {
-            Ok(outcome) => match outcome.diagnostics.first() {
-                Some(diagnostic) => format!("Error: {}", diagnostic.message),
-                None => match outcome.flow {
-                    abi::RuntimeFlow::Single(value) => format!("{value:?}"),
-                    _ => "".to_string(),
+        Ok(mut engine) => {
+            let request = abi::ExecutionRequest::for_source(
+                abi::SourceInput::Text {
+                    name: "<format>".to_string(),
+                    text: input.to_string(),
                 },
-            },
-            Err(e) => format!("Error: {e}"),
-        },
+                engine.compat_mode(),
+                abi::HostExecutionPolicy::default(),
+                engine.workspace_handle(),
+            );
+            match engine.execute_request(request).await {
+                Ok(outcome) => match outcome.diagnostics.first() {
+                    Some(diagnostic) => format!("Error: {}", diagnostic.message),
+                    None => match outcome.flow {
+                        abi::RuntimeFlow::Single(value) => format!("{value:?}"),
+                        _ => "".to_string(),
+                    },
+                },
+                Err(e) => format!("Error: {e}"),
+            }
+        }
         Err(e) => format!("Engine Error: {e}"),
     }
+}
+
+/// Test-only helper that executes a text source via `ExecutionRequest`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn execute_text_request_for_testing(
+    session: &mut RunMatSession,
+    source_text: &str,
+) -> Result<SessionExecutionResult, RunError> {
+    let request = abi::ExecutionRequest::for_source(
+        abi::SourceInput::Text {
+            name: "<test>".to_string(),
+            text: source_text.to_string(),
+        },
+        session.compat_mode(),
+        abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    let outcome = futures::executor::block_on(session.execute_request(request))?;
+    let workspace = session.workspace_snapshot();
+    let warnings = outcome
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.severity == abi::DiagnosticSeverity::Warning)
+        .map(|diag| runmat_runtime::warning_store::RuntimeWarning {
+            identifier: diag.code.clone(),
+            message: diag.message.clone(),
+        })
+        .collect();
+    Ok(SessionExecutionResult {
+        value: outcome.flow.durable_workspace_value().cloned(),
+        execution_time_ms: outcome.execution_time_ms,
+        used_jit: outcome.used_jit,
+        error: None,
+        type_info: outcome.type_info,
+        streams: outcome.streams,
+        workspace,
+        figures_touched: outcome.figures_touched,
+        warnings,
+        profiling: outcome.profiling,
+        fusion_plan: outcome.fusion_plan,
+        stdin_events: outcome.stdin_events,
+    })
 }

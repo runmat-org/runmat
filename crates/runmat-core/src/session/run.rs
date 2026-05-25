@@ -47,35 +47,6 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
 }
 
 impl RunMatSession {
-    /// Execute MATLAB/Octave code
-    pub async fn execute(
-        &mut self,
-        input: &str,
-    ) -> std::result::Result<SessionExecutionResult, RunError> {
-        self.execute_internal(input, false)
-            .await
-            .map(session_result_from_execution)
-    }
-
-    /// Execute MATLAB/Octave code and return the runtime/workspace ABI outcome.
-    pub async fn execute_outcome(
-        &mut self,
-        input: &str,
-    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        let request = crate::abi::ExecutionRequest::for_source(
-            crate::abi::SourceInput::Text {
-                name: self.current_source_name().to_string(),
-                text: input.to_string(),
-            },
-            self.compat_mode,
-            crate::abi::HostExecutionPolicy {
-                top_level_await: self.top_level_await_enabled,
-            },
-            self.abi_workspace_handle,
-        );
-        self.execute_request(request).await
-    }
-
     /// Parse, lower, compile, and execute input through the runtime/workspace ABI boundary.
     pub async fn run(
         &mut self,
@@ -118,13 +89,13 @@ impl RunMatSession {
         let (source_name, source_text) = source_input_text(request.source)?;
         let previous_compat = self.compat_mode;
         let previous_top_level_await_enabled = self.top_level_await_enabled;
-        let previous_source_override = self.source_name_override.clone();
+        let previous_source_name = self.active_source_name.clone();
         let previous_workspace_handle = self.abi_workspace_handle;
         let previous_source_identity = self.active_source_identity.clone();
 
         self.compat_mode = request.compatibility;
         self.top_level_await_enabled = request.host_policy.top_level_await;
-        self.source_name_override = Some(source_name);
+        self.active_source_name = source_name;
         self.abi_workspace_handle = request.workspace;
         self.active_source_identity = resolve_source_identity(&source_input, &source_text);
 
@@ -132,7 +103,7 @@ impl RunMatSession {
 
         self.compat_mode = previous_compat;
         self.top_level_await_enabled = previous_top_level_await_enabled;
-        self.source_name_override = previous_source_override;
+        self.active_source_name = previous_source_name;
         self.abi_workspace_handle = previous_workspace_handle;
         self.active_source_identity = previous_source_identity;
 
@@ -1079,9 +1050,6 @@ impl RunMatSession {
         Ok(SessionExecution {
             outcome,
             workspace_snapshot,
-            public_value,
-            error,
-            warnings,
         })
     }
 
@@ -1263,26 +1231,6 @@ fn first_entry_statement(assembly: &runmat_hir::HirAssembly) -> Option<&runmat_h
 struct SessionExecution {
     outcome: crate::abi::ExecutionOutcome,
     workspace_snapshot: WorkspaceSnapshot,
-    public_value: Option<Value>,
-    error: Option<RuntimeError>,
-    warnings: Vec<runmat_runtime::warning_store::RuntimeWarning>,
-}
-
-fn session_result_from_execution(execution: SessionExecution) -> SessionExecutionResult {
-    SessionExecutionResult {
-        value: execution.public_value,
-        execution_time_ms: execution.outcome.execution_time_ms,
-        used_jit: execution.outcome.used_jit,
-        error: execution.error,
-        type_info: execution.outcome.type_info,
-        streams: execution.outcome.streams,
-        workspace: execution.workspace_snapshot,
-        figures_touched: execution.outcome.figures_touched,
-        warnings: execution.warnings,
-        profiling: execution.outcome.profiling,
-        fusion_plan: execution.outcome.fusion_plan,
-        stdin_events: execution.outcome.stdin_events,
-    }
 }
 
 fn source_input_text(

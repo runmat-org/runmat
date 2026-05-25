@@ -15,11 +15,13 @@ fn test_jit_vs_interpreter_execution() {
     gc_test_context(|| {
         // Test with JIT enabled
         let mut jit_engine = RunMatSession::with_options(true, false).unwrap();
-        let jit_result = block_on(jit_engine.execute("x = 5 + 3")).unwrap();
+        let jit_result =
+            runmat_core::execute_text_request_for_testing(&mut jit_engine, "x = 5 + 3").unwrap();
 
         // Test with JIT disabled
         let mut interp_engine = RunMatSession::with_options(false, false).unwrap();
-        let interp_result = block_on(interp_engine.execute("x = 5 + 3")).unwrap();
+        let interp_result =
+            runmat_core::execute_text_request_for_testing(&mut interp_engine, "x = 5 + 3").unwrap();
 
         // Both should succeed
         assert!(jit_result.error.is_none());
@@ -42,7 +44,7 @@ fn test_hotspot_compilation_simulation() {
 
         for _ in 0..15 {
             // Execute multiple times to cross JIT threshold
-            let result = block_on(engine.execute(code)).unwrap();
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, code).unwrap();
             assert!(result.error.is_none());
 
             if result.used_jit {
@@ -77,7 +79,7 @@ t1 = 2*sqrt(2*(0.8*h0)/g);
 exactStopTime = t0 + t1/(1-ratio)";
 
         for _ in 0..12 {
-            let result = block_on(engine.execute(code)).unwrap();
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, code).unwrap();
             assert!(result.error.is_none());
             let value = result.value.as_ref().expect("final assignment emits value");
             let numeric: f64 = value.try_into().unwrap();
@@ -117,7 +119,7 @@ fn test_gc_integration_during_execution() {
         // Execute operations that create objects
         for i in 0..10 {
             let code = format!("matrix{i} = [1, 2; 3, 4]");
-            let result = block_on(engine.execute(&code));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, &code);
             assert!(result.is_ok());
         }
 
@@ -136,18 +138,18 @@ fn test_error_recovery_and_continued_execution() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Execute valid code
-        let result1 = block_on(engine.execute("x = 1"));
+        let result1 = runmat_core::execute_text_request_for_testing(&mut engine, "x = 1");
         assert!(result1.is_ok());
 
         // Execute invalid code
-        let result2 = block_on(engine.execute("y = [1, 2,")); // Incomplete
+        let result2 = runmat_core::execute_text_request_for_testing(&mut engine, "y = [1, 2,"); // Incomplete
         match result2 {
             Err(RunError::Syntax(_)) => {}
             other => panic!("expected syntax error for incomplete matrix literal, got {other:?}"),
         }
 
         // Engine should recover and continue working
-        let result3 = block_on(engine.execute("z = 3"));
+        let result3 = runmat_core::execute_text_request_for_testing(&mut engine, "z = 3");
         assert!(result3.is_ok());
 
         // Statistics should reflect all execution attempts, including parse failures.
@@ -169,7 +171,7 @@ fn test_complex_mathematical_operations() {
         ];
 
         for op in &complex_operations {
-            let result = block_on(engine.execute(op));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, op);
             assert!(result.is_ok(), "Failed to execute: {op}");
             assert!(result.unwrap().error.is_none());
         }
@@ -184,7 +186,7 @@ fn test_strict_mode_rejects_runmat_extensions() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
         engine.set_compat_mode(CompatMode::Strict);
-        let err = block_on(engine.execute("t = spawn(1);"))
+        let err = runmat_core::execute_text_request_for_testing(&mut engine, "t = spawn(1);")
             .expect_err("strict mode should reject RunMat extensions");
         let RunError::Semantic(err) = err else {
             panic!("expected semantic strict-mode error");
@@ -230,13 +232,14 @@ fn test_request_host_policy_disables_top_level_await() {
 fn test_await_passes_through_non_spawn_operand_at_runtime() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("y = await(1);"))
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "y = await(1);")
             .expect("execution should complete successfully");
         assert!(
             result.error.is_none(),
             "await pass-through for non-task values should not error"
         );
-        let readback = block_on(engine.execute("y")).expect("readback should succeed");
+        let readback = runmat_core::execute_text_request_for_testing(&mut engine, "y")
+            .expect("readback should succeed");
         assert_eq!(readback.value, Some(runmat_builtins::Value::Num(1.0)));
     });
 }
@@ -245,17 +248,22 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
 fn test_spawn_handle_is_consumed_after_await() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let first_await = block_on(engine.execute("t = spawn(41 + 1); first = await(t);"))
-            .expect("first await execution should complete successfully");
+        let first_await = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "t = spawn(41 + 1); first = await(t);",
+        )
+        .expect("first await execution should complete successfully");
         assert!(
             first_await.error.is_none(),
             "first await should not report runtime errors"
         );
 
-        let first = block_on(engine.execute("first")).expect("first readback should succeed");
+        let first = runmat_core::execute_text_request_for_testing(&mut engine, "first")
+            .expect("first readback should succeed");
         assert_eq!(first.value, Some(runmat_builtins::Value::Num(42.0)));
 
-        let second_await = block_on(engine.execute("second = await(t);"));
+        let second_await =
+            runmat_core::execute_text_request_for_testing(&mut engine, "second = await(t);");
         match second_await {
             Err(RunError::Runtime(err)) => {
                 assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
@@ -274,39 +282,50 @@ fn test_control_flow_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
 
-        let result = block_on(engine.execute("if 1 > 0; x = 10; end"))
-            .expect("if-statement execution should succeed");
+        let result =
+            runmat_core::execute_text_request_for_testing(&mut engine, "if 1 > 0; x = 10; end")
+                .expect("if-statement execution should succeed");
         assert!(
             result.error.is_none(),
             "if-statement should not report runtime errors"
         );
 
-        let result = block_on(engine.execute("if 0 > 1; y = 20; else; y = 30; end"))
-            .expect("if-else execution should succeed");
+        let result = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "if 0 > 1; y = 20; else; y = 30; end",
+        )
+        .expect("if-else execution should succeed");
         assert!(
             result.error.is_none(),
             "if-else should not report runtime errors"
         );
 
-        let result = block_on(engine.execute("for i = 1:3; z = i * 2; end"))
-            .expect("for-loop execution should succeed");
+        let result = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "for i = 1:3; z = i * 2; end",
+        )
+        .expect("for-loop execution should succeed");
         assert!(
             result.error.is_none(),
             "for-loop should not report runtime errors"
         );
 
-        let result = block_on(engine.execute("while 0 < 1; break; end"))
-            .expect("while-loop execution should succeed");
+        let result =
+            runmat_core::execute_text_request_for_testing(&mut engine, "while 0 < 1; break; end")
+                .expect("while-loop execution should succeed");
         assert!(
             result.error.is_none(),
             "while-loop should not report runtime errors"
         );
 
-        let x = block_on(engine.execute("x")).expect("x readback should succeed");
+        let x = runmat_core::execute_text_request_for_testing(&mut engine, "x")
+            .expect("x readback should succeed");
         assert_eq!(x.value, Some(runmat_builtins::Value::Num(10.0)));
-        let y = block_on(engine.execute("y")).expect("y readback should succeed");
+        let y = runmat_core::execute_text_request_for_testing(&mut engine, "y")
+            .expect("y readback should succeed");
         assert_eq!(y.value, Some(runmat_builtins::Value::Num(30.0)));
-        let z = block_on(engine.execute("z")).expect("z readback should succeed");
+        let z = runmat_core::execute_text_request_for_testing(&mut engine, "z")
+            .expect("z readback should succeed");
         assert_eq!(z.value, Some(runmat_builtins::Value::Num(6.0)));
     });
 }
@@ -319,7 +338,7 @@ fn test_memory_usage_under_load() {
         // Create many objects to test memory management
         for i in 0..50 {
             let code = format!("var{} = [{}; {}; {}]", i, i, i + 1, i + 2);
-            let result = block_on(engine.execute(&code));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, &code);
             assert!(result.is_ok());
         }
 
@@ -333,7 +352,7 @@ fn test_memory_usage_under_load() {
         let _ = runmat_gc::gc_collect_major();
 
         // Should still be able to execute after GC
-        let result = block_on(engine.execute("final = 42"));
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "final = 42");
         assert!(result.is_ok());
     });
 }
@@ -344,7 +363,7 @@ fn test_execution_timing_accuracy() {
         let mut engine = RunMatSession::new().unwrap();
 
         let start = Instant::now();
-        let result = block_on(engine.execute("x = 1 + 1"));
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = 1 + 1");
         let elapsed = start.elapsed();
 
         assert!(result.is_ok());
@@ -366,8 +385,9 @@ fn test_verbose_mode_output() {
 
         let code = "test = 1 + 2";
 
-        let verbose_result = block_on(verbose_engine.execute(code));
-        let quiet_result = block_on(quiet_engine.execute(code));
+        let verbose_result =
+            runmat_core::execute_text_request_for_testing(&mut verbose_engine, code);
+        let quiet_result = runmat_core::execute_text_request_for_testing(&mut quiet_engine, code);
 
         assert!(verbose_result.is_ok());
         assert!(quiet_result.is_ok());
@@ -388,7 +408,7 @@ fn test_statistics_accuracy() {
         let num_executions = 7;
         for i in 0..num_executions {
             let code = format!("val{i} = {i}");
-            let result = block_on(engine.execute(&code));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, &code);
             assert!(result.is_ok());
         }
 
@@ -410,8 +430,8 @@ fn test_engine_state_isolation() {
         let mut engine2 = RunMatSession::new().unwrap();
 
         // Execute different code in each engine
-        block_on(engine1.execute("x = 10")).unwrap();
-        block_on(engine2.execute("y = 20")).unwrap();
+        runmat_core::execute_text_request_for_testing(&mut engine1, "x = 10").unwrap();
+        runmat_core::execute_text_request_for_testing(&mut engine2, "y = 20").unwrap();
 
         let stats1 = engine1.stats();
         let stats2 = engine2.stats();
@@ -441,7 +461,7 @@ fn test_concurrent_engine_usage() {
                 // Don't nest gc_test_context - create engine directly in thread
                 let mut engine = RunMatSession::new().unwrap();
                 let code = format!("thread_var = {thread_id} + 1");
-                let result = block_on(engine.execute(&code));
+                let result = runmat_core::execute_text_request_for_testing(&mut engine, &code);
 
                 let mut results_guard = results_clone.lock().unwrap();
                 results_guard.push((thread_id, result.is_ok()));
@@ -478,7 +498,7 @@ fn test_matrix_operations_integration() {
         ];
 
         for test in &matrix_tests {
-            let result = block_on(engine.execute(test));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, test);
             assert!(result.is_ok(), "Matrix operation failed: {test}");
 
             let exec_result = result.unwrap();
@@ -500,7 +520,7 @@ fn test_performance_degradation_detection() {
 
         for i in 0..20 {
             let code = format!("perf_test_{i} = {i} * 2 + 1");
-            let result = block_on(engine.execute(&code)).unwrap();
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, &code).unwrap();
             execution_times.push(result.execution_time_ms);
         }
 
@@ -529,8 +549,10 @@ fn test_repl_function_definition_and_call_same_statement() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Define and call function in the same statement (this should work)
-        let result =
-            block_on(engine.execute("function y = double(x); y = x * 2; end; result = double(21)"));
+        let result = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "function y = double(x); y = x * 2; end; result = double(21)",
+        );
         assert!(
             result.is_ok(),
             "Function definition and call should succeed"
@@ -556,11 +578,15 @@ fn test_repl_function_persistence() {
                 let mut engine = RunMatSession::new().unwrap();
 
                 // Define function in one command
-                let result1 = block_on(engine.execute("function y = add(a, b); y = a + b; end"));
+                let result1 = runmat_core::execute_text_request_for_testing(
+                    &mut engine,
+                    "function y = add(a, b); y = a + b; end",
+                );
                 assert!(result1.is_ok(), "Function definition should succeed");
 
                 // Use function in another command
-                let result2 = block_on(engine.execute("x = add(10, 20)"));
+                let result2 =
+                    runmat_core::execute_text_request_for_testing(&mut engine, "x = add(10, 20)");
                 assert!(result2.is_ok(), "Function call should succeed");
 
                 // Functions should persist across REPL commands
@@ -583,15 +609,24 @@ fn test_debug_function_context() {
                 let mut engine = RunMatSession::new().unwrap();
 
                 // First, just define a function
-                let result1 = block_on(engine.execute("function y = test_func(x); y = x + 1; end"));
+                let result1 = runmat_core::execute_text_request_for_testing(
+                    &mut engine,
+                    "function y = test_func(x); y = x + 1; end",
+                );
                 assert!(result1.is_ok(), "Function definition should succeed");
 
                 // Try to call a simple builtin to verify engine works
-                let result2 = block_on(engine.execute("builtin_test = abs(-5)"));
+                let result2 = runmat_core::execute_text_request_for_testing(
+                    &mut engine,
+                    "builtin_test = abs(-5)",
+                );
                 assert!(result2.is_ok(), "Builtin call should succeed");
 
                 // Now try to call our user-defined function
-                let result3 = block_on(engine.execute("user_func_test = test_func(10)"));
+                let result3 = runmat_core::execute_text_request_for_testing(
+                    &mut engine,
+                    "user_func_test = test_func(10)",
+                );
                 assert!(result3.is_ok(), "Function call should succeed");
                 let exec_result = result3.unwrap();
                 assert!(

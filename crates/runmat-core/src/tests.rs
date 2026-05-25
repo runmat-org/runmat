@@ -28,16 +28,41 @@ fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool
     }
 }
 
+fn execute_text_request(
+    session: &mut RunMatSession,
+    source_text: &str,
+) -> Result<abi::ExecutionOutcome, RunError> {
+    execute_text_request_named_source(session, "<test>", source_text)
+}
+
+fn execute_text_request_named_source(
+    session: &mut RunMatSession,
+    source_name: &str,
+    source_text: &str,
+) -> Result<abi::ExecutionOutcome, RunError> {
+    let request = abi::ExecutionRequest::for_source(
+        abi::SourceInput::Text {
+            name: source_name.to_string(),
+            text: source_text.to_string(),
+        },
+        session.compat_mode(),
+        abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    block_on(session.execute_request(request))
+}
+
 #[test]
 fn captures_basic_workspace_assignments() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let result = block_on(session.execute("x = 42;")).expect("exec succeeds");
+    let result = execute_text_request(&mut session, "x = 42;").expect("exec succeeds");
     assert!(
-        result
-            .workspace
-            .values
-            .iter()
-            .any(|entry| entry.name == "x"),
+        result.workspace_delta.upserts.iter().any(|upsert| {
+            matches!(
+                &upsert.key,
+                abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x"
+            )
+        }),
         "workspace snapshot should include assigned variable"
     );
 }
@@ -45,7 +70,7 @@ fn captures_basic_workspace_assignments() {
 #[test]
 fn execute_outcome_exposes_runtime_flow() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let outcome = block_on(session.execute_outcome("1 + 1")).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "1 + 1").expect("exec succeeds");
     assert!(
         matches!(outcome.flow, abi::RuntimeFlow::Single(_)),
         "unsuppressed expression should adapt to a single-value ABI flow"
@@ -57,7 +82,7 @@ fn execute_outcome_exposes_runtime_flow() {
 #[test]
 fn execute_outcome_exposes_workspace_upserts() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let outcome = block_on(session.execute_outcome("x = 42;")).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "x = 42;").expect("exec succeeds");
     let upsert = outcome
         .workspace_delta
         .upserts
@@ -75,8 +100,8 @@ fn execute_outcome_exposes_workspace_upserts() {
 #[test]
 fn execute_outcome_exposes_workspace_removals_and_effects() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("x = 1; y = 2;")).expect("seed workspace");
-    let outcome = block_on(session.execute_outcome("clear x;")).expect("clear succeeds");
+    execute_text_request(&mut session, "x = 1; y = 2;").expect("seed workspace");
+    let outcome = execute_text_request(&mut session, "clear x;").expect("clear succeeds");
 
     assert!(outcome.workspace_delta.removals.iter().any(|key| {
         matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x")
@@ -221,13 +246,10 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input("import stats.*; y = summarize(1);")
+        .compile_input_for_source_name(&source_name, "import stats.*; y = summarize(1);")
         .expect("compile");
-    session.set_source_name_override(None);
 
     let calls = &prepared.lowering().hir_index.calls;
     assert!(
@@ -290,12 +312,10 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome =
-        block_on(session.execute_outcome("import pkg.*; v = foo();")).expect("exec succeeds");
-    session.set_source_name_override(None);
+        execute_text_request_named_source(&mut session, &source_name, "import pkg.*; v = foo();")
+            .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -328,11 +348,9 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
-    let outcome = block_on(session.execute_outcome("v = pkg.foo();")).expect("exec succeeds");
-    session.set_source_name_override(None);
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_text_request_named_source(&mut session, &source_name, "v = pkg.foo();")
+        .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -354,12 +372,10 @@ fn execute_outcome_resolves_wildcard_import_without_manifest_when_source_has_pac
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let outcome =
-        block_on(session.execute_outcome("import pkg.*; v = foo();")).expect("exec succeeds");
-    session.set_source_name_override(None);
+        execute_text_request_named_source(&mut session, &source_name, "import pkg.*; v = foo();")
+            .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -392,11 +408,9 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
-    let outcome = block_on(session.execute_outcome("v = add1(41);")).expect("exec succeeds");
-    session.set_source_name_override(None);
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_text_request_named_source(&mut session, &source_name, "v = add1(41);")
+        .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -426,11 +440,9 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
-    let outcome = block_on(session.execute_outcome("v = 1;")).expect("exec succeeds");
-    session.set_source_name_override(None);
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_text_request_named_source(&mut session, &source_name, "v = 1;")
+        .expect("exec succeeds");
 
     assert!(
         outcome.diagnostics.iter().any(|diagnostic| {
@@ -454,9 +466,9 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_with_semicolon() {
     std::fs::write(&source_path, &source).expect("write source file");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(source_path.to_string_lossy().to_string()));
-    let outcome = block_on(session.execute_outcome(&source)).expect("exec succeeds");
-    session.set_source_name_override(None);
+    let source_name = source_path.to_string_lossy().to_string();
+    let outcome = execute_text_request_named_source(&mut session, &source_name, &source)
+        .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -478,9 +490,9 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_without_semicolon()
     std::fs::write(&source_path, &source).expect("write source file");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(source_path.to_string_lossy().to_string()));
-    let outcome = block_on(session.execute_outcome(&source)).expect("exec succeeds");
-    session.set_source_name_override(None);
+    let source_name = source_path.to_string_lossy().to_string();
+    let outcome = execute_text_request_named_source(&mut session, &source_name, &source)
+        .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -500,8 +512,8 @@ fn execute_load_statement_assigns_workspace_bindings_with_semicolon() {
     );
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute(&source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("z = y;")).expect("follow-up succeeds");
+    execute_text_request(&mut session, &source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "z = y;").expect("follow-up succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(
@@ -651,13 +663,10 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input("import statsdep.*; y = summarize(1);")
+        .compile_input_for_source_name(&source_name, "import statsdep.*; y = summarize(1);")
         .expect("compile");
-    session.set_source_name_override(None);
 
     let calls = &prepared.lowering().hir_index.calls;
     assert!(
@@ -709,13 +718,10 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    session.set_source_name_override(Some(
-        tmp.path().join("main.m").to_string_lossy().to_string(),
-    ));
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
     let prepared = session
-        .compile_input("import statsdep.*; f = @summarize;")
+        .compile_input_for_source_name(&source_name, "import statsdep.*; f = @summarize;")
         .expect("compile");
-    session.set_source_name_override(None);
 
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
@@ -761,11 +767,9 @@ roots = ["."]
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let previous = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(tmp.path()).expect("set cwd");
-    session.set_source_name_override(Some("remote:scripts/main.m".to_string()));
     let prepared = session
-        .compile_input("import stats.*; y = summarize(1);")
+        .compile_input_for_source_name("remote:scripts/main.m", "import stats.*; y = summarize(1);")
         .expect("compile");
-    session.set_source_name_override(None);
     std::env::set_current_dir(previous).expect("restore cwd");
 
     assert!(
@@ -803,11 +807,9 @@ roots = ["."]
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let previous = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(tmp.path()).expect("set cwd");
-    session.set_source_name_override(Some("remote:main.m".to_string()));
     let prepared = session
-        .compile_input("import stats.*; y = summarize(1);")
+        .compile_input_for_source_name("remote:main.m", "import stats.*; y = summarize(1);")
         .expect("compile");
-    session.set_source_name_override(None);
     std::env::set_current_dir(previous).expect("restore cwd");
 
     assert!(
@@ -831,8 +833,8 @@ fn end_offset_indexing_uses_semantic_vm() {
         "end-offset indexing should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -852,8 +854,8 @@ fn end_offset_assignment_uses_semantic_vm() {
         "end-offset assignment should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -881,8 +883,8 @@ fn indexed_deletion_uses_semantic_vm() {
         "indexed deletion should lower to explicit delete store bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -910,8 +912,8 @@ fn cell_brace_empty_assignment_is_not_deletion_uses_semantic_vm() {
         "cell brace assignment should not lower to deletion bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -931,8 +933,8 @@ fn complex_matrix_literal_uses_semantic_vm() {
         "complex matrix literal should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -952,8 +954,8 @@ fn complex_indexed_deletion_uses_semantic_vm() {
         "complex indexed deletion should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -973,8 +975,8 @@ fn real_tensor_complex_assignment_uses_semantic_vm() {
         "real tensor complex assignment should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -994,8 +996,8 @@ fn real_tensor_2d_complex_assignment_uses_semantic_vm() {
         "real tensor 2d complex assignment should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1015,8 +1017,8 @@ fn cell_paren_deletion_uses_semantic_vm() {
         "cell paren deletion should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1036,8 +1038,8 @@ fn cell_paren_assignment_uses_semantic_vm() {
         "cell paren assignment should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1057,8 +1059,8 @@ fn cell_2d_paren_assignment_uses_semantic_vm() {
         "2d cell paren assignment should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1078,8 +1080,8 @@ fn cell_2d_linear_indexing_is_column_major_uses_semantic_vm() {
         "2d cell linear indexing should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1099,8 +1101,8 @@ fn cell_2d_expansion_is_column_major_uses_semantic_vm() {
         "2d cell expansion should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1118,8 +1120,8 @@ fn if_else_uses_semantic_vm() {
         "if/else should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1137,8 +1139,8 @@ fn switch_uses_semantic_vm() {
         "switch should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1156,8 +1158,8 @@ fn global_statement_uses_semantic_vm() {
         "global statement should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1184,8 +1186,8 @@ fn range_slice_uses_semantic_vm() {
         "range indexing should lower to slice bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1226,7 +1228,7 @@ fn end_expression_user_function_call_uses_semantic_identity() {
         ))) || (saw_end_numeric_expr && saw_semantic_call),
         "end-expression user calls should carry semantic function identity"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "50"
@@ -1236,8 +1238,11 @@ fn end_expression_user_function_call_uses_semantic_identity() {
 #[test]
 fn end_expression_session_function_call_uses_semantic_identity() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction y = pick(n)\n  y = n;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction y = pick(n)\n  y = n;\nend",
+    )
+    .expect("define session function");
     let source = "x = [10 20 30 40 50 60 70 80]; a = x(pick(end-3));";
     let prepared = session
         .compile_input(source)
@@ -1267,7 +1272,7 @@ fn end_expression_session_function_call_uses_semantic_identity() {
         ))) || (saw_end_numeric_expr && saw_semantic_call),
         "session end-expression user calls should carry semantic function identity"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "50"
@@ -1277,7 +1282,7 @@ fn end_expression_session_function_call_uses_semantic_identity() {
 #[test]
 fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("prefix = 0;")).expect("seed prefix");
+    execute_text_request(&mut session, "prefix = 0;").expect("seed prefix");
     let source = "prefix = prefix + 1; s = 0; for i = 1:3; s = s + i; end; y = s + prefix;";
     let prepared = session.compile_input(source).expect("compile for loop");
     assert!(
@@ -1285,20 +1290,20 @@ fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
         "for range loops should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let y_outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let y_outcome = execute_text_request(&mut session, "y").expect("read y");
     let y = y_outcome
         .flow
         .durable_workspace_value()
         .expect("y should be readable from workspace");
     assert_eq!(y.to_string(), "7");
-    let s_outcome = block_on(session.execute_outcome("s")).expect("read s");
+    let s_outcome = execute_text_request(&mut session, "s").expect("read s");
     let s = s_outcome
         .flow
         .durable_workspace_value()
         .expect("s should be readable from workspace");
     assert_eq!(s.to_string(), "6");
-    let prefix_outcome = block_on(session.execute_outcome("prefix")).expect("read prefix");
+    let prefix_outcome = execute_text_request(&mut session, "prefix").expect("read prefix");
     let prefix = prefix_outcome
         .flow
         .durable_workspace_value()
@@ -1316,8 +1321,8 @@ fn while_loop_uses_semantic_vm_without_rerunning_prefix() {
         "while loops should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1354,8 +1359,8 @@ fn range_assignment_uses_semantic_vm() {
         "range assignment should not rely on StoreIndex fallback"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1392,8 +1397,8 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
         "range vector assignment should not rely on StoreIndex fallback"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1423,8 +1428,8 @@ fn range_deletion_uses_semantic_vm() {
         "range deletion should lower to explicit slice deletion bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1444,8 +1449,8 @@ fn range_complex_assignment_uses_semantic_vm() {
         "complex range assignment should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1473,8 +1478,8 @@ fn logical_indexing_uses_semantic_vm() {
         "logical indexing should lower to slice bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1502,8 +1507,8 @@ fn logical_assignment_uses_semantic_vm() {
         "logical assignment should lower to slice store bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1523,8 +1528,8 @@ fn mixed_logical_numeric_matrix_uses_semantic_vm() {
         "mixed logical numeric matrix should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1544,8 +1549,8 @@ fn mixed_logical_complex_matrix_uses_semantic_vm() {
         "mixed logical complex matrix should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1565,8 +1570,8 @@ fn cell_2d_range_expansion_is_column_major_uses_semantic_vm() {
         "2d cell range expansion should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1603,8 +1608,8 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
         "cell range paren assignment should not rely on StoreIndex fallback"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1634,8 +1639,8 @@ fn cell_range_deletion_uses_semantic_vm() {
         "cell range deletion should lower to explicit slice deletion bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1663,8 +1668,8 @@ fn cell_colon_paren_assignment_uses_semantic_vm() {
         "cell colon paren assignment should lower to slice store bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1675,7 +1680,7 @@ fn cell_colon_paren_assignment_uses_semantic_vm() {
 #[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("x = 42;")).expect("seed workspace");
+    execute_text_request(&mut session, "x = 42;").expect("seed workspace");
 
     let prepared = session.compile_input("x").expect("compile workspace read");
     assert!(
@@ -1683,7 +1688,7 @@ fn workspace_read_across_submissions_uses_semantic_vm() {
         "workspace read should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome("x")).expect("read workspace value");
+    let outcome = execute_text_request(&mut session, "x").expect("read workspace value");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1702,7 +1707,7 @@ fn char_literal_assignment_uses_semantic_vm() {
         "char literal assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome("w = 'hello';")).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "w = 'hello';").expect("exec succeeds");
     assert!(outcome.flow.is_no_value());
     assert_eq!(outcome.type_info, Some("1x5 char array".to_string()));
 }
@@ -1717,7 +1722,7 @@ fn direct_display_builtins_use_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "disp should compile through semantic HIR/MIR/VM"
     );
-    let outcome = block_on(session.execute_outcome("disp('alpha')")).expect("exec disp");
+    let outcome = execute_text_request(&mut session, "disp('alpha')").expect("exec disp");
     let stdout = outcome
         .streams
         .iter()
@@ -1733,7 +1738,7 @@ fn direct_display_builtins_use_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "fprintf should compile through semantic HIR/MIR/VM"
     );
-    let outcome = block_on(session.execute_outcome("fprintf('foo')")).expect("exec fprintf");
+    let outcome = execute_text_request(&mut session, "fprintf('foo')").expect("exec fprintf");
     let stdout = outcome
         .streams
         .iter()
@@ -1752,7 +1757,7 @@ fn simple_builtin_call_uses_semantic_vm() {
         "simple builtin call should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome("sin(0)")).expect("exec sin");
+    let outcome = execute_text_request(&mut session, "sin(0)").expect("exec sin");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -1771,7 +1776,7 @@ fn multi_assign_deal_uses_semantic_vm() {
         "multi-assign should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome("[a, b] = deal(1, 2)")).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "[a, b] = deal(1, 2)").expect("exec succeeds");
     let stdout = outcome
         .streams
         .iter()
@@ -1832,7 +1837,7 @@ fn elementwise_logical_ops_use_semantic_vm() {
         )),
         "semantic logical ops should not lower through string-keyed builtin calls"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "0"
@@ -1859,7 +1864,7 @@ fn short_circuit_logical_ops_use_semantic_vm() {
         "short-circuit logical ops should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "0"
@@ -1882,7 +1887,7 @@ fn metaclass_literal_uses_semantic_vm() {
         "metaclass literals should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "c")
             && upsert.value.to_string() == "'Point'"
@@ -1901,7 +1906,7 @@ fn builtin_function_handle_call_uses_semantic_vm() {
         "builtin function handle call should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "B")
     }));
@@ -1919,7 +1924,7 @@ fn anonymous_function_handle_call_uses_semantic_vm() {
         "anonymous function handle call should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     let b = outcome
         .workspace_delta
         .upserts
@@ -1945,7 +1950,7 @@ fn local_function_call_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "local function call should compile through semantic HIR/MIR/VM"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1964,7 +1969,7 @@ fn builtin_call_with_cell_expansion_uses_semantic_vm() {
         "builtin call with cell expansion should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1983,7 +1988,7 @@ fn builtin_call_with_cell_end_expansion_uses_semantic_vm() {
         "builtin call with cell end expansion should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2001,8 +2006,8 @@ fn builtin_call_with_cell_end_offset_expansion_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "builtin call with cell end-offset expansion should compile through semantic HIR/MIR/VM"
     );
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2022,7 +2027,7 @@ fn multi_assign_builtin_with_cell_expansion_uses_semantic_vm() {
         "multi-assign builtin expansion should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "1"
@@ -2045,7 +2050,7 @@ fn multi_assign_cell_expansion_rhs_uses_semantic_vm() {
         "multi-assign cell expansion RHS should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "1"
@@ -2068,8 +2073,8 @@ fn multi_assign_cell_end_rhs_uses_semantic_vm() {
         "multi-assign cell end rhs should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("a")).expect("read a");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "a").expect("read a");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2089,8 +2094,8 @@ fn multi_assign_cell_end_offset_rhs_uses_semantic_vm() {
         "multi-assign cell end-offset rhs should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("a")).expect("read a");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "a").expect("read a");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2110,7 +2115,7 @@ fn cell_end_indexing_uses_semantic_vm() {
         "cell end indexing should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "2"
@@ -2129,8 +2134,8 @@ fn cell_end_offset_indexing_uses_semantic_vm() {
         "cell end-offset indexing should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2150,7 +2155,7 @@ fn cell_end_assignment_uses_semantic_vm() {
         "cell end assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "9"
@@ -2169,7 +2174,7 @@ fn cell_end_offset_assignment_uses_semantic_vm() {
         "cell end-offset assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "9"
@@ -2196,8 +2201,8 @@ fn cell_end_offset_range_paren_assignment_uses_semantic_vm() {
         "cell end-offset range paren assignment should lower to expression slice store bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2225,8 +2230,8 @@ fn cell_end_offset_range_paren_deletion_uses_semantic_vm() {
         "cell end-offset range paren deletion should lower to expression slice deletion bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2254,8 +2259,8 @@ fn end_offset_range_deletion_uses_semantic_vm() {
         "end-offset range deletion should lower to expression slice deletion bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2288,7 +2293,7 @@ fn feval_anonymous_handle_uses_semantic_vm() {
         "feval should not lower as a string-keyed builtin call"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2309,7 +2314,7 @@ fn feval_string_local_function_uses_semantic_handle() {
         )),
         "local feval string callee should lower to a semantic function handle"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2342,8 +2347,8 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
         "function handle literals should not lower through the internal make_handle builtin"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2370,8 +2375,8 @@ fn dynamic_function_handle_tensor_arg_uses_semantic_vm() {
         "builtin function handle literal should lower to typed function-handle bytecode"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2400,7 +2405,7 @@ fn local_function_handle_uses_semantic_handle() {
         )),
         "zero-capture local function handles should not lower as closures"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2419,8 +2424,8 @@ fn dynamic_anonymous_handle_call_uses_semantic_vm() {
         "dynamic anonymous handle call should compile through semantic HIR/MIR/VM"
     );
 
-    block_on(session.execute_outcome(source)).expect("exec succeeds");
-    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
     let value = outcome
         .flow
         .durable_workspace_value()
@@ -2440,7 +2445,7 @@ fn local_function_multi_output_uses_semantic_vm() {
         "local multi-output function call should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -2471,7 +2476,7 @@ fn dynamic_function_handle_multi_output_uses_semantic_vm() {
         "dynamic multi-output function handle call should lower to typed feval multi-output bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -2503,7 +2508,7 @@ fn dynamic_function_handle_multi_output_with_expansion_uses_semantic_vm() {
         "dynamic multi-output expansion call should lower to typed feval expansion bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -2532,7 +2537,7 @@ fn try_catch_uses_semantic_vm() {
         "try/catch should lower to typed exception bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "2"
@@ -2559,7 +2564,7 @@ fn try_catch_binding_uses_semantic_vm() {
         "try/catch binding should lower the catch binding into exception bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     let y_message = outcome
         .workspace_delta
         .upserts
@@ -2598,7 +2603,7 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
         "indexed member slice assignment should lower to typed slice store bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "5"
@@ -2629,7 +2634,7 @@ fn dotted_member_index_call_uses_semantic_vm() {
         "dotted member index call should lower to typed method/member-index bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "2"
@@ -2656,7 +2661,7 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
         "expanded dotted member index call should lower to typed expansion bytecode"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "20"
@@ -2690,7 +2695,7 @@ fn feval_with_cell_expansion_uses_semantic_vm() {
         "expanded feval should not lower as a string-keyed builtin call"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2717,7 +2722,7 @@ fn feval_with_2d_cell_expansion_is_column_major_uses_semantic_vm() {
         "2d expanded feval should use the VM feval ABI instruction"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "2"
@@ -2735,7 +2740,7 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "local function with cell expansion should compile through semantic HIR/MIR/VM"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2769,7 +2774,7 @@ fn cellfun_named_local_function_uses_semantic_callback() {
         )),
         "local string callback should be bound to a semantic function handle"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2791,7 +2796,7 @@ fn cellfun_runtime_string_callback_uses_semantic_resolver() {
         )),
         "runtime string callback variables should not be compile-time literal rewrites"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2801,8 +2806,11 @@ fn cellfun_runtime_string_callback_uses_semantic_resolver() {
 #[test]
 fn cellfun_session_function_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
+    )
+    .expect("define session function");
 
     let source = "C = {2}; B = cellfun('inc', C); y = B(1);";
     let prepared = session
@@ -2843,7 +2851,7 @@ fn cellfun_session_function_uses_semantic_registry() {
         )),
         "session string callback should be bound to a semantic function handle"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2865,7 +2873,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
         )),
         "local arrayfun string callback should be bound to a semantic function handle"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "4"
@@ -2875,8 +2883,11 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
 #[test]
 fn arrayfun_session_function_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
+    )
+    .expect("define session function");
 
     let source = "A = [2, 3]; B = arrayfun('inc', A); y = B(2);";
     let prepared = session
@@ -2889,7 +2900,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
         )),
         "session arrayfun string callback should be bound to a semantic function handle"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "4"
@@ -2911,7 +2922,7 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
         )),
         "runtime arrayfun string callback variables should not be compile-time literal rewrites"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "4"
@@ -2921,7 +2932,7 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
 #[test]
 fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let outcome = block_on(session.execute_outcome("C = {2}; y = cellfun('pkg.callback', C);"))
+    let outcome = execute_text_request(&mut session, "C = {2}; y = cellfun('pkg.callback', C);")
         .expect("unresolved external cellfun callback should surface a runtime diagnostic");
     assert!(outcome.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RunMat:UndefinedFunction"
@@ -2932,8 +2943,9 @@ fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() 
 #[test]
 fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let outcome = block_on(session.execute_outcome("A = [2, 3]; y = arrayfun('pkg.callback', A);"))
-        .expect("unresolved external arrayfun callback should surface a runtime diagnostic");
+    let outcome =
+        execute_text_request(&mut session, "A = [2, 3]; y = arrayfun('pkg.callback', A);")
+            .expect("unresolved external arrayfun callback should surface a runtime diagnostic");
     assert!(outcome.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RunMat:UndefinedFunction"
             && matches!(diagnostic.severity, abi::DiagnosticSeverity::Error)
@@ -2943,8 +2955,11 @@ fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier()
 #[test]
 fn direct_session_function_call_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
+    )
+    .expect("define session function");
 
     let prepared = session
         .compile_input("y = inc(2);")
@@ -2957,7 +2972,7 @@ fn direct_session_function_call_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 1))),
         "direct call should lower to semantic function bytecode"
     );
-    let outcome = block_on(session.execute_outcome("y = inc(2);")).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y = inc(2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -2967,9 +2982,9 @@ fn direct_session_function_call_uses_semantic_registry() {
 #[test]
 fn direct_session_function_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(
-        session
-            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
     )
     .expect("define session function");
 
@@ -2984,7 +2999,7 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 2))),
         "direct multi-output call should lower to semantic function bytecode"
     );
-    let outcome = block_on(session.execute_outcome("[a, b] = pair(2);")).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "[a, b] = pair(2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -2998,8 +3013,11 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
 #[test]
 fn direct_session_function_cell_expansion_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
+    )
+    .expect("define session function");
 
     let prepared = session
         .compile_input("C = {2}; y = inc(C{:});")
@@ -3012,7 +3030,7 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
         "direct expansion call should lower to semantic function bytecode"
     );
     let outcome =
-        block_on(session.execute_outcome("C = {2}; y = inc(C{:});")).expect("exec succeeds");
+        execute_text_request(&mut session, "C = {2}; y = inc(C{:});").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -3022,9 +3040,9 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
 #[test]
 fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(
-        session
-            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
     )
     .expect("define session function");
 
@@ -3039,7 +3057,7 @@ fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
         "direct expansion multi-output call should lower to semantic function bytecode"
     );
     let outcome =
-        block_on(session.execute_outcome("C = {2}; [a, b] = pair(C{:});")).expect("exec succeeds");
+        execute_text_request(&mut session, "C = {2}; [a, b] = pair(C{:});").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -3053,8 +3071,11 @@ fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
 #[test]
 fn session_function_handle_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
+    )
+    .expect("define session function");
 
     let prepared = session
         .compile_input("f = @inc; y = f(2);")
@@ -3082,7 +3103,7 @@ fn session_function_handle_uses_semantic_registry() {
         )),
         "session function handles should not remain name-only handles"
     );
-    let outcome = block_on(session.execute_outcome("f = @inc; y = f(2);"))
+    let outcome = execute_text_request(&mut session, "f = @inc; y = f(2);")
         .expect("function handle call succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
@@ -3093,9 +3114,9 @@ fn session_function_handle_uses_semantic_registry() {
 #[test]
 fn session_function_handle_feval_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(
-        session
-            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
     )
     .expect("define session function");
 
@@ -3110,7 +3131,7 @@ fn session_function_handle_feval_multi_output_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(_, 2))),
         "function handle feval multi-output call should use typed feval bytecode"
     );
-    let outcome = block_on(session.execute_outcome("f = @pair; [a, b] = feval(f, 2);"))
+    let outcome = execute_text_request(&mut session, "f = @pair; [a, b] = feval(f, 2);")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
@@ -3125,9 +3146,9 @@ fn session_function_handle_feval_multi_output_uses_semantic_registry() {
 #[test]
 fn session_feval_string_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(
-        session
-            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
     )
     .expect("define session function");
 
@@ -3150,7 +3171,7 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
         "session feval string multi-output call should use typed feval bytecode"
     );
     let outcome =
-        block_on(session.execute_outcome("[a, b] = feval('pair', 2);")).expect("exec succeeds");
+        execute_text_request(&mut session, "[a, b] = feval('pair', 2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -3164,8 +3185,11 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
 #[test]
 fn session_function_handle_feval_expansion_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend",
+    )
+    .expect("define session function");
 
     let prepared = session
         .compile_input("f = @add2; C = {2, 3}; y = feval(f, C{:});")
@@ -3178,7 +3202,7 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))),
         "function handle feval expansion call should use typed feval expansion bytecode"
     );
-    let outcome = block_on(session.execute_outcome("f = @add2; C = {2, 3}; y = feval(f, C{:});"))
+    let outcome = execute_text_request(&mut session, "f = @add2; C = {2, 3}; y = feval(f, C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
@@ -3189,8 +3213,11 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
 #[test]
 fn session_feval_string_expansion_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend"))
-        .expect("define session function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend",
+    )
+    .expect("define session function");
 
     let prepared = session
         .compile_input("C = {2, 3}; y = feval('add2', C{:});")
@@ -3210,7 +3237,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))),
         "session feval string expansion call should use typed feval expansion bytecode"
     );
-    let outcome = block_on(session.execute_outcome("C = {2, 3}; y = feval('add2', C{:});"))
+    let outcome = execute_text_request(&mut session, "C = {2, 3}; y = feval('add2', C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
@@ -3221,9 +3248,9 @@ fn session_feval_string_expansion_uses_semantic_registry() {
 #[test]
 fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(
-        session
-            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
     )
     .expect("define session function");
 
@@ -3237,8 +3264,9 @@ fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry()
         )),
         "function handle feval expansion multi-output call should use typed feval expansion bytecode"
     );
-    let outcome = block_on(session.execute_outcome("f = @pair; C = {2}; [a, b] = feval(f, C{:});"))
-        .expect("exec succeeds");
+    let outcome =
+        execute_text_request(&mut session, "f = @pair; C = {2}; [a, b] = feval(f, C{:});")
+            .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -3252,9 +3280,9 @@ fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry()
 #[test]
 fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(
-        session
-            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend",
     )
     .expect("define session function");
 
@@ -3275,7 +3303,7 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
         )),
         "session feval string expansion multi-output call should use typed feval expansion bytecode"
     );
-    let outcome = block_on(session.execute_outcome("C = {2}; [a, b] = feval('pair', C{:});"))
+    let outcome = execute_text_request(&mut session, "C = {2}; [a, b] = feval('pair', C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
@@ -3290,10 +3318,16 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
 #[test]
 fn session_semantic_registry_replaces_redefined_function() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
-        .expect("define first function");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 10;\nend"))
-        .expect("redefine function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend",
+    )
+    .expect("define first function");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 10;\nend",
+    )
+    .expect("redefine function");
 
     let source = "C = {2}; B = cellfun('inc', C); y = B(1);";
     let prepared = session
@@ -3310,7 +3344,7 @@ fn session_semantic_registry_replaces_redefined_function() {
         1,
         "semantic registry should retire the old definition"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "12"
@@ -3320,12 +3354,16 @@ fn session_semantic_registry_replaces_redefined_function() {
 #[test]
 fn session_semantic_registry_retires_replaced_source_group() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    block_on(session.execute_outcome(
+    execute_text_request(
+        &mut session,
         "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend\nfunction z = dec(x)\n  z = x - 1;\nend",
-    ))
+    )
     .expect("define source function group");
-    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 10;\nend"))
-        .expect("replace one function from group");
+    execute_text_request(
+        &mut session,
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 10;\nend",
+    )
+    .expect("replace one function from group");
 
     let prepared = session
         .compile_input("y = inc(2);")
@@ -3360,7 +3398,7 @@ fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "local multi-output expansion should compile through semantic HIR/MIR/VM"
     );
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -3383,7 +3421,7 @@ fn struct_member_access_uses_semantic_vm() {
         "struct member access should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -3402,7 +3440,7 @@ fn nested_struct_member_assignment_uses_semantic_vm() {
         "nested struct member assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -3421,7 +3459,7 @@ fn nested_dynamic_member_assignment_uses_semantic_vm() {
         "nested dynamic member assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "4"
@@ -3440,7 +3478,7 @@ fn indexed_cell_member_assignment_uses_semantic_vm() {
         "indexed cell member assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "5"
@@ -3459,7 +3497,7 @@ fn cell_member_access_uses_semantic_vm() {
         "cell member access should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "6"
@@ -3478,7 +3516,7 @@ fn cell_member_assignment_uses_semantic_vm() {
         "cell member assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "9"
@@ -3497,7 +3535,7 @@ fn indexed_cell_end_offset_member_assignment_uses_semantic_vm() {
         "indexed cell end-offset member assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "7"
@@ -3516,7 +3554,7 @@ fn scalar_struct_paren_member_assignment_uses_semantic_vm() {
         "scalar struct paren member assignment should compile through semantic HIR/MIR/VM"
     );
 
-    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "5"
@@ -3526,15 +3564,16 @@ fn scalar_struct_paren_member_assignment_uses_semantic_vm() {
 #[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let result =
-        block_on(session.execute("d = datetime([739351; 739352], 'ConvertFrom', 'datenum');"))
-            .expect("exec succeeds");
-    let entry = result
-        .workspace
-        .values
-        .iter()
-        .find(|entry| entry.name == "d")
-        .expect("workspace entry for d");
+    execute_text_request(
+        &mut session,
+        "d = datetime([739351; 739352], 'ConvertFrom', 'datenum');",
+    )
+    .expect("exec succeeds");
+    let entry = block_on(session.materialize_variable(
+        WorkspaceMaterializeTarget::Name("d".to_string()),
+        WorkspaceMaterializeOptions::default(),
+    ))
+    .expect("workspace entry for d");
     assert_eq!(entry.class_name, "datetime");
     assert_eq!(entry.shape, vec![2, 1]);
 }
@@ -3543,7 +3582,8 @@ fn workspace_reports_datetime_array_shape() {
 fn workspace_state_roundtrip_replace_only() {
     let mut source_session =
         RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _ = block_on(source_session.execute("x = 42; y = [1, 2, 3];")).expect("exec succeeds");
+    let _ =
+        execute_text_request(&mut source_session, "x = 42; y = [1, 2, 3];").expect("exec succeeds");
 
     let bytes = block_on(source_session.export_workspace_state(WorkspaceExportMode::Force))
         .expect("workspace export")
@@ -3551,12 +3591,13 @@ fn workspace_state_roundtrip_replace_only() {
 
     let mut restore_session =
         RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let _ = block_on(restore_session.execute("z = 99;")).expect("seed workspace");
+    let _ = execute_text_request(&mut restore_session, "z = 99;").expect("seed workspace");
     restore_session
         .import_workspace_state(&bytes)
         .expect("workspace import");
 
-    let _restored = block_on(restore_session.execute("r = x + y(2);")).expect("post-import exec");
+    let _restored =
+        execute_text_request(&mut restore_session, "r = x + y(2);").expect("post-import exec");
 
     let x = block_on(restore_session.materialize_variable(
         WorkspaceMaterializeTarget::Name("x".to_string()),

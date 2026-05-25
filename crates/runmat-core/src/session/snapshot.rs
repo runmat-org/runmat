@@ -112,8 +112,7 @@ impl RunMatSession {
             async_input_handler: None,
             callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
             error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
-            default_source_name: "<repl>".to_string(),
-            source_name_override: None,
+            active_source_name: "<repl>".to_string(),
             telemetry_consent: true,
             telemetry_client_id: None,
             telemetry_platform: TelemetryPlatformInfo::default(),
@@ -144,9 +143,7 @@ impl RunMatSession {
     }
 
     pub(crate) fn current_source_name(&self) -> &str {
-        self.source_name_override
-            .as_deref()
-            .unwrap_or(&self.default_source_name)
+        &self.active_source_name
     }
 
     #[cfg(target_arch = "wasm32")]

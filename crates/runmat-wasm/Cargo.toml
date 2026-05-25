@@ -18,6 +18,7 @@ gpu = ["runmat-accelerate/wgpu"]
 
 [dependencies]
 runmat-core = { workspace = true }
+runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }

@@ -39,6 +39,16 @@ fn init_options(enable_gpu: bool) -> JsValue {
     options.into()
 }
 
+fn execute_request(script: &str) -> JsValue {
+    serde_wasm_bindgen::to_value(&serde_json::json!({
+        "source": {
+            "name": "gradient_gpu_test.m",
+            "text": script,
+        }
+    }))
+    .expect("serialize executeRequest payload")
+}
+
 #[wasm_bindgen_test(async)]
 async fn gradient_gpu_row_vector_matches_expected_output() {
     let runtime = init_runmat(init_options(true))
@@ -51,9 +61,9 @@ async fn gradient_gpu_row_vector_matches_expected_output() {
 
     let payload: ExecPayload = serde_wasm_bindgen::from_value(
         runtime
-            .execute(
-                "G = gpuArray(single([1 4 9]));\nD = gradient(G, 2);\nout = gather(D)".to_string(),
-            )
+            .execute_request_js(execute_request(
+                "G = gpuArray(single([1 4 9]));\nD = gradient(G, 2);\nout = gather(D)",
+            ))
             .await
             .expect("execute gradient script"),
     )
@@ -93,9 +103,9 @@ async fn gradient_gpu_row_vector_matches_expected_output_without_webgpu() {
 
     let payload: ExecPayload = serde_wasm_bindgen::from_value(
         runtime
-            .execute(
-                "G = gpuArray(single([1 4 9]));\nD = gradient(G, 2);\nout = gather(D)".to_string(),
-            )
+            .execute_request_js(execute_request(
+                "G = gpuArray(single([1 4 9]));\nD = gradient(G, 2);\nout = gather(D)",
+            ))
             .await
             .expect("execute gradient script"),
     )
