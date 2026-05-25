@@ -26,14 +26,12 @@ runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-gc = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-accelerate = { workspace = true, optional = true }
 runmat-time = { workspace = true }
 
 [dev-dependencies]
-env_logger = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-mir = { workspace = true }
 
 [features]
 default = ["native-accel"]
-native-accel = ["runmat-vm/native-accel", "runmat-accelerate"]
+native-accel = ["runmat-vm/native-accel"]

@@ -82,4 +82,3 @@ zstd = { version = "0.13", optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 lz4_flex = { version = "0.12", optional = true }
 ruzstd = { version = "0.8", optional = true, default-features = false, features = ["std"] }
-getrandom = { version = "0.2", features = ["js"] }

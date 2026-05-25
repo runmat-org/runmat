@@ -20,7 +20,6 @@ runmat-accelerate-api = { workspace = true }
 runmat-turbine = { workspace = true, optional = true }
 runmat-gc = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-async = { workspace = true }
 runmat-telemetry = { workspace = true }
 anyhow = "1.0"
 log = "0.4"

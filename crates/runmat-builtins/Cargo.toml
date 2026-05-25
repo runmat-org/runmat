@@ -19,5 +19,4 @@ indexmap = { version = "1.9", features = ["std"] }
 once_cell = { workspace = true }
 
 [dev-dependencies]
-trybuild = "1"
 runmat-macros = { workspace = true }

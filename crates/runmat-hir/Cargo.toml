@@ -14,6 +14,3 @@ runmat-builtins = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
-runmat-lexer = { workspace = true }
-runmat-runtime = { workspace = true }
-tempfile = "3"
