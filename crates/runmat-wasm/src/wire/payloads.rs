@@ -7,7 +7,9 @@ use crate::wire::errors::{js_error, RunMatErrorKind, RunMatErrorPayload, RunMatE
 use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 use runmat_builtins::Value;
 use runmat_core::{
-    abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeDiagnostic, WorkspaceBindingKey},
+    abi::{
+        DiagnosticSeverity, ExecutionOutcome, RuntimeDiagnostic, RuntimeFlow, WorkspaceBindingKey,
+    },
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
     value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
     FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot, MaterializedVariable,
@@ -41,6 +43,7 @@ struct MaterializeSlicePayload {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionPayload {
+    pub(crate) flow: JsonValue,
     pub(crate) value_text: Option<String>,
     pub(crate) value_json: Option<JsonValue>,
     pub(crate) type_info: Option<String>,
@@ -66,6 +69,7 @@ pub(crate) struct MemoryUsagePayload {
 impl ExecutionPayload {
     pub(crate) fn from_outcome(outcome: ExecutionOutcome, source: &str) -> Self {
         let workspace = WorkspacePayload::from_outcome(&outcome);
+        let flow = runtime_flow_to_json(&outcome.flow);
         let value = outcome.flow.durable_workspace_value().cloned();
         let error = outcome
             .diagnostics
@@ -73,6 +77,7 @@ impl ExecutionPayload {
             .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
             .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source));
         Self {
+            flow,
             value_text: value.as_ref().map(|value| value.to_string()),
             value_json: value.as_ref().map(|value| value_to_json(value, 0)),
             type_info: outcome.type_info,
@@ -189,6 +194,7 @@ pub(crate) struct WorkspacePayload {
     pub(crate) full: bool,
     pub(crate) version: u64,
     pub(crate) values: Vec<WorkspaceEntryPayload>,
+    pub(crate) removals: Vec<String>,
 }
 
 impl From<WorkspaceSnapshot> for WorkspacePayload {
@@ -201,6 +207,7 @@ impl From<WorkspaceSnapshot> for WorkspacePayload {
                 .into_iter()
                 .map(WorkspaceEntryPayload::from)
                 .collect(),
+            removals: Vec::new(),
         }
     }
 }
@@ -209,7 +216,7 @@ impl WorkspacePayload {
     fn from_outcome(outcome: &ExecutionOutcome) -> Self {
         Self {
             full: outcome.workspace_delta.full_snapshot_required,
-            version: 0,
+            version: outcome.workspace_delta.version,
             values: outcome
                 .workspace_delta
                 .upserts
@@ -219,7 +226,36 @@ impl WorkspacePayload {
                     Some(workspace_entry_from_value(name, &binding.value))
                 })
                 .collect(),
+            removals: outcome
+                .workspace_delta
+                .removals
+                .iter()
+                .filter_map(workspace_binding_name)
+                .map(ToString::to_string)
+                .collect(),
         }
+    }
+}
+
+fn runtime_flow_to_json(flow: &RuntimeFlow) -> JsonValue {
+    match flow {
+        RuntimeFlow::NoValue => serde_json::json!({ "kind": "no-value" }),
+        RuntimeFlow::Single(value) => serde_json::json!({
+            "kind": "single",
+            "value": value_to_json(value, 0)
+        }),
+        RuntimeFlow::OutputList(values) => serde_json::json!({
+            "kind": "output-list",
+            "values": values.iter().map(|value| value_to_json(value, 0)).collect::<Vec<_>>()
+        }),
+        RuntimeFlow::CommaList(values) => serde_json::json!({
+            "kind": "comma-list",
+            "values": values.iter().map(|value| value_to_json(value, 0)).collect::<Vec<_>>()
+        }),
+        RuntimeFlow::DynamicList(handle) => serde_json::json!({
+            "kind": "dynamic-list",
+            "id": handle.0.to_string()
+        }),
     }
 }
 
@@ -726,4 +762,56 @@ pub(crate) fn parse_materialize_options(
         });
     }
     Ok(opts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_core::abi::{WorkspaceBindingValue, WorkspaceDelta};
+    use runmat_hir::BindingName;
+
+    #[test]
+    fn execution_payload_serializes_runtime_flow_kind() {
+        let outcome = ExecutionOutcome {
+            flow: RuntimeFlow::OutputList(vec![Value::Num(1.0), Value::Num(2.0)]),
+            ..ExecutionOutcome::default()
+        };
+
+        let payload = ExecutionPayload::from_outcome(outcome, "");
+        assert_eq!(payload.flow["kind"], "output-list");
+        assert_eq!(
+            payload.flow["values"],
+            serde_json::json!([
+                { "kind": "double", "value": 1.0, "shape": [1, 1] },
+                { "kind": "double", "value": 2.0, "shape": [1, 1] }
+            ])
+        );
+    }
+
+    #[test]
+    fn execution_payload_serializes_workspace_version_and_removals() {
+        let key = WorkspaceBindingKey::Interactive {
+            session: Uuid::nil(),
+            name: BindingName("x".to_string()),
+        };
+        let workspace_delta = WorkspaceDelta {
+            version: 42,
+            upserts: vec![WorkspaceBindingValue {
+                key: key.clone(),
+                value: Value::Num(7.0),
+            }],
+            removals: vec![key],
+            full_snapshot_required: false,
+        };
+        let outcome = ExecutionOutcome {
+            workspace_delta,
+            ..ExecutionOutcome::default()
+        };
+
+        let payload = ExecutionPayload::from_outcome(outcome, "");
+        assert_eq!(payload.workspace.version, 42);
+        assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
+        assert_eq!(payload.workspace.values.len(), 1);
+        assert_eq!(payload.workspace.values[0].name, "x");
+    }
 }

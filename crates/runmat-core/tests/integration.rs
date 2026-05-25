@@ -205,12 +205,15 @@ fn test_request_host_policy_disables_top_level_await() {
                 name: "request-await-policy.m".to_string(),
                 text: "y = await(1);".to_string(),
             },
+            entrypoint: abi::EntrypointSelector::Auto,
             compatibility: CompatMode::Matlab,
             host_policy: abi::HostExecutionPolicy {
                 top_level_await: false,
             },
+            inputs: abi::RuntimeFlow::NoValue,
             requested_outputs: runmat_hir::RequestedOutputCount::Zero,
             workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(13)),
+            resolver: abi::ResolverHandle::default(),
         }))
         .expect_err("request should reject top-level await when host policy disables it");
         let RunError::Semantic(err) = err else {

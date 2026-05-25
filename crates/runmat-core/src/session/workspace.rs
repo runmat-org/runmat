@@ -1,10 +1,23 @@
 use super::*;
 
 impl RunMatSession {
+    pub fn workspace_handle(&self) -> crate::abi::WorkspaceHandle {
+        self.abi_workspace_handle
+    }
+
     pub(crate) fn workspace_binding_key(&self, name: &str) -> crate::abi::WorkspaceBindingKey {
-        crate::abi::WorkspaceBindingKey::Interactive {
-            session: self.abi_workspace_handle.0,
-            name: runmat_hir::BindingName(name.to_string()),
+        let binding = runmat_hir::BindingName(name.to_string());
+        if let Some(source) = self.active_source_identity.clone() {
+            crate::abi::WorkspaceBindingKey::SourceBinding {
+                source,
+                def_path: source_binding_def_path(self.current_source_name()),
+                binding,
+            }
+        } else {
+            crate::abi::WorkspaceBindingKey::Interactive {
+                session: self.abi_workspace_handle.0,
+                name: binding,
+            }
         }
     }
 
@@ -203,5 +216,24 @@ impl RunMatSession {
             values.push(entry);
         }
         values
+    }
+}
+
+fn source_binding_def_path(source_name: &str) -> runmat_hir::DefPath {
+    use std::path::Path;
+
+    let stem = Path::new(source_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or("entrypoint")
+        .to_string();
+
+    runmat_hir::DefPath {
+        package: runmat_hir::PackageName("workspace".to_string()),
+        module: runmat_hir::QualifiedName(vec![runmat_hir::SymbolName(stem.clone())]),
+        item: vec![runmat_hir::DefPathSegment::Function(
+            runmat_hir::SymbolName(stem),
+        )],
     }
 }

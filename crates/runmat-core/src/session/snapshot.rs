@@ -102,6 +102,7 @@ impl RunMatSession {
             workspace_bindings: HashMap::new(),
             workspace_values: HashMap::new(),
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
+            active_source_identity: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
             source_pool: SourcePool::default(),

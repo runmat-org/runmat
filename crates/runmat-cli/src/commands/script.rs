@@ -4,7 +4,10 @@ use runmat_config::{
     resolve_project_source_input_from, ResolveProjectSourceInputError, RunMatConfig,
 };
 use runmat_core::{
-    abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
+    abi::{
+        DiagnosticSeverity, ExecutionOutcome, ExecutionRequest, HostExecutionPolicy, RuntimeFlow,
+        SourceInput,
+    },
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
 use runmat_time::Instant;
@@ -83,14 +86,24 @@ pub(crate) async fn execute_script_contents(
         config,
         "Failed to create execution engine",
     )?;
-    engine.set_source_name_override(Some(script.to_string_lossy().to_string()));
     let mut script_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Script,
         jit_enabled: config.jit.enabled,
         accelerate_enabled: config.accelerate.enabled,
     });
     let start_time = Instant::now();
-    let outcome = match engine.execute_outcome(&content).await {
+    let source_name = script.to_string_lossy().to_string();
+    let content_for_diagnostics = content.clone();
+    let request = ExecutionRequest::for_source(
+        SourceInput::Text {
+            name: source_name.clone(),
+            text: content,
+        },
+        crate::diagnostics::parser_compat(config.language.compat),
+        HostExecutionPolicy::default(),
+        engine.workspace_handle(),
+    );
+    let outcome = match engine.execute_request(request).await {
         Ok(outcome) => outcome,
         Err(err) => {
             let failure = err.telemetry_failure_info();
@@ -107,7 +120,7 @@ pub(crate) async fn execute_script_contents(
                 });
             }
             if let Some(diag) =
-                format_frontend_error(&err, script.to_string_lossy().as_ref(), &content)
+                format_frontend_error(&err, source_name.as_str(), &content_for_diagnostics)
             {
                 eprintln!("{diag}");
             } else {
@@ -169,7 +182,6 @@ pub(crate) async fn execute_script_contents(
         }
     }
 
-    engine.set_source_name_override(None);
     dump_provider_telemetry_if_requested();
 
     Ok(())

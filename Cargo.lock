@@ -5990,6 +5990,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-core",
  "runmat-filesystem",
+ "runmat-hir",
  "runmat-logging",
  "runmat-plot",
  "runmat-runtime",

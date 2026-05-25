@@ -70,6 +70,8 @@ pub struct RunMatSession {
     workspace_values: HashMap<String, Value>,
     /// Stable ABI identity for this interactive workspace.
     abi_workspace_handle: crate::abi::WorkspaceHandle,
+    /// Source identity for the active execution request (if source-scoped).
+    active_source_identity: Option<crate::abi::SourceIdentity>,
     /// Semantic function registry persisted across interactive inputs.
     function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,

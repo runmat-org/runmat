@@ -62,7 +62,18 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        self.run(input).await
+        let request = crate::abi::ExecutionRequest::for_source(
+            crate::abi::SourceInput::Text {
+                name: self.current_source_name().to_string(),
+                text: input.to_string(),
+            },
+            self.compat_mode,
+            crate::abi::HostExecutionPolicy {
+                top_level_await: self.top_level_await_enabled,
+            },
+            self.abi_workspace_handle,
+        );
+        self.execute_request(request).await
     }
 
     /// Parse, lower, compile, and execute input through the runtime/workspace ABI boundary.
@@ -103,30 +114,29 @@ impl RunMatSession {
         request: crate::abi::ExecutionRequest,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
         let requested_outputs = request.requested_outputs.clone();
+        let source_input = request.source.clone();
         let (source_name, source_text) = source_input_text(request.source)?;
         let previous_compat = self.compat_mode;
         let previous_top_level_await_enabled = self.top_level_await_enabled;
         let previous_source_override = self.source_name_override.clone();
         let previous_workspace_handle = self.abi_workspace_handle;
+        let previous_source_identity = self.active_source_identity.clone();
 
         self.compat_mode = request.compatibility;
         self.top_level_await_enabled = request.host_policy.top_level_await;
         self.source_name_override = Some(source_name);
         self.abi_workspace_handle = request.workspace;
+        self.active_source_identity = resolve_source_identity(&source_input, &source_text);
 
-        let result = self.execute_outcome(&source_text).await;
+        let result = self.run(&source_text).await;
 
         self.compat_mode = previous_compat;
         self.top_level_await_enabled = previous_top_level_await_enabled;
         self.source_name_override = previous_source_override;
         self.abi_workspace_handle = previous_workspace_handle;
+        self.active_source_identity = previous_source_identity;
 
-        result.map(|mut outcome| {
-            if matches!(requested_outputs, runmat_hir::RequestedOutputCount::Zero) {
-                outcome.flow = crate::abi::RuntimeFlow::NoValue;
-            }
-            outcome
-        })
+        result.map(|outcome| apply_requested_output_policy(outcome, &requested_outputs))
     }
 
     async fn execute_internal(
@@ -1047,6 +1057,7 @@ impl RunMatSession {
                 .map(crate::abi::RuntimeFlow::Single)
                 .unwrap_or(crate::abi::RuntimeFlow::NoValue),
             workspace_delta: crate::abi::WorkspaceDelta {
+                version: workspace_snapshot.version,
                 full_snapshot_required: workspace_snapshot.full,
                 ..crate::abi::WorkspaceDelta::default()
             },
@@ -1124,6 +1135,86 @@ impl RunMatSession {
             .map(|name| self.workspace_binding_key(&name))
             .collect()
     }
+}
+
+fn apply_requested_output_policy(
+    mut outcome: crate::abi::ExecutionOutcome,
+    requested_outputs: &runmat_hir::RequestedOutputCount,
+) -> crate::abi::ExecutionOutcome {
+    use crate::abi::RuntimeFlow;
+    use runmat_hir::RequestedOutputCount;
+
+    outcome.flow = match requested_outputs {
+        RequestedOutputCount::Zero => RuntimeFlow::NoValue,
+        RequestedOutputCount::One => match outcome.flow {
+            RuntimeFlow::OutputList(mut values) | RuntimeFlow::CommaList(mut values) => {
+                if values.is_empty() {
+                    RuntimeFlow::NoValue
+                } else {
+                    RuntimeFlow::Single(values.remove(0))
+                }
+            }
+            flow => flow,
+        },
+        RequestedOutputCount::Exactly(count) => {
+            if *count == 0 {
+                RuntimeFlow::NoValue
+            } else if *count == 1 {
+                match outcome.flow {
+                    RuntimeFlow::OutputList(mut values) | RuntimeFlow::CommaList(mut values) => {
+                        if values.is_empty() {
+                            RuntimeFlow::NoValue
+                        } else {
+                            RuntimeFlow::Single(values.remove(0))
+                        }
+                    }
+                    flow => flow,
+                }
+            } else {
+                match outcome.flow {
+                    RuntimeFlow::NoValue => RuntimeFlow::OutputList(Vec::new()),
+                    RuntimeFlow::Single(value) => RuntimeFlow::OutputList(vec![value]),
+                    RuntimeFlow::OutputList(mut values) | RuntimeFlow::CommaList(mut values) => {
+                        values.truncate(*count);
+                        RuntimeFlow::OutputList(values)
+                    }
+                    RuntimeFlow::DynamicList(handle) => RuntimeFlow::DynamicList(handle),
+                }
+            }
+        }
+    };
+    outcome
+}
+
+fn resolve_source_identity(
+    source: &crate::abi::SourceInput,
+    source_text: &str,
+) -> Option<crate::abi::SourceIdentity> {
+    match source {
+        crate::abi::SourceInput::Path(path) => {
+            Some(crate::abi::SourceIdentity::PathAndContentHash {
+                path: path.clone(),
+                hash: source_text_hash(source_text),
+            })
+        }
+        crate::abi::SourceInput::Text { name, .. } => {
+            if name.starts_with('<') {
+                None
+            } else {
+                Some(crate::abi::SourceIdentity::PathAndContentHash {
+                    path: name.clone(),
+                    hash: source_text_hash(source_text),
+                })
+            }
+        }
+    }
+}
+
+fn source_text_hash(source_text: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source_text.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn compile_eval_hook_bytecode(

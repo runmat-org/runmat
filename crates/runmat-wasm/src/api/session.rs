@@ -145,7 +145,16 @@ impl RunMatWasm {
             std::mem::take(&mut *slot)
         };
 
-        let exec_result = session.execute_outcome(&source).await;
+        let request = runmat_core::abi::ExecutionRequest::for_source(
+            runmat_core::abi::SourceInput::Text {
+                name: "<wasm>".to_string(),
+                text: source.clone(),
+            },
+            self.config.borrow().language_compat,
+            runmat_core::abi::HostExecutionPolicy::default(),
+            session.workspace_handle(),
+        );
+        let exec_result = session.execute_request(request).await;
         *self.session.borrow_mut() = session;
         let payload = match exec_result {
             Ok(outcome) => {
@@ -163,6 +172,7 @@ impl RunMatWasm {
                 ExecutionPayload::from_outcome(outcome, &source)
             }
             Err(err) => ExecutionPayload {
+                flow: serde_json::json!({ "kind": "no-value" }),
                 value_text: None,
                 value_json: None,
                 type_info: None,
@@ -174,6 +184,7 @@ impl RunMatWasm {
                     full: false,
                     version: 0,
                     values: Vec::new(),
+                    removals: Vec::new(),
                 },
                 figures_touched: Vec::new(),
                 warnings: Vec::new(),

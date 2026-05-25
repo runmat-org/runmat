@@ -351,7 +351,15 @@ export interface StdinEventLog {
   error?: string;
 }
 
+export type RuntimeFlow =
+  | { kind: "no-value" }
+  | { kind: "single"; value: unknown }
+  | { kind: "output-list"; values: unknown[] }
+  | { kind: "comma-list"; values: unknown[] }
+  | { kind: "dynamic-list"; id: string };
+
 export interface ExecuteResult {
+  flow: RuntimeFlow;
   valueText?: string;
   valueJson?: unknown;
   typeInfo?: string;
@@ -412,6 +420,7 @@ export interface WorkspaceSnapshot {
   full: boolean;
   version: number;
   values: WorkspaceEntry[];
+  removals: string[];
 }
 
 export interface WorkspaceEntry {

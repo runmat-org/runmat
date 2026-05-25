@@ -3,7 +3,10 @@ use log::{error, info};
 use runmat_config::{
     resolve_project_source_input_from, ResolveProjectSourceInputError, RunMatConfig,
 };
-use runmat_core::{abi::DiagnosticSeverity, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish};
+use runmat_core::{
+    abi::{DiagnosticSeverity, ExecutionRequest, HostExecutionPolicy, SourceInput},
+    TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
+};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -34,12 +37,12 @@ pub async fn execute_benchmark(
         config,
         "Failed to create execution engine",
     )?;
-    engine.set_source_name_override(Some(file.to_string_lossy().to_string()));
     let mut bench_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Benchmark,
         jit_enabled: jit,
         accelerate_enabled: config.accelerate.enabled,
     });
+    let source_name = file.to_string_lossy().to_string();
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
@@ -47,7 +50,16 @@ pub async fn execute_benchmark(
 
     println!("Warming up...");
     for _ in 0..3 {
-        match engine.execute_outcome(&content).await {
+        let request = ExecutionRequest::for_source(
+            SourceInput::Text {
+                name: source_name.clone(),
+                text: content.clone(),
+            },
+            crate::diagnostics::parser_compat(config.language.compat),
+            HostExecutionPolicy::default(),
+            engine.workspace_handle(),
+        );
+        match engine.execute_request(request).await {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
                 let error =
@@ -103,7 +115,16 @@ pub async fn execute_benchmark(
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let outcome = match engine.execute_outcome(&content).await {
+        let request = ExecutionRequest::for_source(
+            SourceInput::Text {
+                name: source_name.clone(),
+                text: content.clone(),
+            },
+            crate::diagnostics::parser_compat(config.language.compat),
+            HostExecutionPolicy::default(),
+            engine.workspace_handle(),
+        );
+        let outcome = match engine.execute_request(request).await {
             Ok(outcome) => outcome,
             Err(err) => {
                 let failure = err.telemetry_failure_info();

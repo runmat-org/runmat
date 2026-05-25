@@ -207,10 +207,11 @@ interface NativeSession {
 }
 
 const baseExecuteResult: ExecuteResult = {
+  flow: { kind: "no-value" },
   executionTimeMs: 0,
   usedJit: false,
   stdout: [],
-  workspace: { full: false, version: 0, values: [] },
+  workspace: { full: false, version: 0, values: [], removals: [] },
   figuresTouched: [],
   warnings: [],
   stdinEvents: []

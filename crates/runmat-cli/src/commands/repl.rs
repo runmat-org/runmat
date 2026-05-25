@@ -3,7 +3,8 @@ use log::info;
 use owo_colors::OwoColorize;
 use runmat_config::{GcPreset, JitOptLevel, RunMatConfig};
 use runmat_core::{
-    abi::RuntimeFlow, RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
+    abi::{ExecutionRequest, HostExecutionPolicy, RuntimeFlow, SourceInput},
+    RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
@@ -380,7 +381,16 @@ async fn process_repl_line(
         return Ok(true);
     }
 
-    match engine.execute_outcome(line).await {
+    let request = ExecutionRequest::for_source(
+        SourceInput::Text {
+            name: "<repl>".to_string(),
+            text: line.to_string(),
+        },
+        crate::diagnostics::parser_compat(config.language.compat),
+        HostExecutionPolicy::default(),
+        engine.workspace_handle(),
+    );
+    match engine.execute_request(request).await {
         Ok(outcome) => {
             emit_execution_streams(&outcome.streams);
             for diagnostic in &outcome.diagnostics {
