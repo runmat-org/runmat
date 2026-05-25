@@ -63,7 +63,7 @@ mod context;
 mod core;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
-#[path = "ops/fft.rs"]
+#[path = "ops/fft/mod.rs"]
 mod fft;
 #[path = "helpers.rs"]
 mod helpers;
@@ -75,13 +75,13 @@ mod indexing;
 mod init;
 #[path = "ops/io.rs"]
 mod io;
-#[path = "ops/linalg.rs"]
+#[path = "ops/linalg/mod.rs"]
 mod linalg;
 #[path = "ops/polynomial.rs"]
 mod polynomial;
 #[path = "ops/random.rs"]
 mod random;
-#[path = "ops/reduction.rs"]
+#[path = "ops/reduction/mod.rs"]
 mod reduction;
 #[path = "ops/signal.rs"]
 mod signal;

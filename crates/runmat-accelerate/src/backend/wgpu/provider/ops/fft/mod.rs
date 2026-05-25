@@ -83,9 +83,6 @@ fn fft_factor_smooth_235(mut len: usize) -> Option<Vec<u32>> {
     }
 }
 
-#[path = "fft/fallback.rs"]
 mod fallback;
-#[path = "fft/helpers.rs"]
 mod helpers;
-#[path = "fft/kernels.rs"]
 mod kernels;
