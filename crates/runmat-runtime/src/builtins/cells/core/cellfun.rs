@@ -1,6 +1,8 @@
 //! MATLAB-compatible `cellfun` builtin with host execution semantics for RunMat.
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, Closure, ComplexTensor, LogicalArray, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -43,19 +45,244 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Callback execution happens on the host; fusion planners should treat cellfun as a fusion barrier.",
 };
 
-const IDENT_INVALID_INPUT: &str = "RunMat:cellfun:InvalidInput";
-const IDENT_UNIFORM_OUTPUT: &str = "RunMat:cellfun:UniformOutput";
-const IDENT_FUNCTION_ERROR: &str = "RunMat:cellfun:FunctionError";
+const BUILTIN_NAME: &str = "cellfun";
 
-fn cellfun_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("cellfun").build()
-}
+const CELLFUN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Mapped callback outputs.",
+}];
 
-fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cellfun")
-        .with_identifier(identifier)
-        .build()
+const CELLFUN_SIG_SINGLE_CELL_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or builtin/function name.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input cell array.",
+    },
+];
+
+const CELLFUN_SIG_MULTI_CELL_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or builtin/function name.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "One or more input cell arrays followed by optional extra callback args.",
+    },
+];
+
+const CELLFUN_SIG_UNIFORM_OUTPUT_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or builtin/function name.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Cell input arrays and optional callback args.",
+    },
+    BuiltinParamDescriptor {
+        name: "UniformOutput",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"UniformOutput\""),
+        description: "Name-value key for uniform output mode.",
+    },
+    BuiltinParamDescriptor {
+        name: "tf",
+        ty: BuiltinParamType::LogicalArray,
+        arity: BuiltinParamArity::Required,
+        default: Some("true"),
+        description: "Whether callback outputs must be scalar-uniform.",
+    },
+];
+
+const CELLFUN_SIG_ERROR_HANDLER_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or builtin/function name.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Cell input arrays and optional callback args.",
+    },
+    BuiltinParamDescriptor {
+        name: "ErrorHandler",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ErrorHandler\""),
+        description: "Name-value key for callback error handler.",
+    },
+    BuiltinParamDescriptor {
+        name: "errfunc",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Error handler function handle or name.",
+    },
+];
+
+const CELLFUN_SIG_BOTH_OPTIONS_INPUTS: [BuiltinParamDescriptor; 6] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or builtin/function name.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Cell input arrays and optional callback args.",
+    },
+    BuiltinParamDescriptor {
+        name: "UniformOutput",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"UniformOutput\""),
+        description: "Name-value key for uniform output mode.",
+    },
+    BuiltinParamDescriptor {
+        name: "tf",
+        ty: BuiltinParamType::LogicalArray,
+        arity: BuiltinParamArity::Required,
+        default: Some("true"),
+        description: "Whether callback outputs must be scalar-uniform.",
+    },
+    BuiltinParamDescriptor {
+        name: "ErrorHandler",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ErrorHandler\""),
+        description: "Name-value key for callback error handler.",
+    },
+    BuiltinParamDescriptor {
+        name: "errfunc",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Error handler function handle or name.",
+    },
+];
+
+const CELLFUN_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = cellfun(func, C)",
+        inputs: &CELLFUN_SIG_SINGLE_CELL_INPUTS,
+        outputs: &CELLFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = cellfun(func, C1, C2, ...)",
+        inputs: &CELLFUN_SIG_MULTI_CELL_INPUTS,
+        outputs: &CELLFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = cellfun(func, C..., \"UniformOutput\", tf)",
+        inputs: &CELLFUN_SIG_UNIFORM_OUTPUT_INPUTS,
+        outputs: &CELLFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = cellfun(func, C..., \"ErrorHandler\", errfunc)",
+        inputs: &CELLFUN_SIG_ERROR_HANDLER_INPUTS,
+        outputs: &CELLFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = cellfun(func, C..., \"UniformOutput\", tf, \"ErrorHandler\", errfunc)",
+        inputs: &CELLFUN_SIG_BOTH_OPTIONS_INPUTS,
+        outputs: &CELLFUN_OUTPUT,
+    },
+];
+
+const CELLFUN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELLFUN.INVALID_INPUT",
+    identifier: Some("RunMat:cellfun:InvalidInput"),
+    when: "Input callback/cell-array arguments or name-value forms are invalid.",
+    message: "cellfun: invalid input arguments",
+};
+
+const CELLFUN_ERROR_UNIFORM_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELLFUN.UNIFORM_OUTPUT",
+    identifier: Some("RunMat:cellfun:UniformOutput"),
+    when: "UniformOutput mode requirements are violated.",
+    message: "cellfun: uniform output contract violated",
+};
+
+const CELLFUN_ERROR_FUNCTION_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELLFUN.FUNCTION_ERROR",
+    identifier: Some("RunMat:cellfun:FunctionError"),
+    when: "Callback-related function execution semantics fail.",
+    message: "cellfun: callback execution error",
+};
+
+const CELLFUN_ERROR_UNDEFINED_FUNCTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELLFUN.UNDEFINED_FUNCTION",
+    identifier: Some("RunMat:UndefinedFunction"),
+    when: "External callable resolution fails at runtime boundary.",
+    message: "cellfun: undefined external function",
+};
+
+const CELLFUN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELLFUN.INTERNAL",
+    identifier: None,
+    when: "Internal allocation or struct materialization fails.",
+    message: "cellfun: internal error",
+};
+
+const CELLFUN_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    CELLFUN_ERROR_INVALID_INPUT,
+    CELLFUN_ERROR_UNIFORM_OUTPUT,
+    CELLFUN_ERROR_FUNCTION_ERROR,
+    CELLFUN_ERROR_UNDEFINED_FUNCTION,
+    CELLFUN_ERROR_INTERNAL,
+];
+
+pub const CELLFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CELLFUN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CELLFUN_ERRORS,
+};
+
+fn cellfun_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -65,6 +292,7 @@ fn cellfun_error_with_identifier(message: impl Into<String>, identifier: &str) -
     keywords = "cellfun,cell,array,functional",
     accel = "host",
     type_resolver(cellfun_type),
+    descriptor(crate::builtins::cells::core::cellfun::CELLFUN_DESCRIPTOR),
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -89,18 +317,18 @@ async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 error_handler = Some(Callable::from_function(value)?);
             }
             unknown => {
-                return Err(cellfun_error_with_identifier(
+                return Err(cellfun_error_with_message(
                     format!("cellfun: unknown name-value argument '{unknown}'"),
-                    IDENT_INVALID_INPUT,
+                    &CELLFUN_ERROR_INVALID_INPUT,
                 ));
             }
         }
     }
 
     if args.is_empty() {
-        return Err(cellfun_error_with_identifier(
+        return Err(cellfun_error_with_message(
             "cellfun: expected at least one cell array input",
-            IDENT_INVALID_INPUT,
+            &CELLFUN_ERROR_INVALID_INPUT,
         ));
     }
 
@@ -112,9 +340,9 @@ async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         match value {
             Value::Cell(ca) if !seen_non_cell => cell_inputs.push(ca),
             Value::Cell(_) => {
-                return Err(cellfun_error_with_identifier(
+                return Err(cellfun_error_with_message(
                     "cellfun: cell array inputs must precede extra arguments",
-                    IDENT_INVALID_INPUT,
+                    &CELLFUN_ERROR_INVALID_INPUT,
                 ));
             }
             other => {
@@ -125,21 +353,21 @@ async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     }
 
     if cell_inputs.is_empty() {
-        return Err(cellfun_error_with_identifier(
+        return Err(cellfun_error_with_message(
             "cellfun: expected at least one cell array input",
-            IDENT_INVALID_INPUT,
+            &CELLFUN_ERROR_INVALID_INPUT,
         ));
     }
 
     let reference_shape = cell_inputs[0].shape.clone();
     for (idx, ca) in cell_inputs.iter().enumerate().skip(1) {
         if ca.shape != reference_shape {
-            return Err(cellfun_error_with_identifier(
+            return Err(cellfun_error_with_message(
                 format!(
                     "cellfun: cell array input {} does not match the size of the first input",
                     idx + 1
                 ),
-                IDENT_INVALID_INPUT,
+                &CELLFUN_ERROR_INVALID_INPUT,
             ));
         }
     }
@@ -173,9 +401,9 @@ async fn execute_uniform(
     shape: &[usize],
 ) -> BuiltinResult<Value> {
     let element_count = total_len(shape).ok_or_else(|| {
-        cellfun_error_with_identifier(
+        cellfun_error_with_message(
             "cellfun: cell array size exceeds platform limits",
-            IDENT_INVALID_INPUT,
+            &CELLFUN_ERROR_INVALID_INPUT,
         )
     })?;
 
@@ -226,9 +454,9 @@ async fn execute_cell(
     shape: &[usize],
 ) -> BuiltinResult<Value> {
     let element_count = total_len(shape).ok_or_else(|| {
-        cellfun_error_with_identifier(
+        cellfun_error_with_message(
             "cellfun: cell array size exceeds platform limits",
-            IDENT_INVALID_INPUT,
+            &CELLFUN_ERROR_INVALID_INPUT,
         )
     })?;
     let host_extra_args = prepare_extra_args(extra_args).await?;
@@ -268,7 +496,7 @@ async fn execute_cell(
     }
 
     make_cell_with_shape(outputs, shape.to_vec())
-        .map_err(|e| cellfun_error(format!("cellfun: {e}")))
+        .map_err(|e| cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL))
 }
 
 fn deref_cell_value(cell: &CellArray, index: usize) -> Value {
@@ -311,23 +539,23 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(iv) => Ok(iv.to_f64() != 0.0),
         Value::String(s) => parse_bool_string(&s).ok_or_else(|| {
-            cellfun_error_with_identifier(
+            cellfun_error_with_message(
                 "cellfun: UniformOutput must be logical true or false",
-                IDENT_UNIFORM_OUTPUT,
+                &CELLFUN_ERROR_UNIFORM_OUTPUT,
             )
         }),
         Value::CharArray(ca) if ca.rows == 1 => {
             let s: String = ca.data.iter().collect();
             parse_bool_string(&s).ok_or_else(|| {
-                cellfun_error_with_identifier(
+                cellfun_error_with_message(
                     "cellfun: UniformOutput must be logical true or false",
-                    IDENT_UNIFORM_OUTPUT,
+                    &CELLFUN_ERROR_UNIFORM_OUTPUT,
                 )
             })
         }
-        other => Err(cellfun_error_with_identifier(
+        other => Err(cellfun_error_with_message(
             format!("cellfun: UniformOutput must be logical true or false, got {other:?}"),
-            IDENT_UNIFORM_OUTPUT,
+            &CELLFUN_ERROR_UNIFORM_OUTPUT,
         )),
     }
 }
@@ -354,8 +582,9 @@ fn make_error_struct(
     st.fields
         .insert("index".to_string(), Value::Num((linear_index + 1) as f64));
     let subs = linear_to_indices(linear_index, shape);
-    let subs_tensor =
-        dims_to_row_tensor(&subs).map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+    let subs_tensor = dims_to_row_tensor(&subs).map_err(|e| {
+        cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+    })?;
     st.fields
         .insert("indices".to_string(), Value::Tensor(subs_tensor));
     Ok(Value::Struct(st))
@@ -392,7 +621,13 @@ fn split_error_message(raw: &str) -> (String, String) {
             return (trimmed.to_string(), String::new());
         }
     }
-    (IDENT_FUNCTION_ERROR.to_string(), trimmed.to_string())
+    (
+        CELLFUN_ERROR_FUNCTION_ERROR
+            .identifier
+            .expect("CELLFUN_ERROR_FUNCTION_ERROR must define identifier")
+            .to_string(),
+        trimmed.to_string(),
+    )
 }
 
 fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
@@ -435,9 +670,9 @@ impl Callable {
             Value::String(s) => Self::from_text(&s, true),
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
-                    Err(cellfun_error_with_identifier(
+                    Err(cellfun_error_with_message(
                         "cellfun: function name must be a character vector or string scalar",
-                        IDENT_INVALID_INPUT,
+                        &CELLFUN_ERROR_INVALID_INPUT,
                     ))
                 } else {
                     let text: String = ca.data.iter().collect();
@@ -448,9 +683,9 @@ impl Callable {
                 if sa.data.len() == 1 {
                     Self::from_text(&sa.data[0], true)
                 } else {
-                    Err(cellfun_error_with_identifier(
+                    Err(cellfun_error_with_message(
                         "cellfun: function name must be a character vector or string scalar",
-                        IDENT_INVALID_INPUT,
+                        &CELLFUN_ERROR_INVALID_INPUT,
                     ))
                 }
             }
@@ -479,9 +714,9 @@ impl Callable {
                 }
                 Ok(Callable::Closure(c))
             }
-            other => Err(cellfun_error_with_identifier(
+            other => Err(cellfun_error_with_message(
                 format!("cellfun: expected function handle or builtin name, got {other:?}"),
-                IDENT_INVALID_INPUT,
+                &CELLFUN_ERROR_INVALID_INPUT,
             )),
         }
     }
@@ -489,17 +724,17 @@ impl Callable {
     fn from_text(text: &str, fold_case: bool) -> BuiltinResult<Self> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err(cellfun_error_with_identifier(
+            return Err(cellfun_error_with_message(
                 "cellfun: expected function handle or builtin name, got empty string",
-                IDENT_INVALID_INPUT,
+                &CELLFUN_ERROR_INVALID_INPUT,
             ));
         }
         if let Some(rest) = trimmed.strip_prefix('@') {
             let name = rest.trim();
             if name.is_empty() {
-                Err(cellfun_error_with_identifier(
+                Err(cellfun_error_with_message(
                     "cellfun: empty function handle",
-                    IDENT_INVALID_INPUT,
+                    &CELLFUN_ERROR_INVALID_INPUT,
                 ))
             } else {
                 if let Some(callable) = Self::resolved_semantic_handle(name) {
@@ -562,9 +797,9 @@ impl Callable {
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
                 }
-                Err(cellfun_error_with_identifier(
+                Err(cellfun_error_with_message(
                     format!("Undefined function for callable identity {identity:?}"),
-                    "RunMat:UndefinedFunction",
+                    &CELLFUN_ERROR_UNDEFINED_FUNCTION,
                 ))
             }
             Callable::Closure(c) => {
@@ -578,12 +813,12 @@ impl Callable {
                     {
                         return result;
                     }
-                    return Err(cellfun_error_with_identifier(
+                    return Err(cellfun_error_with_message(
                         format!(
                             "cellfun: semantic closure '{}' ({function}) is unavailable",
                             c.function_name
                         ),
-                        IDENT_INVALID_INPUT,
+                        &CELLFUN_ERROR_INVALID_INPUT,
                     ));
                 }
                 if let Some(function) =
@@ -615,32 +850,32 @@ impl SpecialCallable {
         match self {
             SpecialCallable::ProdOfSize => {
                 let value = args.first().ok_or_else(|| {
-                    cellfun_error_with_identifier(
+                    cellfun_error_with_message(
                         "cellfun: prodofsize requires one input",
-                        IDENT_INVALID_INPUT,
+                        &CELLFUN_ERROR_INVALID_INPUT,
                     )
                 })?;
                 Ok(Value::Num(value_numel(value).await? as f64))
             }
             SpecialCallable::IsClass => {
                 if args.len() < 2 {
-                    return Err(cellfun_error_with_identifier(
+                    return Err(cellfun_error_with_message(
                         "cellfun: 'isclass' requires a class name argument",
-                        IDENT_INVALID_INPUT,
+                        &CELLFUN_ERROR_INVALID_INPUT,
                     ));
                 }
                 let left = args[0].clone();
                 let class_name = extract_string(&args[1]).ok_or_else(|| {
-                    cellfun_error_with_identifier(
+                    cellfun_error_with_message(
                         "cellfun: class name must be a string scalar",
-                        IDENT_INVALID_INPUT,
+                        &CELLFUN_ERROR_INVALID_INPUT,
                     )
                 })?;
                 let class_value = call_builtin_async("class", &[left]).await?;
                 let class_str = extract_string(&class_value).ok_or_else(|| {
-                    cellfun_error_with_identifier(
+                    cellfun_error_with_message(
                         "cellfun: failed to evaluate class name",
-                        IDENT_FUNCTION_ERROR,
+                        &CELLFUN_ERROR_FUNCTION_ERROR,
                     )
                 })?;
                 Ok(Value::Bool(
@@ -738,23 +973,27 @@ impl UniformCollector {
             UniformCollector::Pending => {
                 let total = total_len(shape).unwrap_or(0);
                 let data = vec![0.0; total];
-                let tensor = Tensor::new(data, shape.to_vec())
-                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| {
+                    cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+                })?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Double(data) => {
-                let tensor = Tensor::new(data, shape.to_vec())
-                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let tensor = Tensor::new(data, shape.to_vec()).map_err(|e| {
+                    cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+                })?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Logical(bits) => {
-                let logical = LogicalArray::new(bits, shape.to_vec())
-                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let logical = LogicalArray::new(bits, shape.to_vec()).map_err(|e| {
+                    cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+                })?;
                 Ok(Value::LogicalArray(logical))
             }
             UniformCollector::Complex(data) => {
-                let complex = ComplexTensor::new(data, shape.to_vec())
-                    .map_err(|e| cellfun_error(format!("cellfun: {e}")))?;
+                let complex = ComplexTensor::new(data, shape.to_vec()).map_err(|e| {
+                    cellfun_error_with_message(format!("cellfun: {e}"), &CELLFUN_ERROR_INTERNAL)
+                })?;
                 Ok(Value::ComplexTensor(complex))
             }
         }
@@ -778,9 +1017,9 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
             Ok(ClassifiedValue::Logical(la.data[0] != 0))
         }
         Value::ComplexTensor(ct) if ct.data.len() == 1 => Ok(ClassifiedValue::Complex(ct.data[0])),
-        _ => Err(cellfun_error_with_identifier(
+        _ => Err(cellfun_error_with_message(
             "cellfun: callback must return scalar values when 'UniformOutput' is true",
-            IDENT_UNIFORM_OUTPUT,
+            &CELLFUN_ERROR_UNIFORM_OUTPUT,
         )),
     }
 }
@@ -797,6 +1036,19 @@ pub(crate) mod tests {
 
     fn cellfun_builtin(func: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cellfun_builtin(func, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn descriptor_signatures_cover_cellfun_forms() {
+        let labels: Vec<&str> = CELLFUN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = cellfun(func, C)"));
+        assert!(labels.contains(&"Y = cellfun(func, C..., \"UniformOutput\", tf)"));
+        assert!(labels.contains(&"Y = cellfun(func, C..., \"ErrorHandler\", errfunc)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1051,7 +1303,7 @@ pub(crate) mod tests {
         .expect_err("unresolved external callback should error");
         assert_eq!(
             err.identifier(),
-            Some("RunMat:UndefinedFunction"),
+            CELLFUN_ERROR_UNDEFINED_FUNCTION.identifier,
             "unexpected error: {}",
             err.message()
         );
@@ -1078,7 +1330,7 @@ pub(crate) mod tests {
         .expect_err("malformed unresolved external callback should error");
         assert_eq!(
             err.identifier(),
-            Some("RunMat:UndefinedFunction"),
+            CELLFUN_ERROR_UNDEFINED_FUNCTION.identifier,
             "unexpected error: {}",
             err.message()
         );

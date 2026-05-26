@@ -2634,6 +2634,7 @@ mod tests {
                 "C = cell(sz, \"like\", prototype)",
             ),
             ("cell2mat(cell(1, 1));", "A = cell2mat(C)"),
+            ("cellfun(@length, cell(1, 1));", "Y = cellfun(func, C)"),
             ("cellstr(\"RunMat\");", "C = cellstr(str)"),
         ];
 
