@@ -1901,7 +1901,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1926,7 +1927,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1947,7 +1949,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -2035,6 +2038,27 @@ mod tests {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
             let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
+    fn signature_help_uses_plotting_control_descriptors() {
+        let cases = [
+            ("drawnow();", "ok = drawnow()"),
+            ("hold('on');", "enabled = hold(mode)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
