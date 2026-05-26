@@ -8,7 +8,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::isstring_type;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isstring")]
@@ -38,6 +41,37 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Type-check predicate that does not participate in fusion planning.",
 };
 
+const ISSTRING_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input is a string scalar or string array.",
+}];
+
+const ISSTRING_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const ISSTRING_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isstring(A)",
+    inputs: &ISSTRING_INPUTS,
+    outputs: &ISSTRING_OUTPUT,
+}];
+
+const ISSTRING_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const ISSTRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISSTRING_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISSTRING_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isstring",
     category = "introspection",
@@ -45,6 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isstring,string array,string scalar,type checking,introspection",
     accel = "metadata",
     type_resolver(isstring_type),
+    descriptor(crate::builtins::introspection::isstring::ISSTRING_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::isstring"
 )]
 fn isstring_builtin(value: Value) -> crate::BuiltinResult<Value> {

@@ -1944,6 +1944,33 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_workspace_introspection_descriptors() {
+        let cases = [
+            ("class(1);", "name = class(A)"),
+            ("isa(1, \"double\");", "tf = isa(A, type_name)"),
+            ("ischar('abc');", "tf = ischar(A)"),
+            ("isstring(\"abc\");", "tf = isstring(A)"),
+            ("clear(\"x\");", "clear(name, ...)"),
+            (
+                "clearvars(\"x\", \"-except\", \"y\");",
+                "clearvars(name_or_option, ...)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_prefers_descriptor_signature_label() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());

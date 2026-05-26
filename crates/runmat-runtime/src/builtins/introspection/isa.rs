@@ -8,7 +8,11 @@ use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::handle_is_logical;
-use runmat_builtins::{get_class, Value};
+use runmat_builtins::{
+    get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::isa")]
@@ -39,6 +43,51 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Not eligible for fusion planning; isa executes on the host and produces a logical scalar.",
 };
 
+const ISA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input belongs to the requested class/category.",
+}];
+
+const ISA_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "type_name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Class or abstract type name.",
+    },
+];
+
+const ISA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isa(A, type_name)",
+    inputs: &ISA_INPUTS,
+    outputs: &ISA_OUTPUT,
+}];
+
+const ISA_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+    code: "RM.ISA.TYPE_NAME_INVALID",
+    identifier: None,
+    when: "Second argument is not a string scalar or row character vector.",
+    message: "isa: TYPE must be a string scalar or character vector",
+}];
+
+pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISA_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISA_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isa",
     category = "introspection",
@@ -46,6 +95,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
     accel = "metadata",
     type_resolver(isa_type),
+    descriptor(crate::builtins::introspection::isa::ISA_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::isa"
 )]
 fn isa_builtin(value: Value, class_designator: Value) -> crate::BuiltinResult<Value> {
