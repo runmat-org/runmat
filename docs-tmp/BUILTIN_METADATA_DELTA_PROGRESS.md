@@ -7,9 +7,10 @@
 | Wave 2 (Array Constructors + Reduction) | `true`, `false`, `range`, `logspace` | Done | `0dec5d88` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `true_`, `false_`, `range_`, `logspace_` | Attached descriptors with exhaustive signatures aligned to runtime parser/branch behavior |
 | Wave 3 (Random Constructors) | `rand`, `randn`, `randi`, `randperm` | Done | `66c6c0c3` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `rand_`, `randn_`, `randi_`, `randperm_` | Attached descriptors + LSP signature-help coverage for random constructor family |
 | Wave 4 (Special Constructors) | `empty`, `magic` | Done | `68d72b80` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `empty_`, `magic_` | Attached descriptors + LSP signature-help coverage for constructor edge cases |
+| Wave 5 (Grid + Sequence Constructors) | `colon`, `fill`, `meshgrid`, `peaks` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `colon_`, `fill_`, `meshgrid_`, `peaks_` | Attached descriptors + LSP signature-help coverage for sequence/grid creation forms |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `26`
-- Remaining: `542`
+- Migrated with attached descriptor: `30`
+- Remaining: `538`

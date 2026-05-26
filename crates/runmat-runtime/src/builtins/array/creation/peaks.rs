@@ -24,7 +24,11 @@
 //! Y via the existing meshgrid GPU path and obtains Z from the peaks shader.
 
 use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{LiteralValue, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LiteralValue, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -75,6 +79,190 @@ fn peaks_type(args: &[Type], ctx: &ResolveContext) -> Type {
         _ => Type::Unknown,
     }
 }
+
+const PEAKS_OUTPUT_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sampled peaks surface values.",
+}];
+
+const PEAKS_OUTPUT_XY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid coordinates along X-axis.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid coordinates along Y-axis.",
+    },
+];
+
+const PEAKS_OUTPUT_XYZ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid coordinates along X-axis.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid coordinates along Y-axis.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sampled peaks surface values.",
+    },
+];
+
+const PEAKS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const PEAKS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("49"),
+    description: "Grid size n for n-by-n sampling.",
+}];
+
+const PEAKS_SIG_XY_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinate matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinate matrix (same size as X).",
+    },
+];
+
+const PEAKS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "Z = peaks()",
+        inputs: &PEAKS_SIG_EMPTY_INPUTS,
+        outputs: &PEAKS_OUTPUT_Z,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Z = peaks(n)",
+        inputs: &PEAKS_SIG_N_INPUTS,
+        outputs: &PEAKS_OUTPUT_Z,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Z = peaks(X, Y)",
+        inputs: &PEAKS_SIG_XY_INPUTS,
+        outputs: &PEAKS_OUTPUT_Z,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X,Y] = peaks(n)",
+        inputs: &PEAKS_SIG_N_INPUTS,
+        outputs: &PEAKS_OUTPUT_XY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X,Y,Z] = peaks(n)",
+        inputs: &PEAKS_SIG_N_INPUTS,
+        outputs: &PEAKS_OUTPUT_XYZ,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X,Y] = peaks(X, Y)",
+        inputs: &PEAKS_SIG_XY_INPUTS,
+        outputs: &PEAKS_OUTPUT_XY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X,Y,Z] = peaks(X, Y)",
+        inputs: &PEAKS_SIG_XY_INPUTS,
+        outputs: &PEAKS_OUTPUT_XYZ,
+    },
+];
+
+const PEAKS_ERRORS: [BuiltinErrorDescriptor; 10] = [
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.OUTPUT_COUNT",
+        identifier: None,
+        when: "More than three outputs are requested.",
+        message: "peaks: too many output arguments; maximum is 3",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.ARG_COUNT",
+        identifier: None,
+        when: "The builtin is called with more than two input arguments.",
+        message: "peaks: expected 0, 1, or 2 input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.N_NON_SCALAR",
+        identifier: None,
+        when: "The n argument is not a numeric scalar.",
+        message: "peaks: n must be a numeric scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.N_NON_FINITE",
+        identifier: None,
+        when: "The n argument is non-finite.",
+        message: "peaks: n must be finite",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.N_NON_INTEGER",
+        identifier: None,
+        when: "The n argument is not an integer.",
+        message: "peaks: n must be an integer",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.N_NEGATIVE",
+        identifier: None,
+        when: "The n argument is negative.",
+        message: "peaks: n must be non-negative",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.N_TOO_LARGE",
+        identifier: None,
+        when: "The n argument exceeds platform limits.",
+        message: "peaks: n is too large for this platform",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.XY_NON_NUMERIC",
+        identifier: None,
+        when: "X/Y inputs are not numeric matrix values.",
+        message: "peaks: X and Y must be numeric matrices",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.XY_NOT_2D",
+        identifier: None,
+        when: "X/Y inputs are not 2-D matrices.",
+        message: "peaks: X and Y must be 2-D matrices",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.PEAKS.XY_SIZE_MISMATCH",
+        identifier: None,
+        when: "X and Y inputs do not have the same shape.",
+        message: "peaks: X and Y must have the same size",
+    },
+];
+
+pub const PEAKS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PEAKS_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PEAKS_ERRORS,
+};
 
 fn peaks_n_type(arg: &Type, ctx: &ResolveContext) -> Type {
     if let Some(n) = peaks_literal_n(ctx) {
@@ -177,6 +365,7 @@ fn same_size_shape(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<Vec<O
     keywords = "peaks,sample,surface,test,demo",
     accel = "array_construct",
     type_resolver(peaks_type),
+    descriptor(crate::builtins::array::creation::peaks::PEAKS_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::peaks"
 )]
 async fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -3,7 +3,11 @@
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::array::type_resolvers::{
@@ -84,6 +88,241 @@ fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
 }
 
+const FILL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Constant-valued output array.",
+}];
+
+const FILL_SIG_VALUE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Scalar fill value.",
+}];
+
+const FILL_SIG_VALUE_N_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Square size.",
+    },
+];
+
+const FILL_SIG_VALUE_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "size_vector",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Size vector defining output dimensions.",
+    },
+];
+
+const FILL_SIG_VALUE_DIMS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+];
+
+const FILL_SIG_VALUE_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value when no numeric dimension arguments are provided.",
+    },
+];
+
+const FILL_SIG_VALUE_CLASS_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class override ('double'|'logical'|'complex').",
+    },
+];
+
+const FILL_SIG_VALUE_LIKE_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const FILL_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value)",
+        inputs: &FILL_SIG_VALUE_INPUT,
+        outputs: &FILL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value, n)",
+        inputs: &FILL_SIG_VALUE_N_INPUTS,
+        outputs: &FILL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value, size_vector)",
+        inputs: &FILL_SIG_VALUE_SIZE_VECTOR_INPUTS,
+        outputs: &FILL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value, m, n, ...)",
+        inputs: &FILL_SIG_VALUE_DIMS_INPUTS,
+        outputs: &FILL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value, prototype)",
+        inputs: &FILL_SIG_VALUE_PROTOTYPE_INPUTS,
+        outputs: &FILL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value, ..., typename)",
+        inputs: &FILL_SIG_VALUE_CLASS_INPUTS,
+        outputs: &FILL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = fill(value, ..., \"like\", prototype)",
+        inputs: &FILL_SIG_VALUE_LIKE_INPUTS,
+        outputs: &FILL_OUTPUT,
+    },
+];
+
+const FILL_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.NON_SCALAR_VALUE",
+        identifier: None,
+        when: "The fill value is not scalar.",
+        message: "fill: fill value must be a scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.INVALID_FILL_VALUE_TYPE",
+        identifier: None,
+        when: "The fill value type is unsupported.",
+        message: "fill: fill value must be numeric, logical, or complex scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "fill: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.MULTIPLE_LIKE",
+        identifier: None,
+        when: "The 'like' keyword is provided multiple times.",
+        message: "fill: multiple 'like' specifications are not supported",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.CLASS_CONFLICT",
+        identifier: None,
+        when: "A class keyword and a 'like' prototype are both provided.",
+        message: "fill: cannot combine 'like' with class specifiers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.UNSUPPORTED_CLASS",
+        identifier: None,
+        when: "An unsupported output class is requested.",
+        message: "fill: single precision output is not implemented yet",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not recognized.",
+        message: "fill: unrecognised option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.FILL.INVALID_DIMS",
+        identifier: None,
+        when: "Dimension arguments fail numeric/shape parsing.",
+        message: "fill: dimension arguments must be numeric and nonnegative",
+    },
+];
+
+pub const FILL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FILL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FILL_ERRORS,
+};
+
 #[runtime_builtin(
     name = "fill",
     category = "array/creation",
@@ -91,6 +330,7 @@ fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "fill,constant,array,gpu,like",
     accel = "array_construct",
     type_resolver(fill_type),
+    descriptor(crate::builtins::array::creation::fill::FILL_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::fill"
 )]
 async fn fill_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

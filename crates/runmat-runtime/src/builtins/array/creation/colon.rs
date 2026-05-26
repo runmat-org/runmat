@@ -1,7 +1,11 @@
 //! MATLAB-compatible `colon` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{CharArray, ComplexTensor, LiteralValue, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LiteralValue, LogicalArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -86,6 +90,126 @@ fn zero_increment_error() -> crate::RuntimeError {
         .build()
 }
 
+const COLON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Arithmetic progression row vector (numeric or character).",
+}];
+
+const COLON_SIG_TWO_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Start scalar value.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stop scalar value (implicit step = 1).",
+    },
+];
+
+const COLON_SIG_THREE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Start scalar value.",
+    },
+    BuiltinParamDescriptor {
+        name: "step",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Non-zero increment.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stop scalar value.",
+    },
+];
+
+const COLON_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "x = colon(start, stop)",
+        inputs: &COLON_SIG_TWO_INPUTS,
+        outputs: &COLON_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = colon(start, step, stop)",
+        inputs: &COLON_SIG_THREE_INPUTS,
+        outputs: &COLON_OUTPUT,
+    },
+];
+
+const COLON_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.ARG_COUNT",
+        identifier: None,
+        when: "More than three input arguments are provided.",
+        message: "colon: expected two or three input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.ZERO_INCREMENT",
+        identifier: Some("RunMat:IndexStepZero"),
+        when: "The explicit increment is zero.",
+        message: "colon: increment must be nonzero",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.NON_SCALAR_INPUT",
+        identifier: None,
+        when: "At least one input is not scalar.",
+        message: "colon: expected scalar input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.NON_FINITE_INPUT",
+        identifier: None,
+        when: "At least one input scalar is non-finite.",
+        message: "colon: inputs must be finite numeric scalars",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.COMPLEX_IMAGINARY_NONZERO",
+        identifier: None,
+        when: "Complex inputs have non-zero imaginary parts.",
+        message: "colon: complex inputs must have zero imaginary part",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.UNSUPPORTED_STRING_INPUT",
+        identifier: None,
+        when: "String-like values are used as scalar bounds/step.",
+        message: "colon: inputs must be real scalar values; received a string-like argument",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.CHAR_NON_INTEGER_CODEPOINT",
+        identifier: None,
+        when: "Character sequence values are non-integer.",
+        message: "colon: character sequence requires integer code points",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.COLON.CHAR_CODEPOINT_RANGE",
+        identifier: None,
+        when: "Character sequence values are outside valid Unicode range.",
+        message: "colon: character code point out of range",
+    },
+];
+
+pub const COLON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COLON_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COLON_ERRORS,
+};
+
 #[runtime_builtin(
     name = "colon",
     category = "array/creation",
@@ -93,6 +217,7 @@ fn zero_increment_error() -> crate::RuntimeError {
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
     type_resolver(colon_type),
+    descriptor(crate::builtins::array::creation::colon::COLON_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(
