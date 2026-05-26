@@ -286,6 +286,13 @@ fn gpu_array_error_with_message(
     builder.build()
 }
 
+fn gpu_array_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    gpu_array_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuarray")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "gpuArray",
@@ -449,9 +456,9 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
                         options.explicit_dtype = Some(class);
                     }
                 } else if tag != "gpuarray" {
-                    return Err(gpu_array_error_with_message(
-                        format!("gpuArray: unrecognised option '{tag}'"),
+                    return Err(gpu_array_error_with_detail(
                         &GPUARRAY_ERROR_UNKNOWN_OPTION,
+                        format!("unrecognised option '{tag}'"),
                     ));
                 }
             }
@@ -728,9 +735,9 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
             "gpuArray: complex inputs are not supported yet; split real and imaginary parts before uploading",
             &GPUARRAY_ERROR_INPUT_TYPE,
         )),
-        other => Err(gpu_array_error_with_message(
-            format!("gpuArray: unsupported input type for GPU transfer: {other:?}"),
+        other => Err(gpu_array_error_with_detail(
             &GPUARRAY_ERROR_INPUT_TYPE,
+            format!("unsupported input type for GPU transfer: {other:?}"),
         )),
     }
 }

@@ -252,8 +252,10 @@ Disallowed source:
 6. If a branch needs extra context in the text, wrap the descriptor message (`format!("{base}: {detail}")`) while still anchoring the branch to that descriptor row.
 7. Canonical throw helper pattern:
    - `fn foo_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError { foo_error_with_message(error.message, error) }`
+   - `fn foo_error_with_detail(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError { foo_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error) }`
    - Use `foo_error(&FOO_ERROR_...)` for stable branches.
-   - Use `foo_error_with_message(format!(...), &FOO_ERROR_...)` only for contextual/internal details.
+   - Use `foo_error_with_detail(&FOO_ERROR_..., "...")` (or `format!(...)`) only for contextual/internal details.
+   - Do not repeat the stable branch message prefix in callsites (avoid literal `"foo: ..."` throw strings once descriptor rows exist).
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 

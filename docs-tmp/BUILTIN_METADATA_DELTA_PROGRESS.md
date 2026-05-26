@@ -35,9 +35,10 @@
 | Wave 30 (Strings Transform Between) | `extractBetween`, `eraseBetween` | Done | `30944e97` | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::extractbetween::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::erasebetween::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for between-boundary transforms + descriptor-backed stable error maps (input/boundary/position/name-value/cell/size/internal) + LSP signature-help coverage |
 | Wave 31 (GPU Acceleration Core A) | `gather`, `gpuDevice`, `gpuInfo` | Done | `0f068eb4` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gather::tests::`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gpudevice::tests::`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gpuinfo::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for gather/device-info surface + descriptor-backed stable error maps for argument/output/index/reset/provider branches + LSP signature-help coverage |
 | Wave 32 (GPU Acceleration Core B) | `gpuArray` | Done | `e71c10c0` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gpuarray::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for gpuArray size/class/like option grammar + descriptor-backed stable error maps across parser/type-conversion/reshape/provider branches + LSP signature-help coverage |
+| Wave 33 (GPU Acceleration Core C) | `pagefun` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::pagefun::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for pagefun callable/arity surface (`@mtimes`) + descriptor-backed stable error maps for callable/arity/page-shape/matrix-shape/result/internal branches + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `109`
-- Remaining: `459`
+- Migrated with attached descriptor: `110`
+- Remaining: `458`

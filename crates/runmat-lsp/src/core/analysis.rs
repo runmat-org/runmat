@@ -1936,7 +1936,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -2079,6 +2080,7 @@ mod tests {
             ("gpuDevice();", "info = gpuDevice()"),
             ("gpuDevice(1);", "info = gpuDevice(arg)"),
             ("gpuInfo();", "summary = gpuInfo()"),
+            ("pagefun(\"mtimes\", 1, 1);", "Y = pagefun(func, A, B)"),
         ];
 
         for (text, expected_label) in cases {
