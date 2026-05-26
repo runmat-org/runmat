@@ -2628,6 +2628,24 @@ mod tests {
                 "filewrite(\"demo.txt\", \"abc\", \"WriteMode\", \"append\");",
                 "count = filewrite(filename, data, ..., \"WriteMode\", mode)",
             ),
+            ("fread(3);", "data = fread(fid)"),
+            (
+                "fread(3, 10, \"uint8\", 1, \"ieee-le\");",
+                "data = fread(fid, size, precision, skip, machinefmt)",
+            ),
+            (
+                "fread(3, \"uint8\", \"ieee-be\");",
+                "data = fread(fid, precision, machinefmt)",
+            ),
+            (
+                "fread(3, 10, \"double\", \"like\", zeros(1,1));",
+                "data = fread(fid, ..., \"like\", prototype)",
+            ),
+            ("fwrite(3, [1 2 3]);", "count = fwrite(fid, data)"),
+            (
+                "fwrite(3, [1 2 3], \"uint16\", 1, \"ieee-be\");",
+                "count = fwrite(fid, data, precision, skip, machinefmt)",
+            ),
             ("fgetl(3);", "tline = fgetl(fid)"),
             ("fgets(3);", "tline = fgets(fid)"),
             ("fgets(3, 10);", "tline = fgets(fid, nchar)"),
