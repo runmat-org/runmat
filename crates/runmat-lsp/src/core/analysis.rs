@@ -2112,6 +2112,10 @@ mod tests {
             ("strings([2,3]);", "S = strings(sz)"),
             ("strlength(\"abc\");", "L = strlength(str)"),
             ("str2double(\"1.0\");", "X = str2double(str)"),
+            ("char(65);", "C = char(X)"),
+            ("num2str(42);", "txt = num2str(A)"),
+            ("sprintf(\"%d\", 1);", "txt = sprintf(formatSpec, A...)"),
+            ("compose(\"v=%d\", 1);", "S = compose(formatSpec, A...)"),
         ];
 
         for (text, expected_label) in cases {

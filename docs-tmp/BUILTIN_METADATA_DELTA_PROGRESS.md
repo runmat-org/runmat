@@ -22,9 +22,10 @@
 | Wave 17 (Struct Core D) | `setfield` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::setfield::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for scalar/nested/leading-index assignment forms + stable descriptor error row set + LSP signature-help coverage |
 | Wave 18 (Strings Core Compare) | `strcmp`, `strcmpi`, `strncmp` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::strcmp::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strcmpi::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strncmp::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for case-sensitive, case-insensitive, and prefix text comparison builtins + stable descriptor error rows + LSP signature-help coverage |
 | Wave 19 (Strings Core Basics) | `strings`, `string.empty`, `strlength`, `str2double` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::strings::tests::`; `cargo test -p runmat-runtime builtins::strings::core::string_empty::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strlength::tests::`; `cargo test -p runmat-runtime builtins::strings::core::str2double::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core string array creation and scalar/array text numeric metadata conversions + descriptor-row stable errors + LSP signature-help coverage |
+| Wave 20 (Strings Core Formatting A) | `char`, `num2str`, `sprintf`, `compose` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::char::tests::`; `cargo test -p runmat-runtime builtins::strings::core::num2str::tests::`; `cargo test -p runmat-runtime builtins::strings::core::sprintf::tests::`; `cargo test -p runmat-runtime builtins::strings::core::compose::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for numeric/text formatting conversion surface + stable descriptor error rows + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `84`
-- Remaining: `484`
+- Migrated with attached descriptor: `88`
+- Remaining: `480`
