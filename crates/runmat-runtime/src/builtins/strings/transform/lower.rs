@@ -1,6 +1,10 @@
 //! MATLAB-compatible `lower` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -46,14 +50,75 @@ const ARG_TYPE_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "lower: cell array elements must be string scalars or character vectors";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const LOWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Lowercased text preserving input container kind and shape.",
+}];
+
+const LOWER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String/char/cell text input to transform.",
+}];
+
+const LOWER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = lower(str)",
+    inputs: &LOWER_INPUTS,
+    outputs: &LOWER_OUTPUT,
+}];
+
+const LOWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOWER.INVALID_INPUT",
+    identifier: Some("RunMat:lower:InvalidInput"),
+    when: "Input is not a string array, character array, or cell array of text scalars.",
+    message: ARG_TYPE_ERROR,
+};
+
+const LOWER_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOWER.CELL_ELEMENT",
+    identifier: Some("RunMat:lower:CellElement"),
+    when: "Cell array contains a non-text element or non-row char array element.",
+    message: CELL_ELEMENT_ERROR,
+};
+
+const LOWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOWER.INTERNAL",
+    identifier: Some("RunMat:lower:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "lower: internal error",
+};
+
+const LOWER_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LOWER_ERROR_INVALID_INPUT,
+    LOWER_ERROR_CELL_ELEMENT,
+    LOWER_ERROR_INTERNAL,
+];
+
+pub const LOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOWER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOWER_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn lower_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -63,6 +128,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     keywords = "lower,lowercase,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::lower::LOWER_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
 async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
@@ -72,7 +138,10 @@ async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(array) => lower_string_array(array),
         Value::CharArray(array) => lower_char_array(array),
         Value::Cell(cell) => lower_cell_array(cell),
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(lower_error_with_message(
+            ARG_TYPE_ERROR,
+            &LOWER_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
@@ -82,8 +151,9 @@ fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
         .into_iter()
         .map(lowercase_preserving_missing)
         .collect::<Vec<_>>();
-    let lowered_array = StringArray::new(lowered, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let lowered_array = StringArray::new(lowered, shape).map_err(|e| {
+        lower_error_with_message(format!("{BUILTIN_NAME}: {e}"), &LOWER_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(lowered_array))
 }
 
@@ -113,7 +183,9 @@ fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
 
     CharArray::new(lowered_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            lower_error_with_message(format!("{BUILTIN_NAME}: {e}"), &LOWER_ERROR_INTERNAL)
+        })
 }
 
 fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
@@ -128,8 +200,9 @@ fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             lowered_values.push(lowered);
         }
     }
-    make_cell(lowered_values, rows, cols)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(lowered_values, rows, cols).map_err(|e| {
+        lower_error_with_message(format!("{BUILTIN_NAME}: {e}"), &LOWER_ERROR_INTERNAL)
+    })
 }
 
 fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
@@ -139,8 +212,14 @@ fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
             lowercase_preserving_missing(sa.data[0].clone()),
         )),
         Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(ca.clone()),
-        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        Value::CharArray(_) => Err(lower_error_with_message(
+            CELL_ELEMENT_ERROR,
+            &LOWER_ERROR_CELL_ELEMENT,
+        )),
+        _ => Err(lower_error_with_message(
+            CELL_ELEMENT_ERROR,
+            &LOWER_ERROR_CELL_ELEMENT,
+        )),
     }
 }
 
