@@ -18,9 +18,10 @@
 | Wave 13 (Timing) | `pause`, `tic`, `toc`, `timeit` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::timing::` | Attached descriptors for timing builtins + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 | Wave 14 (Struct Core A) | `fieldnames`, `isfield`, `struct`, `rmfield` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::fieldnames::tests::`; `cargo test -p runmat-runtime builtins::structs::core::isfield::tests::`; `cargo test -p runmat-runtime builtins::structs::core::struct::tests::`; `cargo test -p runmat-runtime builtins::structs::core::rmfield::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors + descriptor-row canonical error identifiers/messages (no duplicated identifier/message constants) + LSP signature-help coverage |
 | Wave 15 (Struct Core B) | `orderfields` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::orderfields::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor with by-requested-output semantics (`[S,P]`) + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
+| Wave 16 (Struct Core C) | `getfield` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::getfield::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for scalar/nested/leading-index forms + stable descriptor error rows + descriptor-attached LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `75`
-- Remaining: `493`
+- Migrated with attached descriptor: `76`
+- Remaining: `492`

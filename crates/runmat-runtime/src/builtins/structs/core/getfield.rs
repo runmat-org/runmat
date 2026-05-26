@@ -13,7 +13,9 @@ use crate::{
     BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
     ObjectInstance, StructValue, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -46,19 +48,226 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "getfield";
-const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
+const GETFIELD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Selected field/property value.",
+}];
+
+const GETFIELD_INPUTS_SCALAR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct, struct array, object, or supported metadata container.",
+    },
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Field/property name.",
+    },
+];
+
+const GETFIELD_INPUTS_NESTED: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct, struct array, object, or supported metadata container.",
+    },
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Alternating field names and optional index-selector cells `{...}` for nested access.",
+    },
+];
+
+const GETFIELD_INPUTS_LEADING_INDEX: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct array or supported indexable container.",
+    },
+    BuiltinParamDescriptor {
+        name: "index_selector",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Leading index selector in a cell array, e.g. `{2}` or `{end}`.",
+    },
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Alternating field names and optional index-selector cells `{...}` for nested access.",
+    },
+];
+
+const GETFIELD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "value = getfield(S, field)",
+        inputs: &GETFIELD_INPUTS_SCALAR,
+        outputs: &GETFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = getfield(S, field_or_index, ...)",
+        inputs: &GETFIELD_INPUTS_NESTED,
+        outputs: &GETFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = getfield(S, {idx0}, field_or_index, ...)",
+        inputs: &GETFIELD_INPUTS_LEADING_INDEX,
+        outputs: &GETFIELD_OUTPUT,
+    },
+];
+
+const GETFIELD_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:getfield:NotEnoughInputs"),
+    when: "No field-name/path arguments are supplied.",
+    message: "getfield: expected at least one field name",
+};
+
+const GETFIELD_ERROR_FIELD_EXPECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.FIELD_EXPECTED",
+    identifier: Some("RunMat:getfield:FieldExpected"),
+    when: "Field name is missing after indices or argument parsing.",
+    message: "getfield: expected field name arguments",
+};
+
+const GETFIELD_ERROR_INDEX_SELECTOR_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.INDEX_SELECTOR_TYPE",
+    identifier: Some("RunMat:getfield:IndexSelectorType"),
+    when: "Index selector is not provided as a cell array.",
+    message: "getfield: indices must be provided in a cell array",
+};
+
+const GETFIELD_ERROR_INDEX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.INDEX_INVALID",
+    identifier: Some("RunMat:getfield:InvalidIndex"),
+    when: "Index components are malformed, empty, unsupported, or not positive integers.",
+    message: "getfield: invalid index element",
+};
+
+const GETFIELD_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.FIELD_NAME_TYPE",
+    identifier: Some("RunMat:getfield:FieldNameType"),
+    when: "Field name is not a string scalar or 1-by-N char vector.",
+    message: "getfield: expected field name",
+};
+
+const GETFIELD_ERROR_INDEX_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.INDEX_SHAPE",
+    identifier: Some("RunMat:getfield:IndexShape"),
+    when: "Indexing rank/shape is unsupported for the targeted value.",
+    message: "getfield: unsupported index shape for target value",
+};
+
+const GETFIELD_ERROR_NON_STRUCT_REFERENCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.NON_STRUCT_REFERENCE",
+    identifier: Some("RunMat:getfield:NonStructReference"),
+    when: "Field lookup is attempted on a non-struct/non-object container.",
+    message: "Struct contents reference from a non-struct array object.",
+};
+
+const GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.INDEX_OUT_OF_BOUNDS",
+    identifier: Some("RunMat:getfield:IndexOutOfBounds"),
+    when: "Resolved index is outside the bounds of the targeted value.",
+    message: "Index exceeds the number of array elements.",
+};
+
+const GETFIELD_ERROR_MISSING_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.MISSING_FIELD",
+    identifier: Some("RunMat:getfield:MissingField"),
+    when: "Requested field does not exist on struct/exception/listener.",
+    message: "Reference to non-existent field",
+};
+
+const GETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.PROPERTY_PRIVATE_ACCESS",
+    identifier: Some("RunMat:PropertyPrivateAccess"),
+    when: "Property exists but is private/inaccessible from this context.",
+    message: "You cannot get this property from the current context.",
+};
+
+const GETFIELD_ERROR_OBJECT_PROPERTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.OBJECT_PROPERTY",
+    identifier: Some("RunMat:getfield:ObjectProperty"),
+    when: "Object property access is invalid (static-through-instance, unknown, or non-public).",
+    message: "getfield: invalid object property access",
+};
+
+const GETFIELD_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.INVALID_HANDLE",
+    identifier: Some("RunMat:getfield:InvalidHandle"),
+    when: "Handle object is invalid/deleted.",
+    message: "Invalid or deleted handle object",
+};
+
+const GETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETFIELD.INTERNAL",
+    identifier: Some("RunMat:getfield:InternalError"),
+    when: "Internal value conversion or output assembly failed.",
+    message: "getfield: internal error",
+};
+
+const GETFIELD_ERRORS: [BuiltinErrorDescriptor; 13] = [
+    GETFIELD_ERROR_NOT_ENOUGH_INPUTS,
+    GETFIELD_ERROR_FIELD_EXPECTED,
+    GETFIELD_ERROR_INDEX_SELECTOR_TYPE,
+    GETFIELD_ERROR_INDEX_INVALID,
+    GETFIELD_ERROR_FIELD_NAME_TYPE,
+    GETFIELD_ERROR_INDEX_SHAPE,
+    GETFIELD_ERROR_NON_STRUCT_REFERENCE,
+    GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
+    GETFIELD_ERROR_MISSING_FIELD,
+    GETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS,
+    GETFIELD_ERROR_OBJECT_PROPERTY,
+    GETFIELD_ERROR_INVALID_HANDLE,
+    GETFIELD_ERROR_INTERNAL,
+];
+
+pub const GETFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GETFIELD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GETFIELD_ERRORS,
+};
 
 fn getfield_flow(message: impl Into<String>) -> RuntimeError {
+    getfield_error_with_message(message, &GETFIELD_ERROR_INTERNAL)
+}
+
+fn getfield_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    getfield_error_with_message(error.message, error)
+}
+
+fn getfield_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
+        .with_identifier(error.identifier.unwrap_or("RunMat:getfield:InternalError"))
         .build()
 }
 
 fn getfield_private_access(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(IDENT_PROPERTY_PRIVATE_ACCESS)
-        .build()
+    getfield_error_with_message(message, &GETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS)
 }
 
 fn remap_getfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError {
@@ -85,6 +294,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     summary = "Access a field or property from structs, struct arrays, or MATLAB-style objects.",
     keywords = "getfield,struct,object,field access",
     type_resolver(getfield_type),
+    descriptor(crate::builtins::structs::core::getfield::GETFIELD_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
 async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -130,7 +340,7 @@ enum IndexComponent {
 
 fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     if rest.is_empty() {
-        return Err(getfield_flow("getfield: expected at least one field name"));
+        return Err(getfield_error(&GETFIELD_ERROR_NOT_ENOUGH_INPUTS));
     }
 
     let mut parsed = ParsedArguments::default();
@@ -142,7 +352,10 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     }
 
     if rest.is_empty() {
-        return Err(getfield_flow("getfield: expected field name after indices"));
+        return Err(getfield_error_with_message(
+            "getfield: expected field name after indices",
+            &GETFIELD_ERROR_FIELD_EXPECTED,
+        ));
     }
 
     let mut iter = rest.into_iter().peekable();
@@ -162,7 +375,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     }
 
     if parsed.fields.is_empty() {
-        return Err(getfield_flow("getfield: expected field name arguments"));
+        return Err(getfield_error(&GETFIELD_ERROR_FIELD_EXPECTED));
     }
 
     Ok(parsed)
@@ -174,9 +387,7 @@ fn is_index_selector(value: &Value) -> bool {
 
 fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     let Value::Cell(cell) = value else {
-        return Err(getfield_flow(
-            "getfield: indices must be provided in a cell array",
-        ));
+        return Err(getfield_error(&GETFIELD_ERROR_INDEX_SELECTOR_TYPE));
     };
 
     let mut components = Vec::with_capacity(cell.data.len());
@@ -206,10 +417,10 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
         }
         _ => {
             let idx = parse_positive_scalar(value).map_err(|err| {
-                getfield_flow(format!(
-                    "getfield: invalid index element ({})",
-                    err.message()
-                ))
+                getfield_error_with_message(
+                    format!("getfield: invalid index element ({})", err.message()),
+                    &GETFIELD_ERROR_INDEX_INVALID,
+                )
             })?;
             Ok(IndexComponent::Scalar(idx))
         }
@@ -221,23 +432,30 @@ fn parse_index_text(text: &str) -> BuiltinResult<IndexComponent> {
         return Ok(IndexComponent::End);
     }
     if text == ":" {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: ':' indexing is not currently supported",
+            &GETFIELD_ERROR_INDEX_INVALID,
         ));
     }
     if text.is_empty() {
-        return Err(getfield_flow("getfield: index elements must not be empty"));
+        return Err(getfield_error_with_message(
+            "getfield: index elements must not be empty",
+            &GETFIELD_ERROR_INDEX_INVALID,
+        ));
     }
     if let Ok(value) = text.parse::<usize>() {
         if value == 0 {
-            return Err(getfield_flow("getfield: index must be >= 1"));
+            return Err(getfield_error_with_message(
+                "getfield: index must be >= 1",
+                &GETFIELD_ERROR_INDEX_INVALID,
+            ));
         }
         return Ok(IndexComponent::Scalar(value));
     }
-    Err(getfield_flow(format!(
-        "getfield: invalid index element '{}'",
-        text
-    )))
+    Err(getfield_error_with_message(
+        format!("getfield: invalid index element '{}'", text),
+        &GETFIELD_ERROR_INDEX_INVALID,
+    ))
 }
 
 fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
@@ -247,9 +465,10 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
         Value::Tensor(t) if t.data.len() == 1 => t.data[0],
         _ => {
             let repr = format!("{value:?}");
-            return Err(getfield_flow(format!(
-                "expected positive integer index, got {repr}"
-            )));
+            return Err(getfield_error_with_message(
+                format!("expected positive integer index, got {repr}"),
+                &GETFIELD_ERROR_INDEX_INVALID,
+            ));
         }
     };
 
@@ -258,16 +477,28 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
 
 fn parse_positive_integer(number: f64) -> BuiltinResult<usize> {
     if !number.is_finite() {
-        return Err(getfield_flow("index must be a finite number"));
+        return Err(getfield_error_with_message(
+            "index must be a finite number",
+            &GETFIELD_ERROR_INDEX_INVALID,
+        ));
     }
     if number.fract() != 0.0 {
-        return Err(getfield_flow("index must be an integer"));
+        return Err(getfield_error_with_message(
+            "index must be an integer",
+            &GETFIELD_ERROR_INDEX_INVALID,
+        ));
     }
     if number <= 0.0 {
-        return Err(getfield_flow("index must be >= 1"));
+        return Err(getfield_error_with_message(
+            "index must be >= 1",
+            &GETFIELD_ERROR_INDEX_INVALID,
+        ));
     }
     if number > usize::MAX as f64 {
-        return Err(getfield_flow("index exceeds platform limits"));
+        return Err(getfield_error_with_message(
+            "index exceeds platform limits",
+            &GETFIELD_ERROR_INDEX_INVALID,
+        ));
     }
     Ok(number as usize)
 }
@@ -279,8 +510,9 @@ fn parse_field_name(value: Value) -> BuiltinResult<String> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(getfield_flow(
+                Err(getfield_error_with_message(
                     "getfield: field names must be scalar string arrays or character vectors",
+                    &GETFIELD_ERROR_FIELD_NAME_TYPE,
                 ))
             }
         }
@@ -288,21 +520,24 @@ fn parse_field_name(value: Value) -> BuiltinResult<String> {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err(getfield_flow(
+                Err(getfield_error_with_message(
                     "getfield: field names must be 1-by-N character vectors",
+                    &GETFIELD_ERROR_FIELD_NAME_TYPE,
                 ))
             }
         }
-        other => Err(getfield_flow(format!(
-            "getfield: expected field name, got {other:?}"
-        ))),
+        other => Err(getfield_error_with_message(
+            format!("getfield: expected field name, got {other:?}"),
+            &GETFIELD_ERROR_FIELD_NAME_TYPE,
+        )),
     }
 }
 
 async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<Value> {
     if selector.components.is_empty() {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: index cell must contain at least one element",
+            &GETFIELD_ERROR_INDEX_SELECTOR_TYPE,
         ));
     }
 
@@ -356,12 +591,10 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
             if resolved.len() == 1 && resolved[0] == 1 {
                 Ok(value)
             } else {
-                Err(getfield_flow("Index exceeds the number of array elements."))
+                Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))
             }
         }
-        _ => Err(getfield_flow(
-            "Struct contents reference from a non-struct array object.",
-        )),
+        _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
     }
 }
 
@@ -374,7 +607,7 @@ fn apply_vector_index(value: &Value, selector: &IndexSelector) -> BuiltinResult<
             let mut data = Vec::with_capacity(indices.len());
             for &index in indices {
                 if index < 1 || index > tensor.data.len() {
-                    return Err(getfield_flow("Index exceeds the number of array elements."));
+                    return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
                 }
                 data.push(tensor.data[index - 1]);
             }
@@ -393,8 +626,9 @@ fn resolve_indices(value: &Value, selector: &IndexSelector) -> BuiltinResult<Vec
         let index = match component {
             IndexComponent::Scalar(idx) => *idx,
             IndexComponent::Vector(_, _) => {
-                return Err(getfield_flow(
+                return Err(getfield_error_with_message(
                     "getfield: vector indices are only supported for one-dimensional indexing",
+                    &GETFIELD_ERROR_INDEX_SHAPE,
                 ))
             }
             IndexComponent::End => dimension_length(value, dims, dim_idx)?,
@@ -416,14 +650,13 @@ fn dimension_length(value: &Value, dims: usize, dim_idx: usize) -> BuiltinResult
             if dims == 1 {
                 Ok(1)
             } else {
-                Err(getfield_flow(
+                Err(getfield_error_with_message(
                     "getfield: indexing with more than one dimension is not supported for scalars",
+                    &GETFIELD_ERROR_INDEX_SHAPE,
                 ))
             }
         }
-        _ => Err(getfield_flow(
-            "Struct contents reference from a non-struct array object.",
-        )),
+        _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
     }
 }
 
@@ -431,15 +664,17 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Buil
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err(getfield_flow(
+            return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
+                &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
             ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: indexing with more than two indices is not supported yet",
+            &GETFIELD_ERROR_INDEX_SHAPE,
         ));
     }
     let len = if dim_idx == 0 {
@@ -448,8 +683,9 @@ fn tensor_dimension_length(tensor: &Tensor, dims: usize, dim_idx: usize) -> Buil
         tensor.cols()
     };
     if len == 0 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "Index exceeds the number of array elements (0).",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
         ));
     }
     Ok(len)
@@ -459,21 +695,24 @@ fn cell_dimension_length(cell: &CellArray, dims: usize, dim_idx: usize) -> Built
     if dims == 1 {
         let total = cell.data.len();
         if total == 0 {
-            return Err(getfield_flow(
+            return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
+                &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
             ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: indexing with more than two indices is not supported yet",
+            &GETFIELD_ERROR_INDEX_SHAPE,
         ));
     }
     let len = if dim_idx == 0 { cell.rows } else { cell.cols };
     if len == 0 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "Index exceeds the number of array elements (0).",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
         ));
     }
     Ok(len)
@@ -487,15 +726,17 @@ fn string_array_dimension_length(
     if dims == 1 {
         let total = array.data.len();
         if total == 0 {
-            return Err(getfield_flow(
+            return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
+                &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
             ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: indexing with more than two indices is not supported yet",
+            &GETFIELD_ERROR_INDEX_SHAPE,
         ));
     }
     let len = if dim_idx == 0 {
@@ -504,8 +745,9 @@ fn string_array_dimension_length(
         array.cols()
     };
     if len == 0 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "Index exceeds the number of array elements (0).",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
         ));
     }
     Ok(len)
@@ -519,15 +761,17 @@ fn logical_array_dimension_length(
     if dims == 1 {
         let total = logical.data.len();
         if total == 0 {
-            return Err(getfield_flow(
+            return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
+                &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
             ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: indexing with more than two indices is not supported yet",
+            &GETFIELD_ERROR_INDEX_SHAPE,
         ));
     }
     let len = if dim_idx == 0 {
@@ -536,8 +780,9 @@ fn logical_array_dimension_length(
         logical.shape.get(1).copied().unwrap_or(1)
     };
     if len == 0 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "Index exceeds the number of array elements (0).",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
         ));
     }
     Ok(len)
@@ -551,21 +796,24 @@ fn char_array_dimension_length(
     if dims == 1 {
         let total = array.rows * array.cols;
         if total == 0 {
-            return Err(getfield_flow(
+            return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
+                &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
             ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: indexing with more than two indices is not supported yet",
+            &GETFIELD_ERROR_INDEX_SHAPE,
         ));
     }
     let len = if dim_idx == 0 { array.rows } else { array.cols };
     if len == 0 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "Index exceeds the number of array elements (0).",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
         ));
     }
     Ok(len)
@@ -579,15 +827,17 @@ fn complex_tensor_dimension_length(
     if dims == 1 {
         let total = tensor.data.len();
         if total == 0 {
-            return Err(getfield_flow(
+            return Err(getfield_error_with_message(
                 "Index exceeds the number of array elements (0).",
+                &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
             ));
         }
         return Ok(total);
     }
     if dims > 2 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: indexing with more than two indices is not supported yet",
+            &GETFIELD_ERROR_INDEX_SHAPE,
         ));
     }
     let len = if dim_idx == 0 {
@@ -596,8 +846,9 @@ fn complex_tensor_dimension_length(
         tensor.cols
     };
     if len == 0 {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "Index exceeds the number of array elements (0).",
+            &GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
         ));
     }
     Ok(len)
@@ -605,15 +856,16 @@ fn complex_tensor_dimension_length(
 
 fn index_char_array(array: &CharArray, indices: &[usize]) -> BuiltinResult<Value> {
     if indices.is_empty() {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: at least one index is required for char arrays",
+            &GETFIELD_ERROR_INDEX_INVALID,
         ));
     }
     if indices.len() == 1 {
         let total = array.rows * array.cols;
         let idx = indices[0];
         if idx == 0 || idx > total {
-            return Err(getfield_flow("Index exceeds the number of array elements."));
+            return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
         }
         let linear = idx - 1;
         let rows = array.rows.max(1);
@@ -624,7 +876,7 @@ fn index_char_array(array: &CharArray, indices: &[usize]) -> BuiltinResult<Value
             .data
             .get(pos)
             .copied()
-            .ok_or_else(|| getfield_flow("Index exceeds the number of array elements."))?;
+            .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
         let out =
             CharArray::new(vec![ch], 1, 1).map_err(|e| getfield_flow(format!("getfield: {e}")))?;
         return Ok(Value::CharArray(out));
@@ -633,34 +885,36 @@ fn index_char_array(array: &CharArray, indices: &[usize]) -> BuiltinResult<Value
         let row = indices[0];
         let col = indices[1];
         if row == 0 || row > array.rows || col == 0 || col > array.cols {
-            return Err(getfield_flow("Index exceeds the number of array elements."));
+            return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
         }
         let pos = (row - 1) * array.cols + (col - 1);
         let ch = array
             .data
             .get(pos)
             .copied()
-            .ok_or_else(|| getfield_flow("Index exceeds the number of array elements."))?;
+            .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
         let out =
             CharArray::new(vec![ch], 1, 1).map_err(|e| getfield_flow(format!("getfield: {e}")))?;
         return Ok(Value::CharArray(out));
     }
-    Err(getfield_flow(
+    Err(getfield_error_with_message(
         "getfield: indexing with more than two indices is not supported for char arrays",
+        &GETFIELD_ERROR_INDEX_SHAPE,
     ))
 }
 
 fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinResult<Value> {
     if indices.is_empty() {
-        return Err(getfield_flow(
+        return Err(getfield_error_with_message(
             "getfield: at least one index is required for complex tensors",
+            &GETFIELD_ERROR_INDEX_INVALID,
         ));
     }
     if indices.len() == 1 {
         let total = tensor.data.len();
         let idx = indices[0];
         if idx == 0 || idx > total {
-            return Err(getfield_flow("Index exceeds the number of array elements."));
+            return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
         }
         let (re, im) = tensor.data[idx - 1];
         return Ok(Value::Complex(re, im));
@@ -669,18 +923,19 @@ fn index_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> BuiltinRes
         let row = indices[0];
         let col = indices[1];
         if row == 0 || row > tensor.rows || col == 0 || col > tensor.cols {
-            return Err(getfield_flow("Index exceeds the number of array elements."));
+            return Err(getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS));
         }
         let pos = (row - 1) + (col - 1) * tensor.rows;
         let (re, im) = tensor
             .data
             .get(pos)
             .copied()
-            .ok_or_else(|| getfield_flow("Index exceeds the number of array elements."))?;
+            .ok_or_else(|| getfield_error(&GETFIELD_ERROR_INDEX_OUT_OF_BOUNDS))?;
         return Ok(Value::Complex(re, im));
     }
-    Err(getfield_flow(
+    Err(getfield_error_with_message(
         "getfield: indexing with more than two indices is not supported for complex tensors",
+        &GETFIELD_ERROR_INDEX_SHAPE,
     ))
 }
 
@@ -694,8 +949,9 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
         Value::MException(ex) => get_exception_field(&ex, name),
         Value::Cell(cell) if is_struct_array(&cell) => {
             if cell.data.is_empty() {
-                return Err(getfield_flow(
+                return Err(getfield_error_with_message(
                     "Struct contents reference from an empty struct array.",
+                    &GETFIELD_ERROR_NON_STRUCT_REFERENCE,
                 ));
             }
             // Default to first element when no index is specified
@@ -703,32 +959,32 @@ async fn get_field_value(value: Value, name: &str) -> BuiltinResult<Value> {
             let first_entry = unsafe { &*first_handle.as_raw() };
             match first_entry {
                 Value::Struct(st) => get_struct_field(st, name),
-                _ => Err(getfield_flow(
-                    "Struct contents reference from a non-struct array object.",
-                )),
+                _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
             }
         }
-        _ => Err(getfield_flow(
-            "Struct contents reference from a non-struct array object.",
-        )),
+        _ => Err(getfield_error(&GETFIELD_ERROR_NON_STRUCT_REFERENCE)),
     }
 }
 
 fn get_struct_field(struct_value: &StructValue, name: &str) -> BuiltinResult<Value> {
-    struct_value
-        .fields
-        .get(name)
-        .cloned()
-        .ok_or_else(|| getfield_flow(format!("Reference to non-existent field '{}'.", name)))
+    struct_value.fields.get(name).cloned().ok_or_else(|| {
+        getfield_error_with_message(
+            format!("Reference to non-existent field '{}'.", name),
+            &GETFIELD_ERROR_MISSING_FIELD,
+        )
+    })
 }
 
 async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Value> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
-            return Err(getfield_flow(format!(
-                "You cannot access the static property '{}' through an instance of class '{}'.",
-                name, obj.class_name
-            )));
+            return Err(getfield_error_with_message(
+                format!(
+                    "You cannot access the static property '{}' through an instance of class '{}'.",
+                    name, obj.class_name
+                ),
+                &GETFIELD_ERROR_OBJECT_PROPERTY,
+            ));
         }
         if prop.get_access == Access::Private {
             return Err(getfield_private_access(format!(
@@ -763,25 +1019,28 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
                 name, obj.class_name
             )));
         }
-        return Err(getfield_flow(format!(
-            "No public property '{}' for class '{}'.",
-            name, obj.class_name
-        )));
+        return Err(getfield_error_with_message(
+            format!(
+                "No public property '{}' for class '{}'.",
+                name, obj.class_name
+            ),
+            &GETFIELD_ERROR_OBJECT_PROPERTY,
+        ));
     }
 
-    Err(getfield_flow(format!(
-        "Undefined property '{}' for class {}",
-        name, obj.class_name
-    )))
+    Err(getfield_error_with_message(
+        format!("Undefined property '{}' for class {}", name, obj.class_name),
+        &GETFIELD_ERROR_OBJECT_PROPERTY,
+    ))
 }
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
     if !handle.valid {
-        return Err(getfield_flow(format!(
-            "Invalid or deleted handle object '{}'.",
-            handle.class_name
-        )));
+        return Err(getfield_error_with_message(
+            format!("Invalid or deleted handle object '{}'.", handle.class_name),
+            &GETFIELD_ERROR_INVALID_HANDLE,
+        ));
     }
     let target = unsafe { &*handle.target.as_raw() }.clone();
     get_field_value(target, name).await
@@ -801,10 +1060,10 @@ fn get_listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
             Ok(value)
         }
         "Id" | "id" => Ok(Value::Int(runmat_builtins::IntValue::U64(listener.id))),
-        other => Err(getfield_flow(format!(
-            "getfield: unknown field '{}' on listener object",
-            other
-        ))),
+        other => Err(getfield_error_with_message(
+            format!("getfield: unknown field '{}' on listener object", other),
+            &GETFIELD_ERROR_MISSING_FIELD,
+        )),
     }
 }
 
@@ -813,10 +1072,10 @@ fn get_exception_field(exception: &MException, name: &str) -> BuiltinResult<Valu
         "message" => Ok(Value::String(exception.message.clone())),
         "identifier" => Ok(Value::String(exception.identifier.clone())),
         "stack" => exception_stack_to_value(&exception.stack),
-        other => Err(getfield_flow(format!(
-            "Reference to non-existent field '{}'.",
-            other
-        ))),
+        other => Err(getfield_error_with_message(
+            format!("Reference to non-existent field '{}'.", other),
+            &GETFIELD_ERROR_MISSING_FIELD,
+        )),
     }
 }
 

@@ -2072,6 +2072,10 @@ mod tests {
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),
+            (
+                "getfield(struct('a', 1), 'a');",
+                "value = getfield(S, field)",
+            ),
             ("isfield(struct('a', 1), 'a');", "tf = isfield(S, name)"),
             ("orderfields(struct('a', 1));", "S = orderfields(S)"),
             ("struct('a', 1);", "S = struct(field, value, ...)"),
