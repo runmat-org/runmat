@@ -2244,6 +2244,11 @@ mod tests {
             ("strcat(\"run\", \"mat\");", "out = strcat(str1, str2, ...)"),
             ("join(\"runmat\");", "out = join(str)"),
             ("pad(\"runmat\");", "out = pad(str)"),
+            ("split(\"a b c\");", "newStr = split(str)"),
+            (
+                "strsplit(\"a,b\", \",\");",
+                "[parts, matches] = strsplit(str, delimiter)",
+            ),
         ];
 
         for (text, expected_label) in cases {
