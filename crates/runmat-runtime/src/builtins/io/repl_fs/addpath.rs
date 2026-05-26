@@ -2,7 +2,11 @@
 
 #[cfg(test)]
 use runmat_builtins::CellArray;
-use runmat_builtins::{CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
@@ -18,12 +22,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
-
-const ERROR_ARG_TYPE: &str =
-    "addpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors";
-const ERROR_TOO_FEW_ARGS: &str = "addpath: at least one folder must be specified";
-const ERROR_POSITION_REPEATED: &str =
-    "addpath: position option must be '-begin' or '-end' and may only appear once";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::addpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,10 +52,219 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "addpath";
 
-fn addpath_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const ADDPATH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "oldpath",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Previous search path string.",
+}];
+const ADDPATH_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder1",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder, path-list string, or container of folders to add.",
+}];
+const ADDPATH_INPUTS_FOLDER_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "folder1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First folder argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "folderN",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional folder arguments.",
+    },
+];
+const ADDPATH_INPUTS_WITH_POSITION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "folder1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First folder argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "folders",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional folder arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "position",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-begin\""),
+        description: "Insertion position flag: \"-begin\" or \"-end\".",
+    },
+];
+const ADDPATH_INPUTS_WITH_FROZEN: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "folder1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First folder argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "folders",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional folder arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "frozen",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-frozen\""),
+        description: "Compatibility flag accepted but currently ignored.",
+    },
+];
+const ADDPATH_INPUTS_WITH_POSITION_AND_FROZEN: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "folder1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First folder argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "folders",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional folder arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "position",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-begin\""),
+        description: "Insertion position flag: \"-begin\" or \"-end\".",
+    },
+    BuiltinParamDescriptor {
+        name: "frozen",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-frozen\""),
+        description: "Compatibility flag accepted but currently ignored.",
+    },
+];
+const ADDPATH_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "oldpath = addpath(folder1)",
+        inputs: &ADDPATH_INPUTS_FOLDER,
+        outputs: &ADDPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = addpath(folder1, folder2, ...)",
+        inputs: &ADDPATH_INPUTS_FOLDER_VARIADIC,
+        outputs: &ADDPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = addpath(folder1, ..., position)",
+        inputs: &ADDPATH_INPUTS_WITH_POSITION,
+        outputs: &ADDPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = addpath(folder1, ..., \"-frozen\")",
+        inputs: &ADDPATH_INPUTS_WITH_FROZEN,
+        outputs: &ADDPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = addpath(folder1, ..., position, \"-frozen\")",
+        inputs: &ADDPATH_INPUTS_WITH_POSITION_AND_FROZEN,
+        outputs: &ADDPATH_OUTPUT,
+    },
+];
+
+const ADDPATH_ERROR_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.ARG_TYPE",
+    identifier: None,
+    when: "Folder arguments are not character vectors, string scalars/arrays, tensors of character codes, or cell arrays containing those forms.",
+    message:
+        "addpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors",
+};
+const ADDPATH_ERROR_TOO_FEW_ARGS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.TOO_FEW_ARGS",
+    identifier: None,
+    when: "No folder arguments are provided, or all provided folder tokens are empty/options only.",
+    message: "addpath: at least one folder must be specified",
+};
+const ADDPATH_ERROR_POSITION_REPEATED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.POSITION_REPEATED",
+    identifier: None,
+    when: "A position option is repeated or multiple position options are provided.",
+    message: "addpath: position option must be '-begin' or '-end' and may only appear once",
+};
+const ADDPATH_ERROR_PATHDEF_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.PATHDEF_UNSUPPORTED",
+    identifier: None,
+    when: "A pathdef token is provided; loading pathdef.m is not implemented.",
+    message: "addpath: loading pathdef.m is not implemented yet",
+};
+const ADDPATH_ERROR_CWD_RESOLVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.CWD_RESOLVE",
+    identifier: None,
+    when: "Current directory cannot be resolved while normalizing a relative folder.",
+    message: "addpath: unable to resolve current directory",
+};
+const ADDPATH_ERROR_FOLDER_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.FOLDER_NOT_FOUND",
+    identifier: None,
+    when: "A requested folder path does not exist.",
+    message: "addpath: folder not found",
+};
+const ADDPATH_ERROR_NOT_FOLDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ADDPATH.NOT_FOLDER",
+    identifier: None,
+    when: "A requested path exists but is not a directory.",
+    message: "addpath: path is not a folder",
+};
+const ADDPATH_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    ADDPATH_ERROR_ARG_TYPE,
+    ADDPATH_ERROR_TOO_FEW_ARGS,
+    ADDPATH_ERROR_POSITION_REPEATED,
+    ADDPATH_ERROR_PATHDEF_UNSUPPORTED,
+    ADDPATH_ERROR_CWD_RESOLVE,
+    ADDPATH_ERROR_FOLDER_NOT_FOUND,
+    ADDPATH_ERROR_NOT_FOLDER,
+];
+pub const ADDPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ADDPATH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ADDPATH_ERRORS,
+};
+
+fn addpath_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    addpath_error_with_message(error.message, error)
+}
+
+fn addpath_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn addpath_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    addpath_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -91,11 +298,12 @@ struct AddPathSpec {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::addpath_type),
+    descriptor(crate::builtins::io::repl_fs::addpath::ADDPATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(addpath_error(ERROR_TOO_FEW_ARGS));
+        return Err(addpath_error(&ADDPATH_ERROR_TOO_FEW_ARGS));
     }
 
     let gathered = gather_arguments(&args).await?;
@@ -128,7 +336,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<AddPathSpec> {
     }
 
     if directories.is_empty() {
-        return Err(addpath_error(ERROR_TOO_FEW_ARGS));
+        return Err(addpath_error(&ADDPATH_ERROR_TOO_FEW_ARGS));
     }
 
     let mut resolved = Vec::new();
@@ -140,14 +348,14 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<AddPathSpec> {
         match parse_option(trimmed) {
             Some(AddPathOption::Begin) => {
                 if position_set {
-                    return Err(addpath_error(ERROR_POSITION_REPEATED));
+                    return Err(addpath_error(&ADDPATH_ERROR_POSITION_REPEATED));
                 }
                 position = InsertPosition::Begin;
                 position_set = true;
             }
             Some(AddPathOption::End) => {
                 if position_set {
-                    return Err(addpath_error(ERROR_POSITION_REPEATED));
+                    return Err(addpath_error(&ADDPATH_ERROR_POSITION_REPEATED));
                 }
                 position = InsertPosition::End;
                 position_set = true;
@@ -164,7 +372,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<AddPathSpec> {
     }
 
     if resolved.is_empty() {
-        return Err(addpath_error(ERROR_TOO_FEW_ARGS));
+        return Err(addpath_error(&ADDPATH_ERROR_TOO_FEW_ARGS));
     }
 
     Ok(AddPathSpec {
@@ -278,8 +486,8 @@ async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResu
             }
             Ok(())
         }
-        Value::GpuTensor(_) => Err(addpath_error(ERROR_ARG_TYPE)),
-        _ => Err(addpath_error(ERROR_ARG_TYPE)),
+        Value::GpuTensor(_) => Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE)),
+        _ => Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE)),
     }
 }
 
@@ -294,33 +502,33 @@ fn split_path_list(text: &str) -> Vec<String> {
 async fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err(addpath_error(ERROR_ARG_TYPE));
+        return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
     }
 
     if trimmed.eq_ignore_ascii_case("pathdef") || trimmed.eq_ignore_ascii_case("pathdef.m") {
-        return Err(addpath_error(
-            "addpath: loading pathdef.m is not implemented yet",
-        ));
+        return Err(addpath_error(&ADDPATH_ERROR_PATHDEF_UNSUPPORTED));
     }
 
-    let expanded = expand_user_path(trimmed, "addpath").map_err(addpath_error)?;
+    let expanded = expand_user_path(trimmed, "addpath")
+        .map_err(|err| addpath_error_with_detail(&ADDPATH_ERROR_FOLDER_NOT_FOUND, err))?;
     let path = Path::new(&expanded);
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         vfs::current_dir()
-            .map_err(|_| addpath_error("addpath: unable to resolve current directory"))?
+            .map_err(|_| addpath_error(&ADDPATH_ERROR_CWD_RESOLVE))?
             .join(path)
     };
     let normalized = normalize_pathbuf(&joined);
 
     let metadata = vfs::metadata_async(&normalized)
         .await
-        .map_err(|_| addpath_error(format!("addpath: folder '{trimmed}' not found")))?;
+        .map_err(|_| addpath_error_with_detail(&ADDPATH_ERROR_FOLDER_NOT_FOUND, trimmed))?;
     if !metadata.is_dir() {
-        return Err(addpath_error(format!(
-            "addpath: '{trimmed}' is not a folder"
-        )));
+        return Err(addpath_error_with_detail(
+            &ADDPATH_ERROR_NOT_FOLDER,
+            trimmed,
+        ));
     }
 
     Ok(path_to_string(&normalized))
@@ -354,25 +562,26 @@ fn normalize_pathbuf(path: &Path) -> PathBuf {
 
 fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(addpath_error(ERROR_ARG_TYPE));
+        return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
     }
     if tensor.rows() > 1 {
-        return Err(addpath_error(ERROR_ARG_TYPE));
+        return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
     }
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(addpath_error(ERROR_ARG_TYPE));
+            return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(addpath_error(ERROR_ARG_TYPE));
+            return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(addpath_error(ERROR_ARG_TYPE));
+            return Err(addpath_error(&ADDPATH_ERROR_ARG_TYPE));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| addpath_error(ERROR_ARG_TYPE))?;
+        let ch = char::from_u32(int_code as u32)
+            .ok_or_else(|| addpath_error(&ADDPATH_ERROR_ARG_TYPE))?;
         text.push(ch);
     }
     Ok(text)
@@ -416,6 +625,21 @@ pub(crate) mod tests {
 
     fn addpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::addpath_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn addpath_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ADDPATH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"oldpath = addpath(folder1)"));
+        assert!(labels.contains(&"oldpath = addpath(folder1, folder2, ...)"));
+        assert!(labels.contains(&"oldpath = addpath(folder1, ..., position)"));
+        assert!(labels.contains(&"oldpath = addpath(folder1, ..., \"-frozen\")"));
+        assert!(labels.contains(&"oldpath = addpath(folder1, ..., position, \"-frozen\")"));
     }
 
     struct PathGuard {

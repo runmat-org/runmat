@@ -2721,12 +2721,34 @@ mod tests {
     #[test]
     fn signature_help_uses_io_repl_fs_descriptors() {
         let cases = [
+            ("addpath(\"toolbox\");", "oldpath = addpath(folder1)"),
+            (
+                "addpath(\"toolbox\", \"utils\", \"-end\");",
+                "oldpath = addpath(folder1, ..., position)",
+            ),
+            (
+                "addpath(\"toolbox\", \"-frozen\");",
+                "oldpath = addpath(folder1, ..., \"-frozen\")",
+            ),
             ("pwd();", "folder = pwd()"),
             ("cd();", "folder = cd()"),
             ("cd(\"tmp\");", "folder = cd(folder)"),
+            ("rmpath(\"toolbox\");", "oldpath = rmpath(folder1)"),
+            (
+                "rmpath(\"toolbox\", \"utils\");",
+                "oldpath = rmpath(folder1, folder2, ...)",
+            ),
+            ("genpath();", "pathstr = genpath()"),
+            ("genpath(\"toolbox\");", "pathstr = genpath(folder)"),
+            (
+                "genpath(\"toolbox\", \"private\");",
+                "pathstr = genpath(folder, excludes)",
+            ),
             ("path();", "oldpath = path()"),
             ("path(\"a\");", "oldpath = path(path1)"),
             ("path(\"a\", \"b\");", "oldpath = path(path1, path2)"),
+            ("savepath();", "status = savepath()"),
+            ("savepath(\"pathdef.m\");", "status = savepath(filename)"),
         ];
 
         for (text, expected_label) in cases {
