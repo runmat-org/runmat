@@ -1,13 +1,126 @@
 use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
 use super::plot::plot_builtin;
-use super::state::{current_axes_state, set_log_modes_for_axes};
+use super::state::{current_axes_state, set_log_modes_for_axes, FigureError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "loglog";
+
+const LOGLOG_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Line handle.",
+}];
+const LOGLOG_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Y data vector/matrix.",
+}];
+const LOGLOG_INPUTS_XY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X data vector/matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector/matrix.",
+    },
+];
+const LOGLOG_INPUTS_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Plot-style inputs: optional axes handle, style tokens, and Name/Value pairs.",
+}];
+const LOGLOG_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "h = loglog(Y)",
+        inputs: &LOGLOG_INPUTS_Y,
+        outputs: &LOGLOG_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = loglog(X, Y)",
+        inputs: &LOGLOG_INPUTS_XY,
+        outputs: &LOGLOG_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = loglog(args...)",
+        inputs: &LOGLOG_INPUTS_ARGS,
+        outputs: &LOGLOG_OUTPUT_HANDLE,
+    },
+];
+const LOGLOG_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOGLOG.PLOT_FAILED",
+    identifier: Some("RunMat:loglog:PlotFailed"),
+    when: "Underlying plot rendering/parsing fails while building the log-log plot.",
+    message: "loglog: plot operation failed",
+};
+const LOGLOG_ERROR_LOG_AXIS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOGLOG.LOG_AXIS_FAILED",
+    identifier: Some("RunMat:loglog:LogAxisFailed"),
+    when: "Applying logarithmic axis modes fails.",
+    message: "loglog: failed to apply logarithmic axis mode",
+};
+const LOGLOG_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [LOGLOG_ERROR_PLOT_FAILED, LOGLOG_ERROR_LOG_AXIS_FAILED];
+pub const LOGLOG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOGLOG_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOGLOG_ERRORS,
+};
+
+fn loglog_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn loglog_map_plot_error(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "{}: {}",
+        LOGLOG_ERROR_PLOT_FAILED.message,
+        err.message()
+    ))
+    .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = LOGLOG_ERROR_PLOT_FAILED.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_source(err).build()
+}
+
+fn loglog_map_axes_error(err: FigureError) -> RuntimeError {
+    loglog_error_with_message(
+        format!("{}: {}", LOGLOG_ERROR_LOG_AXIS_FAILED.message, err),
+        &LOGLOG_ERROR_LOG_AXIS_FAILED,
+    )
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::loglog")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,19 +157,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::loglog::LOGLOG_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::loglog"
 )]
 pub async fn loglog_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let result = plot_builtin(args).await;
+    let result = plot_builtin(args).await.map_err(loglog_map_plot_error)?;
     let axes = current_axes_state();
-    set_log_modes_for_axes(axes.handle, axes.active_index, true, true).map_err(|err| {
-        crate::builtins::plotting::plotting_error_with_source(
-            "loglog",
-            format!("loglog: {err}"),
-            err,
-        )
-    })?;
-    result
+    set_log_modes_for_axes(axes.handle, axes.active_index, true, true)
+        .map_err(loglog_map_axes_error)?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -113,5 +222,17 @@ mod tests {
         assert!(meta.x_log);
         assert!(meta.y_log);
         assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn loglog_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LOGLOG_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = loglog(Y)"));
+        assert!(labels.contains(&"h = loglog(X, Y)"));
+        assert!(labels.contains(&"h = loglog(args...)"));
     }
 }

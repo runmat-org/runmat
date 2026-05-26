@@ -2083,6 +2083,9 @@ mod tests {
             ("colormap('parula');", "ok = colormap(name)"),
             ("shading('flat');", "ok = shading(mode)"),
             ("colorbar('off');", "enabled = colorbar(mode)"),
+            ("semilogx([1 10 100]);", "h = semilogx(Y)"),
+            ("semilogy([1 10 100]);", "h = semilogy(Y)"),
+            ("loglog([1 10 100]);", "h = loglog(Y)"),
         ];
 
         for (text, expected_label) in cases {
