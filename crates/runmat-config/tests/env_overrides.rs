@@ -1,56 +1,34 @@
 mod support;
 
-use runmat_config::{ConfigLoader, RunMatConfig, TelemetryDrainMode};
+use runmat_config::ConfigLoader;
 use tempfile::TempDir;
 
-const ENV_VARS: &[&str] = &[
-    "RUNMAT_CONFIG",
-    "RUNMAT_TELEMETRY_ENDPOINT",
-    "RUNMAT_TELEMETRY_UDP_ENDPOINT",
-    "RUNMAT_TELEMETRY_SYNC",
-    "RUNMAT_TELEMETRY_DRAIN",
-    "RUNMAT_TELEMETRY_DRAIN_TIMEOUT_MS",
-];
+const ENV_VARS: &[&str] = &["RUNMAT_CONFIG", "RUNMAT_TIMEOUT", "RUNMAT_JIT_THRESHOLD"];
 
 #[test]
-fn telemetry_env_overrides_respect_empty_values() {
+fn runmat_config_env_selects_config_file() {
     let _lock = support::env_lock();
     support::clear_env(ENV_VARS);
+
     let temp_dir = TempDir::new().unwrap();
-    let config_path = temp_dir.path().join(".runmat.yaml");
-    ConfigLoader::save_to_file(&RunMatConfig::default(), &config_path).unwrap();
+    let config_path = temp_dir.path().join("custom.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[runtime]
+timeout = 123
+jit = { enabled = true, threshold = 42, optimization_level = "speed" }
+"#,
+    )
+    .unwrap();
 
     std::env::set_var("RUNMAT_CONFIG", &config_path);
-    std::env::set_var("RUNMAT_TELEMETRY_ENDPOINT", "https://custom.example/ingest");
-    std::env::set_var("RUNMAT_TELEMETRY_UDP_ENDPOINT", "off");
+    std::env::set_var("RUNMAT_TIMEOUT", "999");
+    std::env::set_var("RUNMAT_JIT_THRESHOLD", "999");
 
     let config = ConfigLoader::load().unwrap();
-    assert_eq!(
-        config.telemetry.http_endpoint.as_deref(),
-        Some("https://custom.example/ingest")
-    );
-    assert!(config.telemetry.udp_endpoint.is_none());
-
-    support::clear_env(ENV_VARS);
-}
-
-#[test]
-fn telemetry_runtime_env_overrides_promote_into_config() {
-    let _lock = support::env_lock();
-    support::clear_env(ENV_VARS);
-    let temp_dir = TempDir::new().unwrap();
-    let config_path = temp_dir.path().join(".runmat.yaml");
-    ConfigLoader::save_to_file(&RunMatConfig::default(), &config_path).unwrap();
-
-    std::env::set_var("RUNMAT_CONFIG", &config_path);
-    std::env::set_var("RUNMAT_TELEMETRY_SYNC", "1");
-    std::env::set_var("RUNMAT_TELEMETRY_DRAIN", "none");
-    std::env::set_var("RUNMAT_TELEMETRY_DRAIN_TIMEOUT_MS", "250");
-
-    let config = ConfigLoader::load().unwrap();
-    assert!(config.telemetry.sync_mode);
-    assert_eq!(config.telemetry.drain_mode, TelemetryDrainMode::None);
-    assert_eq!(config.telemetry.drain_timeout_ms, 250);
+    assert_eq!(config.runtime.timeout, 123);
+    assert_eq!(config.jit.threshold, 42);
 
     support::clear_env(ENV_VARS);
 }

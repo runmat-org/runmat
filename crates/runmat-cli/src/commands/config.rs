@@ -44,47 +44,14 @@ pub async fn execute_config_command(
                 println!("Environment override: {config_path}");
             }
 
-            println!("Current directory:");
-            if let Ok(current_dir) = std::env::current_dir() {
-                for name in &[
-                    ".runmat.yaml",
-                    ".runmat.yml",
-                    ".runmat.json",
-                    ".runmat.toml",
-                ] {
-                    let path = current_dir.join(name);
-                    let exists = if path.exists() { " (exists)" } else { "" };
-                    println!("  {}{}", path.display(), exists);
-                }
-            }
+            println!("Project discovery (walk-up): runmat.toml, runmat.json");
 
             println!();
-            println!("Home directory:");
+            println!("User config:");
             if let Some(home_dir) = dirs::home_dir() {
-                for name in &[".runmat.yaml", ".runmat.yml", ".runmat.json"] {
-                    let path = home_dir.join(name);
-                    let exists = if path.exists() { " (exists)" } else { "" };
-                    println!("  {}{}", path.display(), exists);
-                }
-
                 let config_dir = home_dir.join(".config/runmat");
-                for name in &["config.yaml", "config.yml", "config.json"] {
+                for name in &["config.toml", "config.json"] {
                     let path = config_dir.join(name);
-                    let exists = if path.exists() { " (exists)" } else { "" };
-                    println!("  {}{}", path.display(), exists);
-                }
-            }
-
-            #[cfg(unix)]
-            {
-                println!();
-                println!("System-wide:");
-                for name in &[
-                    "/etc/runmat/config.yaml",
-                    "/etc/runmat/config.yml",
-                    "/etc/runmat/config.json",
-                ] {
-                    let path = std::path::Path::new(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
                     println!("  {}{}", path.display(), exists);
                 }

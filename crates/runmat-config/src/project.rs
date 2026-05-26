@@ -2,10 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::future::Future;
 use std::path::{Component, Path, PathBuf};
+use std::pin::Pin;
 use thiserror::Error;
 
 pub const PROJECT_MANIFEST_FILENAME: &str = "runmat.toml";
+pub const PROJECT_MANIFEST_FILENAMES: &[&str] = &["runmat.toml", "runmat.json"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectManifest {
@@ -22,6 +25,8 @@ pub struct ProjectPackage {
     pub name: String,
     #[serde(default)]
     pub version: Option<String>,
+    #[serde(default, rename = "runmat-version")]
+    pub runmat_version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,33 +36,11 @@ pub struct ProjectSources {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "RawProjectDependency")]
+#[serde(deny_unknown_fields)]
 pub struct ProjectDependency {
-    pub path: PathBuf,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RawProjectDependency {
-    path: Option<PathBuf>,
-    #[serde(flatten)]
-    other: BTreeMap<String, toml::Value>,
-}
-
-impl TryFrom<RawProjectDependency> for ProjectDependency {
-    type Error = String;
-
-    fn try_from(value: RawProjectDependency) -> Result<Self, Self::Error> {
-        if !value.other.is_empty() {
-            let fields = value.other.keys().cloned().collect::<Vec<_>>().join(", ");
-            return Err(format!(
-                "unsupported dependency fields: {fields} (only `path` is currently supported)"
-            ));
-        }
-        let Some(path) = value.path else {
-            return Err("dependency is missing required `path` field".to_string());
-        };
-        Ok(Self { path })
-    }
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +52,48 @@ pub struct ProjectEntrypoint {
     pub module: Option<String>,
     #[serde(default)]
     pub function: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProjectManifest {
+    package: ProjectPackage,
+    sources: ProjectSources,
+    #[serde(default)]
+    dependencies: BTreeMap<String, ProjectDependency>,
+    #[serde(default)]
+    entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawProjectEntrypoint {
+    #[serde(default)]
+    path: Option<PathBuf>,
+    #[serde(default)]
+    module: Option<String>,
+    #[serde(default)]
+    function: Option<String>,
+}
+
+impl From<RawProjectManifest> for ProjectManifest {
+    fn from(value: RawProjectManifest) -> Self {
+        let mut entrypoints = Vec::with_capacity(value.entrypoints.len());
+        for (name, raw) in value.entrypoints {
+            entrypoints.push(ProjectEntrypoint {
+                name,
+                path: raw.path,
+                module: raw.module,
+                function: raw.function,
+            });
+        }
+        Self {
+            package: value.package,
+            sources: value.sources,
+            dependencies: value.dependencies,
+            entrypoints,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,11 +121,17 @@ pub enum ProjectManifestLoadError {
         #[source]
         source: std::io::Error,
     },
-    #[error("failed to parse project manifest {path}: {source}")]
-    Parse {
+    #[error("failed to parse TOML project manifest {path}: {source}")]
+    ParseToml {
         path: PathBuf,
         #[source]
         source: toml::de::Error,
+    },
+    #[error("failed to parse JSON project manifest {path}: {source}")]
+    ParseJson {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
     },
     #[error("invalid project manifest {path}: {source}")]
     Validation {
@@ -211,6 +242,8 @@ pub enum ProjectCompositionError {
         dependency: String,
         path: PathBuf,
     },
+    #[error("dependency `{dependency}` in package `{package}` does not define a local `path` (version-only dependencies are not yet available to local composition)")]
+    DependencyPathRequired { package: String, dependency: String },
     #[error(
         "failed to load dependency manifest {path} for dependency `{dependency}` of package `{package}`: {source}"
     )]
@@ -338,6 +371,11 @@ impl ProjectManifest {
         if package_name.is_empty() {
             messages.push("[package].name is required and must be non-empty".to_string());
         }
+        if let Some(requirement) = self.package.runmat_version.as_deref() {
+            if let Some(msg) = validate_runmat_version_requirement(requirement) {
+                messages.push(msg);
+            }
+        }
 
         if self.sources.roots.is_empty() {
             messages.push("[sources].roots is required and must be non-empty".to_string());
@@ -364,18 +402,35 @@ impl ProjectManifest {
             if name.trim().is_empty() {
                 messages.push("dependency names must be non-empty".to_string());
             }
-            if !is_relative_without_parent(&dep.path) {
+            let has_path = dep.path.is_some();
+            let has_version = dep
+                .version
+                .as_ref()
+                .is_some_and(|version| !version.trim().is_empty());
+            if !has_path && !has_version {
                 messages.push(format!(
-                    "dependency `{name}` path `{}` must be project-relative without `..` segments",
-                    dep.path.display()
+                    "dependency `{name}` must set at least one of `path` or `version`"
                 ));
                 continue;
             }
-            let resolved = project_root.join(&dep.path);
+            let Some(path) = dep.path.as_ref() else {
+                messages.push(format!(
+                    "dependency `{name}` must set `path` for local composition support"
+                ));
+                continue;
+            };
+            if !is_relative_without_parent(path) {
+                messages.push(format!(
+                    "dependency `{name}` path `{}` must be project-relative without `..` segments",
+                    path.display()
+                ));
+                continue;
+            }
+            let resolved = project_root.join(path);
             if !resolved.is_dir() {
                 messages.push(format!(
                     "dependency `{name}` path `{}` does not exist as a directory",
-                    dep.path.display()
+                    path.display()
                 ));
             }
         }
@@ -450,7 +505,11 @@ impl ProjectManifest {
 }
 
 pub fn parse_project_manifest_toml(input: &str) -> Result<ProjectManifest, toml::de::Error> {
-    toml::from_str(input)
+    toml::from_str::<RawProjectManifest>(input).map(ProjectManifest::from)
+}
+
+pub fn parse_project_manifest_json(input: &str) -> Result<ProjectManifest, serde_json::Error> {
+    serde_json::from_str::<RawProjectManifest>(input).map(ProjectManifest::from)
 }
 
 pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, ProjectManifestLoadError> {
@@ -458,12 +517,63 @@ pub fn load_project_manifest(path: &Path) -> Result<ProjectManifest, ProjectMani
         path: path.to_path_buf(),
         source,
     })?;
-    let manifest: ProjectManifest = parse_project_manifest_toml(&content).map_err(|source| {
-        ProjectManifestLoadError::Parse {
+    let manifest = if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+    {
+        parse_project_manifest_json(&content).map_err(|source| {
+            ProjectManifestLoadError::ParseJson {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?
+    } else {
+        parse_project_manifest_toml(&content).map_err(|source| {
+            ProjectManifestLoadError::ParseToml {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?
+    };
+    let project_root = path.parent().unwrap_or_else(|| Path::new("."));
+    manifest
+        .validate(project_root)
+        .map_err(|source| ProjectManifestLoadError::Validation {
             path: path.to_path_buf(),
             source,
-        }
-    })?;
+        })?;
+    Ok(manifest)
+}
+
+pub async fn load_project_manifest_async(
+    path: &Path,
+) -> Result<ProjectManifest, ProjectManifestLoadError> {
+    let content = runmat_filesystem::read_to_string_async(path)
+        .await
+        .map_err(|source| ProjectManifestLoadError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let manifest = if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+    {
+        parse_project_manifest_json(&content).map_err(|source| {
+            ProjectManifestLoadError::ParseJson {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?
+    } else {
+        parse_project_manifest_toml(&content).map_err(|source| {
+            ProjectManifestLoadError::ParseToml {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?
+    };
     let project_root = path.parent().unwrap_or_else(|| Path::new("."));
     manifest
         .validate(project_root)
@@ -481,9 +591,31 @@ pub fn discover_project_manifest_from(start: &Path) -> Option<PathBuf> {
         start.parent()?.to_path_buf()
     };
     loop {
-        let candidate = current.join(PROJECT_MANIFEST_FILENAME);
-        if candidate.is_file() {
-            return Some(candidate);
+        for filename in PROJECT_MANIFEST_FILENAMES {
+            let candidate = current.join(filename);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    None
+}
+
+pub async fn discover_project_manifest_from_async(start: &Path) -> Option<PathBuf> {
+    let mut current = if path_is_dir_async(start).await {
+        start.to_path_buf()
+    } else {
+        start.parent()?.to_path_buf()
+    };
+    loop {
+        for filename in PROJECT_MANIFEST_FILENAMES {
+            let candidate = current.join(filename);
+            if path_is_file_async(&candidate).await {
+                return Some(candidate);
+            }
         }
         if !current.pop() {
             break;
@@ -513,6 +645,42 @@ pub fn build_project_source_index(
             &mut index,
             project_root,
         )?;
+    }
+
+    index
+        .files
+        .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    index.package_dirs.sort();
+    index.package_dirs.dedup();
+    index.class_dirs.sort();
+    index.class_dirs.dedup();
+    index.private_dirs.sort();
+    index.private_dirs.dedup();
+    Ok(index)
+}
+
+pub async fn build_project_source_index_async(
+    project_root: &Path,
+    manifest: &ProjectManifest,
+) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
+    let mut index = ProjectSourceIndex::default();
+    for source_root in &manifest.sources.roots {
+        let abs_root = project_root.join(source_root);
+        if !path_is_dir_async(&abs_root).await {
+            return Err(ProjectSourceIndexError::InvalidSourceRoot {
+                root: source_root.clone(),
+            });
+        }
+        let state = ScanState::default();
+        scan_source_dir_async(
+            &abs_root,
+            &abs_root,
+            source_root,
+            &state,
+            &mut index,
+            project_root,
+        )
+        .await?;
     }
 
     index
@@ -685,6 +853,61 @@ pub fn discover_project_symbols_from(
     }))
 }
 
+pub async fn discover_project_symbols_from_async(
+    start: &Path,
+) -> Result<Option<DiscoveredProjectSymbols>, DiscoverProjectSymbolsError> {
+    let Some(discovered) = discover_project_composition_from_async(start)
+        .await
+        .map_err(|err| match err {
+            DiscoverProjectCompositionError::Composition {
+                manifest_path,
+                source,
+            } => DiscoverProjectSymbolsError::Composition {
+                manifest_path,
+                source,
+            },
+            DiscoverProjectCompositionError::MissingRootPackage {
+                manifest_path,
+                package,
+            } => DiscoverProjectSymbolsError::MissingRootPackage {
+                manifest_path,
+                package,
+            },
+        })?
+    else {
+        return Ok(None);
+    };
+    let manifest_path = discovered.manifest_path.clone();
+    let root_package = discovered.root_package.clone();
+    let root = discovered
+        .composition
+        .packages
+        .get(&root_package)
+        .expect("root package should be present");
+    let root_dependencies = root.dependencies.clone();
+    let mut symbols = HashSet::new();
+    for package in discovered.composition.packages.values() {
+        for source in &package.source_index.files {
+            symbols.insert(source.qualified_name.clone());
+            symbols.insert(format!(
+                "{}.{}",
+                package.package_name, source.qualified_name
+            ));
+            for (alias, dependency_package) in &root_dependencies {
+                if dependency_package == &package.package_name {
+                    symbols.insert(format!("{alias}.{}", source.qualified_name));
+                }
+            }
+        }
+    }
+    Ok(Some(DiscoveredProjectSymbols {
+        manifest_path,
+        root_package,
+        project_root: root.project_root.clone(),
+        symbols,
+    }))
+}
+
 pub fn discover_project_symbols_from_source_name(
     source_name: &str,
     cwd: &Path,
@@ -728,6 +951,45 @@ pub fn discover_project_symbols_from_source_name(
     discover_project_symbols_from(&start)
 }
 
+pub async fn discover_project_symbols_from_source_name_async(
+    source_name: &str,
+    cwd: &Path,
+) -> Result<Option<DiscoveredProjectSymbols>, DiscoverProjectSymbolsError> {
+    let source_path = PathBuf::from(source_name);
+    let local_candidate = if source_path.is_absolute() {
+        source_path.clone()
+    } else {
+        cwd.join(&source_path)
+    };
+    if source_name.contains(':') && !path_exists_async(&local_candidate).await {
+        return Ok(None);
+    }
+    if (source_path.is_absolute() || source_path.components().count() > 1)
+        && !path_exists_async(&local_candidate).await
+    {
+        return Ok(None);
+    }
+    let start = if path_is_file_async(&local_candidate).await {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf())
+    } else if source_path.is_absolute() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf())
+    } else if source_path.components().count() > 1 {
+        local_candidate
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf())
+    } else {
+        cwd.to_path_buf()
+    };
+    discover_project_symbols_from_async(&start).await
+}
+
 pub fn discover_known_project_symbols_from_source_name(
     source_name: Option<&str>,
     cwd: &Path,
@@ -736,6 +998,22 @@ pub fn discover_known_project_symbols_from_source_name(
         return HashSet::new();
     };
     let Ok(discovered) = discover_project_symbols_from_source_name(source_name, cwd) else {
+        return HashSet::new();
+    };
+    discovered
+        .map(|discovered| discovered.symbols)
+        .unwrap_or_default()
+}
+
+pub async fn discover_known_project_symbols_from_source_name_async(
+    source_name: Option<&str>,
+    cwd: &Path,
+) -> HashSet<String> {
+    let Some(source_name) = source_name else {
+        return HashSet::new();
+    };
+    let Ok(discovered) = discover_project_symbols_from_source_name_async(source_name, cwd).await
+    else {
         return HashSet::new();
     };
     discovered
@@ -800,6 +1078,25 @@ pub fn build_project_composition_graph(
     })
 }
 
+pub async fn build_project_composition_graph_async(
+    root_manifest_path: &Path,
+) -> Result<ProjectCompositionGraph, ProjectCompositionError> {
+    let mut loader = AsyncCompositionGraphLoader::default();
+    let root_package = loader
+        .load_package(
+            root_manifest_path,
+            None,
+            true,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .await?;
+    Ok(ProjectCompositionGraph {
+        root_package,
+        packages: loader.packages,
+    })
+}
+
 fn is_relative_without_parent(path: &Path) -> bool {
     if path.is_absolute() {
         return false;
@@ -835,6 +1132,32 @@ fn discover_project_composition_from(
     }))
 }
 
+async fn discover_project_composition_from_async(
+    start: &Path,
+) -> Result<Option<DiscoveredProjectComposition>, DiscoverProjectCompositionError> {
+    let Some(manifest_path) = discover_project_manifest_from_async(start).await else {
+        return Ok(None);
+    };
+    let composition = build_project_composition_graph_async(&manifest_path)
+        .await
+        .map_err(|source| DiscoverProjectCompositionError::Composition {
+            manifest_path: manifest_path.clone(),
+            source: Box::new(source),
+        })?;
+    let root_package = composition.root_package.clone();
+    if !composition.packages.contains_key(&root_package) {
+        return Err(DiscoverProjectCompositionError::MissingRootPackage {
+            manifest_path,
+            package: root_package,
+        });
+    }
+    Ok(Some(DiscoveredProjectComposition {
+        manifest_path,
+        composition,
+        root_package,
+    }))
+}
+
 fn source_input_entrypoint_name_candidate(path: &Path) -> Option<String> {
     if path.extension().is_some() {
         return None;
@@ -847,6 +1170,54 @@ fn source_input_entrypoint_name_candidate(path: &Path) -> Option<String> {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn validate_runmat_version_requirement(requirement: &str) -> Option<String> {
+    let trimmed = requirement.trim();
+    if trimmed.is_empty() {
+        return Some("[package].runmat-version must be non-empty when set".to_string());
+    }
+    let target = trimmed.strip_prefix(">=").unwrap_or(trimmed).trim();
+    let required = match parse_semver_triplet(target) {
+        Ok(version) => version,
+        Err(reason) => {
+            return Some(format!(
+                "[package].runmat-version `{trimmed}` is invalid: {reason}"
+            ));
+        }
+    };
+    let current = match parse_semver_triplet(env!("CARGO_PKG_VERSION")) {
+        Ok(version) => version,
+        Err(_) => return None,
+    };
+    if current < required {
+        return Some(format!(
+            "[package].runmat-version requires {trimmed}, but current runtime is {}",
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+    None
+}
+
+fn parse_semver_triplet(input: &str) -> Result<(u64, u64, u64), String> {
+    let base = input.split(['-', '+']).next().unwrap_or(input);
+    let mut parts = base.split('.');
+    let major = parts
+        .next()
+        .ok_or_else(|| "missing major".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "invalid major".to_string())?;
+    let minor = parts
+        .next()
+        .ok_or_else(|| "missing minor".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "invalid minor".to_string())?;
+    let patch = parts
+        .next()
+        .ok_or_else(|| "missing patch".to_string())?
+        .parse::<u64>()
+        .map_err(|_| "invalid patch".to_string())?;
+    Ok((major, minor, patch))
 }
 
 fn resolve_entrypoint_path(project_root: &Path, path: &Path) -> Option<PathBuf> {
@@ -961,7 +1332,18 @@ impl CompositionGraphLoader {
 
         let mut dependency_map = BTreeMap::new();
         for (dependency_name, dep) in &manifest.dependencies {
-            let dep_manifest_path = project_root.join(&dep.path).join(PROJECT_MANIFEST_FILENAME);
+            let Some(dep_path) = dep.path.as_ref() else {
+                return Err(ProjectCompositionError::DependencyPathRequired {
+                    package: package_name.clone(),
+                    dependency: dependency_name.clone(),
+                });
+            };
+            let dep_root = project_root.join(dep_path);
+            let dep_manifest_path = PROJECT_MANIFEST_FILENAMES
+                .iter()
+                .map(|filename| dep_root.join(filename))
+                .find(|candidate| candidate.is_file())
+                .unwrap_or_else(|| dep_root.join(PROJECT_MANIFEST_FILENAME));
             if !dep_manifest_path.is_file() {
                 return Err(ProjectCompositionError::MissingDependencyManifest {
                     package: package_name.clone(),
@@ -1011,8 +1393,156 @@ impl CompositionGraphLoader {
     }
 }
 
+type CompositionFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
+#[derive(Default)]
+struct AsyncCompositionGraphLoader {
+    packages: BTreeMap<String, ProjectCompositionPackage>,
+    package_by_manifest: BTreeMap<PathBuf, String>,
+}
+
+impl AsyncCompositionGraphLoader {
+    fn load_package<'a>(
+        &'a mut self,
+        manifest_path: &'a Path,
+        from: Option<(&'a str, &'a str)>,
+        is_root: bool,
+        active_paths: &'a mut Vec<PathBuf>,
+        active_package_names: &'a mut Vec<String>,
+    ) -> CompositionFuture<'a, Result<String, ProjectCompositionError>> {
+        Box::pin(async move {
+            let manifest_path = canonical_manifest_path_async(manifest_path).await;
+            if let Some(existing) = self.package_by_manifest.get(&manifest_path) {
+                return Ok(existing.clone());
+            }
+
+            if let Some(idx) = active_paths.iter().position(|path| path == &manifest_path) {
+                let mut cycle = active_package_names[idx..].to_vec();
+                if let Some(last) = active_package_names.last() {
+                    cycle.push(last.clone());
+                }
+                return Err(ProjectCompositionError::DependencyCycle {
+                    cycle: cycle.join(" -> "),
+                });
+            }
+
+            let manifest = if is_root {
+                load_project_manifest_async(&manifest_path)
+                    .await
+                    .map_err(|source| ProjectCompositionError::RootManifestLoad {
+                        path: manifest_path.clone(),
+                        source: Box::new(source),
+                    })?
+            } else {
+                let (package, dependency) = from.expect("dependency context is required");
+                load_project_manifest_async(&manifest_path)
+                    .await
+                    .map_err(|source| ProjectCompositionError::DependencyManifestLoad {
+                        package: package.to_string(),
+                        dependency: dependency.to_string(),
+                        path: manifest_path.clone(),
+                        source: Box::new(source),
+                    })?
+            };
+
+            let package_name = manifest.package.name.clone();
+            let project_root = manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
+            let source_index = build_project_source_index_async(&project_root, &manifest)
+                .await
+                .map_err(|source| ProjectCompositionError::SourceIndex {
+                    package: package_name.clone(),
+                    source: Box::new(source),
+                })?;
+
+            if let Some(existing) = self.packages.get(&package_name) {
+                if existing.manifest_path != manifest_path {
+                    return Err(ProjectCompositionError::DuplicatePackageName {
+                        package: package_name,
+                        first_manifest: existing.manifest_path.clone(),
+                        second_manifest: manifest_path,
+                    });
+                }
+                return Ok(existing.package_name.clone());
+            }
+
+            active_paths.push(manifest_path.clone());
+            active_package_names.push(package_name.clone());
+
+            let mut dependency_map = BTreeMap::new();
+            for (dependency_name, dep) in &manifest.dependencies {
+                let Some(dep_path) = dep.path.as_ref() else {
+                    return Err(ProjectCompositionError::DependencyPathRequired {
+                        package: package_name.clone(),
+                        dependency: dependency_name.clone(),
+                    });
+                };
+                let dep_root = project_root.join(dep_path);
+                let dep_manifest_path = first_existing_manifest_path_async(&dep_root)
+                    .await
+                    .unwrap_or_else(|| dep_root.join(PROJECT_MANIFEST_FILENAME));
+                if !path_is_file_async(&dep_manifest_path).await {
+                    return Err(ProjectCompositionError::MissingDependencyManifest {
+                        package: package_name.clone(),
+                        dependency: dependency_name.clone(),
+                        path: dep_manifest_path,
+                    });
+                }
+                let dep_package_name = self
+                    .load_package(
+                        &dep_manifest_path,
+                        Some((&package_name, dependency_name)),
+                        false,
+                        active_paths,
+                        active_package_names,
+                    )
+                    .await?;
+                dependency_map.insert(dependency_name.clone(), dep_package_name);
+            }
+
+            active_paths.pop();
+            active_package_names.pop();
+
+            if let Some(existing) = self.packages.get(&package_name) {
+                if existing.manifest_path != manifest_path {
+                    return Err(ProjectCompositionError::DuplicatePackageName {
+                        package: package_name,
+                        first_manifest: existing.manifest_path.clone(),
+                        second_manifest: manifest_path,
+                    });
+                }
+                return Ok(existing.package_name.clone());
+            }
+
+            self.package_by_manifest
+                .insert(manifest_path.clone(), package_name.clone());
+            self.packages.insert(
+                package_name.clone(),
+                ProjectCompositionPackage {
+                    package_name: package_name.clone(),
+                    manifest_path,
+                    project_root,
+                    manifest,
+                    source_index,
+                    dependencies: dependency_map,
+                },
+            );
+
+            Ok(package_name)
+        })
+    }
+}
+
 fn canonical_manifest_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+async fn canonical_manifest_path_async(path: &Path) -> PathBuf {
+    runmat_filesystem::canonicalize_async(path)
+        .await
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1134,4 +1664,135 @@ fn scan_source_dir(
     }
 
     Ok(())
+}
+
+async fn scan_source_dir_async(
+    dir: &Path,
+    root_abs: &Path,
+    source_root: &Path,
+    state: &ScanState,
+    index: &mut ProjectSourceIndex,
+    project_root: &Path,
+) -> Result<(), ProjectSourceIndexError> {
+    let mut stack = vec![(dir.to_path_buf(), state.clone())];
+    while let Some((current_dir, current_state)) = stack.pop() {
+        let mut sorted = runmat_filesystem::read_dir_async(&current_dir)
+            .await
+            .map_err(|source| ProjectSourceIndexError::ReadDir {
+                path: current_dir.clone(),
+                source,
+            })?;
+        sorted.sort_by_key(|entry| entry.file_name().to_string_lossy().to_string());
+
+        for entry in sorted {
+            let path = entry.path().to_path_buf();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if entry.is_dir() {
+                let mut next = current_state.clone();
+                if let Some(pkg) = name.strip_prefix('+') {
+                    if !pkg.is_empty() {
+                        next.package_segments.push(pkg.to_string());
+                        if let Ok(rel) = path.strip_prefix(project_root) {
+                            index.package_dirs.push(rel.to_path_buf());
+                        }
+                    }
+                } else if let Some(class) = name.strip_prefix('@') {
+                    if !class.is_empty() {
+                        next.class_name = Some(class.to_string());
+                        if let Ok(rel) = path.strip_prefix(project_root) {
+                            index.class_dirs.push(rel.to_path_buf());
+                        }
+                    }
+                } else if name == "private" {
+                    next.in_private = true;
+                    if let Ok(rel) = path.strip_prefix(project_root) {
+                        index.private_dirs.push(rel.to_path_buf());
+                    }
+                } else {
+                    next.module_segments.push(name);
+                }
+                stack.push((path, next));
+                continue;
+            }
+
+            let is_m_file = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("m"))
+                .unwrap_or(false);
+            if !is_m_file {
+                continue;
+            }
+
+            let relative_path = path
+                .strip_prefix(root_abs)
+                .unwrap_or(path.as_path())
+                .to_path_buf();
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("")
+                .trim();
+            if stem.is_empty() {
+                continue;
+            }
+
+            let mut qualified_segments = Vec::new();
+            qualified_segments.extend(current_state.package_segments.iter().cloned());
+            qualified_segments.extend(current_state.module_segments.iter().cloned());
+            if let Some(class_name) = &current_state.class_name {
+                qualified_segments.push(class_name.clone());
+            }
+            qualified_segments.push(stem.to_string());
+            let qualified_name = qualified_segments.join(".");
+            if qualified_name.is_empty() {
+                continue;
+            }
+
+            let package_path = if current_state.package_segments.is_empty() {
+                None
+            } else {
+                Some(current_state.package_segments.join("."))
+            };
+
+            index.files.push(ProjectSourceFile {
+                source_root: source_root.to_path_buf(),
+                relative_path,
+                qualified_name,
+                package_path,
+                class_name: current_state.class_name.clone(),
+                is_private: current_state.in_private,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+async fn path_exists_async(path: &Path) -> bool {
+    runmat_filesystem::metadata_async(path).await.is_ok()
+}
+
+async fn first_existing_manifest_path_async(dir: &Path) -> Option<PathBuf> {
+    for filename in PROJECT_MANIFEST_FILENAMES {
+        let candidate = dir.join(filename);
+        if path_is_file_async(&candidate).await {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+async fn path_is_file_async(path: &Path) -> bool {
+    runmat_filesystem::metadata_async(path)
+        .await
+        .map(|meta| meta.is_file())
+        .unwrap_or(false)
+}
+
+async fn path_is_dir_async(path: &Path) -> bool {
+    runmat_filesystem::metadata_async(path)
+        .await
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false)
 }

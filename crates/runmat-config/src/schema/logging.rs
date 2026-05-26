@@ -37,6 +37,6 @@ impl Default for LoggingConfig {
 
 impl Default for LogLevel {
     fn default() -> Self {
-        Self::Info
+        Self::Warn
     }
 }

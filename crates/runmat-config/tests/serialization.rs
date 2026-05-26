@@ -1,23 +1,34 @@
-use runmat_config::RunMatConfig;
+use runmat_config::{ConfigLoader, RunMatConfig};
+use tempfile::TempDir;
 
 #[test]
-fn yaml_serialization() {
-    let config = RunMatConfig::default();
-    let yaml = serde_yaml::to_string(&config).unwrap();
-    let parsed: RunMatConfig = serde_yaml::from_str(&yaml).unwrap();
+fn toml_round_trip() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path().join("runmat.toml");
 
-    assert_eq!(parsed.runtime.timeout, config.runtime.timeout);
-    assert_eq!(parsed.jit.enabled, config.jit.enabled);
-    assert_eq!(parsed.accelerate.provider, config.accelerate.provider);
+    let mut config = RunMatConfig::default();
+    config.runtime.timeout = 777;
+    config.jit.threshold = 25;
+
+    ConfigLoader::save_to_file(&config, &path).unwrap();
+    let loaded = ConfigLoader::load_from_file(&path).unwrap();
+
+    assert_eq!(loaded.runtime.timeout, 777);
+    assert_eq!(loaded.jit.threshold, 25);
 }
 
 #[test]
-fn json_serialization() {
-    let config = RunMatConfig::default();
-    let json = serde_json::to_string_pretty(&config).unwrap();
-    let parsed: RunMatConfig = serde_json::from_str(&json).unwrap();
+fn json_round_trip() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = temp_dir.path().join("runmat.json");
 
-    assert_eq!(parsed.runtime.timeout, config.runtime.timeout);
-    assert_eq!(parsed.plotting.mode, config.plotting.mode);
-    assert_eq!(parsed.accelerate.enabled, config.accelerate.enabled);
+    let mut config = RunMatConfig::default();
+    config.plotting.mode = runmat_config::PlotMode::Headless;
+    config.accelerate.enabled = false;
+
+    ConfigLoader::save_to_file(&config, &path).unwrap();
+    let loaded = ConfigLoader::load_from_file(&path).unwrap();
+
+    assert_eq!(loaded.plotting.mode, runmat_config::PlotMode::Headless);
+    assert!(!loaded.accelerate.enabled);
 }

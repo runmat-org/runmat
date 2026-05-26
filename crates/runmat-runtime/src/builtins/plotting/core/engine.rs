@@ -474,16 +474,34 @@ pub(crate) mod native {
     use super::*;
     use once_cell::sync::OnceCell;
     use runmat_plot::plots::Figure;
-    use std::env;
     use std::sync::Arc;
+    use std::sync::RwLock;
 
     static FIGURE_EVENT_BRIDGE: OnceCell<()> = OnceCell::new();
+    static PLOTTING_MODE_OVERRIDE: OnceCell<RwLock<Option<PlottingMode>>> = OnceCell::new();
 
     #[derive(Debug, Clone, Copy)]
     enum PlottingMode {
         Auto,
         Interactive,
         Static,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum RuntimePlottingMode {
+        Auto,
+        Interactive,
+        Static,
+    }
+
+    pub fn set_runtime_plotting_mode(mode: RuntimePlottingMode) {
+        let lock = PLOTTING_MODE_OVERRIDE.get_or_init(|| RwLock::new(None));
+        let mut guard = lock.write().expect("plotting mode lock poisoned");
+        *guard = Some(match mode {
+            RuntimePlottingMode::Auto => PlottingMode::Auto,
+            RuntimePlottingMode::Interactive => PlottingMode::Interactive,
+            RuntimePlottingMode::Static => PlottingMode::Static,
+        });
     }
 
     pub fn render(handle: FigureHandle, mut figure: Figure) -> BuiltinResult<String> {
@@ -496,15 +514,13 @@ pub(crate) mod native {
     }
 
     fn detect_mode() -> PlottingMode {
-        if let Ok(mode) = env::var("RUNMAT_PLOT_MODE") {
-            match mode.to_lowercase().as_str() {
-                "gui" => PlottingMode::Interactive,
-                "headless" | "static" => PlottingMode::Static,
-                _ => PlottingMode::Auto,
+        if let Some(lock) = PLOTTING_MODE_OVERRIDE.get() {
+            let guard = lock.read().expect("plotting mode lock poisoned");
+            if let Some(mode) = *guard {
+                return mode;
             }
-        } else {
-            PlottingMode::Auto
         }
+        PlottingMode::Auto
     }
 
     fn interactive_export(handle: FigureHandle, figure: &mut Figure) -> BuiltinResult<String> {

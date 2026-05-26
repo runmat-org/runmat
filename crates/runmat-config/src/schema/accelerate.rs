@@ -32,6 +32,8 @@ pub struct AccelerateConfig {
 pub enum AccelerateProviderPreference {
     Auto,
     Wgpu,
+    #[serde(rename = "inprocess", alias = "in-process")]
+    #[value(name = "inprocess")]
     InProcess,
 }
 

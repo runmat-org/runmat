@@ -1,67 +1,137 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use log::info;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::RunMatConfig;
+use crate::{
+    AccelerateConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig, PlottingConfig,
+    RunMatConfig, TelemetryConfig,
+};
 
-/// Load configuration from a specific file.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RuntimeFileDocument {
+    #[serde(default)]
+    runtime: RuntimeFileSection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RuntimeFileSection {
+    timeout: Option<u64>,
+    callstack_limit: Option<usize>,
+    error_namespace: Option<String>,
+    verbose: Option<bool>,
+    snapshot_path: Option<PathBuf>,
+    language: Option<LanguageConfig>,
+    logging: Option<LoggingConfig>,
+    telemetry: Option<TelemetryConfig>,
+    jit: Option<JitConfig>,
+    gc: Option<GcConfig>,
+    accelerate: Option<AccelerateConfig>,
+    plotting: Option<PlottingConfig>,
+}
+
+impl RuntimeFileSection {
+    fn apply_to(self, config: &mut RunMatConfig) {
+        if let Some(timeout) = self.timeout {
+            config.runtime.timeout = timeout;
+        }
+        if let Some(callstack_limit) = self.callstack_limit {
+            config.runtime.callstack_limit = callstack_limit;
+        }
+        if let Some(error_namespace) = self.error_namespace {
+            config.runtime.error_namespace = error_namespace;
+        }
+        if let Some(verbose) = self.verbose {
+            config.runtime.verbose = verbose;
+        }
+        if let Some(snapshot_path) = self.snapshot_path {
+            config.runtime.snapshot_path = Some(snapshot_path);
+        }
+        if let Some(language) = self.language {
+            config.language = language;
+        }
+        if let Some(logging) = self.logging {
+            config.logging = logging;
+        }
+        if let Some(telemetry) = self.telemetry {
+            config.telemetry = telemetry;
+        }
+        if let Some(jit) = self.jit {
+            config.jit = jit;
+        }
+        if let Some(gc) = self.gc {
+            config.gc = gc;
+        }
+        if let Some(accelerate) = self.accelerate {
+            config.accelerate = accelerate;
+        }
+        if let Some(plotting) = self.plotting {
+            config.plotting = plotting;
+        }
+    }
+}
+
+impl From<&RunMatConfig> for RuntimeFileDocument {
+    fn from(value: &RunMatConfig) -> Self {
+        Self {
+            runtime: RuntimeFileSection {
+                timeout: Some(value.runtime.timeout),
+                callstack_limit: Some(value.runtime.callstack_limit),
+                error_namespace: Some(value.runtime.error_namespace.clone()),
+                verbose: Some(value.runtime.verbose),
+                snapshot_path: value.runtime.snapshot_path.clone(),
+                language: Some(value.language.clone()),
+                logging: Some(value.logging.clone()),
+                telemetry: Some(value.telemetry.clone()),
+                jit: Some(value.jit.clone()),
+                gc: Some(value.gc.clone()),
+                accelerate: Some(value.accelerate.clone()),
+                plotting: Some(value.plotting.clone()),
+            },
+        }
+    }
+}
+
+/// Load runtime configuration from a canonical runmat.toml/runmat.json file.
 pub(crate) fn load_from_file(path: &Path) -> Result<RunMatConfig> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-    let config = match path.extension().and_then(|ext| ext.to_str()) {
-        // `.runmat` is a TOML alias by default (single canonical format)
-        None if path.file_name().and_then(|n| n.to_str()) == Some(".runmat") => {
-            toml::from_str(&content).with_context(|| {
-                format!("Failed to parse .runmat (TOML) config: {}", path.display())
-            })?
-        }
-        Some("runmat") => toml::from_str(&content).with_context(|| {
-            format!("Failed to parse .runmat (TOML) config: {}", path.display())
-        })?,
-        Some("yaml") | Some("yml") => serde_yaml::from_str(&content)
-            .with_context(|| format!("Failed to parse YAML config: {}", path.display()))?,
-        Some("json") => serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse JSON config: {}", path.display()))?,
+    let parsed: RuntimeFileDocument = match path.extension().and_then(|ext| ext.to_str()) {
         Some("toml") => toml::from_str(&content)
             .with_context(|| format!("Failed to parse TOML config: {}", path.display()))?,
-        _ => {
-            // Try auto-detect (prefer TOML for unknown/no extension)
-            if let Ok(config) = toml::from_str(&content) {
-                config
-            } else if let Ok(config) = serde_yaml::from_str(&content) {
-                config
-            } else if let Ok(config) = serde_json::from_str(&content) {
-                config
-            } else {
-                return Err(anyhow::anyhow!(
-                    "Could not parse config file {} (tried TOML, YAML, JSON)",
-                    path.display()
-                ));
-            }
+        Some("json") => serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse JSON config: {}", path.display()))?,
+        Some(other) => {
+            return Err(anyhow!(
+                "Unsupported config extension .{other}; expected .toml or .json"
+            ));
         }
+        None => return Err(anyhow!("Config file must have .toml or .json extension")),
     };
 
+    let mut config = RunMatConfig::default();
+    parsed.runtime.apply_to(&mut config);
     Ok(config)
 }
 
-/// Save configuration to a file.
+/// Save runtime configuration to a canonical runmat.toml/runmat.json file.
 pub(crate) fn save_to_file(config: &RunMatConfig, path: &Path) -> Result<()> {
+    let doc = RuntimeFileDocument::from(config);
     let content = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("yaml") | Some("yml") => {
-            serde_yaml::to_string(config).context("Failed to serialize config to YAML")?
+        Some("toml") => {
+            toml::to_string_pretty(&doc).context("Failed to serialize config to TOML")?
         }
         Some("json") => {
-            serde_json::to_string_pretty(config).context("Failed to serialize config to JSON")?
+            serde_json::to_string_pretty(&doc).context("Failed to serialize config to JSON")?
         }
-        Some("toml") => {
-            toml::to_string_pretty(config).context("Failed to serialize config to TOML")?
+        Some(other) => {
+            return Err(anyhow!(
+                "Unsupported config extension .{other}; expected .toml or .json"
+            ));
         }
-        _ => {
-            // Default to YAML
-            serde_yaml::to_string(config).context("Failed to serialize config to YAML")?
-        }
+        None => return Err(anyhow!("Config file must have .toml or .json extension")),
     };
 
     fs::write(path, content)
@@ -71,8 +141,36 @@ pub(crate) fn save_to_file(config: &RunMatConfig, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Generate a sample configuration file.
+/// Generate a sample runmat.toml file containing package + runtime sections.
 pub(crate) fn generate_sample_config() -> String {
-    let config = RunMatConfig::default();
-    serde_yaml::to_string(&config).unwrap_or_else(|_| "# Failed to generate config".to_string())
+    let sample = r#"[package]
+name = "example"
+version = "0.1.0"
+runmat-version = ">=0.4.0"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+utils = { path = "../utils", version = "0.1.0" }
+
+[entrypoints.main]
+module = "app"
+function = "main"
+
+[runtime]
+timeout = 300
+callstack_limit = 200
+error_namespace = "RunMat"
+verbose = false
+
+language = { compat = "runmat" }
+logging = { level = "warn", debug = false, file = "" }
+telemetry = { enabled = true, show_payloads = false, http_endpoint = "", udp_endpoint = "udp.telemetry.runmat.com:7846", queue_size = 256, sync_mode = false, drain_mode = "all", drain_timeout_ms = 50, require_ingestion_key = true }
+jit = { enabled = true, threshold = 10, optimization_level = "speed" }
+gc = { preset = "low-latency", young_size_mb = 128, threads = 8, collect_stats = false }
+accelerate = { enabled = true, provider = "wgpu", allow_inprocess_fallback = true, wgpu_power_preference = "auto", wgpu_force_fallback_adapter = false, auto_offload = { enabled = true, calibrate = true, profile_path = ".runmat/auto_offload.json", log_level = "trace" } }
+plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_target_points = 250000, surface_vertex_budget = 400000 }
+"#;
+    sample.to_string()
 }

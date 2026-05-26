@@ -5093,9 +5093,9 @@ dependencies = [
  "log",
  "once_cell",
  "runmat-accelerate",
+ "runmat-filesystem",
  "serde",
  "serde_json",
- "serde_yaml",
  "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
@@ -5221,11 +5221,13 @@ name = "runmat-lsp"
 version = "0.4.1"
 dependencies = [
  "env_logger 0.11.8",
+ "futures",
  "log",
  "lsp-types",
  "once_cell",
  "runmat-builtins",
  "runmat-config",
+ "runmat-filesystem",
  "runmat-hir",
  "runmat-lexer",
  "runmat-mir",
@@ -5240,6 +5242,7 @@ dependencies = [
  "tokio",
  "tower-lsp",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

@@ -267,8 +267,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
         )
@@ -315,8 +314,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -346,8 +344,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,

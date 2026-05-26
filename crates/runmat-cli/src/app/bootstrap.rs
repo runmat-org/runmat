@@ -113,6 +113,7 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
                     "Config path is a directory, ignoring: {}",
                     config_file.display()
                 );
+                return Ok(RunMatConfig::default());
             } else {
                 info!("Loading configuration from: {}", config_file.display());
                 return ConfigLoader::load_from_file(config_file);
@@ -126,34 +127,7 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
         }
     }
 
-    match ConfigLoader::load() {
-        Ok(c) => Ok(c),
-        Err(e) => {
-            if let Ok(conf_env) = std::env::var("RUNMAT_CONFIG") {
-                let p = std::path::PathBuf::from(conf_env);
-                if p.is_dir() {
-                    info!(
-                        "Config path from env is a directory, ignoring: {}",
-                        p.display()
-                    );
-                    return Ok(RunMatConfig::default());
-                }
-            }
-
-            if let Some(home) = dirs::home_dir() {
-                let dir = home.join(".runmat");
-                if dir.is_dir() {
-                    info!(
-                        "Home config path is a directory, ignoring: {}",
-                        dir.display()
-                    );
-                    return Ok(RunMatConfig::default());
-                }
-            }
-
-            Err(e)
-        }
-    }
+    ConfigLoader::load()
 }
 
 /// Apply CLI argument overrides to configuration
@@ -213,16 +187,9 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
 
     if let Some(plot_mode) = &cli.plot_mode {
         config.plotting.mode = *plot_mode;
-        let env_value = match plot_mode {
-            PlotMode::Auto => "auto",
-            PlotMode::Gui => "gui",
-            PlotMode::Headless => "headless",
-        };
-        std::env::set_var("RUNMAT_PLOT_MODE", env_value);
     }
     if cli.plot_headless {
         config.plotting.force_headless = true;
-        std::env::set_var("RUNMAT_PLOT_MODE", "headless");
     }
     if let Some(backend) = &cli.plot_backend {
         config.plotting.backend = *backend;
@@ -297,8 +264,20 @@ fn gc_config_from_preset(preset: config::GcPreset) -> runmat_gc::GcConfig {
 
 fn configure_plotting_from_config(config: &RunMatConfig) {
     use runmat_runtime::builtins::plotting::{
-        set_scatter_target_points, set_surface_vertex_budget,
+        set_runtime_plotting_mode, set_scatter_target_points, set_surface_vertex_budget,
+        RuntimePlottingMode,
     };
+
+    let runtime_mode = if config.plotting.force_headless {
+        RuntimePlottingMode::Static
+    } else {
+        match config.plotting.mode {
+            PlotMode::Auto => RuntimePlottingMode::Auto,
+            PlotMode::Gui => RuntimePlottingMode::Interactive,
+            PlotMode::Headless => RuntimePlottingMode::Static,
+        }
+    };
+    set_runtime_plotting_mode(runtime_mode);
 
     if let Some(points) = config.plotting.scatter_target_points {
         set_scatter_target_points(points);

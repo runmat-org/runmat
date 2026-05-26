@@ -9,6 +9,7 @@ use super::{
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RunMatConfig {
     /// Runtime configuration
+    #[serde(default)]
     pub runtime: RuntimeConfig,
     /// Acceleration configuration
     #[serde(default)]
@@ -20,11 +21,15 @@ pub struct RunMatConfig {
     #[serde(default)]
     pub telemetry: TelemetryConfig,
     /// JIT compiler configuration
+    #[serde(default)]
     pub jit: JitConfig,
     /// Garbage collector configuration
+    #[serde(default)]
     pub gc: GcConfig,
     /// Plotting configuration
+    #[serde(default)]
     pub plotting: PlottingConfig,
     /// Logging configuration
+    #[serde(default)]
     pub logging: LoggingConfig,
 }

@@ -1,7 +1,6 @@
 mod discovery;
 mod env;
 mod file;
-mod parse;
 
 use anyhow::Result;
 use log::{debug, info};
@@ -22,21 +21,19 @@ impl ConfigLoader {
 
     /// Find and load configuration from files
     fn load_from_files() -> Result<RunMatConfig> {
-        // Try to find config file in order of preference
-        let config_paths = discovery::find_config_files();
-
-        for path in config_paths {
+        if let Some(path) = discovery::find_config_file() {
             if path.is_dir() {
                 info!(
                     "Ignoring config directory path (expected file): {}",
                     path.display()
                 );
-                continue;
+                return Ok(RunMatConfig::default());
             }
-            if path.exists() {
+            if path.is_file() {
                 info!("Loading configuration from: {}", path.display());
                 return Self::load_from_file(&path);
             }
+            debug!("Configured path does not exist: {}", path.display());
         }
 
         debug!("No configuration file found, using defaults");
@@ -45,7 +42,7 @@ impl ConfigLoader {
 
     /// Walk up from the provided directory looking for the first config file.
     pub fn discover_config_path_from(start: &Path) -> Option<PathBuf> {
-        discovery::discover_config_path_from(start)
+        discovery::discover_project_config_path_from(start)
     }
 
     /// Load configuration from a specific file

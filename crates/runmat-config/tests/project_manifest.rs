@@ -35,8 +35,7 @@ roots = ["src"]
 [dependencies]
 dep_a = { path = "dep_a" }
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
     );
@@ -45,6 +44,31 @@ path = "src/main"
     assert_eq!(loaded.package.name, "demo");
     assert_eq!(loaded.sources.roots.len(), 1);
     assert_eq!(loaded.entrypoints.len(), 1);
+}
+
+#[test]
+fn validation_rejects_unsatisfied_runmat_version() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+runmat-version = ">=999.0.0"
+
+[sources]
+roots = ["src"]
+"#,
+    );
+    let err = load_project_manifest(&manifest_path).expect_err("version gate should fail");
+    let ProjectManifestLoadError::Validation { source, .. } = err else {
+        panic!("expected validation error");
+    };
+    assert!(source
+        .messages
+        .iter()
+        .any(|msg| msg.contains("[package].runmat-version")));
 }
 
 #[test]
@@ -85,8 +109,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
     );
@@ -117,13 +140,12 @@ roots = ["src"]
 [dependencies]
 dep_a = { path = "dep_a", git = "https://example.com/repo.git" }
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
     );
     let err = load_project_manifest(&manifest_path).expect_err("unsupported fields should fail");
-    assert!(matches!(err, ProjectManifestLoadError::Parse { .. }));
+    assert!(matches!(err, ProjectManifestLoadError::ParseToml { .. }));
 }
 
 #[test]
@@ -140,24 +162,16 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 module = "app.server"
 function = "run"
 "#,
     );
     let err = load_project_manifest(&manifest_path).expect_err("duplicate entrypoint should fail");
-    let ProjectManifestLoadError::Validation { source, .. } = err else {
-        panic!("expected validation error");
-    };
-    assert!(source
-        .messages
-        .iter()
-        .any(|msg| msg.contains("duplicate entrypoint name `main`")));
+    assert!(matches!(err, ProjectManifestLoadError::ParseToml { .. }));
 }
 
 #[test]
@@ -173,8 +187,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -380,8 +393,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
     )
@@ -428,8 +440,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -548,8 +559,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
     );
@@ -583,8 +593,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -616,8 +625,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -648,8 +656,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "point-move"
+[entrypoints.point-move]
 module = "pkg.Point"
 function = "move"
 "#,
@@ -681,8 +688,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -848,8 +854,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
@@ -882,8 +887,7 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,

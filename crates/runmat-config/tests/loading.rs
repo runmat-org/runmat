@@ -4,7 +4,7 @@ use tempfile::TempDir;
 #[test]
 fn file_loading() {
     let temp_dir = TempDir::new().unwrap();
-    let config_path = temp_dir.path().join(".runmat.yaml");
+    let config_path = temp_dir.path().join("runmat.toml");
 
     let mut config = RunMatConfig::default();
     config.runtime.timeout = 600;

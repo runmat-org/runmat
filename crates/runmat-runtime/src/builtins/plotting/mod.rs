@@ -161,6 +161,26 @@ pub use web::{
     PlotSurfaceCameraState,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimePlottingMode {
+    Auto,
+    Interactive,
+    Static,
+}
+
+#[cfg(feature = "gui")]
+pub fn set_runtime_plotting_mode(mode: RuntimePlottingMode) {
+    let mapped = match mode {
+        RuntimePlottingMode::Auto => engine::native::RuntimePlottingMode::Auto,
+        RuntimePlottingMode::Interactive => engine::native::RuntimePlottingMode::Interactive,
+        RuntimePlottingMode::Static => engine::native::RuntimePlottingMode::Static,
+    };
+    engine::native::set_runtime_plotting_mode(mapped);
+}
+
+#[cfg(not(feature = "gui"))]
+pub fn set_runtime_plotting_mode(_mode: RuntimePlottingMode) {}
+
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 pub use web::handle_plot_surface_event;
 
