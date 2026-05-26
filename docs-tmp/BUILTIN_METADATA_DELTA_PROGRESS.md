@@ -63,9 +63,10 @@
 | Wave 58 (Plotting Legend) | `legend` | Done | `b515e531` | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::legend::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for legend query/mode/labels/style forms (with optional axes target), added stable descriptor error rows, runtime descriptor signature tests, and LSP signature-help coverage for legend |
 | Wave 59 (Plotting Command Verbs) | `grid`, `box`, `axis`, `cla`, `colormap`, `shading`, `colorbar` | Done | `7b82875e` | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::cmds::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for plotting command-style verbs with exhaustive core signatures, stable descriptor error rows, runtime descriptor signature tests, and descriptor-driven LSP signature-help coverage |
 | Wave 60 (Plotting Log Wrappers) | `semilogx`, `semilogy`, `loglog` | Done | `73fe83f4` | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::semilogx::tests::`; `cargo test -p runmat-runtime builtins::plotting::semilogy::tests::`; `cargo test -p runmat-runtime builtins::plotting::loglog::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for semilog/loglog wrapper builtins, added stable descriptor error rows for plot+axis-mode branches, runtime descriptor signature tests, and LSP signature-help coverage |
+| Wave 61 (Strings Regex Family) | `regexp`, `regexpi`, `regexprep` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::regex::regexp::tests::`; `cargo test -p runmat-runtime builtins::strings::regex::regexpi::tests::`; `cargo test -p runmat-runtime builtins::strings::regex::regexprep::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for regex match/search/replace builtins, stable descriptor error rows, runtime descriptor signature tests, and descriptor-driven LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `188`
-- Remaining: `380`
+- Migrated with attached descriptor: `191`
+- Remaining: `377`

@@ -2086,6 +2086,15 @@ mod tests {
             ("semilogx([1 10 100]);", "h = semilogx(Y)"),
             ("semilogy([1 10 100]);", "h = semilogy(Y)"),
             ("loglog([1 10 100]);", "h = loglog(Y)"),
+            (
+                "regexp('abc123', '\\\\d+');",
+                "out = regexp(subject, pattern)",
+            ),
+            ("regexpi('Alpha', 'a');", "out = regexpi(subject, pattern)"),
+            (
+                "regexprep('abc123', '\\\\d+', 'X');",
+                "out = regexprep(subject, pattern, replacement)",
+            ),
         ];
 
         for (text, expected_label) in cases {
