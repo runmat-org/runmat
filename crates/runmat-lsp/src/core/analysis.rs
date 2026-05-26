@@ -2596,6 +2596,13 @@ mod tests {
     #[test]
     fn signature_help_uses_io_filetext_stream_descriptors() {
         let cases = [
+            ("fopen(\"demo.txt\");", "fid = fopen(filename)"),
+            (
+                "fopen(\"demo.txt\", \"w\", \"ieee-be\", \"latin1\");",
+                "fid = fopen(filename, permission, machinefmt, encoding)",
+            ),
+            ("fopen(3);", "filename = fopen(fid)"),
+            ("fopen(\"all\");", "fids = fopen(\"all\")"),
             ("fclose();", "status = fclose()"),
             ("fclose(3);", "status = fclose(fid)"),
             ("fclose(\"all\");", "status = fclose(\"all\")"),
