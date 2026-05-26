@@ -16,3 +16,22 @@ fn file_loading() {
     assert_eq!(loaded.runtime.callstack_limit, 333);
     assert_eq!(loaded.jit.threshold, 20);
 }
+
+#[test]
+fn runtime_section_rejects_unknown_keys() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("runmat.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[runtime]
+callstack_limit = 64
+verbosee = true
+"#,
+    )
+    .unwrap();
+
+    let err = ConfigLoader::load_from_file(&config_path)
+        .expect_err("unknown runtime keys should fail validation");
+    assert!(err.to_string().contains("Failed to parse TOML config"));
+}

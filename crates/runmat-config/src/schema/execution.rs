@@ -5,6 +5,7 @@ use super::defaults::default_true;
 
 /// Runtime execution configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
     /// Maximum number of call stack frames to record
     #[serde(default = "default_callstack_limit")]
@@ -21,6 +22,7 @@ pub struct RuntimeConfig {
 
 /// JIT compiler configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JitConfig {
     /// Enable JIT compilation
     #[serde(default = "default_true")]
@@ -35,6 +37,7 @@ pub struct JitConfig {
 
 /// GC configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct GcConfig {
     /// GC preset
     pub preset: Option<GcPreset>,

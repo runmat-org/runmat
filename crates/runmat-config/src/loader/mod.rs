@@ -21,19 +21,40 @@ impl ConfigLoader {
 
     /// Find and load configuration from files
     fn load_from_files() -> Result<RunMatConfig> {
-        if let Some(path) = discovery::find_config_file() {
+        if let Ok(config_path) = std::env::var("RUNMAT_CONFIG") {
+            let path = PathBuf::from(config_path);
             if path.is_dir() {
-                info!(
-                    "Ignoring config directory path (expected file): {}",
+                return Err(anyhow::anyhow!(
+                    "RUNMAT_CONFIG points to a directory, expected a file: {}",
                     path.display()
-                );
-                return Ok(RunMatConfig::default());
+                ));
             }
-            if path.is_file() {
+            if !path.is_file() {
+                return Err(anyhow::anyhow!(
+                    "RUNMAT_CONFIG points to a missing file: {}",
+                    path.display()
+                ));
+            }
+            info!(
+                "Loading configuration from RUNMAT_CONFIG: {}",
+                path.display()
+            );
+            return Self::load_from_file(&path);
+        }
+
+        if let Ok(current_dir) = std::env::current_dir() {
+            if let Some(path) = discovery::discover_project_config_path_from(&current_dir) {
                 info!("Loading configuration from: {}", path.display());
                 return Self::load_from_file(&path);
             }
-            debug!("Configured path does not exist: {}", path.display());
+        }
+
+        if let Some(path) = discovery::user_config_candidates()
+            .into_iter()
+            .find(|candidate| candidate.is_file())
+        {
+            info!("Loading configuration from: {}", path.display());
+            return Self::load_from_file(&path);
         }
 
         debug!("No configuration file found, using defaults");
@@ -58,6 +79,12 @@ impl ConfigLoader {
     /// Save configuration to a file
     pub fn save_to_file(config: &RunMatConfig, path: &Path) -> Result<()> {
         file::save_to_file(config, path)
+    }
+
+    /// Render runtime config into TOML/JSON text matching the output file contract.
+    pub fn render_runtime_config(config: &RunMatConfig, path: &Path) -> Result<String> {
+        let format = file::format_from_path(path)?;
+        file::render_runtime_config(config, format)
     }
 
     /// Generate a sample configuration file

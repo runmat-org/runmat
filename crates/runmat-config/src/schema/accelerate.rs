@@ -6,6 +6,7 @@ use super::defaults::default_true;
 
 /// Acceleration (GPU) configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccelerateConfig {
     /// Enable acceleration subsystem
     #[serde(default = "default_true")]
@@ -68,6 +69,7 @@ pub enum AutoOffloadLogLevel {
 
 /// Auto-offload planner configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AutoOffloadConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,

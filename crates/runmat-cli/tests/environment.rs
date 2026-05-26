@@ -144,8 +144,12 @@ fn runmat_config_save_and_load_use_canonical_extensions() {
 
 #[test]
 fn info_output_shows_current_supported_env_keys() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("runmat.toml");
+    std::fs::write(&config_path, "[runtime]\n").unwrap();
+
     let mut env = HashMap::new();
-    env.insert("RUNMAT_CONFIG", "/tmp/example-runmat.toml");
+    env.insert("RUNMAT_CONFIG", config_path.to_str().unwrap());
 
     let output = run_runmat_with_env(&["info"], env);
     assert!(output.status.success());

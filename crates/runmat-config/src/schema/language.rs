@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct LanguageConfig {
     /// Compatibility mode for MATLAB command syntax and legacy behaviors.
     /// Default: "runmat" (RunMat identifiers with MATLAB-compatible command syntax).

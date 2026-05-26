@@ -9,6 +9,12 @@ use crate::{
     RunMatConfig, TelemetryConfig,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigFormat {
+    Toml,
+    Json,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RuntimeFileDocument {
     #[serde(default)]
@@ -16,6 +22,7 @@ struct RuntimeFileDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct RuntimeFileSection {
     callstack_limit: Option<usize>,
     error_namespace: Option<String>,
@@ -93,18 +100,8 @@ pub(crate) fn load_from_file(path: &Path) -> Result<RunMatConfig> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-    let parsed: RuntimeFileDocument = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("toml") => toml::from_str(&content)
-            .with_context(|| format!("Failed to parse TOML config: {}", path.display()))?,
-        Some("json") => serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse JSON config: {}", path.display()))?,
-        Some(other) => {
-            return Err(anyhow!(
-                "Unsupported config extension .{other}; expected .toml or .json"
-            ));
-        }
-        None => return Err(anyhow!("Config file must have .toml or .json extension")),
-    };
+    let format = format_from_path(path)?;
+    let parsed: RuntimeFileDocument = parse_document(&content, format, path)?;
 
     let mut config = RunMatConfig::default();
     parsed.runtime.apply_to(&mut config);
@@ -113,21 +110,8 @@ pub(crate) fn load_from_file(path: &Path) -> Result<RunMatConfig> {
 
 /// Save runtime configuration to a canonical runmat.toml/runmat.json file.
 pub(crate) fn save_to_file(config: &RunMatConfig, path: &Path) -> Result<()> {
-    let doc = RuntimeFileDocument::from(config);
-    let content = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("toml") => {
-            toml::to_string_pretty(&doc).context("Failed to serialize config to TOML")?
-        }
-        Some("json") => {
-            serde_json::to_string_pretty(&doc).context("Failed to serialize config to JSON")?
-        }
-        Some(other) => {
-            return Err(anyhow!(
-                "Unsupported config extension .{other}; expected .toml or .json"
-            ));
-        }
-        None => return Err(anyhow!("Config file must have .toml or .json extension")),
-    };
+    let format = format_from_path(path)?;
+    let content = render_runtime_config(config, format)?;
 
     fs::write(path, content)
         .with_context(|| format!("Failed to write config file: {}", path.display()))?;
@@ -167,4 +151,36 @@ accelerate = { enabled = true, provider = "wgpu", allow_inprocess_fallback = tru
 plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_target_points = 250000, surface_vertex_budget = 400000 }
 "#;
     sample.to_string()
+}
+
+pub(crate) fn render_runtime_config(config: &RunMatConfig, format: ConfigFormat) -> Result<String> {
+    let doc = RuntimeFileDocument::from(config);
+    match format {
+        ConfigFormat::Toml => {
+            toml::to_string_pretty(&doc).context("Failed to serialize config to TOML")
+        }
+        ConfigFormat::Json => {
+            serde_json::to_string_pretty(&doc).context("Failed to serialize config to JSON")
+        }
+    }
+}
+
+pub(crate) fn format_from_path(path: &Path) -> Result<ConfigFormat> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("toml") => Ok(ConfigFormat::Toml),
+        Some("json") => Ok(ConfigFormat::Json),
+        Some(other) => Err(anyhow!(
+            "Unsupported config extension .{other}; expected .toml or .json"
+        )),
+        None => Err(anyhow!("Config file must have .toml or .json extension")),
+    }
+}
+
+fn parse_document(content: &str, format: ConfigFormat, path: &Path) -> Result<RuntimeFileDocument> {
+    match format {
+        ConfigFormat::Toml => toml::from_str(content)
+            .with_context(|| format!("Failed to parse TOML config: {}", path.display())),
+        ConfigFormat::Json => serde_json::from_str(content)
+            .with_context(|| format!("Failed to parse JSON config: {}", path.display())),
+    }
 }

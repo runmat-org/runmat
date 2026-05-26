@@ -100,31 +100,23 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 
 /// Load configuration from files and environment
 fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
-    let config_from_env = std::env::var("RUNMAT_CONFIG")
-        .ok()
-        .map(std::path::PathBuf::from);
-
     if let Some(config_file) = &cli.config {
-        let is_from_env = config_from_env.as_ref() == Some(config_file);
-
-        if config_file.exists() {
-            if config_file.is_dir() {
-                info!(
-                    "Config path is a directory, ignoring: {}",
-                    config_file.display()
-                );
-                return Ok(RunMatConfig::default());
-            } else {
-                info!("Loading configuration from: {}", config_file.display());
-                return ConfigLoader::load_from_file(config_file);
-            }
-        } else if !is_from_env {
+        if config_file.is_dir() {
+            error!(
+                "Specified config path is a directory, expected a file: {}",
+                config_file.display()
+            );
+            std::process::exit(1);
+        }
+        if !config_file.is_file() {
             error!(
                 "Specified config file does not exist: {}",
                 config_file.display()
             );
             std::process::exit(1);
         }
+        info!("Loading configuration from: {}", config_file.display());
+        return ConfigLoader::load_from_file(config_file);
     }
 
     ConfigLoader::load()

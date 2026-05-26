@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::env;
 
 use crate::RunMatConfig;
 
@@ -9,10 +8,4 @@ use crate::RunMatConfig;
 /// highest precedence runtime layer.
 pub(crate) fn apply_environment_variables(_config: &mut RunMatConfig) -> Result<()> {
     Ok(())
-}
-
-pub(crate) fn env_value(primary: &str, aliases: &[&str]) -> Option<String> {
-    env::var(primary)
-        .ok()
-        .or_else(|| aliases.iter().find_map(|alias| env::var(alias).ok()))
 }

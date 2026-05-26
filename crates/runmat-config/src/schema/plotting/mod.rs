@@ -6,6 +6,7 @@ pub(super) use super::defaults::default_true;
 
 /// Plotting configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlottingConfig {
     /// Plotting mode
     #[serde(default)]
@@ -30,6 +31,7 @@ pub struct PlottingConfig {
 
 /// GUI configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GuiConfig {
     /// Window width
     #[serde(default = "default_window_width")]
@@ -47,6 +49,7 @@ pub struct GuiConfig {
 
 /// Export configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExportConfig {
     /// Default export format
     #[serde(default)]

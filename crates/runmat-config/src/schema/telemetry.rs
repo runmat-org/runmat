@@ -5,6 +5,7 @@ use super::defaults::default_true;
 
 /// Telemetry configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TelemetryConfig {
     /// Enable runtime telemetry
     #[serde(default = "default_true")]

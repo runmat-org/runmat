@@ -36,3 +36,19 @@ jit = { enabled = true, threshold = 42, optimization_level = "speed" }
 
     support::clear_env(ENV_VARS);
 }
+
+#[test]
+fn runmat_config_env_missing_file_is_error() {
+    let _lock = support::env_lock();
+    support::clear_env(ENV_VARS);
+
+    std::env::set_var(
+        "RUNMAT_CONFIG",
+        "/tmp/definitely-missing-runmat-config.toml",
+    );
+    let err = ConfigLoader::load().expect_err("missing RUNMAT_CONFIG path should fail");
+    let message = err.to_string();
+    assert!(message.contains("RUNMAT_CONFIG points to a missing file"));
+
+    support::clear_env(ENV_VARS);
+}

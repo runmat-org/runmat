@@ -104,23 +104,6 @@ Built-in REPL commands:
 - `help`: show REPL help
 - `exit`, `quit`: leave the REPL
 
-### Jupyter kernel
-
-```sh
-# Install the kernel spec
-runmat --install-kernel
-
-# Start a kernel directly
-runmat kernel
-
-# Start from an existing connection file
-runmat kernel-connection connection.json
-```
-
-Advanced kernel flags exist for IP, ports, transport, signature scheme, and
-connection-file output. Use `runmat kernel --help` when you need to wire RunMat
-into an existing Jupyter environment manually.
-
 ### Diagnostics
 
 ```sh
@@ -216,9 +199,11 @@ local_script.m`, which reads the source from local disk.
 ### Configuration
 
 ```sh
-runmat config show
-runmat config generate -o .runmat.yaml
-runmat config validate .runmat.yaml
+runmat config show --format toml
+runmat config show --format json
+runmat config generate -o runmat.toml
+runmat config generate -o runmat.json --format json
+runmat config validate runmat.toml
 runmat config paths
 ```
 
@@ -237,7 +222,7 @@ runmat snapshot validate stdlib.snapshot
 runmat benchmark <file.m> [--iterations N] [--jit]
 ```
 
-`--iterations` defaults to `10`.
+`--iterations` defaults to `10`. The benchmark target can also be a named entrypoint from `runmat.toml`.
 
 ### Garbage collection
 
@@ -293,7 +278,7 @@ Global flags apply to both direct script execution and subcommands.
 
 ### Plotting and artifacts
 
-- `--plot-mode <auto|gui|headless|jupyter>`
+- `--plot-mode <auto|gui|headless>`
 - `--plot-headless`
 - `--plot-backend <auto|wgpu|static|web>`
 - `--plot-scatter-target <n>`
@@ -304,62 +289,30 @@ Global flags apply to both direct script execution and subcommands.
 - `--figure-size <WIDTHxHEIGHT>`
 - `--max-figures <n>`
 
-### Integrations
-
-- `--install-kernel`: install the RunMat Jupyter kernel
-
 ## Environment variables
 
-Most execution-related globals also have environment variable forms. Boolean
-values accept `1/0`, `true/false`, `yes/no`, `on/off`, and `enable/disable`.
+RunMat uses config files + CLI flags for runtime behavior. Environment variables are limited to config path selection and service/auth settings.
 
-### General
+### Config discovery
 
-- `RUNMAT_DEBUG`
-- `RUNMAT_LOG_LEVEL`
-- `RUNMAT_CALLSTACK_LIMIT`
-- `RUNMAT_ERROR_NAMESPACE`
 - `RUNMAT_CONFIG`
-- `RUNMAT_SNAPSHOT_PATH`
 
-### JIT and GC
+### Service/auth
 
-- `RUNMAT_JIT_ENABLE`
-- `RUNMAT_JIT_DISABLE`
-- `RUNMAT_JIT_THRESHOLD`
-- `RUNMAT_JIT_OPT_LEVEL`
-- `RUNMAT_GC_PRESET`
-- `RUNMAT_GC_YOUNG_SIZE`
-- `RUNMAT_GC_THREADS`
-- `RUNMAT_GC_STATS`
+- `RUNMAT_API_KEY`
+- `RUNMAT_SERVER_URL`
+- `RUNMAT_ORG_ID`
+- `RUNMAT_PROJECT_ID`
 
-### Plotting and artifacts
+### Telemetry ingestion (optional)
 
-- `RUNMAT_PLOT_MODE`
-- `RUNMAT_PLOT_HEADLESS`
-- `RUNMAT_PLOT_BACKEND`
-- `RUNMAT_ARTIFACTS_DIR`
-- `RUNMAT_ARTIFACTS_MANIFEST`
-- `RUNMAT_CAPTURE_FIGURES`
-- `RUNMAT_FIGURE_SIZE`
-- `RUNMAT_MAX_FIGURES`
-
-### Kernel
-
-- `RUNMAT_KERNEL_IP`
-- `RUNMAT_KERNEL_KEY`
-- `RUNMAT_SHELL_PORT`
-- `RUNMAT_IOPUB_PORT`
-- `RUNMAT_STDIN_PORT`
-- `RUNMAT_CONTROL_PORT`
-- `RUNMAT_HB_PORT`
+- `RUNMAT_TELEMETRY_KEY`
 
 ## Precedence
 
-CLI flags override environment variables, which override configuration files,
-which override built-in defaults.
+Runtime behavior: CLI flags override configuration files, which override built-in defaults.
 
-See `/docs/configuration` for configuration file discovery and formats.
+Config file selection: `RUNMAT_CONFIG` overrides project discovery, which overrides user config.
 
 ## CI, headless, and containers
 
@@ -367,19 +320,19 @@ RunMat is intended to work in both interactive shells and non-interactive
 environments.
 
 ```sh
-# Force headless execution in CI
-RUNMAT_PLOT_MODE=headless RUNMAT_JIT_DISABLE=1 runmat tests/current_feature_test.m
+# Headless execution in CI
+runmat --plot-mode headless --no-jit tests/current_feature_test.m
 
 # Headless benchmark run
-RUNMAT_PLOT_MODE=headless RUNMAT_GC_PRESET=high-throughput \
-  runmat benchmark perf.m --iterations 10 --jit
+runmat --plot-mode headless --gc-preset high-throughput \
+  benchmark perf.m --iterations 10 --jit
 ```
 
 ```Dockerfile
 FROM debian:stable-slim
 # install runmat binary and runtime dependencies
-ENV NO_GUI=1 RUNMAT_PLOT_MODE=headless
-CMD ["runmat", "info"]
+ENV NO_GUI=1
+CMD ["runmat", "--plot-mode", "headless", "info"]
 ```
 
 ## Exit codes

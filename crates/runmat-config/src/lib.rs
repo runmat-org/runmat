@@ -1,10 +1,10 @@
 //! Configuration system for RunMat
 //!
-//! Supports multiple configuration sources with proper precedence:
-//! 1. Command-line arguments (highest priority)
-//! 2. Explicit config path via RUNMAT_CONFIG
-//! 3. Configuration files (runmat.toml, runmat.json)
-//! 4. Built-in defaults (lowest priority)
+//! File-based config discovery for RunMat:
+//! 1. Explicit config path via RUNMAT_CONFIG
+//! 2. Project config discovery (runmat.toml, runmat.json)
+//! 3. User config (~/.config/runmat/config.toml|json)
+//! 4. Built-in defaults
 
 mod loader;
 mod project;

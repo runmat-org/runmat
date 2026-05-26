@@ -363,13 +363,20 @@ pub enum SnapshotCommand {
 
 #[derive(Subcommand, Clone)]
 pub enum ConfigCommand {
-    /// Show current configuration
-    Show,
-    /// Generate sample configuration file
+    /// Show resolved runtime configuration
+    Show {
+        /// Output format
+        #[arg(long, value_enum, default_value = "toml")]
+        format: ConfigFormat,
+    },
+    /// Generate a starter runmat config file (project + runtime sections)
     Generate {
         /// Output file path
         #[arg(short, long, default_value = "runmat.toml")]
         output: PathBuf,
+        /// Output format (overrides file extension when set)
+        #[arg(long, value_enum)]
+        format: Option<ConfigFormat>,
     },
     /// Validate configuration file
     Validate {
@@ -378,4 +385,10 @@ pub enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum ConfigFormat {
+    Toml,
+    Json,
 }

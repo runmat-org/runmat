@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoggingConfig {
     /// Log level
     #[serde(default)]
