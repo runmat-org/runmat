@@ -2022,6 +2022,29 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_plotting_handle_core_descriptors() {
+        let cases = [
+            ("figure();", "fig = figure()"),
+            ("gcf();", "fig = gcf()"),
+            ("gca();", "ax = gca()"),
+            ("isgraphics(1);", "tf = isgraphics(h)"),
+            ("ishandle(1);", "tf = ishandle(h)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_empty_and_magic_descriptors() {
         let cases = [
             ("empty(0, 3);", "A = empty(m, n, ...)"),
