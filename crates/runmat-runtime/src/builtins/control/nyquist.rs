@@ -461,7 +461,7 @@ async fn render_nyquist_plot(response: &NyquistResponse) -> BuiltinResult<()> {
     }
 
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
-        if is_nonfatal_plot_setup_error(&err) {
+        if super::is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }
         return Err(err);
@@ -471,14 +471,6 @@ async fn render_nyquist_plot(response: &NyquistResponse) -> BuiltinResult<()> {
     let _ = crate::call_builtin_async("ylabel", &[Value::from("Imaginary Axis")]).await;
     let _ = crate::call_builtin_async("grid", &[Value::from("on")]).await;
     Ok(())
-}
-
-fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
-    let lower = err.to_string().to_ascii_lowercase();
-    lower.contains("plotting is unavailable")
-        || lower.contains("non-main thread")
-        || lower.contains("interactive plotting failed")
-        || lower.contains("eventloop can't be recreated")
 }
 
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
