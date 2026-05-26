@@ -9,7 +9,11 @@ use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
-use runmat_builtins::{CharArray, IntValue, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, IntValue, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -48,26 +52,192 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Pure string manipulation builtin; excluded from fusion plans and gathers GPU inputs immediately.",
 };
 
-const FN_NAME: &str = "extractBetween";
-const ARG_TYPE_ERROR: &str = "extractBetween: first argument must be a string array, character array, or cell array of character vectors";
-const BOUNDARY_TYPE_ERROR: &str =
-    "extractBetween: start and end arguments must both be text or both be numeric positions";
-const POSITION_TYPE_ERROR: &str = "extractBetween: position arguments must be positive integers";
-const OPTION_PAIR_ERROR: &str = "extractBetween: name-value arguments must appear in pairs";
-const OPTION_NAME_ERROR: &str = "extractBetween: unrecognized parameter name";
-const OPTION_VALUE_ERROR: &str =
-    "extractBetween: 'Boundaries' must be either 'inclusive' or 'exclusive'";
-const CELL_ELEMENT_ERROR: &str =
-    "extractBetween: cell array elements must be string scalars or character vectors";
-const SIZE_MISMATCH_ERROR: &str =
-    "extractBetween: boundary sizes must be compatible with the text input";
+const BUILTIN_NAME: &str = "extractBetween";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(FN_NAME).build()
+const EXTRACT_BETWEEN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newText",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Extracted text preserving scalar/array/cell text container semantics.",
+}];
+
+const EXTRACT_BETWEEN_INPUTS_BASE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text scalar/array/cell.",
+    },
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Start boundary marker text or positive integer position(s).",
+    },
+    BuiltinParamDescriptor {
+        name: "end",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "End boundary marker text or positive integer position(s).",
+    },
+];
+
+const EXTRACT_BETWEEN_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text scalar/array/cell.",
+    },
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Start boundary marker text or positive integer position(s).",
+    },
+    BuiltinParamDescriptor {
+        name: "end",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "End boundary marker text or positive integer position(s).",
+    },
+    BuiltinParamDescriptor {
+        name: "Name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option name (`Boundaries`).",
+    },
+    BuiltinParamDescriptor {
+        name: "Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option value and additional Name/Value pairs.",
+    },
+];
+
+const EXTRACT_BETWEEN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "newText = extractBetween(str, start, end)",
+        inputs: &EXTRACT_BETWEEN_INPUTS_BASE,
+        outputs: &EXTRACT_BETWEEN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "newText = extractBetween(str, start, end, Name, Value, ...)",
+        inputs: &EXTRACT_BETWEEN_INPUTS_NAME_VALUE,
+        outputs: &EXTRACT_BETWEEN_OUTPUT,
+    },
+];
+
+const EXTRACT_BETWEEN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.INVALID_INPUT",
+    identifier: Some("RunMat:extractBetween:InvalidInput"),
+    when: "First argument is not a string array, character array, or cell array of text scalars.",
+    message:
+        "extractBetween: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.BOUNDARY_TYPE",
+    identifier: Some("RunMat:extractBetween:BoundaryType"),
+    when: "Start/end boundaries are mixed text/numeric domains or use unsupported boundary types.",
+    message:
+        "extractBetween: start and end arguments must both be text or both be numeric positions",
+};
+
+const EXTRACT_BETWEEN_ERROR_POSITION_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.POSITION_TYPE",
+    identifier: Some("RunMat:extractBetween:PositionType"),
+    when: "Numeric boundary positions are not positive finite integers.",
+    message: "extractBetween: position arguments must be positive integers",
+};
+
+const EXTRACT_BETWEEN_ERROR_NAME_VALUE_PAIR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.NAME_VALUE_PAIR",
+    identifier: Some("RunMat:extractBetween:NameValuePair"),
+    when: "Name/value options are not supplied in complete pairs.",
+    message: "extractBetween: name-value arguments must appear in pairs",
+};
+
+const EXTRACT_BETWEEN_ERROR_OPTION_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.OPTION_NAME",
+    identifier: Some("RunMat:extractBetween:OptionName"),
+    when: "An option name other than `Boundaries` was supplied.",
+    message: "extractBetween: unrecognized parameter name",
+};
+
+const EXTRACT_BETWEEN_ERROR_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.OPTION_VALUE",
+    identifier: Some("RunMat:extractBetween:OptionValue"),
+    when: "`Boundaries` option value is not `inclusive` or `exclusive`.",
+    message: "extractBetween: 'Boundaries' must be either 'inclusive' or 'exclusive'",
+};
+
+const EXTRACT_BETWEEN_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.CELL_ELEMENT",
+    identifier: Some("RunMat:extractBetween:CellElement"),
+    when: "Cell text input/boundary contains non-text values or non-row char arrays.",
+    message: "extractBetween: cell array elements must be string scalars or character vectors",
+};
+
+const EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.SIZE_MISMATCH",
+    identifier: Some("RunMat:extractBetween:SizeMismatch"),
+    when: "Text/boundary inputs are not broadcast-compatible for extraction.",
+    message: "extractBetween: boundary sizes must be compatible with the text input",
+};
+
+const EXTRACT_BETWEEN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXTRACT_BETWEEN.INTERNAL",
+    identifier: Some("RunMat:extractBetween:InternalError"),
+    when: "Internal output construction failed.",
+    message: "extractBetween: internal error",
+};
+
+const EXTRACT_BETWEEN_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    EXTRACT_BETWEEN_ERROR_INVALID_INPUT,
+    EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE,
+    EXTRACT_BETWEEN_ERROR_POSITION_TYPE,
+    EXTRACT_BETWEEN_ERROR_NAME_VALUE_PAIR,
+    EXTRACT_BETWEEN_ERROR_OPTION_NAME,
+    EXTRACT_BETWEEN_ERROR_OPTION_VALUE,
+    EXTRACT_BETWEEN_ERROR_CELL_ELEMENT,
+    EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH,
+    EXTRACT_BETWEEN_ERROR_INTERNAL,
+];
+
+pub const EXTRACT_BETWEEN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EXTRACT_BETWEEN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXTRACT_BETWEEN_ERRORS,
+};
+
+fn extract_between_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    extract_between_error_with_message(error.message, error)
+}
+
+fn extract_between_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, FN_NAME)
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +253,7 @@ enum BoundariesMode {
     keywords = "extractBetween,substring,boundaries,strings",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::extractbetween::EXTRACT_BETWEEN_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::extractbetween"
 )]
 async fn extract_between_builtin(
@@ -102,7 +273,7 @@ async fn extract_between_builtin(
     let stop_boundary = BoundaryArg::from_value(stop)?;
 
     if start_boundary.kind() != stop_boundary.kind() {
-        return Err(runtime_error_for(BOUNDARY_TYPE_ERROR));
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE));
     }
     let boundary_kind = start_boundary.kind();
     let effective_mode = mode_override.unwrap_or(match boundary_kind {
@@ -114,11 +285,20 @@ async fn extract_between_builtin(
     let stop_shape = stop_boundary.shape();
     let text_shape = normalized_text.shape();
 
-    let shape_ts = broadcast_shapes(FN_NAME, text_shape, start_shape).map_err(runtime_error_for)?;
-    let output_shape =
-        broadcast_shapes(FN_NAME, &shape_ts, stop_shape).map_err(runtime_error_for)?;
+    let shape_ts = broadcast_shapes(BUILTIN_NAME, text_shape, start_shape).map_err(|err| {
+        extract_between_error_with_message(
+            format!("{}: {err}", EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH.message),
+            &EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH,
+        )
+    })?;
+    let output_shape = broadcast_shapes(BUILTIN_NAME, &shape_ts, stop_shape).map_err(|err| {
+        extract_between_error_with_message(
+            format!("{}: {err}", EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH.message),
+            &EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH,
+        )
+    })?;
     if !normalized_text.supports_shape(&output_shape) {
-        return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH));
     }
 
     let total: usize = output_shape.iter().copied().product();
@@ -162,29 +342,31 @@ async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<Boundar
         return Ok(None);
     }
     if !args.len().is_multiple_of(2) {
-        return Err(runtime_error_for(OPTION_PAIR_ERROR));
+        return Err(extract_between_error(
+            &EXTRACT_BETWEEN_ERROR_NAME_VALUE_PAIR,
+        ));
     }
 
     let mut mode: Option<BoundariesMode> = None;
     let mut idx = 0;
     while idx < args.len() {
         let name_value = gather_if_needed_async(&args[idx]).await.map_err(map_flow)?;
-        let name =
-            value_to_string(&name_value).ok_or_else(|| runtime_error_for(OPTION_NAME_ERROR))?;
+        let name = value_to_string(&name_value)
+            .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_NAME))?;
         if !name.eq_ignore_ascii_case("boundaries") {
-            return Err(runtime_error_for(OPTION_NAME_ERROR));
+            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_NAME));
         }
         let value = gather_if_needed_async(&args[idx + 1])
             .await
             .map_err(map_flow)?;
-        let value_str =
-            value_to_string(&value).ok_or_else(|| runtime_error_for(OPTION_VALUE_ERROR))?;
+        let value_str = value_to_string(&value)
+            .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_VALUE))?;
         let parsed_mode = if value_str.eq_ignore_ascii_case("inclusive") {
             BoundariesMode::Inclusive
         } else if value_str.eq_ignore_ascii_case("exclusive") {
             BoundariesMode::Exclusive
         } else {
-            return Err(runtime_error_for(OPTION_VALUE_ERROR));
+            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_VALUE));
         };
         mode = Some(parsed_mode);
         idx += 2;
@@ -403,8 +585,12 @@ impl NormalizedText {
                             }
                             kinds.push(CellElementKind::Char);
                         }
-                        Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-                        _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                        Value::CharArray(_) => {
+                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
+                        }
+                        _ => {
+                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
+                        }
                     }
                 }
                 Ok(Self {
@@ -416,7 +602,7 @@ impl NormalizedText {
                     }),
                 })
             }
-            _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+            _ => Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_INVALID_INPUT)),
         }
     }
 
@@ -452,25 +638,38 @@ impl NormalizedText {
                     Ok(Value::String(value.text))
                 } else {
                     let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
-                    let array = StringArray::new(data, output_shape)
-                        .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
+                    let array = StringArray::new(data, output_shape).map_err(|e| {
+                        extract_between_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                        )
+                    })?;
                     Ok(Value::StringArray(array))
                 }
             }
             TextKind::StringArray => {
                 let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
-                let array = StringArray::new(data, output_shape)
-                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))?;
+                let array = StringArray::new(data, output_shape).map_err(|e| {
+                    extract_between_error_with_message(
+                        format!("{BUILTIN_NAME}: {e}"),
+                        &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                    )
+                })?;
                 Ok(Value::StringArray(array))
             }
             TextKind::CharArray { rows } => {
                 if rows == 0 {
                     return CharArray::new(Vec::new(), 0, 0)
                         .map(Value::CharArray)
-                        .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")));
+                        .map_err(|e| {
+                            extract_between_error_with_message(
+                                format!("{BUILTIN_NAME}: {e}"),
+                                &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                            )
+                        });
                 }
                 if results.len() != rows {
-                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+                    return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH));
                 }
                 let mut max_width = 0usize;
                 let mut row_strings = Vec::with_capacity(rows);
@@ -489,11 +688,16 @@ impl NormalizedText {
                 }
                 CharArray::new(flattened, rows, max_width)
                     .map(Value::CharArray)
-                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))
+                    .map_err(|e| {
+                        extract_between_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                        )
+                    })
             }
             TextKind::CellArray(info) => {
                 if results.len() != info.element_kinds.len() {
-                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+                    return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_SIZE_MISMATCH));
                 }
                 let mut values = Vec::with_capacity(results.len());
                 for (idx, result) in results.into_iter().enumerate() {
@@ -505,8 +709,12 @@ impl NormalizedText {
                         }
                     }
                 }
-                make_cell_with_shape(values, info.shape)
-                    .map_err(|e| runtime_error_for(format!("{FN_NAME}: {e}")))
+                make_cell_with_shape(values, info.shape).map_err(|e| {
+                    extract_between_error_with_message(
+                        format!("{BUILTIN_NAME}: {e}"),
+                        &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                    )
+                })
             }
         }
     }
@@ -533,9 +741,13 @@ impl BoundaryArg {
             Value::Num(_) | Value::Int(_) | Value::Tensor(_) => {
                 BoundaryPositions::from_value(value).map(BoundaryArg::Position)
             }
-            other => Err(runtime_error_for(format!(
-                "{BOUNDARY_TYPE_ERROR}: unsupported argument {other:?}"
-            ))),
+            other => Err(extract_between_error_with_message(
+                format!(
+                    "{}: unsupported argument {other:?}",
+                    EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE.message
+                ),
+                &EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE,
+            )),
         }
     }
 
@@ -611,13 +823,17 @@ impl BoundaryText {
                                 data.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
                             }
                         }
-                        Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-                        _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                        Value::CharArray(_) => {
+                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
+                        }
+                        _ => {
+                            return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT))
+                        }
                     }
                 }
                 Ok(Self { data, shape })
             }
-            _ => Err(runtime_error_for(BOUNDARY_TYPE_ERROR)),
+            _ => Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE)),
         }
     }
 }
@@ -653,20 +869,20 @@ impl BoundaryPositions {
                     },
                 })
             }
-            _ => Err(runtime_error_for(BOUNDARY_TYPE_ERROR)),
+            _ => Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE)),
         }
     }
 }
 
 fn parse_position(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() || value < 1.0 {
-        return Err(runtime_error_for(POSITION_TYPE_ERROR));
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
     }
     if (value.fract()).abs() > f64::EPSILON {
-        return Err(runtime_error_for(POSITION_TYPE_ERROR));
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
     }
     if value > (usize::MAX as f64) {
-        return Err(runtime_error_for(POSITION_TYPE_ERROR));
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
     }
     Ok(value as usize)
 }
@@ -674,7 +890,7 @@ fn parse_position(value: f64) -> BuiltinResult<usize> {
 fn parse_position_int(value: IntValue) -> BuiltinResult<usize> {
     let val = value.to_i64();
     if val <= 0 {
-        return Err(runtime_error_for(POSITION_TYPE_ERROR));
+        return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_POSITION_TYPE));
     }
     Ok(val as usize)
 }
@@ -886,7 +1102,11 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), POSITION_TYPE_ERROR);
+        assert_eq!(err.to_string(), EXTRACT_BETWEEN_ERROR_POSITION_TYPE.message);
+        assert_eq!(
+            err.identifier(),
+            EXTRACT_BETWEEN_ERROR_POSITION_TYPE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -899,7 +1119,11 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), BOUNDARY_TYPE_ERROR);
+        assert_eq!(err.to_string(), EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE.message);
+        assert_eq!(
+            err.identifier(),
+            EXTRACT_BETWEEN_ERROR_BOUNDARY_TYPE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -937,7 +1161,11 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), OPTION_VALUE_ERROR);
+        assert_eq!(err.to_string(), EXTRACT_BETWEEN_ERROR_OPTION_VALUE.message);
+        assert_eq!(
+            err.identifier(),
+            EXTRACT_BETWEEN_ERROR_OPTION_VALUE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -953,7 +1181,11 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), OPTION_NAME_ERROR);
+        assert_eq!(err.to_string(), EXTRACT_BETWEEN_ERROR_OPTION_NAME.message);
+        assert_eq!(
+            err.identifier(),
+            EXTRACT_BETWEEN_ERROR_OPTION_NAME.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -966,7 +1198,14 @@ pub(crate) mod tests {
             vec![Value::String("Boundaries".into())],
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), OPTION_PAIR_ERROR);
+        assert_eq!(
+            err.to_string(),
+            EXTRACT_BETWEEN_ERROR_NAME_VALUE_PAIR.message
+        );
+        assert_eq!(
+            err.identifier(),
+            EXTRACT_BETWEEN_ERROR_NAME_VALUE_PAIR.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

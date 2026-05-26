@@ -2249,6 +2249,14 @@ mod tests {
                 "strsplit(\"a,b\", \",\");",
                 "[parts, matches] = strsplit(str, delimiter)",
             ),
+            (
+                "extractBetween(\"A[GPU]B\", \"[\", \"]\");",
+                "newText = extractBetween(str, start, end)",
+            ),
+            (
+                "eraseBetween(\"A[GPU]B\", \"[\", \"]\");",
+                "newText = eraseBetween(str, start, end)",
+            ),
         ];
 
         for (text, expected_label) in cases {
