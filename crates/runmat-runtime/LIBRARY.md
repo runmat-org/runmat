@@ -65,6 +65,13 @@
 |-----------|------------|--------------------------------------------------|-------------------|-----|--------|------------------|----------------------------------------|
 |     ✅    | math/poly  | polyval, polyfit, roots, polyder, polyint        | Poly utilities    | —   | P      | LAPACK (QR)      | polyfit via least squares (\/QR).      |
 
+## Control systems
+
+| Completed | Path    | Name(s)                    | Purpose                         | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                                   |
+|-----------|---------|----------------------------|---------------------------------|-----|--------|------------------|---------------------------------------------------------|
+|     ✅     | control | tf                         | Transfer-function models        | —   | —      | —                | SISO metadata object; gathers coefficient inputs.       |
+|     ✅     | control | step, impulse, nyquist     | Time and frequency responses    | —   | —      | —                | Host-side response evaluation with GPU residency specs. |
+
 ## Statistics (core)
 
 | Completed | Path           | Name(s)                | Purpose                    | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                 |
