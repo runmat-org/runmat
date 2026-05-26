@@ -206,6 +206,7 @@ Rule:
 3. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
 4. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
 5. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
+6. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
 
 ## Shared Helper Reuse Strategy
 
@@ -248,6 +249,10 @@ Disallowed source:
 4. Do not build runtime errors with hard-coded identifiers/messages when a descriptor row already exists for that branch.
 5. When remapping parser/broadcast/helper failures into builtin error branches, throw via the descriptor row helper (`*_error(&FOO_ERROR_...)`) rather than `format!(...)` message copies.
 6. If a branch needs extra context in the text, wrap the descriptor message (`format!("{base}: {detail}")`) while still anchoring the branch to that descriptor row.
+7. Canonical throw helper pattern:
+   - `fn foo_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError { foo_error_with_message(error.message, error) }`
+   - Use `foo_error(&FOO_ERROR_...)` for stable branches.
+   - Use `foo_error_with_message(format!(...), &FOO_ERROR_...)` only for contextual/internal details.
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 

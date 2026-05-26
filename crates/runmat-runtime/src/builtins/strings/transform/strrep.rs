@@ -1,6 +1,10 @@
 //! MATLAB-compatible `strrep` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -42,12 +46,95 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "strrep";
-const ARGUMENT_TYPE_ERROR: &str =
-    "strrep: first argument must be a string array, character array, or cell array of character vectors";
-const PATTERN_TYPE_ERROR: &str = "strrep: old and new must be string scalars or character vectors";
-const PATTERN_MISMATCH_ERROR: &str = "strrep: old and new must be the same data type";
-const CELL_ELEMENT_ERROR: &str =
-    "strrep: cell array elements must be string scalars or character vectors";
+
+const STRREP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newStr",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Text with pattern occurrences replaced, preserving input container kind.",
+}];
+
+const STRREP_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "old",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text scalar (string or char row).",
+    },
+    BuiltinParamDescriptor {
+        name: "new",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Replacement text scalar matching old's data type family.",
+    },
+];
+
+const STRREP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "newStr = strrep(str, old, new)",
+    inputs: &STRREP_INPUTS,
+    outputs: &STRREP_OUTPUT,
+}];
+
+const STRREP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRREP.INVALID_INPUT",
+    identifier: Some("RunMat:strrep:InvalidInput"),
+    when: "First argument is not a string array, char array, or cell array of text scalars.",
+    message:
+        "strrep: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const STRREP_ERROR_PATTERN_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRREP.PATTERN_TYPE",
+    identifier: Some("RunMat:strrep:PatternType"),
+    when: "old/new arguments are not string scalars or character vectors.",
+    message: "strrep: old and new must be string scalars or character vectors",
+};
+
+const STRREP_ERROR_PATTERN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRREP.PATTERN_MISMATCH",
+    identifier: Some("RunMat:strrep:PatternMismatch"),
+    when: "old and new are different text data families (string vs char).",
+    message: "strrep: old and new must be the same data type",
+};
+
+const STRREP_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRREP.CELL_ELEMENT",
+    identifier: Some("RunMat:strrep:CellElement"),
+    when: "Cell input contains non-text elements or non-row char arrays.",
+    message: "strrep: cell array elements must be string scalars or character vectors",
+};
+
+const STRREP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRREP.INTERNAL",
+    identifier: Some("RunMat:strrep:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "strrep: internal error",
+};
+
+const STRREP_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    STRREP_ERROR_INVALID_INPUT,
+    STRREP_ERROR_PATTERN_TYPE,
+    STRREP_ERROR_PATTERN_MISMATCH,
+    STRREP_ERROR_CELL_ELEMENT,
+    STRREP_ERROR_INTERNAL,
+];
+
+pub const STRREP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRREP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRREP_ERRORS,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PatternKind {
@@ -55,14 +142,23 @@ enum PatternKind {
     Char,
 }
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
-
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn strrep_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn strrep_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strrep_error_with_message(error.message, error)
 }
 
 #[runtime_builtin(
@@ -72,6 +168,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     keywords = "strrep,replace,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::strrep::STRREP_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::strrep"
 )]
 async fn strrep_builtin(
@@ -86,7 +183,7 @@ async fn strrep_builtin(
     let (old_text, old_kind) = parse_pattern(gathered_old)?;
     let (new_text, new_kind) = parse_pattern(gathered_new)?;
     if old_kind != new_kind {
-        return Err(runtime_error_for(PATTERN_MISMATCH_ERROR));
+        return Err(strrep_error(&STRREP_ERROR_PATTERN_MISMATCH));
     }
 
     match gathered_str {
@@ -96,7 +193,7 @@ async fn strrep_builtin(
         Value::StringArray(array) => strrep_string_array(array, &old_text, &new_text),
         Value::CharArray(array) => strrep_char_array(array, &old_text, &new_text),
         Value::Cell(cell) => strrep_cell_array(cell, &old_text, &new_text),
-        _ => Err(runtime_error_for(ARGUMENT_TYPE_ERROR)),
+        _ => Err(strrep_error(&STRREP_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -107,7 +204,7 @@ fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
             if array.data.len() == 1 {
                 Ok((array.data[0].clone(), PatternKind::String))
             } else {
-                Err(runtime_error_for(PATTERN_TYPE_ERROR))
+                Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE))
             }
         }
         Value::CharArray(array) => {
@@ -119,10 +216,10 @@ fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
                 };
                 Ok((text, PatternKind::Char))
             } else {
-                Err(runtime_error_for(PATTERN_TYPE_ERROR))
+                Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE))
             }
         }
-        _ => Err(runtime_error_for(PATTERN_TYPE_ERROR)),
+        _ => Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE)),
     }
 }
 
@@ -140,8 +237,9 @@ fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResul
         .into_iter()
         .map(|text| strrep_string_value(text, old, new))
         .collect::<Vec<_>>();
-    let rebuilt = StringArray::new(replaced, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let rebuilt = StringArray::new(replaced, shape).map_err(|e| {
+        strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(rebuilt))
 }
 
@@ -171,7 +269,9 @@ fn strrep_char_array(array: CharArray, old: &str, new: &str) -> BuiltinResult<Va
 
     CharArray::new(new_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
+        })
 }
 
 fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> BuiltinResult<Value> {
@@ -180,8 +280,9 @@ fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> BuiltinResult<Val
     for ptr in &data {
         replaced.push(strrep_cell_element(ptr, old, new)?);
     }
-    make_cell_with_shape(replaced, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell_with_shape(replaced, shape).map_err(|e| {
+        strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
+    })
 }
 
 fn strrep_cell_element(value: &Value, old: &str, new: &str) -> BuiltinResult<Value> {
@@ -189,7 +290,7 @@ fn strrep_cell_element(value: &Value, old: &str, new: &str) -> BuiltinResult<Val
         Value::String(text) => Ok(Value::String(strrep_string_value(text.clone(), old, new))),
         Value::StringArray(array) => strrep_string_array(array.clone(), old, new),
         Value::CharArray(array) => strrep_char_array(array.clone(), old, new),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        _ => Err(strrep_error(&STRREP_ERROR_CELL_ELEMENT)),
     }
 }
 

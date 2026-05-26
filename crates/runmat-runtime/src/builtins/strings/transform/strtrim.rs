@@ -47,10 +47,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "strtrim";
-const ARG_TYPE_ERROR: &str =
-    "strtrim: first argument must be a string array, character array, or cell array of character vectors";
-const CELL_ELEMENT_ERROR: &str =
-    "strtrim: cell array elements must be string scalars or character vectors";
 
 const STRTRIM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -78,14 +74,15 @@ const STRTRIM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescript
     code: "RM.STRTRIM.INVALID_INPUT",
     identifier: Some("RunMat:strtrim:InvalidInput"),
     when: "Input is not a string array, character array, or cell array of text scalars.",
-    message: ARG_TYPE_ERROR,
+    message:
+        "strtrim: first argument must be a string array, character array, or cell array of character vectors",
 };
 
 const STRTRIM_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.STRTRIM.CELL_ELEMENT",
     identifier: Some("RunMat:strtrim:CellElement"),
     when: "Cell array contains a non-text element or non-row char array element.",
-    message: CELL_ELEMENT_ERROR,
+    message: "strtrim: cell array elements must be string scalars or character vectors",
 };
 
 const STRTRIM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -123,6 +120,10 @@ fn strtrim_error_with_message(
     builder.build()
 }
 
+fn strtrim_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strtrim_error_with_message(error.message, error)
+}
+
 #[runtime_builtin(
     name = "strtrim",
     category = "strings/transform",
@@ -140,10 +141,7 @@ async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(array) => strtrim_string_array(array),
         Value::CharArray(array) => strtrim_char_array(array),
         Value::Cell(cell) => strtrim_cell_array(cell).await,
-        _ => Err(strtrim_error_with_message(
-            ARG_TYPE_ERROR,
-            &STRTRIM_ERROR_INVALID_INPUT,
-        )),
+        _ => Err(strtrim_error(&STRTRIM_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -225,14 +223,8 @@ async fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
                     )
                 })
         }
-        Value::CharArray(_) => Err(strtrim_error_with_message(
-            CELL_ELEMENT_ERROR,
-            &STRTRIM_ERROR_CELL_ELEMENT,
-        )),
-        _ => Err(strtrim_error_with_message(
-            CELL_ELEMENT_ERROR,
-            &STRTRIM_ERROR_CELL_ELEMENT,
-        )),
+        Value::CharArray(_) => Err(strtrim_error(&STRTRIM_ERROR_CELL_ELEMENT)),
+        _ => Err(strtrim_error(&STRTRIM_ERROR_CELL_ELEMENT)),
     }
 }
 

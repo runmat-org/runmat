@@ -45,10 +45,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "lower";
-const ARG_TYPE_ERROR: &str =
-    "lower: first argument must be a string array, character array, or cell array of character vectors";
-const CELL_ELEMENT_ERROR: &str =
-    "lower: cell array elements must be string scalars or character vectors";
 
 const LOWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -76,14 +72,15 @@ const LOWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     code: "RM.LOWER.INVALID_INPUT",
     identifier: Some("RunMat:lower:InvalidInput"),
     when: "Input is not a string array, character array, or cell array of text scalars.",
-    message: ARG_TYPE_ERROR,
+    message:
+        "lower: first argument must be a string array, character array, or cell array of character vectors",
 };
 
 const LOWER_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.LOWER.CELL_ELEMENT",
     identifier: Some("RunMat:lower:CellElement"),
     when: "Cell array contains a non-text element or non-row char array element.",
-    message: CELL_ELEMENT_ERROR,
+    message: "lower: cell array elements must be string scalars or character vectors",
 };
 
 const LOWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -121,6 +118,10 @@ fn lower_error_with_message(
     builder.build()
 }
 
+fn lower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    lower_error_with_message(error.message, error)
+}
+
 #[runtime_builtin(
     name = "lower",
     category = "strings/transform",
@@ -138,10 +139,7 @@ async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(array) => lower_string_array(array),
         Value::CharArray(array) => lower_char_array(array),
         Value::Cell(cell) => lower_cell_array(cell),
-        _ => Err(lower_error_with_message(
-            ARG_TYPE_ERROR,
-            &LOWER_ERROR_INVALID_INPUT,
-        )),
+        _ => Err(lower_error(&LOWER_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -212,14 +210,8 @@ fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
             lowercase_preserving_missing(sa.data[0].clone()),
         )),
         Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(ca.clone()),
-        Value::CharArray(_) => Err(lower_error_with_message(
-            CELL_ELEMENT_ERROR,
-            &LOWER_ERROR_CELL_ELEMENT,
-        )),
-        _ => Err(lower_error_with_message(
-            CELL_ELEMENT_ERROR,
-            &LOWER_ERROR_CELL_ELEMENT,
-        )),
+        Value::CharArray(_) => Err(lower_error(&LOWER_ERROR_CELL_ELEMENT)),
+        _ => Err(lower_error(&LOWER_ERROR_CELL_ELEMENT)),
     }
 }
 
@@ -347,7 +339,7 @@ pub(crate) mod tests {
     #[test]
     fn lower_errors_on_invalid_input() {
         let err = run_lower(Value::Num(1.0)).unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), LOWER_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -355,7 +347,7 @@ pub(crate) mod tests {
     fn lower_cell_errors_on_invalid_element() {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap();
         let err = run_lower(Value::Cell(cell)).unwrap_err();
-        assert_eq!(err.to_string(), CELL_ELEMENT_ERROR);
+        assert_eq!(err.to_string(), LOWER_ERROR_CELL_ELEMENT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -397,7 +389,7 @@ pub(crate) mod tests {
             })
             .expect("upload");
         let err = run_lower(Value::GpuTensor(handle.clone())).unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), LOWER_ERROR_INVALID_INPUT.message);
         provider.free(&handle).ok();
     }
 
