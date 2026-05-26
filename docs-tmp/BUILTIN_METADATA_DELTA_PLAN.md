@@ -221,6 +221,11 @@ Rule:
    - Throw only through helpers that accept `&'static BuiltinErrorDescriptor`.
    - Do not create parallel `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` mirrors.
 
+Audit command (must stay clean):
+
+1. `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`
+2. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
+
 ## Shared Helper Reuse Strategy
 
 Use existing resolver/helper modules as migration anchors, not bespoke one-offs.
