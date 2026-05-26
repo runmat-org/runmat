@@ -2098,6 +2098,27 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_array_indexing_descriptors() {
+        let cases = [
+            ("find([1 0 2]);", "idx = find(X)"),
+            ("ind2sub([3 4], 7);", "subs = ind2sub(sz, ind)"),
+            ("sub2ind([3 4], 2, 3);", "ind = sub2ind(sz, I1, In...)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

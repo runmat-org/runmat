@@ -37,9 +37,10 @@
 | Wave 32 (GPU Acceleration Core B) | `gpuArray` | Done | `e71c10c0` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gpuarray::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for gpuArray size/class/like option grammar + descriptor-backed stable error maps across parser/type-conversion/reshape/provider branches + LSP signature-help coverage |
 | Wave 33 (GPU Acceleration Core C) | `pagefun` | Done | `24c52854` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::pagefun::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for pagefun callable/arity surface (`@mtimes`) + descriptor-backed stable error maps for callable/arity/page-shape/matrix-shape/result/internal branches + LSP signature-help coverage |
 | Wave 34 (GPU Acceleration Core D) | `arrayfun` | Done | `97eaadbb` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::arrayfun::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for arrayfun callable + variadic input + name-value option surface + descriptor-backed stable error maps for invalid input/options/uniform-output/callback/internal branches + LSP signature-help coverage |
+| Wave 35 (Array Indexing Core A) | `find`, `ind2sub`, `sub2ind` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::indexing::find::tests::`; `cargo test -p runmat-runtime builtins::array::indexing::ind2sub::tests::`; `cargo test -p runmat-runtime builtins::array::indexing::sub2ind::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core index conversion/search surface + stable descriptor-backed error identifiers + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `111`
-- Remaining: `457`
+- Migrated with attached descriptor: `114`
+- Remaining: `454`
