@@ -38,9 +38,10 @@
 | Wave 33 (GPU Acceleration Core C) | `pagefun` | Done | `24c52854` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::pagefun::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for pagefun callable/arity surface (`@mtimes`) + descriptor-backed stable error maps for callable/arity/page-shape/matrix-shape/result/internal branches + LSP signature-help coverage |
 | Wave 34 (GPU Acceleration Core D) | `arrayfun` | Done | `97eaadbb` | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::arrayfun::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for arrayfun callable + variadic input + name-value option surface + descriptor-backed stable error maps for invalid input/options/uniform-output/callback/internal branches + LSP signature-help coverage |
 | Wave 35 (Array Indexing Core A) | `find`, `ind2sub`, `sub2ind` | Done | `06d4754a` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::indexing::find::tests::`; `cargo test -p runmat-runtime builtins::array::indexing::ind2sub::tests::`; `cargo test -p runmat-runtime builtins::array::indexing::sub2ind::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core index conversion/search surface + stable descriptor-backed error identifiers + LSP signature-help coverage |
+| Wave 36 (Diagnostics Core) | `assert`, `error`, `warning` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::diagnostics::assert::tests::`; `cargo test -p runmat-runtime builtins::diagnostics::error::tests::`; `cargo test -p runmat-runtime builtins::diagnostics::warning::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for diagnostics control-flow surface + stable descriptor-backed parser/validation error maps + LSP signature-help coverage for callable diagnostics forms (`assert`/`error`) |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `114`
-- Remaining: `454`
+- Migrated with attached descriptor: `117`
+- Remaining: `451`

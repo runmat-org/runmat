@@ -1,6 +1,10 @@
 //! MATLAB-compatible `assert` builtin that mirrors MATLAB diagnostic semantics.
 
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::format_variadic;
@@ -12,12 +16,191 @@ use crate::builtins::common::spec::{
 use crate::builtins::diagnostics::type_resolvers::assert_type;
 use crate::{build_runtime_error, RuntimeError};
 
+const BUILTIN_NAME: &str = "assert";
 const DEFAULT_IDENTIFIER: &str = "RunMat:assertion:failed";
 const DEFAULT_MESSAGE: &str = "Assertion failed.";
-const INVALID_CONDITION_IDENTIFIER: &str = "RunMat:assertion:invalidCondition";
-const INVALID_INPUT_IDENTIFIER: &str = "RunMat:assertion:invalidInput";
-const MIN_INPUT_IDENTIFIER: &str = "RunMat:minrhs";
-const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
+
+const ASSERT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Zero when the assertion passes.",
+}];
+
+const ASSERT_INPUTS_CONDITION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "condition",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical/numeric condition that must evaluate to true.",
+}];
+
+const ASSERT_INPUTS_MESSAGE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "condition",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Logical/numeric condition that must evaluate to true.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Assertion failed.\""),
+        description: "Failure message text.",
+    },
+];
+
+const ASSERT_INPUTS_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "condition",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Logical/numeric condition that must evaluate to true.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Assertion failed.\""),
+        description: "Failure message template text.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Formatting values for the message template.",
+    },
+];
+
+const ASSERT_INPUTS_IDENTIFIER_MESSAGE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "condition",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Logical/numeric condition that must evaluate to true.",
+    },
+    BuiltinParamDescriptor {
+        name: "message_id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"RunMat:assertion:failed\""),
+        description: "Message identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Assertion failed.\""),
+        description: "Failure message text.",
+    },
+];
+
+const ASSERT_INPUTS_IDENTIFIER_MESSAGE_VARIADIC: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "condition",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Logical/numeric condition that must evaluate to true.",
+    },
+    BuiltinParamDescriptor {
+        name: "message_id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"RunMat:assertion:failed\""),
+        description: "Message identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"Assertion failed.\""),
+        description: "Failure message template text.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Formatting values for the message template.",
+    },
+];
+
+const ASSERT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "out = assert(condition)",
+        inputs: &ASSERT_INPUTS_CONDITION,
+        outputs: &ASSERT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = assert(condition, message)",
+        inputs: &ASSERT_INPUTS_MESSAGE,
+        outputs: &ASSERT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = assert(condition, message, A...)",
+        inputs: &ASSERT_INPUTS_MESSAGE_VARIADIC,
+        outputs: &ASSERT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = assert(condition, message_id, message)",
+        inputs: &ASSERT_INPUTS_IDENTIFIER_MESSAGE,
+        outputs: &ASSERT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = assert(condition, message_id, message, A...)",
+        inputs: &ASSERT_INPUTS_IDENTIFIER_MESSAGE_VARIADIC,
+        outputs: &ASSERT_OUTPUT,
+    },
+];
+
+const ASSERT_ERROR_ASSERTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASSERT.ASSERTION_FAILED",
+    identifier: Some(DEFAULT_IDENTIFIER),
+    when: "Condition evaluates to false and no custom identifier/message override is provided.",
+    message: DEFAULT_MESSAGE,
+};
+
+const ASSERT_ERROR_INVALID_CONDITION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASSERT.INVALID_CONDITION",
+    identifier: Some("RunMat:assertion:invalidCondition"),
+    when: "First argument is not a supported logical or numeric condition input.",
+    message: "assert: first input must be logical or numeric.",
+};
+
+const ASSERT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASSERT.INVALID_INPUT",
+    identifier: Some("RunMat:assertion:invalidInput"),
+    when: "Message identifier/message text or formatting payload is invalid.",
+    message: "assert: invalid input argument",
+};
+
+const ASSERT_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ASSERT.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:minrhs"),
+    when: "No condition argument is provided.",
+    message: "Not enough input arguments.",
+};
+
+const ASSERT_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ASSERT_ERROR_ASSERTION_FAILED,
+    ASSERT_ERROR_INVALID_CONDITION,
+    ASSERT_ERROR_INVALID_INPUT,
+    ASSERT_ERROR_NOT_ENOUGH_INPUTS,
+];
+
+pub const ASSERT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ASSERT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ASSERT_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::assert")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -46,22 +229,43 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Control-flow builtin with no fusion support.",
 };
 
+fn assert_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    assert_error_with_message(error.message, error)
+}
+
+fn assert_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(normalize_identifier(identifier));
+    }
+    builder.build()
+}
+
 fn assert_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
-        .with_builtin("assert")
+        .with_builtin(BUILTIN_NAME)
         .with_identifier(normalize_identifier(identifier))
         .build()
 }
 
-fn remap_assert_flow<F>(err: RuntimeError, identifier: &str, message: F) -> RuntimeError
+fn remap_assert_flow<F>(
+    err: RuntimeError,
+    error: &'static BuiltinErrorDescriptor,
+    message: F,
+) -> RuntimeError
 where
     F: FnOnce(&crate::RuntimeError) -> String,
 {
-    build_runtime_error(message(&err))
-        .with_builtin("assert")
-        .with_identifier(normalize_identifier(identifier))
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(message(&err))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(normalize_identifier(identifier));
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -71,11 +275,12 @@ where
     keywords = "assert,diagnostics,validation,error",
     accel = "metadata",
     type_resolver(assert_type),
+    descriptor(crate::builtins::diagnostics::assert::ASSERT_DESCRIPTOR),
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
 async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(assert_flow(MIN_INPUT_IDENTIFIER, MIN_INPUT_MESSAGE));
+        return Err(assert_error(&ASSERT_ERROR_NOT_ENOUGH_INPUTS));
     }
 
     let mut iter = args.into_iter();
@@ -99,7 +304,7 @@ async fn normalize_condition_value(condition: Value) -> crate::BuiltinResult<Val
             gpu_helpers::gather_value_async(&gpu_value)
                 .await
                 .map_err(|flow| {
-                    remap_assert_flow(flow, INVALID_INPUT_IDENTIFIER, |err| {
+                    remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
                         format!("assert: {}", err.message())
                     })
                 })
@@ -154,10 +359,7 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
         Value::GpuTensor(_) => {
             unreachable!("gpu tensors are gathered in normalize_condition_value")
         }
-        _ => Err(assert_flow(
-            INVALID_CONDITION_IDENTIFIER,
-            "assert: first input must be logical or numeric.",
-        )),
+        _ => Err(assert_error(&ASSERT_ERROR_INVALID_CONDITION)),
     }
 }
 
@@ -211,7 +413,9 @@ fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload> {
     if treat_as_identifier {
         if args.len() < 2 {
             return Err(assert_flow(
-                INVALID_INPUT_IDENTIFIER,
+                ASSERT_ERROR_INVALID_INPUT
+                    .identifier
+                    .unwrap_or(DEFAULT_IDENTIFIER),
                 "assert: message text must follow the message identifier.",
             ));
         }
@@ -249,7 +453,9 @@ fn identifier_from_value(value: &Value) -> crate::BuiltinResult<String> {
     )?;
     if text.trim().is_empty() {
         return Err(assert_flow(
-            INVALID_INPUT_IDENTIFIER,
+            ASSERT_ERROR_INVALID_INPUT
+                .identifier
+                .unwrap_or(DEFAULT_IDENTIFIER),
             "assert: message identifier must be nonempty.",
         ));
     }
@@ -265,7 +471,7 @@ fn message_from_value(value: &Value) -> crate::BuiltinResult<String> {
 
 fn format_message(template: &str, args: &[Value]) -> crate::BuiltinResult<String> {
     format_variadic(template, args).map_err(|flow| {
-        remap_assert_flow(flow, INVALID_INPUT_IDENTIFIER, |err| {
+        remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
             format!("assert: {}", err.message())
         })
     })
@@ -309,7 +515,10 @@ fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResul
         Value::CharArray(char_array) if char_array.rows == 1 => {
             Ok(char_array.data.iter().collect::<String>())
         }
-        _ => Err(assert_flow(INVALID_INPUT_IDENTIFIER, context)),
+        _ => Err(assert_error_with_message(
+            context,
+            &ASSERT_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
@@ -485,7 +694,10 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::from("invalid")]).expect_err("assert should error"),
         );
-        assert_eq!(err.identifier(), Some(INVALID_CONDITION_IDENTIFIER));
+        assert_eq!(
+            err.identifier(),
+            Some(ASSERT_ERROR_INVALID_CONDITION.identifier.unwrap())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -510,7 +722,10 @@ pub(crate) mod tests {
             assert_builtin(vec![Value::Bool(false), Value::Num(5.0)])
                 .expect_err("assert should error"),
         );
-        assert_eq!(err.identifier(), Some(INVALID_INPUT_IDENTIFIER));
+        assert_eq!(
+            err.identifier(),
+            Some(ASSERT_ERROR_INVALID_INPUT.identifier.unwrap())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -523,7 +738,10 @@ pub(crate) mod tests {
             ])
             .expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(INVALID_INPUT_IDENTIFIER));
+        assert_eq!(
+            err.identifier(),
+            Some(ASSERT_ERROR_INVALID_INPUT.identifier.unwrap())
+        );
         assert!(err.message().contains("sprintf"));
     }
 
@@ -557,8 +775,11 @@ pub(crate) mod tests {
     #[test]
     fn assert_requires_condition_argument() {
         let err = unwrap_error(assert_builtin(Vec::new()).expect_err("assert should error"));
-        assert_eq!(err.identifier(), Some(MIN_INPUT_IDENTIFIER));
-        assert_eq!(err.message(), MIN_INPUT_MESSAGE);
+        assert_eq!(
+            err.identifier(),
+            Some(ASSERT_ERROR_NOT_ENOUGH_INPUTS.identifier.unwrap())
+        );
+        assert_eq!(err.message(), ASSERT_ERROR_NOT_ENOUGH_INPUTS.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

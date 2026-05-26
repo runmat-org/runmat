@@ -1967,7 +1967,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for diagnostics case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1993,7 +1994,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for diagnostics case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -2109,6 +2111,35 @@ mod tests {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
             let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
+    fn signature_help_uses_diagnostics_descriptors() {
+        let cases = [
+            ("assert(true);", "out = assert(condition)"),
+            (
+                "assert(false, \"id:test\", \"failed %d\", 1);",
+                "out = assert(condition, message_id, message, A...)",
+            ),
+            ("error(\"failure\");", "out = error(message)"),
+            (
+                "error(\"RunMat:demo:bad\", \"failed %d\", 1);",
+                "out = error(message_id, message, A...)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for diagnostics case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
