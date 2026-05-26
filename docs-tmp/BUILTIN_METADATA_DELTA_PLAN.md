@@ -228,7 +228,8 @@ Rule:
 Audit command (must stay clean):
 
 1. `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`
-2. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
+2. `rg -n 'with_identifier\\("RunMat:' crates/runmat-runtime/src/builtins`
+3. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
 
 ## Shared Helper Reuse Strategy
 

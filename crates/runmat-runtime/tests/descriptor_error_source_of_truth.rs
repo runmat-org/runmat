@@ -17,6 +17,10 @@ fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+fn pre_test_source(source: &str) -> &str {
+    source.split("#[cfg(test)]").next().unwrap_or(source)
+}
+
 #[test]
 fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
     let builtins_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/builtins");
@@ -32,14 +36,15 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
         if !source.contains("BuiltinErrorDescriptor") {
             continue;
         }
+        let runtime_source = pre_test_source(&source);
 
         assert!(
-            !source.contains("const IDENT_"),
+            !runtime_source.contains("const IDENT_"),
             "{} defines IDENT_* constant despite descriptor-backed errors; keep identifier/message/code in BuiltinErrorDescriptor rows only",
             file.display()
         );
 
-        for line in source.lines() {
+        for line in runtime_source.lines() {
             let trimmed = line.trim();
             let is_error_const = trimmed.starts_with("const ")
                 && trimmed.contains(": &str")
@@ -50,5 +55,11 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
                 file.display()
             );
         }
+
+        assert!(
+            !runtime_source.contains("with_identifier(\"RunMat:"),
+            "{} hard-codes a RunMat identifier via with_identifier(...); throw through BuiltinErrorDescriptor rows instead",
+            file.display()
+        );
     }
 }

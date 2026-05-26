@@ -2603,6 +2603,14 @@ mod tests {
             ),
             ("fopen(3);", "filename = fopen(fid)"),
             ("fopen(\"all\");", "fids = fopen(\"all\")"),
+            (
+                "fprintf(\"value=%d\", 7);",
+                "count = fprintf(formatSpec, A...)",
+            ),
+            (
+                "fprintf(1, \"value=%d\", 7);",
+                "count = fprintf(fid_or_stream, formatSpec, A...)",
+            ),
             ("fclose();", "status = fclose()"),
             ("fclose(3);", "status = fclose(fid)"),
             ("fclose(\"all\");", "status = fclose(\"all\")"),
