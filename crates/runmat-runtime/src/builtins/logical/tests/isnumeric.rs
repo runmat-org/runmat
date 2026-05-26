@@ -44,7 +44,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isnumeric";
-const IDENTIFIER_INTERNAL: &str = "RunMat:isnumeric:InternalError";
 
 const ISNUMERIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -68,12 +67,14 @@ const ISNUMERIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &ISNUMERIC_OUTPUT,
 }];
 
-const ISNUMERIC_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+const ISNUMERIC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ISNUMERIC.INTERNAL",
-    identifier: Some(IDENTIFIER_INTERNAL),
+    identifier: Some("RunMat:isnumeric:InternalError"),
     when: "Internal gather/dispatch path fails.",
     message: "isnumeric: internal error",
-}];
+};
+
+const ISNUMERIC_ERRORS: [BuiltinErrorDescriptor; 1] = [ISNUMERIC_ERROR_INTERNAL];
 
 pub const ISNUMERIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISNUMERIC_SIGNATURES,
@@ -81,6 +82,17 @@ pub const ISNUMERIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISNUMERIC_ERRORS,
 };
+
+fn isnumeric_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isnumeric",
@@ -118,7 +130,9 @@ async fn isnumeric_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let gpu_value = Value::GpuTensor(handle.clone());
     let gathered = gpu_helpers::gather_value_async(&gpu_value)
         .await
-        .map_err(|err| internal_error(format!("isnumeric: {err}")))?;
+        .map_err(|err| {
+            isnumeric_error_with_message(format!("isnumeric: {err}"), &ISNUMERIC_ERROR_INTERNAL)
+        })?;
     isnumeric_host(gathered)
 }
 
@@ -143,10 +157,7 @@ fn isnumeric_value(value: &Value) -> bool {
 }
 
 fn internal_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    isnumeric_error_with_message(message, &ISNUMERIC_ERROR_INTERNAL)
 }
 
 #[cfg(test)]

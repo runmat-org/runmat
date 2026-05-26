@@ -46,7 +46,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isreal";
-const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
 
 const ISREAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -70,12 +69,14 @@ const ISREAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDesc
     outputs: &ISREAL_OUTPUT,
 }];
 
-const ISREAL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+const ISREAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ISREAL.INTERNAL",
-    identifier: Some(IDENTIFIER_INTERNAL),
+    identifier: Some("RunMat:isreal:InternalError"),
     when: "Internal gather/dispatch path fails.",
     message: "isreal: internal error",
-}];
+};
+
+const ISREAL_ERRORS: [BuiltinErrorDescriptor; 1] = [ISREAL_ERROR_INTERNAL];
 
 pub const ISREAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISREAL_SIGNATURES,
@@ -83,6 +84,17 @@ pub const ISREAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISREAL_ERRORS,
 };
+
+fn isreal_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isreal",
@@ -115,7 +127,9 @@ async fn isreal_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let gpu_value = Value::GpuTensor(handle);
     let gathered = gpu_helpers::gather_value_async(&gpu_value)
         .await
-        .map_err(|err| internal_error(format!("isreal: {err}")))?;
+        .map_err(|err| {
+            isreal_error_with_message(format!("isreal: {err}"), &ISREAL_ERROR_INTERNAL)
+        })?;
     isreal_host(gathered)
 }
 
@@ -153,10 +167,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn internal_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    isreal_error_with_message(message, &ISREAL_ERROR_INTERNAL)
 }
 
 #[cfg(test)]

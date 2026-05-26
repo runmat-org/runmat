@@ -207,6 +207,7 @@ Rule:
 4. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
 5. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
 6. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
+7. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
 
 ## Shared Helper Reuse Strategy
 
@@ -264,7 +265,7 @@ For each builtin `B`, follow this exact loop:
 4. Populate signatures with named params/outputs and explicit arity.
 5. Encode options/default/variadic semantics in typed fields.
 6. Encode error identifiers, stable error codes, and trigger text from actual runtime errors used by `B`.
-   - Define per-error descriptor constants (for example `FOO_ERROR_INVALID_INPUT`) and build `FOO_ERRORS` from those constants.
+   - Define named per-error descriptor constants (for example `FOO_ERROR_INVALID_INPUT`) and build `FOO_ERRORS` from those constants (no inline anonymous descriptor rows).
    - Runtime throw helpers must take a descriptor row (or descriptor-derived identifier) rather than re-declaring identifier/message literals.
    - If a shared helper in another module needs error context, pass `&BuiltinErrorDescriptor` into that helper instead of exporting free-floating identifier/message constants.
    - Do not retain legacy fallback identifier literals in helper builders once descriptor constants exist.

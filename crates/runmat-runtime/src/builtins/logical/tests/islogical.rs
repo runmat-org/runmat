@@ -44,7 +44,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "islogical";
-const IDENTIFIER_INTERNAL: &str = "RunMat:islogical:InternalError";
 
 const ISLOGICAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -68,12 +67,14 @@ const ISLOGICAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &ISLOGICAL_OUTPUT,
 }];
 
-const ISLOGICAL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+const ISLOGICAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ISLOGICAL.INTERNAL",
-    identifier: Some(IDENTIFIER_INTERNAL),
+    identifier: Some("RunMat:islogical:InternalError"),
     when: "Internal gather/dispatch path fails.",
     message: "islogical: internal error",
-}];
+};
+
+const ISLOGICAL_ERRORS: [BuiltinErrorDescriptor; 1] = [ISLOGICAL_ERROR_INTERNAL];
 
 pub const ISLOGICAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISLOGICAL_SIGNATURES,
@@ -81,6 +82,17 @@ pub const ISLOGICAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISLOGICAL_ERRORS,
 };
+
+fn islogical_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "islogical",
@@ -117,7 +129,9 @@ async fn islogical_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let gpu_value = Value::GpuTensor(handle.clone());
     let gathered = gpu_helpers::gather_value_async(&gpu_value)
         .await
-        .map_err(|err| internal_error(format!("islogical: {err}")))?;
+        .map_err(|err| {
+            islogical_error_with_message(format!("islogical: {err}"), &ISLOGICAL_ERROR_INTERNAL)
+        })?;
     islogical_host(gathered)
 }
 
@@ -132,10 +146,7 @@ fn islogical_host(value: Value) -> BuiltinResult<Value> {
 }
 
 fn internal_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    islogical_error_with_message(message, &ISLOGICAL_ERROR_INTERNAL)
 }
 
 #[cfg(test)]

@@ -58,8 +58,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isinf";
-const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isinf:InvalidInput";
-const IDENTIFIER_INTERNAL: &str = "RunMat:isinf:InternalError";
 
 const ISINF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -83,20 +81,21 @@ const ISINF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &ISINF_OUTPUT,
 }];
 
-const ISINF_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.ISINF.INVALID_INPUT",
-        identifier: Some(IDENTIFIER_INVALID_INPUT),
-        when: "Input is not numeric, logical, char, or string.",
-        message: "isinf: expected numeric, logical, char, or string input",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ISINF.INTERNAL",
-        identifier: Some(IDENTIFIER_INTERNAL),
-        when: "Internal mask-construction or gather path fails.",
-        message: "isinf: internal error",
-    },
-];
+const ISINF_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISINF.INVALID_INPUT",
+    identifier: Some("RunMat:isinf:InvalidInput"),
+    when: "Input is not numeric, logical, char, or string.",
+    message: "isinf: expected numeric, logical, char, or string input",
+};
+
+const ISINF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISINF.INTERNAL",
+    identifier: Some("RunMat:isinf:InternalError"),
+    when: "Internal mask-construction or gather path fails.",
+    message: "isinf: internal error",
+};
+
+const ISINF_ERRORS: [BuiltinErrorDescriptor; 2] = [ISINF_ERROR_INVALID_INPUT, ISINF_ERROR_INTERNAL];
 
 pub const ISINF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISINF_SIGNATURES,
@@ -104,6 +103,22 @@ pub const ISINF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISINF_ERRORS,
 };
+
+fn isinf_error(name: &str, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    isinf_error_with_message(name, error.message, error)
+}
+
+fn isinf_error_with_message(
+    name: &str,
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isinf",
@@ -125,7 +140,13 @@ async fn isinf_builtin(value: Value) -> BuiltinResult<Value> {
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
+                .map_err(|err| {
+                    isinf_error_with_message(
+                        BUILTIN_NAME,
+                        format!("{BUILTIN_NAME}: {err}"),
+                        &ISINF_ERROR_INTERNAL,
+                    )
+                })?;
             isinf_tensor(BUILTIN_NAME, tensor)
         }
         other => isinf_host(other),
@@ -152,12 +173,7 @@ fn isinf_host(value: Value) -> BuiltinResult<Value> {
             let StringArray { shape, .. } = array;
             logical_zeros(BUILTIN_NAME, shape)
         }
-        _ => Err(build_runtime_error(format!(
-            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
-        ))
-        .with_identifier(IDENTIFIER_INVALID_INPUT)
-        .with_builtin(BUILTIN_NAME)
-        .build()),
+        _ => Err(isinf_error(BUILTIN_NAME, &ISINF_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -222,10 +238,7 @@ fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeError 
 }
 
 fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(name)
-        .build()
+    isinf_error_with_message(name, message, &ISINF_ERROR_INTERNAL)
 }
 
 #[cfg(test)]

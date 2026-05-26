@@ -60,8 +60,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isnan";
-const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isnan:InvalidInput";
-const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
 
 const ISNAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "tf",
@@ -85,20 +83,21 @@ const ISNAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &ISNAN_OUTPUT,
 }];
 
-const ISNAN_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.ISNAN.INVALID_INPUT",
-        identifier: Some(IDENTIFIER_INVALID_INPUT),
-        when: "Input is not numeric, logical, char, or string.",
-        message: "isnan: expected numeric, logical, char, or string input",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ISNAN.INTERNAL",
-        identifier: Some(IDENTIFIER_INTERNAL),
-        when: "Internal mask-construction or gather path fails.",
-        message: "isnan: internal error",
-    },
-];
+const ISNAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISNAN.INVALID_INPUT",
+    identifier: Some("RunMat:isnan:InvalidInput"),
+    when: "Input is not numeric, logical, char, or string.",
+    message: "isnan: expected numeric, logical, char, or string input",
+};
+
+const ISNAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISNAN.INTERNAL",
+    identifier: Some("RunMat:isnan:InternalError"),
+    when: "Internal mask-construction or gather path fails.",
+    message: "isnan: internal error",
+};
+
+const ISNAN_ERRORS: [BuiltinErrorDescriptor; 2] = [ISNAN_ERROR_INVALID_INPUT, ISNAN_ERROR_INTERNAL];
 
 pub const ISNAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISNAN_SIGNATURES,
@@ -106,6 +105,22 @@ pub const ISNAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ISNAN_ERRORS,
 };
+
+fn isnan_error(name: &str, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    isnan_error_with_message(name, error.message, error)
+}
+
+fn isnan_error_with_message(
+    name: &str,
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isnan",
@@ -122,7 +137,13 @@ async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
+                .map_err(|err| {
+                    isnan_error_with_message(
+                        BUILTIN_NAME,
+                        format!("{BUILTIN_NAME}: {err}"),
+                        &ISNAN_ERROR_INTERNAL,
+                    )
+                })?;
             isnan_tensor(BUILTIN_NAME, tensor)
         }
         other => isnan_host(other),
@@ -149,12 +170,7 @@ fn isnan_host(value: Value) -> BuiltinResult<Value> {
             let StringArray { shape, .. } = array;
             logical_zeros(BUILTIN_NAME, shape)
         }
-        _ => Err(build_runtime_error(format!(
-            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
-        ))
-        .with_identifier(IDENTIFIER_INVALID_INPUT)
-        .with_builtin(BUILTIN_NAME)
-        .build()),
+        _ => Err(isnan_error(BUILTIN_NAME, &ISNAN_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -213,10 +229,7 @@ fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeError 
 }
 
 fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(name)
-        .build()
+    isnan_error_with_message(name, message, &ISNAN_ERROR_INTERNAL)
 }
 
 #[cfg(test)]
