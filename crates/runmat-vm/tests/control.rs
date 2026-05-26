@@ -133,3 +133,43 @@ fn impulse_discrete_response_through_vm_dispatch() {
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 0.5).abs() < 1.0e-12)));
 }
+
+#[test]
+fn nyquist_returns_frequency_response_through_vm_dispatch() {
+    let program = r#"
+        H = tf(1, [1 1]);
+        [re, im, w] = nyquist(H, [0 1 2]);
+        re1 = re(1);
+        re2 = re(2);
+        im2 = im(2);
+        w3 = w(3);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < 1.0e-12)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 0.5).abs() < 1.0e-12)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n + 0.5).abs() < 1.0e-12)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 2.0).abs() < 1.0e-12)));
+}
+
+#[test]
+fn nyquist_statement_form_plots_without_error() {
+    let program = r#"
+        H = tf(1, [1 2 1]);
+        nyquist(H);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    execute(&hir).unwrap();
+}
