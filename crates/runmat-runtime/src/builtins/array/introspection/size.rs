@@ -7,7 +7,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::size")]
@@ -91,12 +95,143 @@ fn size_type(args: &[Type], _context: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+const SIZE_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sz",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Row vector of dimension extents.",
+}];
+
+const SIZE_OUTPUT_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "d",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Extent for selected dimension.",
+}];
+
+const SIZE_OUTPUT_MULTI: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "d",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Per-dimension outputs when multiple outputs are requested.",
+}];
+
+const SIZE_SIG_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const SIZE_SIG_DIM_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension selector (scalar or vector).",
+    },
+];
+
+const SIZE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "sz = size(A)",
+        inputs: &SIZE_SIG_INPUTS,
+        outputs: &SIZE_OUTPUT_SINGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[d1,d2,...] = size(A)",
+        inputs: &SIZE_SIG_INPUTS,
+        outputs: &SIZE_OUTPUT_MULTI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = size(A, dim)",
+        inputs: &SIZE_SIG_DIM_INPUTS,
+        outputs: &SIZE_OUTPUT_SCALAR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "sz = size(A, [dim1 dim2 ...])",
+        inputs: &SIZE_SIG_DIM_INPUTS,
+        outputs: &SIZE_OUTPUT_SINGLE,
+    },
+];
+
+const SIZE_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.ARG_COUNT",
+        identifier: None,
+        when: "More than two input arguments are provided.",
+        message: "size: too many input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.DIM_ARG_TYPE",
+        identifier: None,
+        when: "Dimension selector is not a numeric scalar/vector.",
+        message: "size: dimension argument must be a numeric scalar or vector",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.DIM_VECTOR_SHAPE",
+        identifier: None,
+        when: "Dimension vector argument is not vector-shaped.",
+        message: "size: dimension vector must be a vector of positive integers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.DIM_VECTOR_EMPTY",
+        identifier: None,
+        when: "Dimension vector argument has zero elements.",
+        message: "size: dimension vector must contain at least one element",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.DIM_NON_FINITE",
+        identifier: None,
+        when: "A dimension selector is non-finite.",
+        message: "size: dimension must be finite",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.DIM_NON_INTEGER",
+        identifier: None,
+        when: "A dimension selector is non-integer.",
+        message: "size: dimension must be an integer",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.DIM_LT_ONE",
+        identifier: None,
+        when: "A dimension selector is less than one.",
+        message: "size: dimension must be >= 1",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.SIZE.OUTPUT_TENSOR_BUILD",
+        identifier: None,
+        when: "Output row vector tensor construction fails.",
+        message: "size: failed to build output",
+    },
+];
+
+pub const SIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIZE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SIZE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "size",
     category = "array/introspection",
     summary = "Get the dimensions of scalars, vectors, matrices, and N-D arrays.",
     keywords = "size,dimensions,shape,gpu,introspection",
     type_resolver(size_type),
+    descriptor(crate::builtins::array::introspection::size::SIZE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::size"
 )]
 async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

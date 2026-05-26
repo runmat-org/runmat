@@ -7,7 +7,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::containers::map::map_length;
 use crate::runtime_error::RuntimeError;
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::length")]
@@ -47,6 +51,37 @@ fn length_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+const LENGTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Largest dimension extent of input.",
+}];
+
+const LENGTH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const LENGTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "n = length(A)",
+    inputs: &LENGTH_INPUTS,
+    outputs: &LENGTH_OUTPUT,
+}];
+
+const LENGTH_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const LENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LENGTH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LENGTH_ERRORS,
+};
+
 #[runtime_builtin(
     name = "length",
     category = "array/introspection",
@@ -54,6 +89,7 @@ fn length_type(args: &[Type], _context: &ResolveContext) -> Type {
     keywords = "length,largest dimension,vector length,gpu metadata,array size",
     accel = "metadata",
     type_resolver(length_type),
+    descriptor(crate::builtins::array::introspection::length::LENGTH_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::length"
 )]
 async fn length_builtin(value: Value) -> crate::BuiltinResult<Value> {

@@ -8,9 +8,10 @@
 | Wave 3 (Random Constructors) | `rand`, `randn`, `randi`, `randperm` | Done | `66c6c0c3` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `rand_`, `randn_`, `randi_`, `randperm_` | Attached descriptors + LSP signature-help coverage for random constructor family |
 | Wave 4 (Special Constructors) | `empty`, `magic` | Done | `68d72b80` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `empty_`, `magic_` | Attached descriptors + LSP signature-help coverage for constructor edge cases |
 | Wave 5 (Grid + Sequence Constructors) | `colon`, `fill`, `meshgrid`, `peaks` | Done | `e6b2e0a2` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `colon_`, `fill_`, `meshgrid_`, `peaks_` | Attached descriptors + LSP signature-help coverage for sequence/grid creation forms |
+| Wave 6 (Array Introspection) | `isempty`, `ismatrix`, `isscalar`, `isvector`, `length`, `ndims`, `numel`, `size` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `isempty_`, `ismatrix_`, `isscalar_`, `isvector_`, `length_`, `ndims_`, `numel_`, `builtins::array::introspection::size::tests::` | Attached descriptors + stable error maps + LSP signature-help coverage for introspection family |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `30`
-- Remaining: `538`
+- Migrated with attached descriptor: `38`
+- Remaining: `530`

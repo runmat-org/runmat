@@ -1918,6 +1918,32 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_introspection_descriptors() {
+        let cases = [
+            ("isempty([]);", "tf = isempty(A)"),
+            ("ismatrix([1 2; 3 4]);", "tf = ismatrix(A)"),
+            ("isscalar(1);", "tf = isscalar(A)"),
+            ("isvector([1 2 3]);", "tf = isvector(A)"),
+            ("length([1 2 3]);", "n = length(A)"),
+            ("ndims(ones(2,2,2));", "n = ndims(A)"),
+            ("numel([1 2; 3 4], 1, 2);", "n = numel(A, dim, ...)"),
+            ("size([1 2; 3 4], 1);", "d = size(A, dim)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_prefers_descriptor_signature_label() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
