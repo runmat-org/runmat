@@ -2786,6 +2786,11 @@ mod tests {
                 "movefile(\"a\", \"b\", \"f\");",
                 "status = movefile(source, destination, flag)",
             ),
+            ("delete(\"a.txt\");", "status = delete(filename)"),
+            (
+                "delete(\"a.txt\", \"b.txt\");",
+                "status = delete(filename1, filename2, ...)",
+            ),
         ];
 
         for (text, expected_label) in cases {

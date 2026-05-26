@@ -5,7 +5,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use glob::{Pattern, PatternError};
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path, path_to_string};
@@ -14,17 +18,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const MESSAGE_ID_FILE_NOT_FOUND: &str = "RunMat:DELETE:FileNotFound";
-const MESSAGE_ID_IS_DIRECTORY: &str = "RunMat:delete:Directories";
-const MESSAGE_ID_OS_ERROR: &str = "RunMat:DELETE:PermissionDenied";
-const MESSAGE_ID_INVALID_PATTERN: &str = "RunMat:delete:InvalidPattern";
-const MESSAGE_ID_INVALID_INPUT: &str = "RunMat:delete:InvalidInput";
-const MESSAGE_ID_EMPTY_FILENAME: &str = "RunMat:delete:EmptyFilename";
-const MESSAGE_ID_INVALID_HANDLE: &str = "RunMat:delete:InvalidHandle";
-
-const ERR_FILENAME_ARG: &str =
-    "delete: filename must be a character vector, string scalar, string array, or cell array of character vectors";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::delete")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,11 +50,115 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "delete";
 
-fn delete_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(message_id)
-        .build()
+const DELETE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Always 0 on success; function primarily acts as a sink.",
+}];
+const DELETE_INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filename/pattern string, string array, char matrix, cell array of path strings, or handle input.",
+}];
+const DELETE_INPUTS_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First filename/pattern/handle input.",
+    },
+    BuiltinParamDescriptor {
+        name: "filenameN",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional filename/pattern/handle inputs.",
+    },
+];
+const DELETE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "status = delete(filename)",
+        inputs: &DELETE_INPUTS_ONE,
+        outputs: &DELETE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = delete(filename1, filename2, ...)",
+        inputs: &DELETE_INPUTS_VARIADIC,
+        outputs: &DELETE_OUTPUT,
+    },
+];
+const DELETE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.INVALID_INPUT",
+    identifier: Some("RunMat:delete:InvalidInput"),
+    when: "Input arguments are missing or contain unsupported filename value types.",
+    message: "delete: invalid input",
+};
+const DELETE_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.INVALID_HANDLE",
+    identifier: Some("RunMat:delete:InvalidHandle"),
+    when: "Handle deletion inputs are mixed with filename inputs or contain unsupported handle values.",
+    message: "delete: invalid handle input",
+};
+const DELETE_ERROR_EMPTY_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.EMPTY_FILENAME",
+    identifier: Some("RunMat:delete:EmptyFilename"),
+    when: "A filename input is empty after trimming.",
+    message: "delete: filename cannot be empty",
+};
+const DELETE_ERROR_INVALID_PATTERN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.INVALID_PATTERN",
+    identifier: Some("RunMat:delete:InvalidPattern"),
+    when: "Wildcard pattern parsing or structure validation fails.",
+    message: "delete: invalid wildcard pattern",
+};
+const DELETE_ERROR_FILE_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.FILE_NOT_FOUND",
+    identifier: Some("RunMat:DELETE:FileNotFound"),
+    when: "Target path does not exist or pattern matches no files.",
+    message: "delete: file not found",
+};
+const DELETE_ERROR_IS_DIRECTORY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.IS_DIRECTORY",
+    identifier: Some("RunMat:delete:Directories"),
+    when: "Target path is a directory instead of a file.",
+    message: "delete: cannot delete directories",
+};
+const DELETE_ERROR_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DELETE.OS_ERROR",
+    identifier: Some("RunMat:DELETE:PermissionDenied"),
+    when: "Underlying filesystem operation fails while deleting files.",
+    message: "delete: filesystem deletion failed",
+};
+const DELETE_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    DELETE_ERROR_INVALID_INPUT,
+    DELETE_ERROR_INVALID_HANDLE,
+    DELETE_ERROR_EMPTY_FILENAME,
+    DELETE_ERROR_INVALID_PATTERN,
+    DELETE_ERROR_FILE_NOT_FOUND,
+    DELETE_ERROR_IS_DIRECTORY,
+    DELETE_ERROR_OS_ERROR,
+];
+pub const DELETE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DELETE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DELETE_ERRORS,
+};
+
+fn delete_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -84,12 +181,13 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     sink = true,
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::delete_type),
+    descriptor(crate::builtins::io::repl_fs::delete::DELETE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::delete"
 )]
 async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(delete_error(
-            MESSAGE_ID_INVALID_INPUT,
+        return Err(delete_error_with(
+            &DELETE_ERROR_INVALID_INPUT,
             "delete: missing filename input",
         ));
     }
@@ -100,8 +198,8 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     if gathered.iter().any(contains_handle_input) {
-        return Err(delete_error(
-            MESSAGE_ID_INVALID_HANDLE,
+        return Err(delete_error_with(
+            &DELETE_ERROR_INVALID_HANDLE,
             "delete: cannot mix handle and filename inputs",
         ));
     }
@@ -124,10 +222,10 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 async fn delete_target(raw: &str) -> BuiltinResult<()> {
     let expanded = expand_user_path(raw, "delete")
-        .map_err(|msg| delete_error(MESSAGE_ID_INVALID_INPUT, msg))?;
+        .map_err(|msg| delete_error_with(&DELETE_ERROR_INVALID_INPUT, msg))?;
     if expanded.is_empty() {
-        return Err(delete_error(
-            MESSAGE_ID_EMPTY_FILENAME,
+        return Err(delete_error_with(
+            &DELETE_ERROR_EMPTY_FILENAME,
             "delete: filename cannot be empty",
         ));
     }
@@ -143,8 +241,8 @@ async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> 
     validate_wildcard_pattern(pattern, display)?;
 
     if let Err(PatternError { msg, .. }) = Pattern::new(pattern) {
-        return Err(delete_error(
-            MESSAGE_ID_INVALID_PATTERN,
+        return Err(delete_error_with(
+            &DELETE_ERROR_INVALID_PATTERN,
             format!("delete: invalid wildcard pattern '{display}' ({msg})"),
         ));
     }
@@ -152,8 +250,8 @@ async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> 
     let paths = match glob::glob(pattern) {
         Ok(iter) => iter,
         Err(PatternError { msg, .. }) => {
-            return Err(delete_error(
-                MESSAGE_ID_INVALID_PATTERN,
+            return Err(delete_error_with(
+                &DELETE_ERROR_INVALID_PATTERN,
                 format!("delete: invalid wildcard pattern '{display}' ({msg})"),
             ))
         }
@@ -165,8 +263,8 @@ async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> 
             Ok(path) => matches.push(path),
             Err(err) => {
                 let problem_path = path_to_string(err.path());
-                return Err(delete_error(
-                    MESSAGE_ID_OS_ERROR,
+                return Err(delete_error_with(
+                    &DELETE_ERROR_OS_ERROR,
                     format!(
                         "delete: unable to delete '{}' ({})",
                         problem_path,
@@ -178,8 +276,8 @@ async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> 
     }
 
     if matches.is_empty() {
-        return Err(delete_error(
-            MESSAGE_ID_FILE_NOT_FOUND,
+        return Err(delete_error_with(
+            &DELETE_ERROR_FILE_NOT_FOUND,
             format!(
                 "delete: cannot delete '{}' because it does not exist",
                 display
@@ -198,8 +296,8 @@ async fn delete_single_path_async(path: &Path, display: &str) -> BuiltinResult<(
     match vfs::metadata_async(path).await {
         Ok(meta) => {
             if meta.is_dir() {
-                return Err(delete_error(
-                    MESSAGE_ID_IS_DIRECTORY,
+                return Err(delete_error_with(
+                    &DELETE_ERROR_IS_DIRECTORY,
                     format!(
                         "delete: cannot delete '{}' because it is a directory (use rmdir instead)",
                         display
@@ -207,24 +305,24 @@ async fn delete_single_path_async(path: &Path, display: &str) -> BuiltinResult<(
                 ));
             }
             vfs::remove_file_async(path).await.map_err(|err| {
-                delete_error(
-                    MESSAGE_ID_OS_ERROR,
+                delete_error_with(
+                    &DELETE_ERROR_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
                 )
             })
         }
         Err(err) => {
             if err.kind() == io::ErrorKind::NotFound {
-                Err(delete_error(
-                    MESSAGE_ID_FILE_NOT_FOUND,
+                Err(delete_error_with(
+                    &DELETE_ERROR_FILE_NOT_FOUND,
                     format!(
                         "delete: cannot delete '{}' because it does not exist",
                         display
                     ),
                 ))
             } else {
-                Err(delete_error(
-                    MESSAGE_ID_OS_ERROR,
+                Err(delete_error_with(
+                    &DELETE_ERROR_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
                 ))
             }
@@ -239,8 +337,8 @@ fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
 
 fn validate_wildcard_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
     if has_unbalanced(pattern, '[', ']') || has_unbalanced(pattern, '{', '}') {
-        return Err(delete_error(
-            MESSAGE_ID_INVALID_PATTERN,
+        return Err(delete_error_with(
+            &DELETE_ERROR_INVALID_PATTERN,
             format!("delete: invalid wildcard pattern '{display}'"),
         ));
     }
@@ -286,7 +384,10 @@ fn collect_targets(value: &Value, targets: &mut Vec<String>) -> BuiltinResult<()
         Value::CharArray(array) => collect_char_array_targets(array, targets),
         Value::StringArray(array) => collect_string_array_targets(array, targets),
         Value::Cell(cell) => collect_cell_targets(cell, targets),
-        _ => Err(delete_error(MESSAGE_ID_INVALID_INPUT, ERR_FILENAME_ARG)),
+        _ => Err(delete_error_with(
+            &DELETE_ERROR_INVALID_INPUT,
+            "delete: filename must be a character vector, string scalar, string array, or cell array of character vectors",
+        )),
     }
 }
 
@@ -301,8 +402,8 @@ fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> B
         }
         let trimmed = text.trim_end().to_string();
         if trimmed.is_empty() {
-            return Err(delete_error(
-                MESSAGE_ID_EMPTY_FILENAME,
+            return Err(delete_error_with(
+                &DELETE_ERROR_EMPTY_FILENAME,
                 "delete: filename cannot be empty",
             ));
         }
@@ -317,8 +418,8 @@ fn collect_string_array_targets(
 ) -> BuiltinResult<()> {
     for text in &array.data {
         if text.is_empty() {
-            return Err(delete_error(
-                MESSAGE_ID_EMPTY_FILENAME,
+            return Err(delete_error_with(
+                &DELETE_ERROR_EMPTY_FILENAME,
                 "delete: filename cannot be empty",
             ));
         }
@@ -371,8 +472,8 @@ fn process_handle_value(value: &Value, mutated_last: &mut Option<Value>) -> Buil
             }
             Ok(total)
         }
-        other => Err(delete_error(
-            MESSAGE_ID_INVALID_HANDLE,
+        other => Err(delete_error_with(
+            &DELETE_ERROR_INVALID_HANDLE,
             format!("delete: unsupported handle input {other:?}"),
         )),
     }
@@ -402,8 +503,8 @@ fn contains_handle_input(value: &Value) -> bool {
 
 fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> BuiltinResult<()> {
     if text.is_empty() {
-        Err(delete_error(
-            MESSAGE_ID_EMPTY_FILENAME,
+        Err(delete_error_with(
+            &DELETE_ERROR_EMPTY_FILENAME,
             "delete: filename cannot be empty",
         ))
     } else {
@@ -422,6 +523,22 @@ pub(crate) mod tests {
 
     fn delete_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::delete_builtin(args))
+    }
+
+    fn ident(error: &'static BuiltinErrorDescriptor) -> Option<&'static str> {
+        error.identifier
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn delete_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DELETE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = delete(filename)"));
+        assert!(labels.contains(&"status = delete(filename1, filename2, ...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -563,7 +680,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_errors_on_empty_string_argument() {
         let err = delete_builtin(vec![Value::from(String::new())]).expect_err("empty string");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_EMPTY_FILENAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -572,7 +689,7 @@ pub(crate) mod tests {
         let array =
             StringArray::new(vec![String::new()], vec![1]).expect("single empty string element");
         let err = delete_builtin(vec![Value::StringArray(array)]).expect_err("empty element");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_EMPTY_FILENAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -581,7 +698,7 @@ pub(crate) mod tests {
         let data = vec![' '; 4];
         let char_array = CharArray::new(data, 1, 4).expect("char matrix");
         let err = delete_builtin(vec![Value::CharArray(char_array)]).expect_err("blank row");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_EMPTY_FILENAME));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_EMPTY_FILENAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -590,7 +707,7 @@ pub(crate) mod tests {
         let pattern = "{invalid*";
         let err = futures::executor::block_on(delete_target(pattern))
             .expect_err("invalid pattern should error");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_PATTERN));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_INVALID_PATTERN));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -604,7 +721,7 @@ pub(crate) mod tests {
         let missing = temp.path().join("missing.txt");
         let missing_str = missing.to_string_lossy().to_string();
         let err = futures::executor::block_on(delete_target(&missing_str)).expect_err("error");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_FILE_NOT_FOUND));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_FILE_NOT_FOUND));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -619,7 +736,7 @@ pub(crate) mod tests {
         std::fs::create_dir(&dir).expect("create dir");
         let dir_display = dir.to_string_lossy().to_string();
         let err = delete_single_path(&dir, &dir_display).expect_err("error");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_IS_DIRECTORY));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_IS_DIRECTORY));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -658,7 +775,7 @@ pub(crate) mod tests {
             Value::from("mixed-handle-path.txt".to_string()),
         ])
         .expect_err("expected mixed error");
-        assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_HANDLE));
+        assert_eq!(err.identifier(), ident(&DELETE_ERROR_INVALID_HANDLE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
