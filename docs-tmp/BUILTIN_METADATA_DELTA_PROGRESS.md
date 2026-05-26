@@ -13,9 +13,10 @@
 | Wave 8 (Introspection Query) | `which`, `who`, `whos` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-lsp`; targeted runtime filters `builtins::introspection::which::tests::`, `builtins::introspection::who::tests::`, `builtins::introspection::whos::tests::` | Attached descriptors for option/name/filter forms + parser error codes + LSP signature-help coverage |
 | Wave 9 (Logical Predicates) | `isfinite`, `isinf`, `isnan`, `islogical`, `isnumeric`, `isreal`, `isgpuarray` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filter `builtins::logical::tests::` | Attached descriptors for logical predicate family + stable runtime-error mappings + LSP signature-help coverage |
 | Wave 10 (Logical Relations) | `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `isequal` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::logical::rel::`; `cargo test -p runmat-lsp signature_help_uses_logical_rel_descriptors` | Attached descriptors + LSP signature help + descriptor row as single source-of-truth for stable runtime identifier/message mappings |
+| Wave 11 (Logical Bitwise) | `and`, `or`, `xor`, `not` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::logical::bit::` | Attached descriptors for unary/binary logical bit ops + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `61`
-- Remaining: `507`
+- Migrated with attached descriptor: `65`
+- Remaining: `503`
