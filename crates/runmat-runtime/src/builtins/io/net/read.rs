@@ -1,6 +1,10 @@
 //! MATLAB-compatible `read` builtin for TCP/IP clients in RunMat.
 
-use runmat_builtins::{CharArray, IntValue, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, IntValue, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::io::{self, Read};
 use std::net::TcpStream;
@@ -14,13 +18,143 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
-const MESSAGE_ID_INVALID_CLIENT: &str = "RunMat:read:InvalidTcpClient";
-const MESSAGE_ID_NOT_CONNECTED: &str = "RunMat:read:NotConnected";
-const MESSAGE_ID_TIMEOUT: &str = "RunMat:read:Timeout";
-const MESSAGE_ID_CONNECTION_CLOSED: &str = "RunMat:read:ConnectionClosed";
-const MESSAGE_ID_INVALID_COUNT: &str = "RunMat:read:InvalidCount";
-const MESSAGE_ID_INVALID_DATATYPE: &str = "RunMat:read:InvalidDataType";
-const MESSAGE_ID_INTERNAL: &str = "RunMat:read:InternalError";
+const BUILTIN_NAME: &str = "read";
+
+const READ_OUTPUT_DATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "data",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Available bytes or requested typed payload from the TCP client.",
+}];
+const READ_INPUTS_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "client",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tcpclient handle struct.",
+}];
+const READ_INPUTS_CLIENT_COUNT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "client",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tcpclient handle struct.",
+    },
+    BuiltinParamDescriptor {
+        name: "count",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Requested element count.",
+    },
+];
+const READ_INPUTS_CLIENT_COUNT_DATATYPE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "client",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "tcpclient handle struct.",
+    },
+    BuiltinParamDescriptor {
+        name: "count",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Requested element count.",
+    },
+    BuiltinParamDescriptor {
+        name: "datatype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"uint8\""),
+        description: "Data type label (for example \"uint8\", \"double\", \"char\", \"string\").",
+    },
+];
+const READ_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "data = read(client)",
+        inputs: &READ_INPUTS_CLIENT,
+        outputs: &READ_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = read(client, count)",
+        inputs: &READ_INPUTS_CLIENT_COUNT,
+        outputs: &READ_OUTPUT_DATA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "data = read(client, count, datatype)",
+        inputs: &READ_INPUTS_CLIENT_COUNT_DATATYPE,
+        outputs: &READ_OUTPUT_DATA,
+    },
+];
+
+const READ_ERROR_INVALID_CLIENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.INVALID_CLIENT",
+    identifier: Some("RunMat:read:InvalidTcpClient"),
+    when: "Client handle is missing, malformed, invalid, or disconnected.",
+    message: "read: invalid tcpclient handle",
+};
+const READ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.INVALID_INPUT",
+    identifier: Some("RunMat:read:InvalidInput"),
+    when: "Argument list shape is unsupported for read.",
+    message: "read: invalid argument list",
+};
+const READ_ERROR_NOT_CONNECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.NOT_CONNECTED",
+    identifier: Some("RunMat:read:NotConnected"),
+    when: "Client has no active socket connection.",
+    message: "read: tcpclient is disconnected",
+};
+const READ_ERROR_TIMEOUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.TIMEOUT",
+    identifier: Some("RunMat:read:Timeout"),
+    when: "Socket read exceeds configured timeout.",
+    message: "read: timed out waiting for data",
+};
+const READ_ERROR_CONNECTION_CLOSED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.CONNECTION_CLOSED",
+    identifier: Some("RunMat:read:ConnectionClosed"),
+    when: "Peer closes socket before requested payload is fully available.",
+    message: "read: connection closed before the requested data was received",
+};
+const READ_ERROR_INVALID_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.INVALID_COUNT",
+    identifier: Some("RunMat:read:InvalidCount"),
+    when: "Requested count is non-scalar, negative, non-finite, or out of range.",
+    message: "read: invalid count argument",
+};
+const READ_ERROR_INVALID_DATATYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.INVALID_DATATYPE",
+    identifier: Some("RunMat:read:InvalidDataType"),
+    when: "Datatype argument is not a supported scalar text label.",
+    message: "read: invalid datatype argument",
+};
+const READ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.READ.INTERNAL",
+    identifier: Some("RunMat:read:InternalError"),
+    when: "Internal socket/control-flow conversion fails.",
+    message: "read: internal socket error",
+};
+const READ_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    READ_ERROR_INVALID_CLIENT,
+    READ_ERROR_INVALID_INPUT,
+    READ_ERROR_NOT_CONNECTED,
+    READ_ERROR_TIMEOUT,
+    READ_ERROR_CONNECTION_CLOSED,
+    READ_ERROR_INVALID_COUNT,
+    READ_ERROR_INVALID_DATATYPE,
+    READ_ERROR_INTERNAL,
+];
+pub const READ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &READ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &READ_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::read")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,15 +172,38 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Socket reads always execute on the host CPU; GPU providers are never consulted.",
 };
 
-fn read_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(message_id)
-        .with_builtin("read")
-        .build()
+fn read_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn read_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    read_error(message_id, message)
+fn read_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("read: ").unwrap_or(detail);
+    read_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn read_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -> RuntimeError {
+    read_error_with_detail(error, message)
+}
+
+fn map_control_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::read")]
@@ -66,17 +223,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Read numeric or text data from a TCP/IP client.",
     keywords = "read,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::read_type),
+    descriptor(crate::builtins::io::net::read::READ_DESCRIPTOR),
     builtin_path = "crate::builtins::io::net::read"
 )]
 async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let client = gather_if_needed_async(&client).await?;
+    let client = gather_if_needed_async(&client)
+        .await
+        .map_err(|err| map_control_flow(err, &READ_ERROR_INVALID_CLIENT))?;
     let options = parse_arguments(rest).await?;
 
     let client_struct = match &client {
         Value::Struct(st) => st,
         _ => {
             return Err(read_flow(
-                MESSAGE_ID_INVALID_CLIENT,
+                &READ_ERROR_INVALID_CLIENT,
                 "read: expected tcpclient struct as first argument",
             ))
         }
@@ -85,7 +245,7 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     let client_id = extract_client_id(client_struct)?;
     let handle = client_handle(client_id).ok_or_else(|| {
         read_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READ_ERROR_INVALID_CLIENT,
             "read: tcpclient handle is no longer valid",
         )
     })?;
@@ -94,16 +254,15 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
             return Err(read_flow(
-                MESSAGE_ID_NOT_CONNECTED,
+                &READ_ERROR_NOT_CONNECTED,
                 "read: tcpclient is disconnected",
             ));
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
-        let stream = guard
-            .stream
-            .try_clone()
-            .map_err(|err| read_flow(MESSAGE_ID_INTERNAL, format!("read: clone failed ({err})")))?;
+        let stream = guard.stream.try_clone().map_err(|err| {
+            read_flow(&READ_ERROR_INTERNAL, format!("read: clone failed ({err})"))
+        })?;
         (stream, timeout, byte_order, guard.connected)
     };
 
@@ -111,7 +270,7 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     if connected {
         if let Err(err) = configure_stream(&stream, timeout) {
             return Err(read_flow(
-                MESSAGE_ID_INTERNAL,
+                &READ_ERROR_INTERNAL,
                 format!("read: unable to configure socket timeout ({err})"),
             ));
         }
@@ -130,14 +289,14 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     if let ReadMode::Count(count) = options.mode {
         if read_result.bytes.is_empty() && count > 0 {
             return Err(read_flow(
-                MESSAGE_ID_CONNECTION_CLOSED,
+                &READ_ERROR_CONNECTION_CLOSED,
                 "read: connection closed before the requested data was received",
             ));
         }
         let expected = count.saturating_mul(element_size);
         if read_result.bytes.len() != expected {
             return Err(read_flow(
-                MESSAGE_ID_CONNECTION_CLOSED,
+                &READ_ERROR_CONNECTION_CLOSED,
                 "read: connection closed before the requested data was received",
             ));
         }
@@ -211,15 +370,15 @@ fn perform_read(
     match read_from_stream(stream, mode, element_size) {
         Ok(outcome) => Ok(outcome),
         Err(ReadError::Timeout) => Err(read_flow(
-            MESSAGE_ID_TIMEOUT,
+            &READ_ERROR_TIMEOUT,
             "read: timed out waiting for data",
         )),
         Err(ReadError::ConnectionClosed) => Err(read_flow(
-            MESSAGE_ID_CONNECTION_CLOSED,
+            &READ_ERROR_CONNECTION_CLOSED,
             "read: connection closed before the requested data was received",
         )),
         Err(ReadError::Io(err)) => Err(read_flow(
-            MESSAGE_ID_INTERNAL,
+            &READ_ERROR_INTERNAL,
             format!("read: socket error ({err})"),
         )),
     }
@@ -354,7 +513,7 @@ fn bytes_to_value(bytes: &[u8], datatype: DataType, order: ByteOrder) -> Builtin
             let values = numeric_from_bytes(bytes, datatype, order)?;
             let cols = values.len();
             let tensor = Tensor::new(values, vec![1, cols])
-                .map_err(|err| read_flow(MESSAGE_ID_INTERNAL, format!("read: {err}")))?;
+                .map_err(|err| read_flow(&READ_ERROR_INTERNAL, format!("read: {err}")))?;
             Ok(Value::Tensor(tensor))
         }
     }
@@ -378,7 +537,7 @@ fn numeric_from_bytes(
     }
     if !bytes.len().is_multiple_of(size) {
         return Err(read_flow(
-            MESSAGE_ID_INTERNAL,
+            &READ_ERROR_INTERNAL,
             "read: received byte count does not align with datatype size",
         ));
     }
@@ -483,7 +642,7 @@ async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
             })
         }
         _ => Err(read_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READ_ERROR_INVALID_INPUT,
             "read: invalid argument list",
         )),
     }
@@ -496,26 +655,26 @@ fn parse_count(value: &Value) -> BuiltinResult<usize> {
         Value::Tensor(t) if t.data.len() == 1 => t.data[0],
         _ => {
             return Err(read_flow(
-                MESSAGE_ID_INVALID_COUNT,
+                &READ_ERROR_INVALID_COUNT,
                 "read: count must be a numeric scalar",
             ))
         }
     };
     if numeric.is_nan() || numeric.is_sign_negative() {
         return Err(read_flow(
-            MESSAGE_ID_INVALID_COUNT,
+            &READ_ERROR_INVALID_COUNT,
             "read: count must be a non-negative finite value",
         ));
     }
     if numeric.is_infinite() {
         return Err(read_flow(
-            MESSAGE_ID_INVALID_COUNT,
+            &READ_ERROR_INVALID_COUNT,
             "read: count must be finite",
         ));
     }
     if numeric > usize::MAX as f64 {
         return Err(read_flow(
-            MESSAGE_ID_INVALID_COUNT,
+            &READ_ERROR_INVALID_COUNT,
             "read: count exceeds the maximum supported size",
         ));
     }
@@ -529,7 +688,7 @@ fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         _ => {
             return Err(read_flow(
-                MESSAGE_ID_INVALID_DATATYPE,
+                &READ_ERROR_INVALID_DATATYPE,
                 "read: datatype must be a string scalar",
             ))
         }
@@ -550,7 +709,7 @@ fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
         "string" => DataType::String,
         _ => {
             return Err(read_flow(
-                MESSAGE_ID_INVALID_DATATYPE,
+                &READ_ERROR_INVALID_DATATYPE,
                 format!("read: unsupported datatype '{text}'"),
             ))
         }
@@ -561,7 +720,7 @@ fn parse_datatype(value: &Value) -> BuiltinResult<DataType> {
 fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
     let id_value = struct_field(struct_value, CLIENT_HANDLE_FIELD).ok_or_else(|| {
         read_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READ_ERROR_INVALID_CLIENT,
             "read: tcpclient struct is missing internal handle",
         )
     })?;
@@ -569,7 +728,7 @@ fn extract_client_id(struct_value: &StructValue) -> BuiltinResult<u64> {
         Value::Int(IntValue::U64(id)) => Ok(*id),
         Value::Int(iv) => Ok(iv.to_i64() as u64),
         _ => Err(read_flow(
-            MESSAGE_ID_INVALID_CLIENT,
+            &READ_ERROR_INVALID_CLIENT,
             "read: tcpclient struct has invalid handle field",
         )),
     }
@@ -659,6 +818,19 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn read_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = READ_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"data = read(client)"));
+        assert!(labels.contains(&"data = read(client, count)"));
+        assert!(labels.contains(&"data = read(client, count, datatype)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn read_reads_requested_uint8_values() {
         let _guard = net_guard();
         let listener = TcpListener::bind("127.0.0.1:0").expect("listener");
@@ -730,7 +902,7 @@ pub(crate) mod tests {
         let client = make_client(stream, 0.1);
 
         let err = run_read(client.clone(), vec![Value::Num(4.0)]).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_TIMEOUT);
+        assert_error_identifier(err, READ_ERROR_TIMEOUT.identifier.unwrap());
 
         remove_client_for_test(client_id(&client));
     }
