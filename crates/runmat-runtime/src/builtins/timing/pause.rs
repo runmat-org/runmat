@@ -1,7 +1,11 @@
 //! MATLAB-compatible `pause` builtin that temporarily suspends execution.
 
 use once_cell::sync::Lazy;
-use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::sync::RwLock;
 
@@ -63,23 +67,109 @@ impl Default for PauseState {
 }
 
 const BUILTIN_NAME: &str = "pause";
-const ERR_INVALID_ARG: &str = "RunMat:pause:InvalidInputArgument";
-const ERR_TOO_MANY_INPUTS: &str = "RunMat:pause:TooManyInputs";
-const MSG_INVALID_ARG: &str = "pause: invalid input argument";
-const MSG_TOO_MANY_INPUTS: &str = "pause: too many input arguments";
 const MSG_STATE_LOCK: &str = "pause: failed to acquire pause state";
 
-fn pause_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const PAUSE_OUTPUT_EMPTY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Empty array when pausing or changing state.",
+}];
 
-fn pause_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .build()
+const PAUSE_OUTPUT_STATE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "state",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Previous pause state ('on' or 'off').",
+}];
+
+const PAUSE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const PAUSE_INPUTS_DURATION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "duration",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: Some("0"),
+    description: "Duration scalar or command-like scalar value accepted by pause.",
+}];
+const PAUSE_INPUTS_COMMAND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "command",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "One of 'on', 'off', or 'query'.",
+}];
+
+const PAUSE_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "out = pause()",
+        inputs: &PAUSE_INPUTS_NONE,
+        outputs: &PAUSE_OUTPUT_EMPTY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pause(duration)",
+        inputs: &PAUSE_INPUTS_DURATION,
+        outputs: &PAUSE_OUTPUT_EMPTY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "state = pause(command)",
+        inputs: &PAUSE_INPUTS_COMMAND,
+        outputs: &PAUSE_OUTPUT_STATE,
+    },
+];
+
+const PAUSE_ERROR_INVALID_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAUSE.INVALID_ARG",
+    identifier: Some("RunMat:pause:InvalidInputArgument"),
+    when: "Input argument is malformed, unsupported, non-scalar where scalar is required, or a negative/non-finite duration.",
+    message: "pause: invalid input argument",
+};
+
+const PAUSE_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAUSE.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:pause:TooManyInputs"),
+    when: "More than one input argument is supplied.",
+    message: "pause: too many input arguments",
+};
+
+const PAUSE_ERROR_STATE_LOCK: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAUSE.STATE_LOCK",
+    identifier: Some("RunMat:pause:StateLockFailed"),
+    when: "Internal pause-state lock cannot be acquired.",
+    message: "pause: failed to acquire pause state",
+};
+
+const PAUSE_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAUSE.GPU_GATHER_FAILED",
+    identifier: Some("RunMat:pause:GpuGatherFailed"),
+    when: "Gathering a GPU argument to host fails during argument classification.",
+    message: "pause: failed to gather gpu input",
+};
+
+const PAUSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    PAUSE_ERROR_INVALID_ARG,
+    PAUSE_ERROR_TOO_MANY_INPUTS,
+    PAUSE_ERROR_STATE_LOCK,
+    PAUSE_ERROR_GATHER_FAILED,
+];
+
+pub const PAUSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PAUSE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PAUSE_ERRORS,
+};
+
+fn pause_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +194,7 @@ enum PauseWait {
     accel = "metadata",
     sink = true,
     type_resolver(pause_type),
+    descriptor(crate::builtins::timing::pause::PAUSE_DESCRIPTOR),
     builtin_path = "crate::builtins::timing::pause"
 )]
 async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -126,9 +217,9 @@ async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 Ok(state_value(current))
             }
         },
-        _ => Err(pause_error_with_identifier(
-            MSG_TOO_MANY_INPUTS,
-            ERR_TOO_MANY_INPUTS,
+        _ => Err(pause_error_with_message(
+            PAUSE_ERROR_TOO_MANY_INPUTS.message,
+            &PAUSE_ERROR_TOO_MANY_INPUTS,
         )),
     }
 }
@@ -239,7 +330,7 @@ async fn wasm_sleep_seconds(seconds: f64) -> Result<(), RuntimeError> {
 async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
     let host_value = gpu_helpers::gather_value_async(arg)
         .await
-        .map_err(|e| pause_error(format!("pause: {e}")))?;
+        .map_err(|e| pause_error_with_message(format!("pause: {e}"), &PAUSE_ERROR_GATHER_FAILED))?;
     match host_value {
         Value::String(text) => parse_command(&text),
         Value::CharArray(ca) => {
@@ -249,9 +340,9 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
                 let text: String = ca.data.iter().collect();
                 parse_command(&text)
             } else {
-                Err(pause_error_with_identifier(
-                    MSG_INVALID_ARG,
-                    ERR_INVALID_ARG,
+                Err(pause_error_with_message(
+                    PAUSE_ERROR_INVALID_ARG.message,
+                    &PAUSE_ERROR_INVALID_ARG,
                 ))
             }
         }
@@ -261,9 +352,9 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
             } else if sa.data.len() == 1 {
                 parse_command(&sa.data[0])
             } else {
-                Err(pause_error_with_identifier(
-                    MSG_INVALID_ARG,
-                    ERR_INVALID_ARG,
+                Err(pause_error_with_message(
+                    PAUSE_ERROR_INVALID_ARG.message,
+                    &PAUSE_ERROR_INVALID_ARG,
                 ))
             }
         }
@@ -290,9 +381,9 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(pause_error_with_identifier(
-            MSG_INVALID_ARG,
-            ERR_INVALID_ARG,
+        | Value::OutputList(_) => Err(pause_error_with_message(
+            PAUSE_ERROR_INVALID_ARG.message,
+            &PAUSE_ERROR_INVALID_ARG,
         )),
     }
 }
@@ -307,9 +398,9 @@ fn parse_command(raw: &str) -> Result<PauseArgument, RuntimeError> {
         "on" => Ok(PauseArgument::SetState(true)),
         "off" => Ok(PauseArgument::SetState(false)),
         "query" => Ok(PauseArgument::Query),
-        _ => Err(pause_error_with_identifier(
-            MSG_INVALID_ARG,
-            ERR_INVALID_ARG,
+        _ => Err(pause_error_with_message(
+            PAUSE_ERROR_INVALID_ARG.message,
+            &PAUSE_ERROR_INVALID_ARG,
         )),
     }
 }
@@ -319,15 +410,15 @@ fn parse_numeric(value: f64) -> Result<PauseArgument, RuntimeError> {
         if value.is_sign_positive() {
             return Ok(PauseArgument::Wait(PauseWait::Default));
         }
-        return Err(pause_error_with_identifier(
-            MSG_INVALID_ARG,
-            ERR_INVALID_ARG,
+        return Err(pause_error_with_message(
+            PAUSE_ERROR_INVALID_ARG.message,
+            &PAUSE_ERROR_INVALID_ARG,
         ));
     }
     if value < 0.0 {
-        return Err(pause_error_with_identifier(
-            MSG_INVALID_ARG,
-            ERR_INVALID_ARG,
+        return Err(pause_error_with_message(
+            PAUSE_ERROR_INVALID_ARG.message,
+            &PAUSE_ERROR_INVALID_ARG,
         ));
     }
     Ok(PauseArgument::Wait(PauseWait::Seconds(value)))
@@ -338,9 +429,9 @@ fn parse_tensor(tensor: Tensor) -> Result<PauseArgument, RuntimeError> {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
     if tensor.data.len() != 1 {
-        return Err(pause_error_with_identifier(
-            MSG_INVALID_ARG,
-            ERR_INVALID_ARG,
+        return Err(pause_error_with_message(
+            PAUSE_ERROR_INVALID_ARG.message,
+            &PAUSE_ERROR_INVALID_ARG,
         ));
     }
     parse_numeric(tensor.data[0])
@@ -351,9 +442,9 @@ fn parse_logical(logical: LogicalArray) -> Result<PauseArgument, RuntimeError> {
         return Ok(PauseArgument::Wait(PauseWait::Default));
     }
     if logical.data.len() != 1 {
-        return Err(pause_error_with_identifier(
-            MSG_INVALID_ARG,
-            ERR_INVALID_ARG,
+        return Err(pause_error_with_message(
+            PAUSE_ERROR_INVALID_ARG.message,
+            &PAUSE_ERROR_INVALID_ARG,
         ));
     }
     let scalar = if logical.data[0] != 0 { 1.0 } else { 0.0 };
@@ -373,13 +464,13 @@ fn pause_enabled() -> Result<bool, RuntimeError> {
     PAUSE_STATE
         .read()
         .map(|guard| guard.enabled)
-        .map_err(|_| pause_error(MSG_STATE_LOCK))
+        .map_err(|_| pause_error_with_message(MSG_STATE_LOCK, &PAUSE_ERROR_STATE_LOCK))
 }
 
 fn set_pause_enabled(next: bool) -> Result<bool, RuntimeError> {
     let mut guard = PAUSE_STATE
         .write()
-        .map_err(|_| pause_error(MSG_STATE_LOCK))?;
+        .map_err(|_| pause_error_with_message(MSG_STATE_LOCK, &PAUSE_ERROR_STATE_LOCK))?;
     let previous = guard.enabled;
     guard.enabled = next;
     Ok(previous)
@@ -501,7 +592,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         reset_state(true);
         let err = block_on(pause_builtin(vec![Value::Num(-0.1)])).unwrap_err();
-        assert_pause_error_identifier(err, ERR_INVALID_ARG);
+        assert_pause_error_identifier(err, PAUSE_ERROR_INVALID_ARG.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -511,7 +602,7 @@ pub(crate) mod tests {
         reset_state(true);
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = block_on(pause_builtin(vec![Value::Tensor(tensor)])).unwrap_err();
-        assert_pause_error_identifier(err, ERR_INVALID_ARG);
+        assert_pause_error_identifier(err, PAUSE_ERROR_INVALID_ARG.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -606,6 +697,15 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_state(true);
         let err = block_on(pause_builtin(vec![Value::from("invalid")])).unwrap_err();
-        assert_pause_error_identifier(err, ERR_INVALID_ARG);
+        assert_pause_error_identifier(err, PAUSE_ERROR_INVALID_ARG.identifier.unwrap());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn too_many_inputs_raises_error() {
+        let _guard = TEST_GUARD.lock().unwrap();
+        reset_state(true);
+        let err = block_on(pause_builtin(vec![Value::Num(0.0), Value::Num(0.0)])).unwrap_err();
+        assert_pause_error_identifier(err, PAUSE_ERROR_TOO_MANY_INPUTS.identifier.unwrap());
     }
 }

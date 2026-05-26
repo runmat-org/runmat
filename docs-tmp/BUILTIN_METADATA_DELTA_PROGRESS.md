@@ -15,9 +15,10 @@
 | Wave 10 (Logical Relations) | `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `isequal` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::logical::rel::`; `cargo test -p runmat-lsp signature_help_uses_logical_rel_descriptors` | Attached descriptors + LSP signature help + descriptor row as single source-of-truth for stable runtime identifier/message mappings |
 | Wave 11 (Logical Bitwise) | `and`, `or`, `xor`, `not` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::logical::bit::` | Attached descriptors for unary/binary logical bit ops + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 | Wave 12 (Logical Conversion) | `logical` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::logical::ops::` | Attached descriptor for logical conversion + stable runtime identifiers/messages mapped through descriptor rows + LSP signature-help coverage |
+| Wave 13 (Timing) | `pause`, `tic`, `toc`, `timeit` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::timing::` | Attached descriptors for timing builtins + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `66`
-- Remaining: `502`
+- Migrated with attached descriptor: `70`
+- Remaining: `498`

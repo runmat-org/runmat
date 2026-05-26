@@ -6,7 +6,10 @@
 use runmat_time::Instant;
 use std::cmp::Ordering;
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -22,10 +25,143 @@ const MIN_SAMPLE_COUNT: usize = 7;
 const MAX_SAMPLE_COUNT: usize = 21;
 const BUILTIN_NAME: &str = "timeit";
 
-fn timeit_error(message: impl Into<String>) -> crate::RuntimeError {
-    crate::build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const TIMEIT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "t",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Median execution time per invocation in seconds.",
+}];
+
+const TIMEIT_INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "f",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Zero-input function handle to benchmark.",
+}];
+
+const TIMEIT_INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "f",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-input function handle to benchmark.",
+    },
+    BuiltinParamDescriptor {
+        name: "numOutputs",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "Requested output count for invoking the benchmarked handle.",
+    },
+];
+
+const TIMEIT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "t = timeit(f)",
+        inputs: &TIMEIT_INPUTS_ONE,
+        outputs: &TIMEIT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = timeit(f, numOutputs)",
+        inputs: &TIMEIT_INPUTS_TWO,
+        outputs: &TIMEIT_OUTPUT,
+    },
+];
+
+const TIMEIT_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:timeit:TooManyInputs"),
+    when: "More than two input arguments are supplied.",
+    message: "timeit: too many input arguments",
+};
+
+const TIMEIT_ERROR_NUM_OUTPUTS_SCALAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.NUM_OUTPUTS_SCALAR",
+    identifier: Some("RunMat:timeit:NumOutputsScalar"),
+    when: "numOutputs is not a scalar numeric/integer value.",
+    message: "timeit: numOutputs must be a scalar numeric value",
+};
+
+const TIMEIT_ERROR_NUM_OUTPUTS_FINITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.NUM_OUTPUTS_FINITE",
+    identifier: Some("RunMat:timeit:NumOutputsFinite"),
+    when: "numOutputs is NaN or infinite.",
+    message: "timeit: numOutputs must be finite",
+};
+
+const TIMEIT_ERROR_NUM_OUTPUTS_NONNEG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.NUM_OUTPUTS_NONNEGATIVE",
+    identifier: Some("RunMat:timeit:NumOutputsNonnegative"),
+    when: "numOutputs is negative.",
+    message: "timeit: numOutputs must be a nonnegative integer",
+};
+
+const TIMEIT_ERROR_NUM_OUTPUTS_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.NUM_OUTPUTS_INTEGER",
+    identifier: Some("RunMat:timeit:NumOutputsInteger"),
+    when: "numOutputs has a non-integer numeric value.",
+    message: "timeit: numOutputs must be an integer value",
+};
+
+const TIMEIT_ERROR_EMPTY_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.EMPTY_HANDLE",
+    identifier: Some("RunMat:timeit:EmptyFunctionHandle"),
+    when: "A function-handle string or payload is empty after trimming.",
+    message: "timeit: empty function handle string",
+};
+
+const TIMEIT_ERROR_EXPECTS_AT_HANDLE_STRING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.EXPECTS_AT_HANDLE_STRING",
+    identifier: Some("RunMat:timeit:ExpectedAtHandleString"),
+    when: "A string/char function handle does not begin with '@'.",
+    message: "timeit: expected a function handle string beginning with '@'",
+};
+
+const TIMEIT_ERROR_HANDLE_KIND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.HANDLE_KIND",
+    identifier: Some("RunMat:timeit:HandleKind"),
+    when: "Function handle argument is not a scalar string/char or callable handle value.",
+    message: "timeit: function handle must be a string scalar or function handle",
+};
+
+const TIMEIT_ERROR_FIRST_ARG_KIND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMEIT.FIRST_ARG_KIND",
+    identifier: Some("RunMat:timeit:FirstArgKind"),
+    when: "First argument is not a function handle value.",
+    message: "timeit: first argument must be a function handle",
+};
+
+const TIMEIT_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    TIMEIT_ERROR_TOO_MANY_INPUTS,
+    TIMEIT_ERROR_NUM_OUTPUTS_SCALAR,
+    TIMEIT_ERROR_NUM_OUTPUTS_FINITE,
+    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
+    TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
+    TIMEIT_ERROR_EMPTY_HANDLE,
+    TIMEIT_ERROR_EXPECTS_AT_HANDLE_STRING,
+    TIMEIT_ERROR_HANDLE_KIND,
+    TIMEIT_ERROR_FIRST_ARG_KIND,
+];
+
+pub const TIMEIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMEIT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TIMEIT_ERRORS,
+};
+
+fn timeit_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = crate::build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::timeit")]
@@ -62,6 +198,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "timeit,benchmark,timing,performance,gpu",
     accel = "helper",
     type_resolver(timeit_type),
+    descriptor(crate::builtins::timing::timeit::TIMEIT_DESCRIPTOR),
     builtin_path = "crate::builtins::timing::timeit"
 )]
 async fn timeit_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -84,7 +221,10 @@ fn parse_num_outputs(rest: &[Value]) -> Result<Option<usize>, crate::RuntimeErro
     match rest.len() {
         0 => Ok(None),
         1 => parse_non_negative_integer(&rest[0]).map(Some),
-        _ => Err(timeit_error("timeit: too many input arguments")),
+        _ => Err(timeit_error_with_message(
+            TIMEIT_ERROR_TOO_MANY_INPUTS.message,
+            &TIMEIT_ERROR_TOO_MANY_INPUTS,
+        )),
     }
 }
 
@@ -93,8 +233,9 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
         Value::Int(iv) => {
             let raw = iv.to_i64();
             if raw < 0 {
-                Err(timeit_error(
-                    "timeit: numOutputs must be a nonnegative integer",
+                Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
                 ))
             } else {
                 Ok(raw as usize)
@@ -102,21 +243,29 @@ fn parse_non_negative_integer(value: &Value) -> Result<usize, crate::RuntimeErro
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(timeit_error("timeit: numOutputs must be finite"));
+                return Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_FINITE.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_FINITE,
+                ));
             }
             if *n < 0.0 {
-                return Err(timeit_error(
-                    "timeit: numOutputs must be a nonnegative integer",
+                return Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_NONNEG,
                 ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(timeit_error("timeit: numOutputs must be an integer value"));
+                return Err(timeit_error_with_message(
+                    TIMEIT_ERROR_NUM_OUTPUTS_INTEGER.message,
+                    &TIMEIT_ERROR_NUM_OUTPUTS_INTEGER,
+                ));
             }
             Ok(rounded as usize)
         }
-        _ => Err(timeit_error(
-            "timeit: numOutputs must be a scalar numeric value",
+        _ => Err(timeit_error_with_message(
+            TIMEIT_ERROR_NUM_OUTPUTS_SCALAR.message,
+            &TIMEIT_ERROR_NUM_OUTPUTS_SCALAR,
         )),
     }
 }
@@ -214,7 +363,10 @@ fn prepare_callable(
     fn normalize_name(name: &str) -> Result<String, crate::RuntimeError> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
-            Err(timeit_error("timeit: empty function handle string"))
+            Err(timeit_error_with_message(
+                TIMEIT_ERROR_EMPTY_HANDLE.message,
+                &TIMEIT_ERROR_EMPTY_HANDLE,
+            ))
         } else {
             Ok(trimmed.to_string())
         }
@@ -232,8 +384,9 @@ fn prepare_callable(
         }),
         Value::CharArray(arr) => {
             if arr.rows != 1 {
-                Err(timeit_error(
-                    "timeit: function handle must be a string scalar or function handle",
+                Err(timeit_error_with_message(
+                    TIMEIT_ERROR_HANDLE_KIND.message,
+                    &TIMEIT_ERROR_HANDLE_KIND,
                 ))
             } else {
                 let text: String = arr.data.iter().collect();
@@ -250,8 +403,9 @@ fn prepare_callable(
                     num_outputs,
                 })
             } else {
-                Err(timeit_error(
-                    "timeit: function handle must be a string scalar or function handle",
+                Err(timeit_error_with_message(
+                    TIMEIT_ERROR_HANDLE_KIND.message,
+                    &TIMEIT_ERROR_HANDLE_KIND,
                 ))
             }
         }
@@ -298,9 +452,10 @@ fn prepare_callable(
             },
             num_outputs,
         }),
-        other => Err(timeit_error(format!(
-            "timeit: first argument must be a function handle, got {other:?}"
-        ))),
+        other => Err(timeit_error_with_message(
+            format!("timeit: first argument must be a function handle, got {other:?}"),
+            &TIMEIT_ERROR_FIRST_ARG_KIND,
+        )),
     }
 }
 
@@ -316,13 +471,17 @@ fn parse_handle_string(text: &str) -> Result<String, crate::RuntimeError> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix('@') {
         if rest.trim().is_empty() {
-            Err(timeit_error("timeit: empty function handle string"))
+            Err(timeit_error_with_message(
+                TIMEIT_ERROR_EMPTY_HANDLE.message,
+                &TIMEIT_ERROR_EMPTY_HANDLE,
+            ))
         } else {
             Ok(format!("@{}", rest.trim()))
         }
     } else {
-        Err(timeit_error(
-            "timeit: expected a function handle string beginning with '@'",
+        Err(timeit_error_with_message(
+            TIMEIT_ERROR_EXPECTS_AT_HANDLE_STRING.message,
+            &TIMEIT_ERROR_EXPECTS_AT_HANDLE_STRING,
         ))
     }
 }
@@ -384,13 +543,17 @@ pub(crate) mod tests {
         Value::String("@__timeit_helper_counter_default".to_string())
     }
 
-    fn assert_timeit_error_contains(err: crate::RuntimeError, needle: &str) {
+    fn assert_timeit_error_contains(err: &crate::RuntimeError, needle: &str) {
         let message = err.message().to_ascii_lowercase();
         assert!(
             message.contains(&needle.to_ascii_lowercase()),
             "unexpected error text: {}",
             err.message()
         );
+    }
+
+    fn assert_timeit_error_identifier(err: &crate::RuntimeError, identifier: &'static str) {
+        assert_eq!(err.identifier(), Some(identifier), "{}", err.message());
     }
 
     fn outputs_handle() -> Value {
@@ -423,14 +586,16 @@ pub(crate) mod tests {
     fn timeit_rejects_empty_function_handle_name_value() {
         let err = prepare_callable(Value::FunctionHandle("   ".to_string()), None)
             .expect_err("timeit should reject empty function-handle payload name");
-        assert_timeit_error_contains(err, "empty function handle");
+        assert_timeit_error_contains(&err, "empty function handle");
+        assert_timeit_error_identifier(&err, TIMEIT_ERROR_EMPTY_HANDLE.identifier.unwrap());
     }
 
     #[test]
     fn timeit_rejects_empty_external_function_handle_name_value() {
         let err = prepare_callable(Value::ExternalFunctionHandle("   ".to_string()), None)
             .expect_err("timeit should reject empty external function-handle payload name");
-        assert_timeit_error_contains(err, "empty function handle");
+        assert_timeit_error_contains(&err, "empty function handle");
+        assert_timeit_error_identifier(&err, TIMEIT_ERROR_EMPTY_HANDLE.identifier.unwrap());
     }
 
     #[test]
@@ -683,7 +848,8 @@ pub(crate) mod tests {
     #[test]
     fn timeit_rejects_non_function_input() {
         let err = block_on(timeit_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
-        assert_timeit_error_contains(err, "function");
+        assert_timeit_error_contains(&err, "function");
+        assert_timeit_error_identifier(&err, TIMEIT_ERROR_FIRST_ARG_KIND.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -691,7 +857,8 @@ pub(crate) mod tests {
     fn timeit_rejects_invalid_num_outputs() {
         COUNTER_INVALID.store(0, Ordering::SeqCst);
         let err = block_on(timeit_builtin(invalid_handle(), vec![Value::Num(-1.0)])).unwrap_err();
-        assert_timeit_error_contains(err, "nonnegative");
+        assert_timeit_error_contains(&err, "nonnegative");
+        assert_timeit_error_identifier(&err, TIMEIT_ERROR_NUM_OUTPUTS_NONNEG.identifier.unwrap());
         assert_eq!(COUNTER_INVALID.load(Ordering::SeqCst), 0);
     }
 
@@ -703,6 +870,7 @@ pub(crate) mod tests {
             vec![Value::from(1.0), Value::from(2.0)],
         ))
         .unwrap_err();
-        assert_timeit_error_contains(err, "too many");
+        assert_timeit_error_contains(&err, "too many");
+        assert_timeit_error_identifier(&err, TIMEIT_ERROR_TOO_MANY_INPUTS.identifier.unwrap());
     }
 }
