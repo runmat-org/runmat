@@ -10,10 +10,15 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{CellArray, ComplexTensor, ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, ComplexTensor, ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const UD_DIM: [usize; 1] = [1];
+const BUILTIN_NAME: &str = "flipud";
 
 fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -80,7 +85,78 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn flipud_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("flipud").build()
+    flipud_error_with_message(message, &FLIPUD_ERROR_INVALID_INPUT)
+}
+
+fn flipud_error_descriptor(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    flipud_error_with_message(error.message, error)
+}
+
+const FLIPUD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array mirrored up-to-down (dimension 1).",
+}];
+
+const FLIPUD_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array/value to reverse along rows.",
+}];
+
+const FLIPUD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = flipud(A)",
+    inputs: &FLIPUD_INPUTS,
+    outputs: &FLIPUD_OUTPUT,
+}];
+
+const FLIPUD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FLIPUD.INVALID_INPUT",
+    identifier: Some("RunMat:flipud:InvalidInput"),
+    when: "Input type or conversion path is invalid for flipud.",
+    message: "flipud: invalid input argument",
+};
+
+const FLIPUD_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FLIPUD.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:flipud:UnsupportedInput"),
+    when: "Input type is unsupported for flipud.",
+    message: "flipud: unsupported input type",
+};
+
+const FLIPUD_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [FLIPUD_ERROR_INVALID_INPUT, FLIPUD_ERROR_UNSUPPORTED_INPUT];
+
+pub const FLIPUD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FLIPUD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FLIPUD_ERRORS,
+};
+
+fn flipud_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_flipud_error(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message().to_string())
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = FLIPUD_ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -90,49 +166,59 @@ fn flipud_error(message: impl Into<String>) -> RuntimeError {
     keywords = "flipud,flip,vertical,matrix,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),
+    descriptor(crate::builtins::array::shape::flipud::FLIPUD_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::flipud"
 )]
 async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => {
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
-        }
-        Value::LogicalArray(array) => {
-            Ok(flip_logical_array_with("flipud", array, &UD_DIM).map(Value::LogicalArray)?)
-        }
-        Value::ComplexTensor(ct) => {
-            Ok(flip_complex_tensor_with("flipud", ct, &UD_DIM).map(Value::ComplexTensor)?)
-        }
+        Value::Tensor(tensor) => Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
+            .map(tensor::tensor_into_value)
+            .map_err(remap_flipud_error)?),
+        Value::LogicalArray(array) => Ok(flip_logical_array_with("flipud", array, &UD_DIM)
+            .map(Value::LogicalArray)
+            .map_err(remap_flipud_error)?),
+        Value::ComplexTensor(ct) => Ok(flip_complex_tensor_with("flipud", ct, &UD_DIM)
+            .map(Value::ComplexTensor)
+            .map_err(remap_flipud_error)?),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| flipud_error(format!("flipud: {e}")))?;
             Ok(flip_complex_tensor_with("flipud", tensor, &UD_DIM)
-                .map(complex_tensor_into_value)?)
+                .map(complex_tensor_into_value)
+                .map_err(remap_flipud_error)?)
         }
-        Value::StringArray(strings) => {
-            Ok(flip_string_array_with("flipud", strings, &UD_DIM).map(Value::StringArray)?)
-        }
-        Value::CharArray(chars) => {
-            Ok(flip_char_array_with("flipud", chars, &UD_DIM).map(Value::CharArray)?)
-        }
+        Value::StringArray(strings) => Ok(flip_string_array_with("flipud", strings, &UD_DIM)
+            .map(Value::StringArray)
+            .map_err(remap_flipud_error)?),
+        Value::CharArray(chars) => Ok(flip_char_array_with("flipud", chars, &UD_DIM)
+            .map(Value::CharArray)
+            .map_err(remap_flipud_error)?),
         Value::String(scalar) => Ok(Value::String(scalar)),
-        Value::Cell(cell) => flip_cell_array_rows(cell),
+        Value::Cell(cell) => flip_cell_array_rows(cell).map_err(remap_flipud_error),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))
                 .map_err(|e| flipud_error(e))?;
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
+                .map(tensor::tensor_into_value)
+                .map_err(remap_flipud_error)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Int(i))
                 .map_err(|e| flipud_error(e))?;
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
+                .map(tensor::tensor_into_value)
+                .map_err(remap_flipud_error)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Bool(flag))
                 .map_err(|e| flipud_error(e))?;
-            Ok(flip_tensor_with("flipud", tensor, &UD_DIM).map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("flipud", tensor, &UD_DIM)
+                .map(tensor::tensor_into_value)
+                .map_err(remap_flipud_error)?)
         }
-        Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM).await?),
+        Value::GpuTensor(handle) => Ok(flip_gpu_with("flipud", handle, &UD_DIM)
+            .await
+            .map_err(remap_flipud_error)?),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -144,7 +230,7 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(flipud_error("flipud: unsupported input type")),
+        | Value::OutputList(_) => Err(flipud_error_descriptor(&FLIPUD_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
