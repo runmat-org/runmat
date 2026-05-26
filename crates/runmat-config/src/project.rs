@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde::de::IgnoredAny;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -54,7 +55,7 @@ pub struct ProjectEntrypoint {
     pub function: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawProjectManifest {
     package: ProjectPackage,
@@ -63,6 +64,8 @@ struct RawProjectManifest {
     dependencies: BTreeMap<String, ProjectDependency>,
     #[serde(default)]
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
+    #[serde(default, rename = "runtime")]
+    _runtime: Option<IgnoredAny>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

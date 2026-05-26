@@ -47,6 +47,28 @@ path = "src/main"
 }
 
 #[test]
+fn parses_manifest_with_runtime_section() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[sources]
+roots = ["src"]
+
+[runtime]
+timeout = 120
+verbose = true
+"#,
+    )
+    .expect("manifest with runtime section should parse");
+
+    assert_eq!(parsed.package.name, "demo");
+    assert_eq!(parsed.sources.roots, vec![std::path::PathBuf::from("src")]);
+}
+
+#[test]
 fn validation_rejects_unsatisfied_runmat_version() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
