@@ -1,7 +1,11 @@
 //! MATLAB-compatible `eye` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
@@ -52,6 +56,167 @@ fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
     tensor_type_from_rank(args, ctx)
 }
 
+const EYE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Identity matrix/tensor.",
+}];
+
+const EYE_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const EYE_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const EYE_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const EYE_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const EYE_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::LikePrototype,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value when no numeric dimension arguments are provided.",
+}];
+
+const EYE_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class name override (double|logical).",
+    },
+];
+
+const EYE_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const EYE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "A = eye()",
+        inputs: &EYE_SIG_EMPTY_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = eye(n)",
+        inputs: &EYE_SIG_N_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = eye(size_vector)",
+        inputs: &EYE_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = eye(m, n, ...)",
+        inputs: &EYE_SIG_DIMS_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = eye(prototype)",
+        inputs: &EYE_SIG_PROTOTYPE_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = eye(..., typename)",
+        inputs: &EYE_SIG_CLASS_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = eye(..., \"like\", prototype)",
+        inputs: &EYE_SIG_LIKE_INPUTS,
+        outputs: &EYE_OUTPUT,
+    },
+];
+
+const EYE_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    BuiltinErrorDescriptor {
+        code: "RM.EYE.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "eye: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EYE.CLASS_CONFLICT",
+        identifier: None,
+        when: "A class keyword and a 'like' prototype are both provided.",
+        message: "eye: cannot combine 'like' with other class specifiers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EYE.UNSUPPORTED_SINGLE",
+        identifier: None,
+        when: "The 'single' class option is requested.",
+        message: "eye: single precision output is not implemented yet",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EYE.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not a supported class keyword.",
+        message: "eye: unrecognised option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EYE.INVALID_DIMS",
+        identifier: None,
+        when: "Dimension arguments fail numeric/shape parsing.",
+        message: "eye: dimension arguments must be numeric and nonnegative",
+    },
+];
+
+pub const EYE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EYE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EYE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "eye",
     category = "array/creation",
@@ -59,6 +224,7 @@ fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "eye,identity,matrix,gpu,like,logical",
     accel = "array_construct",
     type_resolver(eye_type),
+    descriptor(crate::builtins::array::creation::eye::EYE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::eye"
 )]
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

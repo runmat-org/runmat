@@ -3,7 +3,11 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -62,6 +66,187 @@ fn range_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+const RANGE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Range result (max-min).",
+}];
+
+const RANGE_SIG_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input data.",
+}];
+
+const RANGE_SIG_DIM_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Reduction dimension.",
+    },
+];
+
+const RANGE_SIG_VECDIM_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data.",
+    },
+    BuiltinParamDescriptor {
+        name: "vecdim",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Vector of reduction dimensions.",
+    },
+];
+
+const RANGE_SIG_ALL_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data.",
+    },
+    BuiltinParamDescriptor {
+        name: "all_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"all\""),
+        description: "Reduce over all elements.",
+    },
+];
+
+const RANGE_SIG_NANFLAG_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling flag ('omitnan'|'includenan').",
+    },
+];
+
+const RANGE_SIG_DIM_NANFLAG_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim_or_vecdim",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Dimension selector.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling flag ('omitnan'|'includenan').",
+    },
+];
+
+const RANGE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "y = range(X)",
+        inputs: &RANGE_SIG_INPUT,
+        outputs: &RANGE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = range(X, dim)",
+        inputs: &RANGE_SIG_DIM_INPUTS,
+        outputs: &RANGE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = range(X, vecdim)",
+        inputs: &RANGE_SIG_VECDIM_INPUTS,
+        outputs: &RANGE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = range(X, \"all\")",
+        inputs: &RANGE_SIG_ALL_INPUTS,
+        outputs: &RANGE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = range(X, nanflag)",
+        inputs: &RANGE_SIG_NANFLAG_INPUTS,
+        outputs: &RANGE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = range(X, dim_or_vecdim, nanflag)",
+        inputs: &RANGE_SIG_DIM_NANFLAG_INPUTS,
+        outputs: &RANGE_OUTPUT,
+    },
+];
+
+const RANGE_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    BuiltinErrorDescriptor {
+        code: "RM.RANGE.ALL_WITH_DIM",
+        identifier: None,
+        when: "'all' is combined with an explicit dimension.",
+        message: "range: 'all' cannot be combined with an explicit dimension",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANGE.TOO_MANY_DIMS",
+        identifier: None,
+        when: "More than one explicit dimension selector is provided.",
+        message: "range: too many dimension arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANGE.INVALID_DIM",
+        identifier: None,
+        when: "Dimension arguments are non-integer, non-finite, or < 1.",
+        message: "range: dimension must be >= 1",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANGE.DIM_ON_GPU",
+        identifier: None,
+        when: "Dimension selector is GPU-resident.",
+        message: "range: dimension arguments must reside on the host (numeric or string)",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANGE.INVALID_DIM_TYPE",
+        identifier: None,
+        when: "Dimension selector has unsupported value type or shape.",
+        message: "range: unsupported dimension argument type",
+    },
+];
+
+pub const RANGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RANGE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RANGE_ERRORS,
+};
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::range")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "range",
@@ -80,6 +265,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "range,max,min,spread,gpu",
     accel = "reduction",
     type_resolver(range_type),
+    descriptor(crate::builtins::array::creation::range::RANGE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::range"
 )]
 async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

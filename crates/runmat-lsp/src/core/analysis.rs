@@ -1808,6 +1808,69 @@ mod tests {
     }
 
     #[test]
+    fn hover_uses_descriptor_signature_header_when_available() {
+        let text = "zeros(2);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let hover = hover_at(text, &analysis, &position).expect("expected hover");
+        let value = match hover.contents {
+            lsp_types::HoverContents::Markup(markup) => markup.value,
+            other => panic!("unexpected hover contents {other:?}"),
+        };
+        assert!(
+            value.contains("A = zeros(n)"),
+            "expected descriptor signature in hover header, got:\n{value}"
+        );
+    }
+
+    #[test]
+    fn signature_help_uses_builtin_descriptor_signatures() {
+        let text = "linspace(0, 1);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+        let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+        assert!(
+            labels.contains(&"x = linspace(start, stop)")
+                && labels.contains(&"x = linspace(start, stop, n)"),
+            "expected descriptor-backed linspace signatures, got {:?}",
+            labels
+        );
+    }
+
+    #[test]
+    fn signature_help_uses_range_descriptor_signatures() {
+        let text = "range([1 2 3]);";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+        let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+        assert!(
+            labels.contains(&"y = range(X)")
+                && labels.contains(&"y = range(X, dim_or_vecdim, nanflag)"),
+            "expected descriptor-backed range signatures, got {:?}",
+            labels
+        );
+    }
+
+    #[test]
+    fn completion_detail_prefers_descriptor_signature_label() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+        let zeros = completions
+            .iter()
+            .find(|item| item.label.eq_ignore_ascii_case("zeros"))
+            .expect("zeros completion item");
+        let detail = zeros.detail.clone().unwrap_or_default();
+        assert!(
+            detail.contains("zeros("),
+            "expected descriptor signature detail for zeros completion, got {detail}"
+        );
+    }
+
+    #[test]
     fn hover_includes_inferred_tensor_shape() {
         let text = "x = 0:1:100; y = sin(x);";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
