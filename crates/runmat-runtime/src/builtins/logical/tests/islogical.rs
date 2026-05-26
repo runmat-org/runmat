@@ -1,7 +1,11 @@
 //! MATLAB-compatible `islogical` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -42,6 +46,42 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "islogical";
 const IDENTIFIER_INTERNAL: &str = "RunMat:islogical:InternalError";
 
+const ISLOGICAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input uses logical storage.",
+}];
+
+const ISLOGICAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test.",
+}];
+
+const ISLOGICAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = islogical(A)",
+    inputs: &ISLOGICAL_INPUTS,
+    outputs: &ISLOGICAL_OUTPUT,
+}];
+
+const ISLOGICAL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+    code: "RM.ISLOGICAL.INTERNAL",
+    identifier: Some(IDENTIFIER_INTERNAL),
+    when: "Internal gather/dispatch path fails.",
+    message: "islogical: internal error",
+}];
+
+pub const ISLOGICAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISLOGICAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISLOGICAL_ERRORS,
+};
+
 #[runtime_builtin(
     name = "islogical",
     category = "logical/tests",
@@ -49,6 +89,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:islogical:InternalError";
     keywords = "islogical,logical,bool,gpu",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::logical::tests::islogical::ISLOGICAL_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::islogical"
 )]
 async fn islogical_builtin(value: Value) -> BuiltinResult<Value> {

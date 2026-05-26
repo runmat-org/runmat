@@ -1,6 +1,10 @@
 //! MATLAB-compatible `isgpuarray` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -36,6 +40,37 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata query that executes outside of fusion pipelines.",
 };
 
+const ISGPUARRAY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input is a gpuArray handle.",
+}];
+
+const ISGPUARRAY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test.",
+}];
+
+const ISGPUARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isgpuarray(A)",
+    inputs: &ISGPUARRAY_INPUTS,
+    outputs: &ISGPUARRAY_OUTPUT,
+}];
+
+const ISGPUARRAY_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const ISGPUARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISGPUARRAY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISGPUARRAY_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isgpuarray",
     category = "logical/tests",
@@ -43,6 +78,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isgpuarray,gpuarray,gpu,type,logical",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::logical::tests::isgpuarray::ISGPUARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isgpuarray"
 )]
 async fn isgpuarray_builtin(value: Value) -> BuiltinResult<Value> {

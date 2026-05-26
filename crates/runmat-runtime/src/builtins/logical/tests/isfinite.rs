@@ -1,6 +1,10 @@
 //! MATLAB-compatible `isfinite` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -57,6 +61,50 @@ const BUILTIN_NAME: &str = "isfinite";
 const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isfinite:InvalidInput";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
 
+const ISFINITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical mask for finite elements.",
+}];
+
+const ISFINITE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test for finiteness.",
+}];
+
+const ISFINITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isfinite(A)",
+    inputs: &ISFINITE_INPUTS,
+    outputs: &ISFINITE_OUTPUT,
+}];
+
+const ISFINITE_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    BuiltinErrorDescriptor {
+        code: "RM.ISFINITE.INVALID_INPUT",
+        identifier: Some(IDENTIFIER_INVALID_INPUT),
+        when: "Input is not numeric, logical, char, or string.",
+        message: "isfinite: expected numeric, logical, char, or string input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ISFINITE.INTERNAL",
+        identifier: Some(IDENTIFIER_INTERNAL),
+        when: "Internal mask-construction or gather path fails.",
+        message: "isfinite: internal error",
+    },
+];
+
+pub const ISFINITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISFINITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISFINITE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isfinite",
     category = "logical/tests",
@@ -64,6 +112,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
     keywords = "isfinite,finite,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_unary_type),
+    descriptor(crate::builtins::logical::tests::isfinite::ISFINITE_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
 async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {

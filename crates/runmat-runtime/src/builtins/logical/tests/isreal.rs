@@ -4,7 +4,11 @@
 //! component. Unlike `isfinite`/`isnan`, it returns a single logical scalar.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -44,6 +48,42 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "isreal";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
 
+const ISREAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input uses real storage without imaginary components.",
+}];
+
+const ISREAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test.",
+}];
+
+const ISREAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isreal(A)",
+    inputs: &ISREAL_INPUTS,
+    outputs: &ISREAL_OUTPUT,
+}];
+
+const ISREAL_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+    code: "RM.ISREAL.INTERNAL",
+    identifier: Some(IDENTIFIER_INTERNAL),
+    when: "Internal gather/dispatch path fails.",
+    message: "isreal: internal error",
+}];
+
+pub const ISREAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISREAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISREAL_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isreal",
     category = "logical/tests",
@@ -51,6 +91,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isreal:InternalError";
     keywords = "isreal,real,complex,gpu,logical",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::logical::tests::isreal::ISREAL_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isreal"
 )]
 async fn isreal_builtin(value: Value) -> BuiltinResult<Value> {

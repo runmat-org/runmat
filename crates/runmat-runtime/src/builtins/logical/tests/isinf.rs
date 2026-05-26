@@ -1,6 +1,10 @@
 //! MATLAB-compatible `isinf` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -57,6 +61,50 @@ const BUILTIN_NAME: &str = "isinf";
 const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isinf:InvalidInput";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isinf:InternalError";
 
+const ISINF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical mask for infinite elements.",
+}];
+
+const ISINF_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test for infinities.",
+}];
+
+const ISINF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isinf(A)",
+    inputs: &ISINF_INPUTS,
+    outputs: &ISINF_OUTPUT,
+}];
+
+const ISINF_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    BuiltinErrorDescriptor {
+        code: "RM.ISINF.INVALID_INPUT",
+        identifier: Some(IDENTIFIER_INVALID_INPUT),
+        when: "Input is not numeric, logical, char, or string.",
+        message: "isinf: expected numeric, logical, char, or string input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ISINF.INTERNAL",
+        identifier: Some(IDENTIFIER_INTERNAL),
+        when: "Internal mask-construction or gather path fails.",
+        message: "isinf: internal error",
+    },
+];
+
+pub const ISINF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISINF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISINF_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isinf",
     category = "logical/tests",
@@ -64,6 +112,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isinf:InternalError";
     keywords = "isinf,infinity,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_unary_type),
+    descriptor(crate::builtins::logical::tests::isinf::ISINF_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isinf"
 )]
 async fn isinf_builtin(value: Value) -> BuiltinResult<Value> {

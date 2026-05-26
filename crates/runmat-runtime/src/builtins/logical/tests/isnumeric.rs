@@ -1,7 +1,11 @@
 //! MATLAB-compatible `isnumeric` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -42,6 +46,42 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "isnumeric";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isnumeric:InternalError";
 
+const ISNUMERIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input uses numeric storage.",
+}];
+
+const ISNUMERIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test.",
+}];
+
+const ISNUMERIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isnumeric(A)",
+    inputs: &ISNUMERIC_INPUTS,
+    outputs: &ISNUMERIC_OUTPUT,
+}];
+
+const ISNUMERIC_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+    code: "RM.ISNUMERIC.INTERNAL",
+    identifier: Some(IDENTIFIER_INTERNAL),
+    when: "Internal gather/dispatch path fails.",
+    message: "isnumeric: internal error",
+}];
+
+pub const ISNUMERIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISNUMERIC_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISNUMERIC_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isnumeric",
     category = "logical/tests",
@@ -49,6 +89,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isnumeric:InternalError";
     keywords = "isnumeric,numeric,type,gpu",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::logical::tests::isnumeric::ISNUMERIC_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isnumeric"
 )]
 async fn isnumeric_builtin(value: Value) -> BuiltinResult<Value> {

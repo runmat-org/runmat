@@ -1,6 +1,10 @@
 //! MATLAB-compatible `isnan` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -59,6 +63,50 @@ const BUILTIN_NAME: &str = "isnan";
 const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isnan:InvalidInput";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
 
+const ISNAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical mask for NaN elements.",
+}];
+
+const ISNAN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test for NaNs.",
+}];
+
+const ISNAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isnan(A)",
+    inputs: &ISNAN_INPUTS,
+    outputs: &ISNAN_OUTPUT,
+}];
+
+const ISNAN_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    BuiltinErrorDescriptor {
+        code: "RM.ISNAN.INVALID_INPUT",
+        identifier: Some(IDENTIFIER_INVALID_INPUT),
+        when: "Input is not numeric, logical, char, or string.",
+        message: "isnan: expected numeric, logical, char, or string input",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ISNAN.INTERNAL",
+        identifier: Some(IDENTIFIER_INTERNAL),
+        when: "Internal mask-construction or gather path fails.",
+        message: "isnan: internal error",
+    },
+];
+
+pub const ISNAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISNAN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISNAN_ERRORS,
+};
+
 #[runtime_builtin(
     name = "isnan",
     category = "logical/tests",
@@ -66,6 +114,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
     keywords = "isnan,nan,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_unary_type),
+    descriptor(crate::builtins::logical::tests::isnan::ISNAN_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isnan"
 )]
 async fn isnan_builtin(value: Value) -> BuiltinResult<Value> {

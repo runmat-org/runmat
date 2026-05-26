@@ -11,9 +11,10 @@
 | Wave 6 (Array Introspection) | `isempty`, `ismatrix`, `isscalar`, `isvector`, `length`, `ndims`, `numel`, `size` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `isempty_`, `ismatrix_`, `isscalar_`, `isvector_`, `length_`, `ndims_`, `numel_`, `builtins::array::introspection::size::tests::` | Attached descriptors + stable error maps + LSP signature-help coverage for introspection family |
 | Wave 7 (Introspection Core) | `class`, `isa`, `ischar`, `isstring`, `clear`, `clearvars` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `builtins::introspection::class::tests::`, `builtins::introspection::isa::tests::`, `builtins::introspection::ischar::tests::`, `builtins::introspection::isstring::tests::`, `builtins::introspection::clear::tests::`, `builtins::introspection::clearvars::tests::` | Attached descriptors + option/error parser coverage + LSP signature-help coverage |
 | Wave 8 (Introspection Query) | `which`, `who`, `whos` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-lsp`; targeted runtime filters `builtins::introspection::which::tests::`, `builtins::introspection::who::tests::`, `builtins::introspection::whos::tests::` | Attached descriptors for option/name/filter forms + parser error codes + LSP signature-help coverage |
+| Wave 9 (Logical Predicates) | `isfinite`, `isinf`, `isnan`, `islogical`, `isnumeric`, `isreal`, `isgpuarray` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filter `builtins::logical::tests::` | Attached descriptors for logical predicate family + stable runtime-error mappings + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `47`
-- Remaining: `521`
+- Migrated with attached descriptor: `54`
+- Remaining: `514`
