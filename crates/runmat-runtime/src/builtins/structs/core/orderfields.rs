@@ -7,7 +7,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::structs::type_resolvers::orderfields_type;
 
-use runmat_builtins::{CellArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -41,32 +45,264 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Reordering fields is a metadata operation and does not participate in fusion planning.",
 };
 
-const MESSAGE_ID_TOO_MANY_INPUTS: &str = "orderfields:TooManyInputs";
-const MESSAGE_ID_INVALID_INPUT: &str = "orderfields:InvalidInput";
-const MESSAGE_ID_EMPTY_STRUCT_ARRAY: &str = "orderfields:EmptyStructArray";
-const MESSAGE_ID_NO_FIELDS: &str = "orderfields:NoFields";
-const MESSAGE_ID_INVALID_STRUCT_ARRAY: &str = "orderfields:InvalidStructArray";
-const MESSAGE_ID_INVALID_STRUCT_CONTENTS: &str = "orderfields:InvalidStructContents";
-const MESSAGE_ID_REBUILD_FAILED: &str = "orderfields:RebuildFailed";
-const MESSAGE_ID_INVALID_REFERENCE: &str = "orderfields:InvalidReference";
-const MESSAGE_ID_INVALID_NAME_LIST: &str = "orderfields:InvalidFieldNameList";
-const MESSAGE_ID_EMPTY_FIELD_NAME: &str = "orderfields:EmptyFieldName";
-const MESSAGE_ID_INVALID_PERMUTATION: &str = "orderfields:InvalidPermutation";
-const MESSAGE_ID_INDEX_NOT_INTEGER: &str = "orderfields:IndexNotInteger";
-const MESSAGE_ID_INDEX_OUT_OF_RANGE: &str = "orderfields:IndexOutOfRange";
-const MESSAGE_ID_INDEX_DUPLICATE: &str = "orderfields:DuplicateIndex";
-const MESSAGE_ID_FIELD_MISMATCH: &str = "orderfields:FieldMismatch";
-const MESSAGE_ID_UNKNOWN_FIELD: &str = "orderfields:UnknownField";
-const MESSAGE_ID_DUPLICATE_FIELD: &str = "orderfields:DuplicateField";
-const MESSAGE_ID_MISSING_FIELD: &str = "orderfields:MissingField";
-const MESSAGE_ID_INVALID_ORDER_ARGUMENT: &str = "orderfields:InvalidOrderArgument";
-const MESSAGE_ID_INTERNAL: &str = "orderfields:InternalError";
+const BUILTIN_NAME: &str = "orderfields";
 
-fn orderfields_flow(message_id: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("orderfields")
-        .with_identifier(message_id)
-        .build()
+const ORDERFIELDS_OUTPUT_ORDERED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct or struct array with reordered fields.",
+}];
+
+const ORDERFIELDS_OUTPUT_PERM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct or struct array with reordered fields.",
+    },
+    BuiltinParamDescriptor {
+        name: "P",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Permutation vector mapping ordered fields to original positions.",
+    },
+];
+
+const ORDERFIELDS_INPUTS_ONE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input struct or struct array.",
+}];
+
+const ORDERFIELDS_INPUTS_TWO: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct or struct array.",
+    },
+    BuiltinParamDescriptor {
+        name: "order",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Reference struct, field-name list, or permutation vector.",
+    },
+];
+
+const ORDERFIELDS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "S = orderfields(S)",
+        inputs: &ORDERFIELDS_INPUTS_ONE,
+        outputs: &ORDERFIELDS_OUTPUT_ORDERED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = orderfields(S, order)",
+        inputs: &ORDERFIELDS_INPUTS_TWO,
+        outputs: &ORDERFIELDS_OUTPUT_ORDERED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[S,P] = orderfields(S)",
+        inputs: &ORDERFIELDS_INPUTS_ONE,
+        outputs: &ORDERFIELDS_OUTPUT_PERM,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[S,P] = orderfields(S, order)",
+        inputs: &ORDERFIELDS_INPUTS_TWO,
+        outputs: &ORDERFIELDS_OUTPUT_PERM,
+    },
+];
+
+const ORDERFIELDS_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.TOO_MANY_INPUTS",
+    identifier: Some("orderfields:TooManyInputs"),
+    when: "More than two input arguments are supplied.",
+    message: "orderfields: expected at most two input arguments",
+};
+
+const ORDERFIELDS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_INPUT",
+    identifier: Some("orderfields:InvalidInput"),
+    when: "First argument is not a struct or struct array.",
+    message: "orderfields: first argument must be a struct or struct array",
+};
+
+const ORDERFIELDS_ERROR_EMPTY_STRUCT_ARRAY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.EMPTY_STRUCT_ARRAY",
+    identifier: Some("orderfields:EmptyStructArray"),
+    when: "Empty struct array is asked to adopt a non-empty reference order.",
+    message: "orderfields: empty struct arrays cannot adopt a non-empty reference order",
+};
+
+const ORDERFIELDS_ERROR_NO_FIELDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.NO_FIELDS",
+    identifier: Some("orderfields:NoFields"),
+    when: "Ordering is requested for a struct array with no fields.",
+    message: "orderfields: struct array has no fields to reorder",
+};
+
+const ORDERFIELDS_ERROR_INVALID_STRUCT_ARRAY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_STRUCT_ARRAY",
+    identifier: Some("orderfields:InvalidStructArray"),
+    when: "A struct-array element is not a struct.",
+    message: "orderfields: struct array element is not a struct",
+};
+
+const ORDERFIELDS_ERROR_INVALID_STRUCT_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_STRUCT_CONTENTS",
+    identifier: Some("orderfields:InvalidStructContents"),
+    when: "Struct-array contents are not all structs.",
+    message: "orderfields: expected struct array contents to be structs",
+};
+
+const ORDERFIELDS_ERROR_REBUILD_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.REBUILD_FAILED",
+    identifier: Some("orderfields:RebuildFailed"),
+    when: "Rebuilding reordered struct array failed.",
+    message: "orderfields: failed to rebuild struct array",
+};
+
+const ORDERFIELDS_ERROR_INVALID_REFERENCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_REFERENCE",
+    identifier: Some("orderfields:InvalidReference"),
+    when: "Reference struct-array contains non-struct values.",
+    message: "orderfields: reference struct array element is not a struct",
+};
+
+const ORDERFIELDS_ERROR_INVALID_NAME_LIST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_NAME_LIST",
+    identifier: Some("orderfields:InvalidFieldNameList"),
+    when: "Name-list entries are not scalar strings or character vectors.",
+    message: "orderfields: cell array elements must be a string or character vector",
+};
+
+const ORDERFIELDS_ERROR_EMPTY_FIELD_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.EMPTY_FIELD_NAME",
+    identifier: Some("orderfields:EmptyFieldName"),
+    when: "Requested field-name list contains an empty name.",
+    message: "orderfields: field names must be nonempty",
+};
+
+const ORDERFIELDS_ERROR_INVALID_PERMUTATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_PERMUTATION",
+    identifier: Some("orderfields:InvalidPermutation"),
+    when: "Permutation vector does not include each field exactly once.",
+    message: "orderfields: index vector must permute every field exactly once",
+};
+
+const ORDERFIELDS_ERROR_INDEX_NOT_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INDEX_NOT_INTEGER",
+    identifier: Some("orderfields:IndexNotInteger"),
+    when: "Permutation vector contains non-integer entries.",
+    message: "orderfields: index vector must contain integers",
+};
+
+const ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INDEX_OUT_OF_RANGE",
+    identifier: Some("orderfields:IndexOutOfRange"),
+    when: "Permutation vector index is outside valid field range.",
+    message: "orderfields: index vector element out of range",
+};
+
+const ORDERFIELDS_ERROR_INDEX_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INDEX_DUPLICATE",
+    identifier: Some("orderfields:DuplicateIndex"),
+    when: "Permutation vector contains duplicate positions.",
+    message: "orderfields: index vector contains duplicate positions",
+};
+
+const ORDERFIELDS_ERROR_FIELD_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.FIELD_MISMATCH",
+    identifier: Some("orderfields:FieldMismatch"),
+    when: "Requested field set does not exactly match struct fields.",
+    message: "orderfields: field names must match the struct exactly",
+};
+
+const ORDERFIELDS_ERROR_UNKNOWN_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.UNKNOWN_FIELD",
+    identifier: Some("orderfields:UnknownField"),
+    when: "Requested order references an unknown field.",
+    message: "orderfields: unknown field in requested order",
+};
+
+const ORDERFIELDS_ERROR_DUPLICATE_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.DUPLICATE_FIELD",
+    identifier: Some("orderfields:DuplicateField"),
+    when: "Requested field order includes duplicate names.",
+    message: "orderfields: duplicate field in requested order",
+};
+
+const ORDERFIELDS_ERROR_MISSING_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.MISSING_FIELD",
+    identifier: Some("orderfields:MissingField"),
+    when: "A field from the requested order is missing on the struct.",
+    message: "orderfields: field does not exist on the struct",
+};
+
+const ORDERFIELDS_ERROR_INVALID_ORDER_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INVALID_ORDER_ARGUMENT",
+    identifier: Some("orderfields:InvalidOrderArgument"),
+    when: "Second argument is not a supported order descriptor.",
+    message: "orderfields: unrecognised ordering argument",
+};
+
+const ORDERFIELDS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ORDERFIELDS.INTERNAL",
+    identifier: Some("orderfields:InternalError"),
+    when: "Internal permutation tensor construction failed.",
+    message: "orderfields: internal error",
+};
+
+const ORDERFIELDS_ERRORS: [BuiltinErrorDescriptor; 20] = [
+    ORDERFIELDS_ERROR_TOO_MANY_INPUTS,
+    ORDERFIELDS_ERROR_INVALID_INPUT,
+    ORDERFIELDS_ERROR_EMPTY_STRUCT_ARRAY,
+    ORDERFIELDS_ERROR_NO_FIELDS,
+    ORDERFIELDS_ERROR_INVALID_STRUCT_ARRAY,
+    ORDERFIELDS_ERROR_INVALID_STRUCT_CONTENTS,
+    ORDERFIELDS_ERROR_REBUILD_FAILED,
+    ORDERFIELDS_ERROR_INVALID_REFERENCE,
+    ORDERFIELDS_ERROR_INVALID_NAME_LIST,
+    ORDERFIELDS_ERROR_EMPTY_FIELD_NAME,
+    ORDERFIELDS_ERROR_INVALID_PERMUTATION,
+    ORDERFIELDS_ERROR_INDEX_NOT_INTEGER,
+    ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE,
+    ORDERFIELDS_ERROR_INDEX_DUPLICATE,
+    ORDERFIELDS_ERROR_FIELD_MISMATCH,
+    ORDERFIELDS_ERROR_UNKNOWN_FIELD,
+    ORDERFIELDS_ERROR_DUPLICATE_FIELD,
+    ORDERFIELDS_ERROR_MISSING_FIELD,
+    ORDERFIELDS_ERROR_INVALID_ORDER_ARGUMENT,
+    ORDERFIELDS_ERROR_INTERNAL,
+];
+
+pub const ORDERFIELDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ORDERFIELDS_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ORDERFIELDS_ERRORS,
+};
+
+fn orderfields_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    orderfields_error_with_message(error.message, error)
+}
+
+fn orderfields_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -75,6 +311,7 @@ fn orderfields_flow(message_id: &str, message: impl Into<String>) -> RuntimeErro
     summary = "Reorder structure field definitions alphabetically or using a supplied order.",
     keywords = "orderfields,struct,reorder fields,alphabetical,struct array",
     type_resolver(orderfields_type),
+    descriptor(crate::builtins::structs::core::orderfields::ORDERFIELDS_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::orderfields"
 )]
 async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -98,10 +335,7 @@ async fn orderfields_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Va
 /// Evaluate the `orderfields` builtin once and expose both outputs.
 pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<OrderFieldsEvaluation> {
     if rest.len() > 1 {
-        return Err(orderfields_flow(
-            MESSAGE_ID_TOO_MANY_INPUTS,
-            "orderfields: expected at most two input arguments",
-        ));
+        return Err(orderfields_error(&ORDERFIELDS_ERROR_TOO_MANY_INPUTS));
     }
     let order_arg = rest.first();
 
@@ -125,34 +359,22 @@ pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<OrderFieldsEvalua
                         if reference.fields.is_empty() {
                             return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
                         } else {
-                            return Err(orderfields_flow(
-                                MESSAGE_ID_EMPTY_STRUCT_ARRAY,
-                                "orderfields: empty struct arrays cannot adopt a non-empty reference order",
-                            ));
+                            return Err(orderfields_error(&ORDERFIELDS_ERROR_EMPTY_STRUCT_ARRAY));
                         }
                     }
                     if let Some(names) = extract_name_list(arg)? {
                         if names.is_empty() {
                             return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
                         }
-                        return Err(orderfields_flow(
-                            MESSAGE_ID_NO_FIELDS,
-                            "orderfields: struct array has no fields to reorder",
-                        ));
+                        return Err(orderfields_error(&ORDERFIELDS_ERROR_NO_FIELDS));
                     }
                     if let Value::Tensor(tensor) = arg {
                         if tensor.data.is_empty() {
                             return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
                         }
-                        return Err(orderfields_flow(
-                            MESSAGE_ID_NO_FIELDS,
-                            "orderfields: struct array has no fields to reorder",
-                        ));
+                        return Err(orderfields_error(&ORDERFIELDS_ERROR_NO_FIELDS));
                     }
-                    return Err(orderfields_flow(
-                        MESSAGE_ID_NO_FIELDS,
-                        "orderfields: struct array has no fields to reorder",
-                    ));
+                    return Err(orderfields_error(&ORDERFIELDS_ERROR_NO_FIELDS));
                 }
                 return Ok(OrderFieldsEvaluation::new(Value::Cell(cell), permutation));
             }
@@ -167,9 +389,12 @@ pub fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<OrderFieldsEvalua
                 permutation,
             ))
         }
-        other => Err(orderfields_flow(
-            MESSAGE_ID_INVALID_INPUT,
-            format!("orderfields: first argument must be a struct or struct array (got {other:?})"),
+        other => Err(orderfields_error_with_message(
+            format!(
+                "{} (got {other:?})",
+                ORDERFIELDS_ERROR_INVALID_INPUT.message
+            ),
+            &ORDERFIELDS_ERROR_INVALID_INPUT,
         )),
     }
 }
@@ -206,12 +431,13 @@ fn reorder_struct_array(array: &CellArray, order: &[String]) -> BuiltinResult<Ce
     for (index, handle) in array.data.iter().enumerate() {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(st) = value else {
-            return Err(orderfields_flow(
-                MESSAGE_ID_INVALID_STRUCT_ARRAY,
+            return Err(orderfields_error_with_message(
                 format!(
-                    "orderfields: struct array element {} is not a struct",
+                    "{} (element {} is not a struct)",
+                    ORDERFIELDS_ERROR_INVALID_STRUCT_ARRAY.message,
                     index + 1
                 ),
+                &ORDERFIELDS_ERROR_INVALID_STRUCT_ARRAY,
             ));
         };
         ensure_same_field_set(order, st)?;
@@ -219,9 +445,9 @@ fn reorder_struct_array(array: &CellArray, order: &[String]) -> BuiltinResult<Ce
         reordered_elems.push(Value::Struct(reordered));
     }
     CellArray::new_with_shape(reordered_elems, array.shape.clone()).map_err(|e| {
-        orderfields_flow(
-            MESSAGE_ID_REBUILD_FAILED,
-            format!("orderfields: failed to rebuild struct array: {e}"),
+        orderfields_error_with_message(
+            format!("{}: {e}", ORDERFIELDS_ERROR_REBUILD_FAILED.message),
+            &ORDERFIELDS_ERROR_REBUILD_FAILED,
         )
     })
 }
@@ -260,10 +486,7 @@ fn resolve_order(
             return Ok(permutation);
         }
 
-        return Err(orderfields_flow(
-            MESSAGE_ID_INVALID_ORDER_ARGUMENT,
-            "orderfields: unrecognised ordering argument",
-        ));
+        return Err(orderfields_error(&ORDERFIELDS_ERROR_INVALID_ORDER_ARGUMENT));
     }
 
     sort_field_names(&mut current);
@@ -288,8 +511,12 @@ fn permutation_from(original: &[String], order: &[String]) -> BuiltinResult<Vec<
 fn permutation_tensor(indices: Vec<f64>) -> BuiltinResult<Tensor> {
     let rows = indices.len();
     let shape = vec![rows, 1];
-    Tensor::new(indices, shape)
-        .map_err(|e| orderfields_flow(MESSAGE_ID_INTERNAL, format!("orderfields: {e}")))
+    Tensor::new(indices, shape).map_err(|e| {
+        orderfields_error_with_message(
+            format!("{}: {e}", ORDERFIELDS_ERROR_INTERNAL.message),
+            &ORDERFIELDS_ERROR_INTERNAL,
+        )
+    })
 }
 
 fn sort_field_names(names: &mut [String]) {
@@ -315,12 +542,13 @@ fn extract_reference_struct(value: &Value) -> BuiltinResult<Option<StructValue>>
                         first = Some(st.clone());
                     }
                 } else if first.is_some() {
-                    return Err(orderfields_flow(
-                        MESSAGE_ID_INVALID_REFERENCE,
+                    return Err(orderfields_error_with_message(
                         format!(
-                            "orderfields: reference struct array element {} is not a struct",
+                            "{} (element {} is not a struct)",
+                            ORDERFIELDS_ERROR_INVALID_REFERENCE.message,
                             index + 1
                         ),
+                        &ORDERFIELDS_ERROR_INVALID_REFERENCE,
                     ));
                 } else {
                     return Ok(None);
@@ -339,19 +567,17 @@ fn extract_name_list(arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
             for (index, handle) in cell.data.iter().enumerate() {
                 let value = unsafe { &*handle.as_raw() };
                 let text = scalar_string(value).ok_or_else(|| {
-                    orderfields_flow(
-                        MESSAGE_ID_INVALID_NAME_LIST,
+                    orderfields_error_with_message(
                         format!(
-                            "orderfields: cell array element {} must be a string or character vector",
+                            "{} (cell array element {})",
+                            ORDERFIELDS_ERROR_INVALID_NAME_LIST.message,
                             index + 1
                         ),
+                        &ORDERFIELDS_ERROR_INVALID_NAME_LIST,
                     )
                 })?;
                 if text.is_empty() {
-                    return Err(orderfields_flow(
-                        MESSAGE_ID_EMPTY_FIELD_NAME,
-                        "orderfields: field names must be nonempty",
-                    ));
+                    return Err(orderfields_error(&ORDERFIELDS_ERROR_EMPTY_FIELD_NAME));
                 }
                 names.push(text);
             }
@@ -371,10 +597,7 @@ fn extract_name_list(arg: &Value) -> BuiltinResult<Option<Vec<String>>> {
                     text.pop();
                 }
                 if text.is_empty() {
-                    return Err(orderfields_flow(
-                        MESSAGE_ID_EMPTY_FIELD_NAME,
-                        "orderfields: field names must be nonempty",
-                    ));
+                    return Err(orderfields_error(&ORDERFIELDS_ERROR_EMPTY_FIELD_NAME));
                 }
                 names.push(text);
             }
@@ -392,33 +615,21 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
         return Ok(Some(Vec::new()));
     }
     if tensor.data.len() != current.len() {
-        return Err(orderfields_flow(
-            MESSAGE_ID_INVALID_PERMUTATION,
-            "orderfields: index vector must permute every field exactly once",
-        ));
+        return Err(orderfields_error(&ORDERFIELDS_ERROR_INVALID_PERMUTATION));
     }
     let mut seen = HashSet::with_capacity(current.len());
     let mut order = Vec::with_capacity(current.len());
     for value in &tensor.data {
         if !value.is_finite() || value.fract() != 0.0 {
-            return Err(orderfields_flow(
-                MESSAGE_ID_INDEX_NOT_INTEGER,
-                "orderfields: index vector must contain integers",
-            ));
+            return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_NOT_INTEGER));
         }
         let idx = *value as isize;
         if idx < 1 || idx as usize > current.len() {
-            return Err(orderfields_flow(
-                MESSAGE_ID_INDEX_OUT_OF_RANGE,
-                "orderfields: index vector element out of range",
-            ));
+            return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_OUT_OF_RANGE));
         }
         let zero_based = (idx as usize) - 1;
         if !seen.insert(zero_based) {
-            return Err(orderfields_flow(
-                MESSAGE_ID_INDEX_DUPLICATE,
-                "orderfields: index vector contains duplicate positions",
-            ));
+            return Err(orderfields_error(&ORDERFIELDS_ERROR_INDEX_DUPLICATE));
         }
         order.push(current[zero_based].clone());
     }
@@ -427,24 +638,27 @@ fn extract_indices(current: &[String], arg: &Value) -> BuiltinResult<Option<Vec<
 
 fn ensure_same_field_set(order: &[String], original: &StructValue) -> BuiltinResult<()> {
     if order.len() != original.fields.len() {
-        return Err(orderfields_flow(
-            MESSAGE_ID_FIELD_MISMATCH,
-            "orderfields: field names must match the struct exactly",
-        ));
+        return Err(orderfields_error(&ORDERFIELDS_ERROR_FIELD_MISMATCH));
     }
     let mut seen = HashSet::with_capacity(order.len());
     let original_set: HashSet<&str> = original.field_names().map(|s| s.as_str()).collect();
     for name in order {
         if !original_set.contains(name.as_str()) {
-            return Err(orderfields_flow(
-                MESSAGE_ID_UNKNOWN_FIELD,
-                format!("orderfields: unknown field '{name}' in requested order"),
+            return Err(orderfields_error_with_message(
+                format!(
+                    "{} ('{name}' in requested order)",
+                    ORDERFIELDS_ERROR_UNKNOWN_FIELD.message
+                ),
+                &ORDERFIELDS_ERROR_UNKNOWN_FIELD,
             ));
         }
         if !seen.insert(name.as_str()) {
-            return Err(orderfields_flow(
-                MESSAGE_ID_DUPLICATE_FIELD,
-                format!("orderfields: duplicate field '{name}' in requested order"),
+            return Err(orderfields_error_with_message(
+                format!(
+                    "{} ('{name}' in requested order)",
+                    ORDERFIELDS_ERROR_DUPLICATE_FIELD.message
+                ),
+                &ORDERFIELDS_ERROR_DUPLICATE_FIELD,
             ));
         }
     }
@@ -455,9 +669,12 @@ fn extract_struct_from_cell(cell: &CellArray, index: usize) -> BuiltinResult<Str
     let value = unsafe { &*cell.data[index].as_raw() };
     match value {
         Value::Struct(st) => Ok(st.clone()),
-        other => Err(orderfields_flow(
-            MESSAGE_ID_INVALID_STRUCT_CONTENTS,
-            format!("orderfields: expected struct array contents to be structs (found {other:?})"),
+        other => Err(orderfields_error_with_message(
+            format!(
+                "{} (found {other:?})",
+                ORDERFIELDS_ERROR_INVALID_STRUCT_CONTENTS.message
+            ),
+            &ORDERFIELDS_ERROR_INVALID_STRUCT_CONTENTS,
         )),
     }
 }
@@ -478,9 +695,9 @@ fn scalar_string(value: &Value) -> Option<String> {
 }
 
 fn missing_field(name: &str) -> RuntimeError {
-    orderfields_flow(
-        MESSAGE_ID_MISSING_FIELD,
-        format!("orderfields: field '{name}' does not exist on the struct"),
+    orderfields_error_with_message(
+        format!("{} ('{name}')", ORDERFIELDS_ERROR_MISSING_FIELD.message),
+        &ORDERFIELDS_ERROR_MISSING_FIELD,
     )
 }
 
@@ -650,7 +867,7 @@ pub(crate) mod tests {
 
         let permutation = Tensor::new(vec![1.0, 1.5], vec![1, 2]).expect("tensor");
         let err = run_orderfields(Value::Struct(st), vec![Value::Tensor(permutation)]).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INDEX_NOT_INTEGER);
+        assert_error_identifier(err, ORDERFIELDS_ERROR_INDEX_NOT_INTEGER.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -747,7 +964,7 @@ pub(crate) mod tests {
             )],
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_UNKNOWN_FIELD);
+        assert_error_identifier(err, ORDERFIELDS_ERROR_UNKNOWN_FIELD.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -760,7 +977,7 @@ pub(crate) mod tests {
         let names =
             CellArray::new(vec![Value::from("alpha"), Value::from("alpha")], 1, 2).expect("cell");
         let err = run_orderfields(Value::Struct(st), vec![Value::Cell(names)]).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_DUPLICATE_FIELD);
+        assert_error_identifier(err, ORDERFIELDS_ERROR_DUPLICATE_FIELD.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -775,7 +992,7 @@ pub(crate) mod tests {
 
         let err =
             run_orderfields(Value::Struct(source), vec![Value::Struct(reference)]).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_FIELD_MISMATCH);
+        assert_error_identifier(err, ORDERFIELDS_ERROR_FIELD_MISMATCH.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -785,7 +1002,10 @@ pub(crate) mod tests {
         st.fields.insert("x".to_string(), Value::Num(1.0));
 
         let err = run_orderfields(Value::Struct(st), vec![Value::Num(1.0)]).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_ORDER_ARGUMENT);
+        assert_error_identifier(
+            err,
+            ORDERFIELDS_ERROR_INVALID_ORDER_ARGUMENT.identifier.unwrap(),
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -798,6 +1018,9 @@ pub(crate) mod tests {
             .insert("field".to_string(), Value::Num(1.0));
 
         let err = run_orderfields(Value::Cell(empty), vec![Value::Struct(reference)]).unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_EMPTY_STRUCT_ARRAY);
+        assert_error_identifier(
+            err,
+            ORDERFIELDS_ERROR_EMPTY_STRUCT_ARRAY.identifier.unwrap(),
+        );
     }
 }

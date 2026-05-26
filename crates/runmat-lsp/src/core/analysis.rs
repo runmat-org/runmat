@@ -2073,6 +2073,7 @@ mod tests {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),
             ("isfield(struct('a', 1), 'a');", "tf = isfield(S, name)"),
+            ("orderfields(struct('a', 1));", "S = orderfields(S)"),
             ("struct('a', 1);", "S = struct(field, value, ...)"),
             ("rmfield(struct('a', 1), 'a');", "S = rmfield(S, field)"),
         ];
