@@ -2073,6 +2073,7 @@ mod tests {
         let cases = [
             ("subplot(1, 2, 1);", "ax = subplot(rows, cols, position)"),
             ("view(45, 30);", "angles = view(az, el)"),
+            ("legend('off');", "h = legend(mode)"),
         ];
 
         for (text, expected_label) in cases {
