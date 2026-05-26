@@ -29,11 +29,6 @@ use crate::{
     build_runtime_error, dispatcher::gather_if_needed_async, make_cell, BuiltinResult, RuntimeError,
 };
 
-const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
-const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
-const ERROR_NAME_ARG: &str = "which: name must be a character vector or string scalar";
-const ERROR_OPTION_ARG: &str = "which: option must be a character vector or string scalar";
-
 const WHICH_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
     ty: BuiltinParamType::StringScalar,
@@ -115,43 +110,55 @@ const WHICH_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     },
 ];
 
+const WHICH_ERROR_ARG_COUNT_MIN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHICH.ARG_COUNT_MIN",
+    identifier: None,
+    when: "No input arguments are provided.",
+    message: "which: not enough input arguments",
+};
+
+const WHICH_ERROR_ARG_COUNT_MAX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHICH.ARG_COUNT_MAX",
+    identifier: None,
+    when: "More than one name argument is provided.",
+    message: "which: too many input arguments",
+};
+
+const WHICH_ERROR_NAME_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHICH.NAME_ARG_TYPE",
+    identifier: None,
+    when: "Name argument is not a char row or string scalar.",
+    message: "which: name must be a character vector or string scalar",
+};
+
+const WHICH_ERROR_OPTION_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHICH.OPTION_ARG_TYPE",
+    identifier: None,
+    when: "Option argument is not a char row or string scalar.",
+    message: "which: option must be a character vector or string scalar",
+};
+
+const WHICH_ERROR_OPTION_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHICH.OPTION_CONFLICT",
+    identifier: None,
+    when: "Conflicting mode options are combined.",
+    message: "which: conflicting option",
+};
+
+const WHICH_ERROR_OPTION_UNRECOGNIZED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WHICH.OPTION_UNRECOGNIZED",
+    identifier: None,
+    when: "An unrecognized mode option is provided.",
+    message: "which: unrecognized option",
+};
+
 const WHICH_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    BuiltinErrorDescriptor {
-        code: "RM.WHICH.ARG_COUNT_MIN",
-        identifier: None,
-        when: "No input arguments are provided.",
-        message: "which: not enough input arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHICH.ARG_COUNT_MAX",
-        identifier: None,
-        when: "More than one name argument is provided.",
-        message: "which: too many input arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHICH.NAME_ARG_TYPE",
-        identifier: None,
-        when: "Name argument is not a char row or string scalar.",
-        message: "which: name must be a character vector or string scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHICH.OPTION_ARG_TYPE",
-        identifier: None,
-        when: "Option argument is not a char row or string scalar.",
-        message: "which: option must be a character vector or string scalar",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHICH.OPTION_CONFLICT",
-        identifier: None,
-        when: "Conflicting mode options are combined.",
-        message: "which: conflicting option",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.WHICH.OPTION_UNRECOGNIZED",
-        identifier: None,
-        when: "An unrecognized mode option is provided.",
-        message: "which: unrecognized option",
-    },
+    WHICH_ERROR_ARG_COUNT_MIN,
+    WHICH_ERROR_ARG_COUNT_MAX,
+    WHICH_ERROR_NAME_ARG_TYPE,
+    WHICH_ERROR_OPTION_ARG_TYPE,
+    WHICH_ERROR_OPTION_CONFLICT,
+    WHICH_ERROR_OPTION_UNRECOGNIZED,
 ];
 
 pub const WHICH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -178,7 +185,29 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Lookup runs on the host. Arguments are gathered from the GPU before evaluating the search.",
 };
 
-fn which_error(message: impl Into<String>) -> RuntimeError {
+fn which_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    which_error_with_message(error.message, error)
+}
+
+fn which_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("which");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn which_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    which_error_with_message(format!("{} {detail}", error.message), error)
+}
+
+fn which_runtime_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("which").build()
 }
 
@@ -194,7 +223,7 @@ fn which_flow(err: RuntimeError) -> RuntimeError {
 }
 
 fn which_path<T>(result: Result<T, String>) -> BuiltinResult<T> {
-    result.map_err(which_error)
+    result.map_err(which_runtime_error)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::introspection::which")]
@@ -220,7 +249,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(which_error(ERROR_NOT_ENOUGH_ARGS));
+        return Err(which_error(&WHICH_ERROR_ARG_COUNT_MIN));
     }
 
     let mut name: Option<String> = None;
@@ -230,9 +259,9 @@ async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         let gathered = gather_if_needed_async(&arg).await.map_err(which_flow)?;
         let text = value_to_string_scalar(&gathered).ok_or_else(|| {
             if name.is_none() {
-                which_error(ERROR_NAME_ARG)
+                which_error(&WHICH_ERROR_NAME_ARG_TYPE)
             } else {
-                which_error(ERROR_OPTION_ARG)
+                which_error(&WHICH_ERROR_OPTION_ARG_TYPE)
             }
         })?;
 
@@ -241,11 +270,11 @@ async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         } else if name.is_none() {
             name = Some(text);
         } else {
-            return Err(which_error(ERROR_TOO_MANY_ARGS));
+            return Err(which_error(&WHICH_ERROR_ARG_COUNT_MAX));
         }
     }
 
-    let name = name.ok_or_else(|| which_error(ERROR_NOT_ENOUGH_ARGS))?;
+    let name = name.ok_or_else(|| which_error(&WHICH_ERROR_ARG_COUNT_MIN))?;
     let matches = search_matches(&name, &options).await?;
     if matches.is_empty() {
         return Ok(Value::CharArray(CharArray::new_row(&format!(
@@ -296,10 +325,10 @@ impl WhichOptions {
                     conflicts.push("-file");
                 }
                 if !conflicts.is_empty() {
-                    return Err(which_error(format!(
-                        "which: {}",
-                        conflict_message("-builtin", &conflicts)
-                    )));
+                    return Err(which_error_with_detail(
+                        &WHICH_ERROR_OPTION_CONFLICT,
+                        conflict_message("-builtin", &conflicts),
+                    ));
                 }
                 self.builtin_only = true;
                 Ok(())
@@ -313,10 +342,10 @@ impl WhichOptions {
                     conflicts.push("-file");
                 }
                 if !conflicts.is_empty() {
-                    return Err(which_error(format!(
-                        "which: {}",
-                        conflict_message("-var", &conflicts)
-                    )));
+                    return Err(which_error_with_detail(
+                        &WHICH_ERROR_OPTION_CONFLICT,
+                        conflict_message("-var", &conflicts),
+                    ));
                 }
                 self.var_only = true;
                 Ok(())
@@ -330,15 +359,18 @@ impl WhichOptions {
                     conflicts.push("-var");
                 }
                 if !conflicts.is_empty() {
-                    return Err(which_error(format!(
-                        "which: {}",
-                        conflict_message("-file", &conflicts)
-                    )));
+                    return Err(which_error_with_detail(
+                        &WHICH_ERROR_OPTION_CONFLICT,
+                        conflict_message("-file", &conflicts),
+                    ));
                 }
                 self.file_only = true;
                 Ok(())
             }
-            other => Err(which_error(format!("which: unrecognized option '{other}'"))),
+            other => Err(which_error_with_detail(
+                &WHICH_ERROR_OPTION_UNRECOGNIZED,
+                format!("'{other}'"),
+            )),
         }
     }
 }
@@ -355,7 +387,7 @@ fn conflict_message(option: &str, conflicts: &[&str]) -> String {
             text
         }
     };
-    format!("conflicting option '{option}'; cannot combine with {joined}")
+    format!("'{option}'; cannot combine with {joined}")
 }
 
 async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<String>> {
@@ -733,7 +765,7 @@ pub(crate) mod tests {
         let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![]).unwrap_err();
         let message = error_message(err);
-        assert_eq!(message, ERROR_NOT_ENOUGH_ARGS);
+        assert_eq!(message, WHICH_ERROR_ARG_COUNT_MIN.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -742,7 +774,7 @@ pub(crate) mod tests {
         let (_guard, _lock) = test_guard();
         let err = which_builtin(vec![Value::Num(4.0)]).unwrap_err();
         let message = error_message(err);
-        assert_eq!(message, ERROR_NAME_ARG);
+        assert_eq!(message, WHICH_ERROR_NAME_ARG_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -756,7 +788,7 @@ pub(crate) mod tests {
         ])
         .unwrap_err();
         let message = error_message(err);
-        assert_eq!(message, ERROR_TOO_MANY_ARGS);
+        assert_eq!(message, WHICH_ERROR_ARG_COUNT_MAX.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

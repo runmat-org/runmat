@@ -265,8 +265,14 @@ Disallowed source:
    - Do not repeat the stable branch message prefix in callsites (avoid literal `"foo: ..."` throw strings once descriptor rows exist).
 9. Post-migration hygiene check for each touched builtin file:
    - no `const IDENT_*` or `const *_ERROR: &str` for stable identifier/message rows
+   - no standalone `const ERROR_*: &str = "foo: ..."` branch-message constants that duplicate `BuiltinErrorDescriptor.message`
    - no direct `build_runtime_error("...stable branch message...")` in migrated runtime paths
    - all stable branches throw through descriptor-row helpers
+   - if an error row exists, any contextual variant must use `foo_error_with_detail(&FOO_ERROR_..., detail)` so the prefix text still comes from the descriptor row
+10. Repo-level audit command for migrated builtins (must be clean before commit):
+   - `for f in $(rg -l "BuiltinErrorDescriptor" crates/runmat-runtime/src/builtins); do`
+   - `  rg -n 'const\\s+(IDENT|ERROR)_[A-Z0-9_]+:\\s*&str\\s*=\\s*"' "$f" && echo "^^ remove duplicated stable strings in $f";`
+   - `done`
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 
