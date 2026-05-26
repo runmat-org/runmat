@@ -18,7 +18,6 @@ use crate::builtins::diagnostics::type_resolvers::error_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "error";
-const DEFAULT_IDENTIFIER: &str = "RunMat:error";
 
 const ERROR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -145,42 +144,42 @@ const ERROR_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
 
 const ERROR_ERROR_MISSING_MESSAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ERROR.MISSING_MESSAGE",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:error"),
     when: "No arguments are supplied.",
     message: "error: missing message argument",
 };
 
 const ERROR_ERROR_EXTRA_ARGS_MEXCEPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ERROR.MEXCEPTION_EXTRA_ARGS",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:error"),
     when: "Additional arguments are supplied after an MException input.",
     message: "error: additional arguments are not allowed when passing an MException",
 };
 
 const ERROR_ERROR_EXTRA_ARGS_STRUCT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ERROR.STRUCT_EXTRA_ARGS",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:error"),
     when: "Additional arguments are supplied after a message-struct input.",
     message: "error: additional arguments are not allowed when passing a message struct",
 };
 
 const ERROR_ERROR_STRUCT_MISSING_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ERROR.STRUCT_MISSING_IDENTIFIER",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:error"),
     when: "Message struct does not contain an identifier field.",
     message: "error: message struct must contain an 'identifier' field",
 };
 
 const ERROR_ERROR_STRUCT_MISSING_MESSAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ERROR.STRUCT_MISSING_MESSAGE",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:error"),
     when: "Message struct does not contain a message field.",
     message: "error: message struct must contain a 'message' field",
 };
 
 const ERROR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ERROR.INVALID_INPUT",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:error"),
     when: "Identifier/message inputs or format arguments are not string-compatible.",
     message: "error: invalid input argument",
 };
@@ -235,18 +234,25 @@ fn error_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+fn error_default_identifier() -> &'static str {
+    ERROR_ERROR_MISSING_MESSAGE
+        .identifier
+        .expect("error default identifier must be defined")
+}
+
 fn error_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    error_flow(
-        error.identifier.unwrap_or(DEFAULT_IDENTIFIER),
-        error.message,
-    )
+    error_error_with_message(error.message, error)
 }
 
 fn error_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    error_flow(error.identifier.unwrap_or(DEFAULT_IDENTIFIER), message)
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(normalize_identifier(identifier));
+    }
+    builder.build()
 }
 
 fn remap_error_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -300,10 +306,10 @@ fn handle_message_arguments(first: Value, rest: Vec<Value>) -> crate::BuiltinRes
     let first_string = value_to_string("error", &first)?;
 
     if rest.is_empty() {
-        return Err(error_flow(DEFAULT_IDENTIFIER, first_string));
+        return Err(error_flow(error_default_identifier(), first_string));
     }
 
-    let mut identifier = DEFAULT_IDENTIFIER.to_string();
+    let mut identifier = error_default_identifier().to_string();
     let mut format_string = first_string;
     let mut format_args: &[Value] = &rest;
 
@@ -355,7 +361,7 @@ fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String>
 fn normalize_identifier(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        DEFAULT_IDENTIFIER.to_string()
+        error_default_identifier().to_string()
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
@@ -396,7 +402,7 @@ pub(crate) mod tests {
     #[test]
     fn error_requires_message() {
         let err = unwrap_error(error_builtin(Vec::new()).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert!(err.message().contains("missing message"));
     }
 
@@ -405,7 +411,7 @@ pub(crate) mod tests {
     fn default_identifier_is_applied() {
         let err =
             unwrap_error(error_builtin(vec![Value::from("Failure!")]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert_eq!(err.message(), "Failure!");
     }
 
@@ -448,7 +454,7 @@ pub(crate) mod tests {
             ])
             .expect_err("should error"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert_eq!(err.message(), "Value: 7.");
     }
 
@@ -470,7 +476,7 @@ pub(crate) mod tests {
             error_builtin(vec![Value::MException(mex), Value::from(1.0)])
                 .expect_err("should error"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert!(err.message().contains("additional arguments"));
     }
 
@@ -494,7 +500,7 @@ pub(crate) mod tests {
         st.fields
             .insert("identifier".to_string(), Value::from("pkg:demo:oops"));
         let err = unwrap_error(error_builtin(vec![Value::Struct(st)]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(error_default_identifier()));
         assert!(err
             .message()
             .contains("message struct must contain a 'message' field"));

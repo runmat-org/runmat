@@ -17,8 +17,6 @@ use crate::builtins::diagnostics::type_resolvers::assert_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "assert";
-const DEFAULT_IDENTIFIER: &str = "RunMat:assertion:failed";
-const DEFAULT_MESSAGE: &str = "Assertion failed.";
 
 const ASSERT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -162,9 +160,9 @@ const ASSERT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
 
 const ASSERT_ERROR_ASSERTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ASSERT.ASSERTION_FAILED",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:assertion:failed"),
     when: "Condition evaluates to false and no custom identifier/message override is provided.",
-    message: DEFAULT_MESSAGE,
+    message: "Assertion failed.",
 };
 
 const ASSERT_ERROR_INVALID_CONDITION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -231,6 +229,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn assert_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     assert_error_with_message(error.message, error)
+}
+
+fn assert_default_identifier() -> &'static str {
+    ASSERT_ERROR_ASSERTION_FAILED
+        .identifier
+        .expect("assert default identifier must be defined")
+}
+
+fn assert_default_message() -> &'static str {
+    ASSERT_ERROR_ASSERTION_FAILED.message
 }
 
 fn assert_error_with_message(
@@ -402,8 +410,8 @@ struct FailurePayload {
 fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload> {
     if args.is_empty() {
         return Ok(FailurePayload {
-            identifier: DEFAULT_IDENTIFIER.to_string(),
-            message: DEFAULT_MESSAGE.to_string(),
+            identifier: assert_default_identifier().to_string(),
+            message: assert_default_message().to_string(),
         });
     }
 
@@ -415,7 +423,7 @@ fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload> {
             return Err(assert_flow(
                 ASSERT_ERROR_INVALID_INPUT
                     .identifier
-                    .unwrap_or(DEFAULT_IDENTIFIER),
+                    .expect("assert invalid-input identifier must be defined"),
                 "assert: message text must follow the message identifier.",
             ));
         }
@@ -432,7 +440,7 @@ fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload> {
         let formatting_args: &[Value] = if args.len() > 1 { &args[1..] } else { &[] };
         let message = format_message(&template, formatting_args)?;
         Ok(FailurePayload {
-            identifier: DEFAULT_IDENTIFIER.to_string(),
+            identifier: assert_default_identifier().to_string(),
             message,
         })
     }
@@ -455,7 +463,7 @@ fn identifier_from_value(value: &Value) -> crate::BuiltinResult<String> {
         return Err(assert_flow(
             ASSERT_ERROR_INVALID_INPUT
                 .identifier
-                .unwrap_or(DEFAULT_IDENTIFIER),
+                .expect("assert invalid-input identifier must be defined"),
             "assert: message identifier must be nonempty.",
         ));
     }
@@ -480,7 +488,7 @@ fn format_message(template: &str, args: &[Value]) -> crate::BuiltinResult<String
 fn normalize_identifier(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        DEFAULT_IDENTIFIER.to_string()
+        assert_default_identifier().to_string()
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
@@ -574,8 +582,8 @@ pub(crate) mod tests {
     fn assert_false_uses_default_message() {
         let err =
             unwrap_error(assert_builtin(vec![Value::Bool(false)]).expect_err("assert should fail"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
-        assert_eq!(err.message(), DEFAULT_MESSAGE);
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
+        assert_eq!(err.message(), assert_default_message());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -592,7 +600,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::Tensor(tensor)]).expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -601,7 +609,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::Num(f64::NAN)]).expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -616,7 +624,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::Complex(0.0, 0.0)]).expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -626,7 +634,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::ComplexTensor(tensor)]).expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -639,7 +647,7 @@ pub(crate) mod tests {
             ])
             .expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
         assert!(err.message().contains("Vector length must be positive."));
     }
 
@@ -654,7 +662,7 @@ pub(crate) mod tests {
             ])
             .expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
         assert!(err.message().contains("Expected positive value, got -4."));
     }
 
@@ -757,7 +765,7 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let err =
                 unwrap_error(assert_builtin(vec![Value::GpuTensor(handle)]).expect_err("assert"));
-            assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+            assert_eq!(err.identifier(), Some(assert_default_identifier()));
         });
     }
 
@@ -768,7 +776,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::LogicalArray(logical)]).expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -806,7 +814,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             assert_builtin(vec![Value::GpuTensor(handle)]).expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(assert_default_identifier()));
     }
 
     #[test]

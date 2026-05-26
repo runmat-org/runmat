@@ -23,7 +23,6 @@ use crate::{build_runtime_error, RuntimeError};
 use tracing;
 
 const BUILTIN_NAME: &str = "warning";
-const DEFAULT_IDENTIFIER: &str = "RunMat:warning";
 
 const WARNING_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "state_or_status",
@@ -234,14 +233,14 @@ const WARNING_SIGNATURES: [BuiltinSignatureDescriptor; 17] = [
 
 const WARNING_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.WARNING.INVALID_INPUT",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:warning"),
     when: "Arguments are invalid for the warning parser branch or command contract.",
     message: "warning: invalid input arguments",
 };
 
 const WARNING_ERROR_PROMOTED_TO_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.WARNING.PROMOTED_TO_ERROR",
-    identifier: Some(DEFAULT_IDENTIFIER),
+    identifier: Some("RunMat:warning"),
     when: "Warning mode is configured to promote warnings to errors.",
     message: "warning: promoted to error",
 };
@@ -302,6 +301,12 @@ fn warning_flow(identifier: &str, message: impl Into<String>) -> RuntimeError {
         .with_builtin(BUILTIN_NAME)
         .with_identifier(normalize_identifier(identifier))
         .build()
+}
+
+fn warning_default_identifier() -> &'static str {
+    WARNING_ERROR_INVALID_INPUT
+        .identifier
+        .expect("warning default identifier must be defined")
 }
 
 fn warning_default_error(message: impl Into<String>) -> RuntimeError {
@@ -394,13 +399,13 @@ fn handle_message_call(
     }
 
     if rest.is_empty() {
-        emit_warning(DEFAULT_IDENTIFIER, &first_string, rest)
+        emit_warning(warning_default_identifier(), &first_string, rest)
     } else if is_message_identifier(&first_string) {
         let fmt = value_to_string("warning", &rest[0])?;
         let args = &rest[1..];
         emit_warning(&first_string, &fmt, args)
     } else {
-        emit_warning(DEFAULT_IDENTIFIER, &first_string, rest)
+        emit_warning(warning_default_identifier(), &first_string, rest)
     }
 }
 
@@ -429,7 +434,7 @@ fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> crate::Built
         }
         WarningAction::AsError => {
             warning_store::push(&identifier, &message);
-            if identifier == DEFAULT_IDENTIFIER {
+            if identifier == warning_default_identifier() {
                 Err(warning_error_with_message(
                     message,
                     &WARNING_ERROR_PROMOTED_TO_ERROR,
@@ -446,13 +451,13 @@ fn print_warning(identifier: &str, message: &str) {
         with_manager(|mgr| (mgr.backtrace_enabled, mgr.verbose_enabled));
 
     emit_stderr_line(format!("Warning: {message}"));
-    if identifier != DEFAULT_IDENTIFIER {
+    if identifier != warning_default_identifier() {
         emit_stderr_line(format!("identifier: {identifier}"));
     }
 
     if verbose_enabled {
-        let suppression = if identifier == DEFAULT_IDENTIFIER {
-            DEFAULT_IDENTIFIER.to_string()
+        let suppression = if identifier == warning_default_identifier() {
+            warning_default_identifier().to_string()
         } else {
             identifier.to_string()
         };
@@ -1109,7 +1114,7 @@ fn is_message_identifier(text: &str) -> bool {
 fn normalize_identifier(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        DEFAULT_IDENTIFIER.to_string()
+        warning_default_identifier().to_string()
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
@@ -1208,7 +1213,10 @@ pub(crate) mod tests {
         let last = with_manager(|mgr| mgr.last_warning.clone());
         assert_eq!(
             last,
-            Some((DEFAULT_IDENTIFIER.to_string(), "Hello world!".to_string()))
+            Some((
+                warning_default_identifier().to_string(),
+                "Hello world!".to_string()
+            ))
         );
     }
 
@@ -1256,7 +1264,10 @@ pub(crate) mod tests {
         let last = with_manager(|mgr| mgr.last_warning.clone());
         assert_eq!(
             last,
-            Some((DEFAULT_IDENTIFIER.to_string(), "First".to_string()))
+            Some((
+                warning_default_identifier().to_string(),
+                "First".to_string()
+            ))
         );
     }
 
@@ -1270,7 +1281,7 @@ pub(crate) mod tests {
         assert_state_struct(&previous, "all", "on");
         let err =
             unwrap_error(warning_builtin(vec![Value::from("Promoted")]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(warning_default_identifier()));
         assert_eq!(err.message(), "Promoted");
     }
 
@@ -1352,7 +1363,7 @@ pub(crate) mod tests {
             warning_builtin(vec![Value::from("once"), Value::from("backtrace")])
                 .expect_err("invalid state"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(warning_default_identifier()));
         assert!(
             err.message().contains("only 'on' or 'off'"),
             "unexpected error message: {}",
@@ -1369,7 +1380,7 @@ pub(crate) mod tests {
             warning_builtin(vec![Value::from("off"), Value::from("last")])
                 .expect_err("missing last"),
         );
-        assert_eq!(err.identifier(), Some(DEFAULT_IDENTIFIER));
+        assert_eq!(err.identifier(), Some(warning_default_identifier()));
         assert!(
             err.message().contains("no last warning identifier"),
             "unexpected error: {}",
@@ -1378,8 +1389,8 @@ pub(crate) mod tests {
         warning_builtin(vec![Value::from("Hello!")]).expect("emit warning");
         let previous =
             warning_builtin(vec![Value::from("off"), Value::from("last")]).expect("disable last");
-        assert_state_struct(&previous, DEFAULT_IDENTIFIER, "on");
-        let last_mode = with_manager(|mgr| mgr.lookup_mode(DEFAULT_IDENTIFIER).mode);
+        assert_state_struct(&previous, warning_default_identifier(), "on");
+        let last_mode = with_manager(|mgr| mgr.lookup_mode(warning_default_identifier()).mode);
         assert!(matches!(last_mode, WarningMode::Off));
     }
 
