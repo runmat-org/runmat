@@ -33,9 +33,10 @@
 | Wave 28 (Strings Transform Pad) | `pad` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::pad::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for pad argument matrix (`pad(str)`, length/direction/padCharacter permutations) + descriptor-backed length/direction/pad-char/cell-element/arg-config/internal errors + LSP signature-help coverage |
 | Wave 29 (Strings Transform Split) | `split`, `strsplit` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::split::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for split/strsplit option grammars + descriptor-backed stable error maps (including requested-output strsplit mode and regex delimiter diagnostics) + LSP signature-help coverage |
 | Wave 30 (Strings Transform Between) | `extractBetween`, `eraseBetween` | Done | `30944e97` | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::extractbetween::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::erasebetween::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for between-boundary transforms + descriptor-backed stable error maps (input/boundary/position/name-value/cell/size/internal) + LSP signature-help coverage |
+| Wave 31 (GPU Acceleration Core A) | `gather`, `gpuDevice`, `gpuInfo` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gather::tests::`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gpudevice::tests::`; `cargo test -p runmat-runtime builtins::acceleration::gpu::gpuinfo::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for gather/device-info surface + descriptor-backed stable error maps for argument/output/index/reset/provider branches + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `105`
-- Remaining: `463`
+- Migrated with attached descriptor: `108`
+- Remaining: `460`
