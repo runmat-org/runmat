@@ -2143,6 +2143,29 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_array_shape_transform_descriptors() {
+        let cases = [
+            ("permute([1 2 3], [1 2]);", "B = permute(A, order)"),
+            ("ipermute([1 2 3], [1 2]);", "A = ipermute(B, order)"),
+            ("reshape([1 2 3 4], [2 2]);", "B = reshape(A, sz)"),
+            ("reshape([1 2 3 4], 2, 2);", "B = reshape(A, m, n)"),
+            ("squeeze(ones(1,3,1));", "B = squeeze(A)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
             ("assert(true);", "out = assert(condition)"),
