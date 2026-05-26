@@ -1,73 +1,61 @@
 # RunMat Configuration
 
-RunMat reads configuration from a project file named `runmat.toml` (or `runmat.json` if you prefer JSON).  
-This file defines project structure and runtime behavior.
+This document is the reference for `runmat.toml` / `runmat.json`.
 
-## How RunMat Finds Configuration
+## Config Resolution
 
-RunMat resolves configuration in this order:
+RunMat loads configuration in this order:
 
 1. Built-in defaults
-2. A config file:
-   - Path provided by `RUNMAT_CONFIG`
-   - Otherwise, nearest `runmat.toml` or `runmat.json` found by walking up from the current directory
-   - Otherwise, user config at `~/.config/runmat/config.toml` or `~/.config/runmat/config.json`
+2. Config file:
+   - `RUNMAT_CONFIG` (explicit path)
+   - nearest `runmat.toml` / `runmat.json` by walking up from cwd
+   - user config at `~/.config/runmat/config.toml` / `~/.config/runmat/config.json`
 3. CLI flags
 
-CLI flags take precedence over file values.
+CLI flags override file values.
 
-## Project Configuration
+## File Contract
 
-Project configuration describes package identity, source roots, dependencies, and entrypoints.
+- Supported extensions: `.toml`, `.json`
+- A single file can contain both project and runtime config.
+- Unknown keys are rejected for runtime config sections.
+
+## Project Reference
+
+Project sections describe package identity, source layout, dependencies, and named entrypoints.
 
 ### `[package]`
 
-- `name` (required)
-- `version` (optional)
-- `runmat-version` (optional minimum RunMat version)
-
-Example:
-
-```toml
-[package]
-name = "image-pipeline"
-version = "0.1.0"
-runmat-version = ">=0.4.0"
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `name` | string | required | Package identifier. |
+| `version` | string | unset | Package version metadata. |
+| `runmat-version` | string | unset | Minimum RunMat version gate. Accepts `>=x.y.z` or `x.y.z`. |
 
 ### `[sources]`
 
-- `roots` (required list of source directories)
-
-```toml
-[sources]
-roots = ["src", "lib"]
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `roots` | string[] | required | Source root directories, relative to the config file directory. |
 
 ### `[dependencies]`
 
-Dependencies are keyed by alias.
-
-- `path` (local dependency path)
-- `version` (optional version metadata)
+Each dependency is keyed by alias.
 
 ```toml
 [dependencies]
 utils = { path = "../utils", version = "0.1.0" }
 ```
 
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | string | unset | Local dependency path. Required for local composition today. |
+| `version` | string | unset | Version metadata for dependency declaration. |
+
 ### `[entrypoints.<name>]`
 
-Define named entrypoints for scripts or module functions.
-
-Path-based:
-
-```toml
-[entrypoints.batch]
-path = "scripts/run_batch.m"
-```
-
-Module/function-based:
+Define named targets that can be executed from CLI.
 
 ```toml
 [entrypoints.main]
@@ -75,199 +63,148 @@ module = "app.main"
 function = "main"
 ```
 
-CLI usage with named entrypoints:
+```toml
+[entrypoints.batch]
+path = "scripts/run_batch.m"
+```
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | string | unset | File target (`.m` extension inferred if omitted). |
+| `module` | string | unset | Module path under source roots. |
+| `function` | string | unset | Function name for module target. |
+
+Exactly one target mode is required: `path` or `module + function`.
+
+Entrypoint CLI examples:
 
 ```bash
 runmat run main
 runmat benchmark main --iterations 25 --jit
 ```
 
-`main` resolves through `[entrypoints.main]` in `runmat.toml`/`runmat.json`.
+## Runtime Reference
 
-## Runtime Configuration
+All runtime settings are under `[runtime]`.
 
-All runtime settings live under `[runtime]`.
-For default values, see [Runtime Defaults Reference](#runtime-defaults-reference).
+### `[runtime]`
 
-### Core runtime fields
-
-- `callstack_limit`
-- `error_namespace`
-- `verbose`
-- `snapshot_path`
-
-```toml
-[runtime]
-callstack_limit = 200
-error_namespace = "RunMat"
-verbose = false
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `callstack_limit` | integer | `200` | Max retained call stack frames for diagnostics. |
+| `error_namespace` | string | `""` | Error ID namespace. Empty value is normalized at startup by language compatibility mode. |
+| `verbose` | boolean | `false` | Enables verbose execution output. |
+| `snapshot_path` | string | unset | Optional snapshot file to preload. |
 
 ### `[runtime.language]`
 
-- `compat = "runmat" | "matlab" | "strict"`
-
-```toml
-[runtime.language]
-compat = "runmat"
-```
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `compat` | string | `"runmat"` | `runmat`, `matlab`, `strict` | Language compatibility mode. |
 
 ### `[runtime.jit]`
 
-- `enabled`
-- `threshold`
-- `optimization_level = "none" | "size" | "speed" | "aggressive"`
-
-```toml
-[runtime.jit]
-enabled = true
-threshold = 10
-optimization_level = "speed"
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables JIT compilation. |
+| `threshold` | integer | `10` | Executions before JIT tiering triggers. |
+| `optimization_level` | string | `"speed"` | `none`, `size`, `speed`, `aggressive`. |
 
 ### `[runtime.gc]`
 
-- `preset = "low-latency" | "high-throughput" | "low-memory" | "debug"`
-- `young_size_mb`
-- `threads`
-- `collect_stats`
-
-```toml
-[runtime.gc]
-preset = "low-latency"
-young_size_mb = 128
-threads = 8
-collect_stats = false
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `preset` | string | unset | `low-latency`, `high-throughput`, `low-memory`, `debug`. |
+| `young_size_mb` | integer | unset | Young generation size override (MB). |
+| `threads` | integer | unset | GC worker thread override. |
+| `collect_stats` | boolean | `false` | Enables GC statistics collection. |
 
 ### `[runtime.accelerate]`
 
-- `enabled`
-- `provider = "auto" | "wgpu" | "inprocess"`
-- `allow_inprocess_fallback`
-- `wgpu_power_preference = "auto" | "high-performance" | "low-power"`
-- `wgpu_force_fallback_adapter`
-
-```toml
-[runtime.accelerate]
-enabled = true
-provider = "wgpu"
-allow_inprocess_fallback = true
-wgpu_power_preference = "auto"
-wgpu_force_fallback_adapter = false
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables acceleration subsystem. |
+| `provider` | string | `"wgpu"` | `auto`, `wgpu`, `inprocess`. |
+| `allow_inprocess_fallback` | boolean | `true` | Falls back to in-process provider if hardware provider fails. |
+| `wgpu_power_preference` | string | `"auto"` | `auto`, `high-performance`, `low-power`. |
+| `wgpu_force_fallback_adapter` | boolean | `false` | Forces WGPU fallback adapter selection. |
 
 #### `[runtime.accelerate.auto_offload]`
 
-- `enabled`
-- `calibrate`
-- `profile_path`
-- `log_level = "off" | "info" | "trace"`
-
-```toml
-[runtime.accelerate.auto_offload]
-enabled = true
-calibrate = true
-profile_path = ".runmat/auto_offload.json"
-log_level = "trace"
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables auto-offload planner. |
+| `calibrate` | boolean | `true` | Enables calibration mode for planner profile generation. |
+| `profile_path` | string | unset | Optional profile cache path. |
+| `log_level` | string | `"trace"` | `off`, `info`, `trace`. |
 
 ### `[runtime.plotting]`
 
-- `mode = "auto" | "gui" | "headless"`
-- `force_headless`
-- `backend = "auto" | "wgpu" | "static" | "web"`
-- `scatter_target_points`
-- `surface_vertex_budget`
-
-```toml
-[runtime.plotting]
-mode = "auto"
-force_headless = false
-backend = "auto"
-scatter_target_points = 250000
-surface_vertex_budget = 400000
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `mode` | string | `"auto"` | `auto`, `gui`, `headless`. |
+| `force_headless` | boolean | `false` | Forces non-interactive rendering behavior. |
+| `backend` | string | `"auto"` | `auto`, `wgpu`, `static`, `web`. |
+| `scatter_target_points` | integer | unset | Optional scatter decimation target. |
+| `surface_vertex_budget` | integer | unset | Optional surface vertex LOD budget. |
 
 #### `[runtime.plotting.gui]`
 
-- `width`
-- `height`
-- `vsync`
-- `maximized`
-
-```toml
-[runtime.plotting.gui]
-width = 1200
-height = 800
-vsync = true
-maximized = false
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `width` | integer | `1200` | Default GUI window width. |
+| `height` | integer | `800` | Default GUI window height. |
+| `vsync` | boolean | `true` | Enables VSync. |
+| `maximized` | boolean | `false` | Starts window maximized. |
 
 #### `[runtime.plotting.export]`
 
-- `format = "png" | "svg" | "pdf" | "html"`
-- `dpi`
-- `output_dir`
-
-```toml
-[runtime.plotting.export]
-format = "png"
-dpi = 300
-output_dir = "artifacts/figures"
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `format` | string | `"png"` | `png`, `svg`, `pdf`, `html`. |
+| `dpi` | integer | `300` | Raster export DPI. |
+| `output_dir` | string | unset | Default export output directory. |
 
 ### `[runtime.telemetry]`
 
-- `enabled`
-- `show_payloads`
-- `http_endpoint`
-- `udp_endpoint`
-- `queue_size`
-- `sync_mode`
-- `drain_mode = "none" | "all"`
-- `drain_timeout_ms`
-- `require_ingestion_key`
-
-```toml
-[runtime.telemetry]
-enabled = true
-show_payloads = false
-udp_endpoint = "udp.telemetry.runmat.com:7846"
-queue_size = 256
-sync_mode = false
-drain_mode = "all"
-drain_timeout_ms = 50
-require_ingestion_key = true
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables telemetry client. |
+| `show_payloads` | boolean | `false` | Echoes serialized payloads to stdout. |
+| `http_endpoint` | string | unset | Optional HTTP override. When unset, runtime uses built-in collector endpoint. |
+| `udp_endpoint` | string | `"udp.telemetry.runmat.com:7846"` | UDP collector endpoint. |
+| `queue_size` | integer | `256` | Async telemetry queue size (minimum bounded internally). |
+| `sync_mode` | boolean | `false` | Sends telemetry synchronously on caller thread. |
+| `drain_mode` | string | `"all"` | `none`, `all`. |
+| `drain_timeout_ms` | integer | `50` | Max drain wait on shutdown (capped internally). |
+| `require_ingestion_key` | boolean | `true` | Disables telemetry if key is required but unavailable. |
 
 ### `[runtime.logging]`
 
-- `level = "error" | "warn" | "info" | "debug" | "trace"`
-- `debug`
-- `file`
-
-```toml
-[runtime.logging]
-level = "warn"
-debug = false
-```
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `level` | string | `"warn"` | `error`, `warn`, `info`, `debug`, `trace`. |
+| `debug` | boolean | `false` | Forces debug logging path. |
+| `file` | string | unset | Reserved log file path option (runtime currently logs to process logger). |
 
 ## Environment Variables
 
-### Config path
+### Config Selection
 
-- `RUNMAT_CONFIG`  
-  Absolute or relative path to a config file.
+- `RUNMAT_CONFIG`: absolute or relative path to `runmat.toml` / `runmat.json`
 
-### Service/auth settings
+### Service/Auth
 
 - `RUNMAT_API_KEY`
 - `RUNMAT_SERVER_URL`
 - `RUNMAT_ORG_ID`
 - `RUNMAT_PROJECT_ID`
 
-## Complete Example (`runmat.toml`)
+### Telemetry
+
+- `RUNMAT_TELEMETRY_KEY` (ingestion key override)
+
+## Full Example (`runmat.toml`)
 
 ```toml
 [package]
@@ -352,62 +289,3 @@ require_ingestion_key = true
 level = "warn"
 debug = false
 ```
-
-## Runtime Defaults Reference
-
-If a runtime key is omitted, RunMat uses the default shown below.  
-`unset` means the value stays absent unless explicitly configured.
-
-| Key | Default |
-| --- | --- |
-| `runtime.callstack_limit` | `200` |
-| `runtime.error_namespace` | `""` |
-| `runtime.verbose` | `false` |
-| `runtime.snapshot_path` | `unset` |
-| `runtime.language.compat` | `"runmat"` |
-| `runtime.jit.enabled` | `true` |
-| `runtime.jit.threshold` | `10` |
-| `runtime.jit.optimization_level` | `"speed"` |
-| `runtime.gc.preset` | `unset` |
-| `runtime.gc.young_size_mb` | `unset` |
-| `runtime.gc.threads` | `unset` |
-| `runtime.gc.collect_stats` | `false` |
-| `runtime.accelerate.enabled` | `true` |
-| `runtime.accelerate.provider` | `"wgpu"` |
-| `runtime.accelerate.allow_inprocess_fallback` | `true` |
-| `runtime.accelerate.wgpu_power_preference` | `"auto"` |
-| `runtime.accelerate.wgpu_force_fallback_adapter` | `false` |
-| `runtime.accelerate.auto_offload.enabled` | `true` |
-| `runtime.accelerate.auto_offload.calibrate` | `true` |
-| `runtime.accelerate.auto_offload.profile_path` | `unset` |
-| `runtime.accelerate.auto_offload.log_level` | `"trace"` |
-| `runtime.plotting.mode` | `"auto"` |
-| `runtime.plotting.force_headless` | `false` |
-| `runtime.plotting.backend` | `"auto"` |
-| `runtime.plotting.scatter_target_points` | `unset` |
-| `runtime.plotting.surface_vertex_budget` | `unset` |
-| `runtime.plotting.gui.width` | `1200` |
-| `runtime.plotting.gui.height` | `800` |
-| `runtime.plotting.gui.vsync` | `true` |
-| `runtime.plotting.gui.maximized` | `false` |
-| `runtime.plotting.export.format` | `"png"` |
-| `runtime.plotting.export.dpi` | `300` |
-| `runtime.plotting.export.output_dir` | `unset` |
-| `runtime.telemetry.enabled` | `true` |
-| `runtime.telemetry.show_payloads` | `false` |
-| `runtime.telemetry.http_endpoint` | `unset` |
-| `runtime.telemetry.udp_endpoint` | `"udp.telemetry.runmat.com:7846"` |
-| `runtime.telemetry.queue_size` | `256` |
-| `runtime.telemetry.sync_mode` | `false` |
-| `runtime.telemetry.drain_mode` | `"all"` |
-| `runtime.telemetry.drain_timeout_ms` | `50` |
-| `runtime.telemetry.require_ingestion_key` | `true` |
-| `runtime.logging.level` | `"warn"` |
-| `runtime.logging.debug` | `false` |
-| `runtime.logging.file` | `unset` |
-
-## Related
-
-- [CLI Reference](/docs/cli) -- commands, flags, environment variables, and examples.
-- [Browser Guide](/docs/desktop-browser-guide) -- the browser-based sandbox IDE.
-- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- GPU residency rules and acceleration environment variables.
