@@ -1,5 +1,9 @@
 //! MATLAB-compatible `erase` builtin with GPU-aware semantics for RunMat.
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -43,21 +47,99 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "erase";
-const ARG_TYPE_ERROR: &str =
-    "erase: first argument must be a string array, character array, or cell array of character vectors";
-const PATTERN_TYPE_ERROR: &str =
-    "erase: second argument must be a string array, character array, or cell array of character vectors";
-const CELL_ELEMENT_ERROR: &str =
-    "erase: cell array elements must be string scalars or character vectors";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const ERASE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newStr",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Text with substring occurrences removed, preserving input container kind.",
+}];
+
+const ERASE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text list (scalar or array/cell).",
+    },
+];
+
+const ERASE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "newStr = erase(str, pattern)",
+    inputs: &ERASE_INPUTS,
+    outputs: &ERASE_OUTPUT,
+}];
+
+const ERASE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE.INVALID_INPUT",
+    identifier: Some("RunMat:erase:InvalidInput"),
+    when: "First argument is not a string array, char array, or cell array of text scalars.",
+    message:
+        "erase: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const ERASE_ERROR_PATTERN_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE.PATTERN_TYPE",
+    identifier: Some("RunMat:erase:PatternType"),
+    when: "Second argument is not a text scalar/array/cell of text scalars.",
+    message:
+        "erase: second argument must be a string array, character array, or cell array of character vectors",
+};
+
+const ERASE_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE.CELL_ELEMENT",
+    identifier: Some("RunMat:erase:CellElement"),
+    when: "Cell arrays contain non-text elements or non-row char arrays.",
+    message: "erase: cell array elements must be string scalars or character vectors",
+};
+
+const ERASE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERASE.INTERNAL",
+    identifier: Some("RunMat:erase:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "erase: internal error",
+};
+
+const ERASE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ERASE_ERROR_INVALID_INPUT,
+    ERASE_ERROR_PATTERN_TYPE,
+    ERASE_ERROR_CELL_ELEMENT,
+    ERASE_ERROR_INTERNAL,
+];
+
+pub const ERASE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ERASE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERASE_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn erase_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn erase_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    erase_error_with_message(error.message, error)
 }
 
 #[runtime_builtin(
@@ -67,6 +149,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     keywords = "erase,remove substring,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::erase::ERASE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::erase"
 )]
 async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
@@ -80,7 +163,7 @@ async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
         Value::StringArray(sa) => erase_string_array(sa, &patterns),
         Value::CharArray(ca) => erase_char_array(ca, &patterns),
         Value::Cell(cell) => erase_cell_array(cell, &patterns),
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(erase_error(&ERASE_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -116,13 +199,13 @@ impl PatternList {
                         Value::CharArray(ca) if ca.rows == 1 => {
                             list.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
                         }
-                        Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-                        _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                        Value::CharArray(_) => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
+                        _ => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
                     }
                 }
                 list
             }
-            _ => return Err(runtime_error_for(PATTERN_TYPE_ERROR)),
+            _ => return Err(erase_error(&ERASE_ERROR_PATTERN_TYPE)),
         };
         Ok(Self { entries })
     }
@@ -165,7 +248,9 @@ fn erase_string_array(array: StringArray, patterns: &PatternList) -> BuiltinResu
     }
     StringArray::new(erased, shape)
         .map(Value::StringArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+        })
 }
 
 fn erase_char_array(array: CharArray, patterns: &PatternList) -> BuiltinResult<Value> {
@@ -197,7 +282,9 @@ fn erase_char_array(array: CharArray, patterns: &PatternList) -> BuiltinResult<V
 
     CharArray::new(flattened, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+        })
 }
 
 fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Value> {
@@ -206,8 +293,9 @@ fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Va
     for handle in &cell.data {
         values.push(erase_cell_element(handle, patterns)?);
     }
-    make_cell_with_shape(values, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell_with_shape(values, shape).map_err(|e| {
+        erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+    })
 }
 
 fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Value> {
@@ -223,8 +311,8 @@ fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Va
             let erased = patterns.apply(&slice);
             Ok(Value::CharArray(CharArray::new_row(&erased)))
         }
-        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        Value::CharArray(_) => Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
+        _ => Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
     }
 }
 
@@ -451,14 +539,14 @@ pub(crate) mod tests {
     #[test]
     fn erase_errors_on_invalid_first_argument() {
         let err = erase_builtin(Value::Num(1.0), Value::String("a".into())).unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), ERASE_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_errors_on_invalid_pattern_type() {
         let err = erase_builtin(Value::String("abc".into()), Value::Num(1.0)).unwrap_err();
-        assert_eq!(err.to_string(), PATTERN_TYPE_ERROR);
+        assert_eq!(err.to_string(), ERASE_ERROR_PATTERN_TYPE.message);
     }
 
     #[test]
