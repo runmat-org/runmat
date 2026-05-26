@@ -1976,6 +1976,7 @@ mod tests {
     #[test]
     fn signature_help_uses_logical_test_descriptors() {
         let cases = [
+            ("logical(1);", "tf = logical(A)"),
             ("isfinite([1 NaN]);", "tf = isfinite(A)"),
             ("isinf([1 Inf]);", "tf = isinf(A)"),
             ("isnan([1 NaN]);", "tf = isnan(A)"),

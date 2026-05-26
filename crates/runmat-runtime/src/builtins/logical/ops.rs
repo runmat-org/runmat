@@ -3,6 +3,8 @@
 use log::trace;
 use runmat_accelerate_api::{self, AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -52,14 +54,83 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "logical";
 
+const LOGICAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical-converted result.",
+}];
+
+const LOGICAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to convert.",
+}];
+
+const LOGICAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = logical(A)",
+    inputs: &LOGICAL_INPUTS,
+    outputs: &LOGICAL_OUTPUT,
+}];
+
+const LOGICAL_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOGICAL.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:logical:TooManyInputs"),
+    when: "More than one input argument is provided.",
+    message: "logical: too many input arguments",
+};
+
+const LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOGICAL.CONVERSION_NOT_POSSIBLE",
+    identifier: Some("RunMat:logical:ConversionNotPossible"),
+    when: "Input type cannot be converted to logical.",
+    message: "logical: conversion to logical is not possible for this input type",
+};
+
+const LOGICAL_ERROR_GPU_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOGICAL.GPU_GATHER_FAILED",
+    identifier: Some("RunMat:logical:GpuGatherFailed"),
+    when: "GPU input gather fails during host fallback.",
+    message: "logical: failed to gather gpuArray input",
+};
+
+const LOGICAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOGICAL.INTERNAL",
+    identifier: Some("RunMat:logical:InternalError"),
+    when: "Internal logical buffer materialization fails.",
+    message: "logical: internal conversion error",
+};
+
+const LOGICAL_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    LOGICAL_ERROR_TOO_MANY_INPUTS,
+    LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE,
+    LOGICAL_ERROR_GPU_GATHER_FAILED,
+    LOGICAL_ERROR_INTERNAL,
+];
+
+pub const LOGICAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOGICAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOGICAL_ERRORS,
+};
+
 fn logical_type(args: &[Type], _context: &ResolveContext) -> Type {
     args.first().map(logical_like).unwrap_or(Type::logical())
 }
 
-fn logical_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn logical_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -69,11 +140,15 @@ fn logical_error(message: impl Into<String>) -> RuntimeError {
     keywords = "logical,boolean,gpuArray,mask,conversion",
     accel = "unary",
     type_resolver(logical_type),
+    descriptor(crate::builtins::logical::ops::LOGICAL_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::ops"
 )]
 async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(logical_error("logical: too many input arguments"));
+        return Err(logical_error_with_message(
+            LOGICAL_ERROR_TOO_MANY_INPUTS.message,
+            &LOGICAL_ERROR_TOO_MANY_INPUTS,
+        ));
     }
     convert_value_to_logical(value).await
 }
@@ -161,7 +236,12 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
-        .map_err(|err| logical_error(format!("{BUILTIN_NAME}: {err}")))?;
+        .map_err(|err| {
+            logical_error_with_message(
+                format!("{BUILTIN_NAME}: {err}"),
+                &LOGICAL_ERROR_GPU_GATHER_FAILED,
+            )
+        })?;
     let buffer = LogicalBuffer::from_real_tensor(&tensor);
     logical_buffer_to_gpu(buffer, provider)
 }
@@ -173,7 +253,9 @@ fn logical_buffer_to_host(buffer: LogicalBuffer) -> BuiltinResult<Value> {
     } else {
         LogicalArray::new(bits, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| logical_error(format!("logical: {e}")))
+            .map_err(|e| {
+                logical_error_with_message(format!("logical: {e}"), &LOGICAL_ERROR_INTERNAL)
+            })
     }
 }
 
@@ -218,10 +300,13 @@ fn complex_is_zero(re: f64, im: f64) -> bool {
 }
 
 fn conversion_error(type_name: &str) -> RuntimeError {
-    logical_error(format!(
-        "logical: conversion to logical from {} is not possible",
-        type_name
-    ))
+    logical_error_with_message(
+        format!(
+            "logical: conversion to logical from {} is not possible",
+            type_name
+        ),
+        &LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE,
+    )
 }
 
 #[derive(Clone)]
@@ -292,11 +377,11 @@ pub(crate) mod tests {
         block_on(super::logical_builtin(value, rest))
     }
 
-    fn assert_error_message(err: crate::RuntimeError, expected: &str) {
+    fn assert_error_message(err: &crate::RuntimeError, expected: &str) {
         assert_eq!(err.message(), expected);
     }
 
-    fn assert_error_contains(err: crate::RuntimeError, expected: &str) {
+    fn assert_error_contains(err: &crate::RuntimeError, expected: &str) {
         assert!(
             err.message().contains(expected),
             "unexpected error: {}",
@@ -369,8 +454,12 @@ pub(crate) mod tests {
     fn logical_string_error() {
         let err = logical_builtin(Value::String("runmat".to_string()), Vec::new()).unwrap_err();
         assert_error_message(
-            err,
+            &err,
             "logical: conversion to logical from string is not possible",
+        );
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
         );
     }
 
@@ -380,7 +469,11 @@ pub(crate) mod tests {
         let mut st = StructValue::new();
         st.insert("field", Value::Num(1.0));
         let err = logical_builtin(Value::Struct(st), Vec::new()).unwrap_err();
-        assert_error_contains(err, "struct");
+        assert_error_contains(&err, "struct");
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -389,8 +482,12 @@ pub(crate) mod tests {
         let cell = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell creation");
         let err = logical_builtin(Value::Cell(cell), Vec::new()).unwrap_err();
         assert_error_message(
-            err,
+            &err,
             "logical: conversion to logical from cell is not possible",
+        );
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
         );
     }
 
@@ -399,8 +496,12 @@ pub(crate) mod tests {
     fn logical_function_handle_error() {
         let err = logical_builtin(Value::FunctionHandle("foo".into()), Vec::new()).unwrap_err();
         assert_error_message(
-            err,
+            &err,
             "logical: conversion to logical from function_handle is not possible",
+        );
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
         );
     }
 
@@ -409,7 +510,11 @@ pub(crate) mod tests {
     fn logical_object_error() {
         let obj = ObjectInstance::new("DemoClass".to_string());
         let err = logical_builtin(Value::Object(obj), Vec::new()).unwrap_err();
-        assert_error_contains(err, "DemoClass");
+        assert_error_contains(&err, "DemoClass");
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -418,9 +523,21 @@ pub(crate) mod tests {
         let mex = MException::new("id:logical".into(), "message".into());
         let err = logical_builtin(Value::MException(mex), Vec::new()).unwrap_err();
         assert_error_message(
-            err,
+            &err,
             "logical: conversion to logical from MException is not possible",
         );
+        assert_eq!(
+            err.identifier(),
+            LOGICAL_ERROR_CONVERSION_NOT_POSSIBLE.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_too_many_inputs_error() {
+        let err = logical_builtin(Value::Bool(true), vec![Value::Bool(false)]).unwrap_err();
+        assert_error_message(&err, LOGICAL_ERROR_TOO_MANY_INPUTS.message);
+        assert_eq!(err.identifier(), LOGICAL_ERROR_TOO_MANY_INPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
