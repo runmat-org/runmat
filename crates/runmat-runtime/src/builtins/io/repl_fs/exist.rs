@@ -3,7 +3,11 @@
 //! Mirrors MATLAB semantics for checking whether a variable, file, folder,
 //! builtin, class, or other entity is available in the current session.
 
-use runmat_builtins::{builtin_functions, lookup_method, Value};
+use runmat_builtins::{
+    builtin_functions, lookup_method, BuiltinCompletionPolicy, BuiltinDescriptor,
+    BuiltinErrorDescriptor, BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor,
+    BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::contains_wildcards;
@@ -20,10 +24,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const ERROR_NAME_ARG: &str = "exist: name must be a character vector or string scalar";
-const ERROR_TYPE_ARG: &str = "exist: type must be a character vector or string scalar";
-const ERROR_INVALID_TYPE: &str = "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::exist")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,10 +54,97 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "exist";
 
+const EXIST_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "code",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Existence code (0,1,2,3,4,5,6,7,8) following MATLAB semantics.",
+}];
+const EXIST_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Variable/function/file/class name to query.",
+}];
+const EXIST_INPUTS_NAME_TYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Variable/function/file/class name to query.",
+    },
+    BuiltinParamDescriptor {
+        name: "type",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query kind: var|file|dir|builtin|class|handle|method|mex|pcode|simulink|thunk|lib|java.",
+    },
+];
+const EXIST_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "code = exist(name)",
+        inputs: &EXIST_INPUTS_NAME,
+        outputs: &EXIST_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "code = exist(name, type)",
+        inputs: &EXIST_INPUTS_NAME_TYPE,
+        outputs: &EXIST_OUTPUT,
+    },
+];
+const EXIST_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than two total input arguments are provided.",
+    message: "exist: too many input arguments",
+};
+const EXIST_ERROR_NAME_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.NAME_ARG",
+    identifier: None,
+    when: "Name input is not a character vector or string scalar/array scalar.",
+    message: "exist: name must be a character vector or string scalar",
+};
+const EXIST_ERROR_TYPE_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.TYPE_ARG",
+    identifier: None,
+    when: "Type input is not a character vector or string scalar/array scalar.",
+    message: "exist: type must be a character vector or string scalar",
+};
+const EXIST_ERROR_INVALID_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXIST.INVALID_TYPE",
+    identifier: None,
+    when: "Type input is not one of the supported exist query types.",
+    message: "exist: invalid type. Type must be one of 'var', 'variable', 'file', 'dir', 'directory', 'folder', 'builtin', 'built-in', 'class', 'handle', 'method', 'mex', 'pcode', 'simulink', 'thunk', 'lib', 'library', or 'java'",
+};
+const EXIST_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    EXIST_ERROR_TOO_MANY_INPUTS,
+    EXIST_ERROR_NAME_ARG,
+    EXIST_ERROR_TYPE_ARG,
+    EXIST_ERROR_INVALID_TYPE,
+];
+pub const EXIST_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EXIST_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXIST_ERRORS,
+};
+
 fn exist_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn exist_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -78,11 +165,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "exist,file,dir,var,builtin,class",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::exist_type),
+    descriptor(crate::builtins::io::repl_fs::exist::EXIST_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::exist"
 )]
 async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(exist_error("exist: too many input arguments"));
+        return Err(exist_error_row(&EXIST_ERROR_TOO_MANY_INPUTS));
     }
 
     let name_host = gather_if_needed_async(&name)
@@ -106,7 +194,8 @@ async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let result = match query {
         ExistQuery::Handle => exist_handle(&name_host),
         _ => {
-            let text = value_to_string(&name_host).ok_or_else(|| exist_error(ERROR_NAME_ARG))?;
+            let text = value_to_string(&name_host)
+                .ok_or_else(|| exist_error_row(&EXIST_ERROR_NAME_ARG))?;
             exist_for_query(&text, query).await?
         }
     };
@@ -162,7 +251,7 @@ impl ExistResultKind {
 }
 
 fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
-    let text = value_to_string(value).ok_or_else(|| exist_error(ERROR_TYPE_ARG))?;
+    let text = value_to_string(value).ok_or_else(|| exist_error_row(&EXIST_ERROR_TYPE_ARG))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "" => Ok(ExistQuery::Any),
         "var" | "variable" => Ok(ExistQuery::Var),
@@ -178,7 +267,7 @@ fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
         "thunk" => Ok(ExistQuery::Thunk),
         "lib" | "library" => Ok(ExistQuery::Lib),
         "java" => Ok(ExistQuery::Java),
-        _ => Err(exist_error(ERROR_INVALID_TYPE)),
+        _ => Err(exist_error_row(&EXIST_ERROR_INVALID_TYPE)),
     }
 }
 
@@ -456,6 +545,18 @@ pub(crate) mod tests {
         futures::executor::block_on(super::exist_builtin(name, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn exist_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = EXIST_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"code = exist(name)"));
+        assert!(labels.contains(&"code = exist(name, type)"));
+    }
+
     fn workspace_guard() -> std::sync::MutexGuard<'static, ()> {
         crate::workspace::test_guard()
     }
@@ -619,7 +720,7 @@ pub(crate) mod tests {
 
         let err = exist_builtin(Value::from("foo"), vec![Value::from("unknown")])
             .expect_err("expected error");
-        assert_eq!(err.message(), ERROR_INVALID_TYPE);
+        assert_eq!(err.message(), EXIST_ERROR_INVALID_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -628,7 +729,7 @@ pub(crate) mod tests {
         let (_guard, _lock) = test_guard();
 
         let err = exist_builtin(Value::Num(5.0), Vec::new()).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_NAME_ARG);
+        assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -231,6 +231,33 @@ Rule:
    - Throw only through helpers that accept `&'static BuiltinErrorDescriptor`.
    - Do not create parallel `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` mirrors.
 
+17. Exact anti-pattern to reject (this is not allowed in migrated builtins):
+
+```rust
+const IDENT_INVALID_INPUT: &str = "RunMat:foo:InvalidInput";
+const ERROR_INVALID_INPUT_MESSAGE: &str = "foo: invalid input";
+
+const FOO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOO.INVALID_INPUT",
+    identifier: Some(IDENT_INVALID_INPUT),
+    when: "...",
+    message: ERROR_INVALID_INPUT_MESSAGE,
+};
+```
+
+18. Canonical replacement (required shape):
+
+```rust
+const FOO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOO.INVALID_INPUT",
+    identifier: Some("RunMat:foo:InvalidInput"),
+    when: "...",
+    message: "foo: invalid input",
+};
+
+return Err(foo_error(&FOO_ERROR_INVALID_INPUT));
+```
+
 Audit command (must stay clean):
 
 1. `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`

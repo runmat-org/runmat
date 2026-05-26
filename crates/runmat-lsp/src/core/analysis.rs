@@ -2753,6 +2753,12 @@ mod tests {
             ("getenv();", "env = getenv()"),
             ("getenv(\"PATH\");", "value = getenv(NAME)"),
             ("setenv(\"A\", \"B\");", "status = setenv(NAME, VALUE)"),
+            (
+                "fullfile(\"a\", \"b\");",
+                "file = fullfile(part1, part2, ...)",
+            ),
+            ("exist(\"sin\");", "code = exist(name)"),
+            ("exist(\"sin\", \"builtin\");", "code = exist(name, type)"),
         ];
 
         for (text, expected_label) in cases {
