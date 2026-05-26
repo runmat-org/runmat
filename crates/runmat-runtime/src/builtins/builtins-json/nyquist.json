@@ -11,8 +11,10 @@
   ],
   "summary": "Compute or plot the Nyquist frequency response of a SISO transfer-function model.",
   "references": [
-    "title: \"MATLAB nyquist documentation\"",
-    "url: \"https://www.mathworks.com/help/control/ref/dynamicsystem.nyquist.html\""
+    {
+      "title": "MATLAB nyquist documentation",
+      "url": "https://www.mathworks.com/help/control/ref/dynamicsystem.nyquist.html"
+    }
   ],
   "gpu_support": {
     "elementwise": false,

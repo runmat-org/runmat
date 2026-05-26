@@ -308,7 +308,7 @@ fn validate_frequency_vector(values: &[f64]) -> BuiltinResult<()> {
 
 fn default_frequency_vector(system: &TfSystem) -> Vec<f64> {
     if system.is_discrete() {
-        return linspace(
+        return open_linspace(
             0.0,
             std::f64::consts::PI / system.sample_time,
             DEFAULT_FREQUENCY_POINTS,
@@ -476,7 +476,6 @@ async fn render_nyquist_plot(response: &NyquistResponse) -> BuiltinResult<()> {
 fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
     let lower = err.to_string().to_ascii_lowercase();
     lower.contains("plotting is unavailable")
-        || lower.contains("unknown builtin")
         || lower.contains("non-main thread")
         || lower.contains("interactive plotting failed")
         || lower.contains("eventloop can't be recreated")
@@ -495,6 +494,16 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     }
     let step = (stop - start) / ((count - 1) as f64);
     (0..count).map(|idx| start + idx as f64 * step).collect()
+}
+
+fn open_linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let step = (stop - start) / ((count + 1) as f64);
+    (0..count)
+        .map(|idx| start + (idx + 1) as f64 * step)
+        .collect()
 }
 
 fn logspace(start_exp: f64, stop_exp: f64, count: usize) -> Vec<f64> {
@@ -613,6 +622,26 @@ mod tests {
         let im = tensor_data(outputs[1].clone());
         assert!((re[0] - 2.0).abs() < 1.0e-12);
         assert!(im[0].abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn nyquist_discrete_default_grid_excludes_singular_unit_circle_endpoints() {
+        let system = TfSystem {
+            numerator: vec![Complex64::new(1.0, 0.0)],
+            denominator: vec![Complex64::new(1.0, 0.0), Complex64::new(-1.0, 0.0)],
+            sample_time: 0.1,
+            is_real: true,
+        };
+        let w = default_frequency_vector(&system);
+        assert_eq!(w.len(), DEFAULT_FREQUENCY_POINTS);
+        assert!(w[0] > 0.0);
+        assert!(w[w.len() - 1] < std::f64::consts::PI / system.sample_time);
+
+        let _guard = crate::output_count::push_output_count(Some(3));
+        run_nyquist(tf_object(vec![1.0], vec![1.0, -1.0], 0.1), Vec::new())
+            .expect("pole at z=1 should not be evaluated at w=0");
+        run_nyquist(tf_object(vec![1.0], vec![1.0, 1.0], 0.1), Vec::new())
+            .expect("pole at z=-1 should not be evaluated at the Nyquist frequency");
     }
 
     #[test]
