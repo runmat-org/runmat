@@ -2242,6 +2242,7 @@ mod tests {
                 "newStr = erase(str, pattern)",
             ),
             ("strcat(\"run\", \"mat\");", "out = strcat(str1, str2, ...)"),
+            ("join(\"runmat\");", "out = join(str)"),
         ];
 
         for (text, expected_label) in cases {
