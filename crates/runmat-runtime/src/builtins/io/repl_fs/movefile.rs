@@ -5,7 +5,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use glob::Pattern;
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path};
@@ -14,20 +18,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const MESSAGE_ID_OS_ERROR: &str = "RunMat:movefile:OSError";
-const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "RunMat:movefile:FileDoesNotExist";
-const MESSAGE_ID_DEST_EXISTS: &str = "RunMat:movefile:DestinationExists";
-const MESSAGE_ID_DEST_MISSING: &str = "RunMat:movefile:DestinationNotFound";
-const MESSAGE_ID_DEST_NOT_DIR: &str = "RunMat:movefile:DestinationNotDirectory";
-const MESSAGE_ID_EMPTY_SOURCE: &str = "RunMat:movefile:EmptySource";
-const MESSAGE_ID_EMPTY_DEST: &str = "RunMat:movefile:EmptyDestination";
-const MESSAGE_ID_PATTERN_ERROR: &str = "RunMat:movefile:InvalidPattern";
-
-const ERR_SOURCE_ARG: &str = "movefile: source must be a character vector or string scalar";
-const ERR_DEST_ARG: &str = "movefile: destination must be a character vector or string scalar";
-const ERR_FLAG_ARG: &str =
-    "movefile: flag must be the character 'f' supplied as a char vector or string scalar";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::movefile")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -59,6 +49,205 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "movefile";
 
+const MOVEFILE_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "1 on success, 0 when move fails.",
+}];
+const MOVEFILE_OUTPUT_STATUS_MSG_MSGID: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "1 on success, 0 when move fails.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagnostic message for failures.",
+    },
+    BuiltinParamDescriptor {
+        name: "msgID",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stable diagnostic identifier string.",
+    },
+];
+const MOVEFILE_INPUTS_SOURCE_DEST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "source",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source file/folder path or wildcard pattern.",
+    },
+    BuiltinParamDescriptor {
+        name: "destination",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Destination path.",
+    },
+];
+const MOVEFILE_INPUTS_SOURCE_DEST_FLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "source",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source file/folder path or wildcard pattern.",
+    },
+    BuiltinParamDescriptor {
+        name: "destination",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Destination path.",
+    },
+    BuiltinParamDescriptor {
+        name: "flag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"f\""),
+        description: "Overwrite flag; only \"f\" is accepted.",
+    },
+];
+const MOVEFILE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "status = movefile(source, destination)",
+        inputs: &MOVEFILE_INPUTS_SOURCE_DEST,
+        outputs: &MOVEFILE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = movefile(source, destination, flag)",
+        inputs: &MOVEFILE_INPUTS_SOURCE_DEST_FLAG,
+        outputs: &MOVEFILE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = movefile(source, destination)",
+        inputs: &MOVEFILE_INPUTS_SOURCE_DEST,
+        outputs: &MOVEFILE_OUTPUT_STATUS_MSG_MSGID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = movefile(source, destination, flag)",
+        inputs: &MOVEFILE_INPUTS_SOURCE_DEST_FLAG,
+        outputs: &MOVEFILE_OUTPUT_STATUS_MSG_MSGID,
+    },
+];
+const MOVEFILE_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:movefile:NotEnoughInputs"),
+    when: "Fewer than two input arguments are provided.",
+    message: "movefile: not enough input arguments",
+};
+const MOVEFILE_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:movefile:TooManyInputs"),
+    when: "More than three input arguments are provided.",
+    message: "movefile: too many input arguments",
+};
+const MOVEFILE_ERROR_SOURCE_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.SOURCE_ARG",
+    identifier: Some("RunMat:movefile:SourceArgType"),
+    when: "Source argument is not a character vector or string scalar.",
+    message: "movefile: source must be a character vector or string scalar",
+};
+const MOVEFILE_ERROR_DEST_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.DEST_ARG",
+    identifier: Some("RunMat:movefile:DestinationArgType"),
+    when: "Destination argument is not a character vector or string scalar.",
+    message: "movefile: destination must be a character vector or string scalar",
+};
+const MOVEFILE_ERROR_FLAG_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.FLAG_ARG",
+    identifier: Some("RunMat:movefile:FlagArgType"),
+    when: "Flag argument is not the scalar character 'f'.",
+    message: "movefile: flag must be the character 'f' supplied as a char vector or string scalar",
+};
+const MOVEFILE_RESULT_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.OS_ERROR",
+    identifier: Some("RunMat:movefile:OSError"),
+    when: "Filesystem move operation fails.",
+    message: "movefile: unable to move",
+};
+const MOVEFILE_RESULT_SOURCE_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.SOURCE_NOT_FOUND",
+    identifier: Some("RunMat:movefile:FileDoesNotExist"),
+    when: "Source path or wildcard match does not exist.",
+    message: "movefile: source not found",
+};
+const MOVEFILE_RESULT_DEST_EXISTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.DEST_EXISTS",
+    identifier: Some("RunMat:movefile:DestinationExists"),
+    when: "Destination already exists and overwrite is not requested.",
+    message: "movefile: destination already exists",
+};
+const MOVEFILE_RESULT_DEST_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.DEST_MISSING",
+    identifier: Some("RunMat:movefile:DestinationNotFound"),
+    when: "Destination directory is missing for wildcard source moves.",
+    message: "movefile: destination folder not found",
+};
+const MOVEFILE_RESULT_DEST_NOT_DIR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.DEST_NOT_DIR",
+    identifier: Some("RunMat:movefile:DestinationNotDirectory"),
+    when: "Destination must be a directory for wildcard move mode.",
+    message: "movefile: destination is not a directory",
+};
+const MOVEFILE_RESULT_EMPTY_SOURCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.EMPTY_SOURCE",
+    identifier: Some("RunMat:movefile:EmptySource"),
+    when: "Source path is empty.",
+    message: "Source file or folder name must not be empty.",
+};
+const MOVEFILE_RESULT_EMPTY_DEST: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.EMPTY_DEST",
+    identifier: Some("RunMat:movefile:EmptyDestination"),
+    when: "Destination path is empty.",
+    message: "Destination file or folder name must not be empty.",
+};
+const MOVEFILE_RESULT_PATTERN_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MOVEFILE.PATTERN_ERROR",
+    identifier: Some("RunMat:movefile:InvalidPattern"),
+    when: "Source wildcard pattern is invalid.",
+    message: "movefile: invalid source pattern",
+};
+const MOVEFILE_ERRORS: [BuiltinErrorDescriptor; 13] = [
+    MOVEFILE_ERROR_NOT_ENOUGH_INPUTS,
+    MOVEFILE_ERROR_TOO_MANY_INPUTS,
+    MOVEFILE_ERROR_SOURCE_ARG,
+    MOVEFILE_ERROR_DEST_ARG,
+    MOVEFILE_ERROR_FLAG_ARG,
+    MOVEFILE_RESULT_OS_ERROR,
+    MOVEFILE_RESULT_SOURCE_NOT_FOUND,
+    MOVEFILE_RESULT_DEST_EXISTS,
+    MOVEFILE_RESULT_DEST_MISSING,
+    MOVEFILE_RESULT_DEST_NOT_DIR,
+    MOVEFILE_RESULT_EMPTY_SOURCE,
+    MOVEFILE_RESULT_EMPTY_DEST,
+    MOVEFILE_RESULT_PATTERN_ERROR,
+];
+pub const MOVEFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MOVEFILE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MOVEFILE_ERRORS,
+};
+
+fn movefile_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn movefile_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -84,6 +273,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::movefile_type),
+    descriptor(crate::builtins::io::repl_fs::movefile::MOVEFILE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::movefile"
 )]
 async fn movefile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -104,13 +294,13 @@ async fn movefile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<MovefileResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 | 1 => Err(movefile_error("movefile: not enough input arguments")),
+        0 | 1 => Err(movefile_error_row(&MOVEFILE_ERROR_NOT_ENOUGH_INPUTS)),
         2 => move_operation(&gathered[0], &gathered[1], false).await,
         3 => {
             let force = parse_force_flag(&gathered[2])?;
             move_operation(&gathered[0], &gathered[1], force).await
         }
-        _ => Err(movefile_error("movefile: too many input arguments")),
+        _ => Err(movefile_error_row(&MOVEFILE_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -130,32 +320,32 @@ impl MovefileResult {
         }
     }
 
-    fn failure(message: String, message_id: &str) -> Self {
+    fn failure(message: String, error: &'static BuiltinErrorDescriptor) -> Self {
         Self {
             status: 0.0,
             message,
-            message_id: message_id.to_string(),
+            message_id: message_identifier(error).to_string(),
         }
     }
 
     fn empty_source() -> Self {
         Self::failure(
             "Source file or folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_SOURCE,
+            &MOVEFILE_RESULT_EMPTY_SOURCE,
         )
     }
 
     fn empty_destination() -> Self {
         Self::failure(
             "Destination file or folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_DEST,
+            &MOVEFILE_RESULT_EMPTY_DEST,
         )
     }
 
     fn source_not_found(display: &str) -> Self {
         Self::failure(
             format!("Source \"{}\" does not exist.", display),
-            MESSAGE_ID_SOURCE_NOT_FOUND,
+            &MOVEFILE_RESULT_SOURCE_NOT_FOUND,
         )
     }
 
@@ -165,7 +355,7 @@ impl MovefileResult {
                 "Cannot move to \"{}\": destination already exists.",
                 display
             ),
-            MESSAGE_ID_DEST_EXISTS,
+            &MOVEFILE_RESULT_DEST_EXISTS,
         )
     }
 
@@ -175,28 +365,28 @@ impl MovefileResult {
                 "Destination folder \"{}\" must exist when moving multiple sources.",
                 display
             ),
-            MESSAGE_ID_DEST_MISSING,
+            &MOVEFILE_RESULT_DEST_MISSING,
         )
     }
 
     fn destination_not_directory(display: &str) -> Self {
         Self::failure(
             format!("Destination \"{}\" must refer to a folder.", display),
-            MESSAGE_ID_DEST_NOT_DIR,
+            &MOVEFILE_RESULT_DEST_NOT_DIR,
         )
     }
 
     fn glob_pattern_error(pattern: &str, err: &str) -> Self {
         Self::failure(
             format!("Invalid source pattern \"{}\": {}", pattern, err),
-            MESSAGE_ID_PATTERN_ERROR,
+            &MOVEFILE_RESULT_PATTERN_ERROR,
         )
     }
 
     fn os_error(source: &str, target: &str, err: &io::Error) -> Self {
         Self::failure(
             format!("Unable to move \"{}\" to \"{}\": {}", source, target, err),
-            MESSAGE_ID_OS_ERROR,
+            &MOVEFILE_RESULT_OS_ERROR,
         )
     }
 
@@ -233,12 +423,12 @@ async fn move_operation(
     destination: &Value,
     force: bool,
 ) -> BuiltinResult<MovefileResult> {
-    let source_raw = extract_path(source, ERR_SOURCE_ARG)?;
+    let source_raw = extract_path(source, &MOVEFILE_ERROR_SOURCE_ARG)?;
     if source_raw.is_empty() {
         return Ok(MovefileResult::empty_source());
     }
 
-    let destination_raw = extract_path(destination, ERR_DEST_ARG)?;
+    let destination_raw = extract_path(destination, &MOVEFILE_ERROR_DEST_ARG)?;
     if destination_raw.is_empty() {
         return Ok(MovefileResult::empty_destination());
     }
@@ -497,33 +687,37 @@ async fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
 }
 
 fn parse_force_flag(value: &Value) -> BuiltinResult<bool> {
-    let text = extract_path(value, ERR_FLAG_ARG)?;
+    let text = extract_path(value, &MOVEFILE_ERROR_FLAG_ARG)?;
     if text.eq_ignore_ascii_case("f") {
         Ok(true)
     } else {
-        Err(movefile_error(ERR_FLAG_ARG))
+        Err(movefile_error_row(&MOVEFILE_ERROR_FLAG_ARG))
     }
 }
 
-fn extract_path(value: &Value, error_message: &str) -> BuiltinResult<String> {
+fn extract_path(value: &Value, error: &'static BuiltinErrorDescriptor) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(movefile_error(error_message))
+                Err(movefile_error_row(error))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(movefile_error(error_message))
+                Err(movefile_error_row(error))
             }
         }
-        _ => Err(movefile_error(error_message)),
+        _ => Err(movefile_error_row(error)),
     }
+}
+
+fn message_identifier(error: &'static BuiltinErrorDescriptor) -> &'static str {
+    error.identifier.unwrap_or("")
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -555,6 +749,20 @@ pub(crate) mod tests {
 
     fn evaluate(args: &[Value]) -> BuiltinResult<MovefileResult> {
         futures::executor::block_on(super::evaluate(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn movefile_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MOVEFILE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = movefile(source, destination)"));
+        assert!(labels.contains(&"status = movefile(source, destination, flag)"));
+        assert!(labels.contains(&"[status, msg, msgID] = movefile(source, destination)"));
+        assert!(labels.contains(&"[status, msg, msgID] = movefile(source, destination, flag)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -644,7 +852,10 @@ pub(crate) mod tests {
         ])
         .expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DEST_EXISTS);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_DEST_EXISTS)
+        );
         assert!(eval.message().contains("destination already exists."));
         assert!(source.exists());
         assert!(dest.exists());
@@ -693,7 +904,10 @@ pub(crate) mod tests {
         ])
         .expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_SOURCE_NOT_FOUND);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_SOURCE_NOT_FOUND)
+        );
         assert!(eval.message().contains("does not exist"));
     }
 
@@ -730,7 +944,7 @@ pub(crate) mod tests {
 
         let err = evaluate(&[Value::from("a"), Value::from("b"), Value::Num(1.0)])
             .expect_err("expected error");
-        assert_eq!(err.message(), ERR_FLAG_ARG);
+        assert_eq!(err.message(), MOVEFILE_ERROR_FLAG_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -806,7 +1020,10 @@ pub(crate) mod tests {
 
         let eval = evaluate(&[Value::from(""), Value::from("dest.txt")]).expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_SOURCE);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_EMPTY_SOURCE)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -818,7 +1035,10 @@ pub(crate) mod tests {
 
         let eval = evaluate(&[Value::from("source.txt"), Value::from("")]).expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_EMPTY_DEST);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_EMPTY_DEST)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -840,7 +1060,10 @@ pub(crate) mod tests {
         ])
         .expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DEST_MISSING);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_DEST_MISSING)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -863,7 +1086,10 @@ pub(crate) mod tests {
         ])
         .expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DEST_NOT_DIR);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_DEST_NOT_DIR)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -879,6 +1105,9 @@ pub(crate) mod tests {
         ])
         .expect("movefile");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_PATTERN_ERROR);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MOVEFILE_RESULT_PATTERN_ERROR)
+        );
     }
 }

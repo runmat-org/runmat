@@ -2770,6 +2770,22 @@ mod tests {
             ),
             ("rmdir(\"tmp\");", "status = rmdir(folderName)"),
             ("rmdir(\"tmp\", \"s\");", "status = rmdir(folderName, flag)"),
+            (
+                "copyfile(\"a\", \"b\");",
+                "status = copyfile(source, destination)",
+            ),
+            (
+                "copyfile(\"a\", \"b\", \"f\");",
+                "status = copyfile(source, destination, flag)",
+            ),
+            (
+                "movefile(\"a\", \"b\");",
+                "status = movefile(source, destination)",
+            ),
+            (
+                "movefile(\"a\", \"b\", \"f\");",
+                "status = movefile(source, destination, flag)",
+            ),
         ];
 
         for (text, expected_label) in cases {
