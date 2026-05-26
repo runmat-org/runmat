@@ -6,7 +6,11 @@ use runmat_accelerate_api::{
     GpuTensorHandle, SortComparison as ProviderSortComparison, SortOrder as ProviderSortOrder,
     SortResult as ProviderSortResult, SortRowsColumnSpec as ProviderSortRowsColumnSpec,
 };
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::tensor_output_type;
@@ -48,23 +52,307 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`sortrows` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn sortrows_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("sortrows")
-        .build()
+const BUILTIN_NAME: &str = "sortrows";
+
+const SORTROWS_OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sorted input rows.",
+}];
+
+const SORTROWS_OUTPUT_BI: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sorted input rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Permutation indices mapping sorted rows to original rows.",
+    },
+];
+
+const SORTROWS_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix to sort by rows.",
+}];
+
+const SORTROWS_INPUTS_A_COLUMNS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to sort by rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "column",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column specification vector (negative entries request descending order).",
+    },
+];
+
+const SORTROWS_INPUTS_A_DIRECTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to sort by rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ascend\""),
+        description: "Global row direction override: 'ascend' or 'descend'.",
+    },
+];
+
+const SORTROWS_INPUTS_A_COLUMNS_DIRECTION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to sort by rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "column",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column specification vector (negative entries request descending order).",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ascend\""),
+        description: "Global row direction override: 'ascend' or 'descend'.",
+    },
+];
+
+const SORTROWS_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to sort by rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional column and direction arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ComparisonMethod\""),
+        description: "Name-value option key.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"auto\""),
+        description: "Comparison method: 'auto', 'real', or 'abs'.",
+    },
+];
+
+const SORTROWS_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to sort by rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional column and direction arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"MissingPlacement\""),
+        description: "Name-value option key.",
+    },
+    BuiltinParamDescriptor {
+        name: "placement",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"auto\""),
+        description: "NaN placement policy: 'auto', 'first', or 'last'.",
+    },
+];
+
+const SORTROWS_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
+    BuiltinSignatureDescriptor {
+        label: "B = sortrows(A)",
+        inputs: &SORTROWS_INPUTS_A,
+        outputs: &SORTROWS_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sortrows(A, column)",
+        inputs: &SORTROWS_INPUTS_A_COLUMNS,
+        outputs: &SORTROWS_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sortrows(A, direction)",
+        inputs: &SORTROWS_INPUTS_A_DIRECTION,
+        outputs: &SORTROWS_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sortrows(A, column, direction)",
+        inputs: &SORTROWS_INPUTS_A_COLUMNS_DIRECTION,
+        outputs: &SORTROWS_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sortrows(A, ..., \"ComparisonMethod\", method)",
+        inputs: &SORTROWS_INPUTS_COMPARISON_METHOD,
+        outputs: &SORTROWS_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sortrows(A, ..., \"MissingPlacement\", placement)",
+        inputs: &SORTROWS_INPUTS_MISSING_PLACEMENT,
+        outputs: &SORTROWS_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sortrows(A)",
+        inputs: &SORTROWS_INPUTS_A,
+        outputs: &SORTROWS_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sortrows(A, column)",
+        inputs: &SORTROWS_INPUTS_A_COLUMNS,
+        outputs: &SORTROWS_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sortrows(A, direction)",
+        inputs: &SORTROWS_INPUTS_A_DIRECTION,
+        outputs: &SORTROWS_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sortrows(A, column, direction)",
+        inputs: &SORTROWS_INPUTS_A_COLUMNS_DIRECTION,
+        outputs: &SORTROWS_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sortrows(A, ..., \"ComparisonMethod\", method)",
+        inputs: &SORTROWS_INPUTS_COMPARISON_METHOD,
+        outputs: &SORTROWS_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sortrows(A, ..., \"MissingPlacement\", placement)",
+        inputs: &SORTROWS_INPUTS_MISSING_PLACEMENT,
+        outputs: &SORTROWS_OUTPUT_BI,
+    },
+];
+
+const SORTROWS_ERROR_INVALID_COLUMN_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.INVALID_COLUMN_INDEX",
+    identifier: Some("RunMat:sortrows:InvalidColumnIndex"),
+    when: "Column specification indices are out of range, zero, or otherwise invalid.",
+    message: "sortrows: invalid column index",
+};
+
+const SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.MISSING_PLACEMENT_UNKNOWN",
+    identifier: Some("RunMat:sortrows:MissingPlacementUnknown"),
+    when: "MissingPlacement option value is unsupported.",
+    message: "sortrows: unsupported MissingPlacement value",
+};
+
+const SORTROWS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:sortrows:InvalidArgument"),
+    when: "Option parsing receives invalid argument kinds or malformed name-value pairs.",
+    message: "sortrows: invalid argument",
+};
+
+const SORTROWS_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.COMPARISON_METHOD_UNKNOWN",
+    identifier: Some("RunMat:sortrows:ComparisonMethodUnknown"),
+    when: "ComparisonMethod option value is unsupported.",
+    message: "sortrows: unsupported ComparisonMethod value",
+};
+
+const SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.UNSUPPORTED_INPUT_TYPE",
+    identifier: Some("RunMat:sortrows:UnsupportedInputType"),
+    when: "Input cannot be converted to numeric, logical, complex, or char matrix domain.",
+    message: "sortrows: unsupported input type",
+};
+
+const SORTROWS_ERROR_MATRIX_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.MATRIX_REQUIRED",
+    identifier: Some("RunMat:sortrows:MatrixRequired"),
+    when: "Input has rank greater than 2 where matrix input is required.",
+    message: "sortrows: input must be a 2-D matrix",
+};
+
+const SORTROWS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORTROWS.INTERNAL",
+    identifier: Some("RunMat:sortrows:Internal"),
+    when: "Internal conversion/allocation/provider decode fails.",
+    message: "sortrows: internal operation failed",
+};
+
+const SORTROWS_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+    SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN,
+    SORTROWS_ERROR_INVALID_ARGUMENT,
+    SORTROWS_ERROR_COMPARISON_METHOD_UNKNOWN,
+    SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE,
+    SORTROWS_ERROR_MATRIX_REQUIRED,
+    SORTROWS_ERROR_INTERNAL,
+];
+
+pub const SORTROWS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SORTROWS_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SORTROWS_ERRORS,
+};
+
+fn sortrows_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-const SORTROWS_ERR_COLUMN_INDEX_INVALID: &str = "RunMat:sortrows:InvalidColumnIndex";
-const SORTROWS_ERR_MISSINGPLACEMENT_UNKNOWN: &str = "RunMat:sortrows:MissingPlacementUnknown";
+fn sortrows_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    sortrows_error_with(error, error.message)
+}
 
-fn sortrows_error_with_identifier(
-    message: impl Into<String>,
-    identifier: &'static str,
-) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("sortrows")
-        .with_identifier(identifier)
-        .build()
+fn sortrows_internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    sortrows_error_with(&SORTROWS_ERROR_INTERNAL, message)
 }
 
 #[runtime_builtin(
@@ -75,6 +363,7 @@ fn sortrows_error_with_identifier(
     accel = "sink",
     sink = true,
     type_resolver(tensor_output_type),
+    descriptor(crate::builtins::array::sorting_sets::sortrows::SORTROWS_DESCRIPTOR),
     builtin_path = "crate::builtins::array::sorting_sets::sortrows"
 )]
 async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -135,9 +424,9 @@ fn sortrows_from_provider_result(
     result: ProviderSortResult,
 ) -> crate::BuiltinResult<SortRowsEvaluation> {
     let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-        .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
     let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-        .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
     Ok(SortRowsEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
         indices: indices_tensor,
@@ -149,25 +438,28 @@ fn sortrows_host(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsE
         Value::Tensor(tensor) => sortrows_real_tensor(tensor, rest),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| sortrows_error(e))?;
+                .map_err(|e| sortrows_internal_error(e))?;
             sortrows_real_tensor(tensor, rest)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("sortrows", value)
-                .map_err(|e| sortrows_error(e))?;
+                .map_err(|e| sortrows_internal_error(e))?;
             sortrows_real_tensor(tensor, rest)
         }
         Value::ComplexTensor(ct) => sortrows_complex_tensor(ct, rest),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| sortrows_error(format!("sortrows: {e}")))?;
+                .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))?;
             sortrows_complex_tensor(tensor, rest)
         }
         Value::CharArray(ca) => sortrows_char_array(ca, rest),
-        other => Err(sortrows_error(format!(
-            "sortrows: unsupported input type {:?}; expected numeric, logical, complex, or char arrays",
-            other
-        ))
+        other => Err(sortrows_error_with(
+            &SORTROWS_ERROR_UNSUPPORTED_INPUT_TYPE,
+            format!(
+                "sortrows: unsupported input type {:?}; expected numeric, logical, complex, or char arrays",
+                other
+            ),
+        )
         .into()),
     }
 }
@@ -280,7 +572,7 @@ fn ensure_matrix_shape(shape: &[usize]) -> crate::BuiltinResult<()> {
     if shape.len() <= 2 {
         Ok(())
     } else {
-        Err(sortrows_error("sortrows: input must be a 2-D matrix"))
+        Err(sortrows_error(&SORTROWS_ERROR_MATRIX_REQUIRED))
     }
 }
 
@@ -374,7 +666,8 @@ fn reorder_real_rows(
             data[dst_idx] = tensor.data[src_idx];
         }
     }
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| sortrows_error(format!("sortrows: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
 }
 
 fn reorder_complex_rows(
@@ -392,7 +685,7 @@ fn reorder_complex_rows(
         }
     }
     ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|e| sortrows_error(format!("sortrows: {e}")))
+        .map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
 }
 
 fn reorder_char_rows(
@@ -409,7 +702,7 @@ fn reorder_char_rows(
             data[dst_idx] = ca.data[src_idx];
         }
     }
-    CharArray::new(data, rows, cols).map_err(|e| sortrows_error(format!("sortrows: {e}")))
+    CharArray::new(data, rows, cols).map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
 }
 
 fn compare_real_scalars(
@@ -527,7 +820,7 @@ fn permutation_indices(order: &[usize]) -> crate::BuiltinResult<Tensor> {
     for &idx in order {
         data.push((idx + 1) as f64);
     }
-    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_error(format!("sortrows: {e}")))
+    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
 }
 
 fn identity_indices(rows: usize) -> crate::BuiltinResult<Tensor> {
@@ -535,7 +828,7 @@ fn identity_indices(rows: usize) -> crate::BuiltinResult<Tensor> {
     for i in 0..rows {
         data.push((i + 1) as f64);
     }
-    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_error(format!("sortrows: {e}")))
+    Tensor::new(data, vec![rows, 1]).map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
@@ -634,22 +927,24 @@ impl SortRowsArgs {
                 continue;
             }
             let Some(keyword) = tensor::value_to_string(&rest[i]) else {
-                return Err(sortrows_error(format!(
-                    "sortrows: invalid argument {:?}",
-                    rest[i]
-                )));
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_ARGUMENT,
+                    format!("sortrows: invalid argument {:?}", rest[i]),
+                ));
             };
             let lowered = keyword.trim().to_ascii_lowercase();
             match lowered.as_str() {
                 "comparisonmethod" => {
                     i += 1;
                     if i >= rest.len() {
-                        return Err(sortrows_error(
+                        return Err(sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_ARGUMENT,
                             "sortrows: expected a value for 'ComparisonMethod'",
                         ));
                     }
                     let Some(value_str) = tensor::value_to_string(&rest[i]) else {
-                        return Err(sortrows_error(
+                        return Err(sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_ARGUMENT,
                             "sortrows: 'ComparisonMethod' expects a string value",
                         )
                         .into());
@@ -659,9 +954,10 @@ impl SortRowsArgs {
                         "real" => ComparisonMethod::Real,
                         "abs" | "magnitude" => ComparisonMethod::Abs,
                         other => {
-                            return Err(sortrows_error(format!(
-                                "sortrows: unsupported ComparisonMethod '{other}'"
-                            ))
+                            return Err(sortrows_error_with(
+                                &SORTROWS_ERROR_COMPARISON_METHOD_UNKNOWN,
+                                format!("sortrows: unsupported ComparisonMethod '{other}'"),
+                            )
                             .into())
                         }
                     };
@@ -670,13 +966,15 @@ impl SortRowsArgs {
                 "missingplacement" => {
                     i += 1;
                     if i >= rest.len() {
-                        return Err(sortrows_error(
+                        return Err(sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_ARGUMENT,
                             "sortrows: expected a value for 'MissingPlacement'",
                         )
                         .into());
                     }
                     let Some(value_str) = tensor::value_to_string(&rest[i]) else {
-                        return Err(sortrows_error(
+                        return Err(sortrows_error_with(
+                            &SORTROWS_ERROR_INVALID_ARGUMENT,
                             "sortrows: 'MissingPlacement' expects a string value",
                         )
                         .into());
@@ -686,9 +984,9 @@ impl SortRowsArgs {
                         "first" => MissingPlacement::First,
                         "last" => MissingPlacement::Last,
                         other => {
-                            return Err(sortrows_error_with_identifier(
+                            return Err(sortrows_error_with(
+                                &SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN,
                                 format!("sortrows: unsupported MissingPlacement '{other}'"),
-                                SORTROWS_ERR_MISSINGPLACEMENT_UNKNOWN,
                             )
                             .into())
                         }
@@ -696,9 +994,10 @@ impl SortRowsArgs {
                     i += 1;
                 }
                 other => {
-                    return Err(sortrows_error(format!(
-                        "sortrows: unexpected argument '{other}'"
-                    )));
+                    return Err(sortrows_error_with(
+                        &SORTROWS_ERROR_INVALID_ARGUMENT,
+                        format!("sortrows: unexpected argument '{other}'"),
+                    ));
                 }
             }
         }
@@ -756,28 +1055,41 @@ fn parse_column_vector(
         Value::Int(i) => parse_single_column(i.to_i64(), num_cols).map(Some),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(sortrows_error("sortrows: column indices must be finite"));
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                    "sortrows: column indices must be finite",
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(sortrows_error("sortrows: column indices must be integers"));
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                    "sortrows: column indices must be integers",
+                ));
             }
             parse_single_column(rounded as i64, num_cols).map(Some)
         }
         Value::Tensor(tensor) => {
             if !is_vector(&tensor.shape) {
-                return Err(sortrows_error(
+                return Err(sortrows_error_with(
+                    &SORTROWS_ERROR_INVALID_ARGUMENT,
                     "sortrows: column specification must be a vector",
                 ));
             }
             let mut specs = Vec::with_capacity(tensor.data.len());
             for &entry in &tensor.data {
                 if !entry.is_finite() {
-                    return Err(sortrows_error("sortrows: column indices must be finite"));
+                    return Err(sortrows_error_with(
+                        &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                        "sortrows: column indices must be finite",
+                    ));
                 }
                 let rounded = entry.round();
                 if (rounded - entry).abs() > f64::EPSILON {
-                    return Err(sortrows_error("sortrows: column indices must be integers"));
+                    return Err(sortrows_error_with(
+                        &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
+                        "sortrows: column indices must be integers",
+                    ));
                 }
                 let column = parse_single_column_i64(rounded as i64, num_cols)?;
                 specs.push(column);
@@ -794,31 +1106,31 @@ fn parse_single_column(value: i64, num_cols: usize) -> crate::BuiltinResult<Vec<
 
 fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<ColumnSpec> {
     if value == 0 {
-        return Err(sortrows_error_with_identifier(
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
             "sortrows: column indices must be non-zero",
-            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         ));
     }
     let abs = value.unsigned_abs() as usize;
     if abs == 0 {
-        return Err(sortrows_error_with_identifier(
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
             "sortrows: column indices must be >= 1",
-            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         ));
     }
     if num_cols == 0 {
-        return Err(sortrows_error_with_identifier(
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
             "sortrows: column index exceeds matrix with 0 columns",
-            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         ));
     }
     if abs > num_cols {
-        return Err(sortrows_error_with_identifier(
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
             format!(
                 "sortrows: column index {} exceeds matrix with {} columns",
                 abs, num_cols
             ),
-            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         )
         .into());
     }
@@ -850,20 +1162,20 @@ fn default_columns(num_cols: usize) -> Vec<ColumnSpec> {
 
 fn validate_columns(columns: &[ColumnSpec], num_cols: usize) -> crate::BuiltinResult<()> {
     if num_cols == 0 && columns.iter().any(|spec| spec.index > 0) {
-        return Err(sortrows_error_with_identifier(
+        return Err(sortrows_error_with(
+            &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
             "sortrows: column index exceeds matrix with 0 columns",
-            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         ));
     }
     for spec in columns {
         if num_cols > 0 && spec.index >= num_cols {
-            return Err(sortrows_error_with_identifier(
+            return Err(sortrows_error_with(
+                &SORTROWS_ERROR_INVALID_COLUMN_INDEX,
                 format!(
                     "sortrows: column index {} exceeds matrix with {} columns",
                     spec.index + 1,
                     num_cols
                 ),
-                SORTROWS_ERR_COLUMN_INDEX_INVALID,
             )
             .into());
         }
@@ -1054,7 +1366,10 @@ pub(crate) mod tests {
     fn sortrows_invalid_column_index_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = evaluate(Value::Tensor(tensor), &[Value::Int(IntValue::I32(3))]).unwrap_err();
-        assert_eq!(err.identifier(), Some(SORTROWS_ERR_COLUMN_INDEX_INVALID));
+        assert_eq!(
+            err.identifier(),
+            SORTROWS_ERROR_INVALID_COLUMN_INDEX.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1124,7 +1439,7 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some(SORTROWS_ERR_MISSINGPLACEMENT_UNKNOWN)
+            SORTROWS_ERROR_MISSING_PLACEMENT_UNKNOWN.identifier
         );
     }
 

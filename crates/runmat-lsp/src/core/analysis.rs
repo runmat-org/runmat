@@ -2305,6 +2305,15 @@ mod tests {
                 "ismember([1 2 3], [2 4], 'rows');",
                 "tf = ismember(A, B, option...)",
             ),
+            ("sortrows([3 1;2 4]);", "B = sortrows(A)"),
+            (
+                "sortrows([3 1;2 4], [1 -2], 'descend');",
+                "B = sortrows(A, column, direction)",
+            ),
+            (
+                "sortrows([3 1;2 4], 'MissingPlacement', 'first');",
+                "B = sortrows(A, ..., \"MissingPlacement\", placement)",
+            ),
         ];
 
         for (text, expected_label) in cases {

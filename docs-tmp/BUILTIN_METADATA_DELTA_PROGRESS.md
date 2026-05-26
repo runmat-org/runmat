@@ -47,9 +47,10 @@
 | Wave 42 (Array Shape Replication/Shift) | `repmat`, `repelem`, `circshift` | Done | `0aee549e` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::repmat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::repelem::tests::`; `cargo test -p runmat-runtime builtins::array::shape::circshift::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for replication and circular-shift forms + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 | Wave 43 (Array Sorting/Sets A) | `sort`, `argsort`, `issorted` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::sorting_sets::sort::tests::`; `cargo test -p runmat-runtime builtins::array::sorting_sets::argsort::tests::`; `cargo test -p runmat-runtime builtins::array::sorting_sets::issorted::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for sorting/ordering options + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 | Wave 44 (Array Sorting/Sets B) | `unique`, `union`, `intersect`, `setdiff`, `ismember` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime sorting_sets::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Completed descriptor migration for set-operation family with exhaustive signatures, attached descriptors, by-requested-output semantics, descriptor-row canonical runtime error identifiers/messages (no duplicated `RunMat:*` constants), and expanded LSP signature-help coverage |
+| Wave 45 (Array Sorting/Sets C) | `sortrows` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::sorting_sets::sortrows::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp signature_help_uses_array_sorting_sets_descriptors` | Attached descriptor for row-sorting forms (`column`, `direction`, `ComparisonMethod`, `MissingPlacement`) with by-requested-output semantics, descriptor-row canonical error mapping for parser/column-index/input/internal branches, and LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `143`
-- Remaining: `425`
+- Migrated with attached descriptor: `144`
+- Remaining: `424`
