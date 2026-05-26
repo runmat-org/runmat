@@ -53,9 +53,10 @@
 | Wave 48 (Stats Summary A) | `mode` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::summary::mode::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `mode` single/dimension/all forms with by-requested-output semantics (`M`, `[M,F]`, `[M,F,C]`), descriptor-row canonical runtime error mapping (invalid args/dimension/gpu/complex/internal), and LSP stats-summary signature-help coverage |
 | Wave 49 (Stats Summary B) | `cov`, `corrcoef` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::summary::cov::tests::`; `cargo test -p runmat-runtime builtins::stats::summary::corrcoef::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for covariance/correlation forms, descriptor-row canonical runtime error mapping (no duplicated stable identifier/message constants), and expanded LSP stats-summary signature-help coverage |
 | Wave 50 (Stats Histogram) | `histcounts`, `histcounts2` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::hist::histcounts::tests::`; `cargo test -p runmat-runtime builtins::stats::hist::histcounts2::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for histogram and 2-D histogram positional/name-value forms, descriptor-backed stable identifier branches (`BinMethodConflict`, `BinWidthInvalid`, `NumBinsInvalid`), and LSP signature-help coverage for stats/hist surface |
+| Wave 51 (Plotting Axis Labels) | `xlabel`, `ylabel`, `zlabel` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::xlabel::tests::`; `cargo test -p runmat-runtime builtins::plotting::ylabel::tests::`; `cargo test -p runmat-runtime builtins::plotting::zlabel::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for axis-label call forms (`txt`, optional `ax`, optional Name/Value pairs), added runtime descriptor signature tests, and added LSP signature-help coverage for plotting axis labels |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `153`
-- Remaining: `415`
+- Migrated with attached descriptor: `156`
+- Remaining: `412`
