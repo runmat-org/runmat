@@ -9,9 +9,7 @@
     "pwd"
   ],
   "summary": "Change the current working folder or query the folder that RunMat is executing in.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/cd.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

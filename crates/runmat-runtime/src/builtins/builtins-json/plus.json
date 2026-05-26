@@ -9,9 +9,7 @@
     "implicit expansion"
   ],
   "summary": "Element-wise addition A + B with MATLAB-compatible implicit expansion, complex support, and GPU fallbacks.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/plus.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -10,9 +10,7 @@
     "colormap"
   ],
   "summary": "Convert RGB image or colormap values to HSV.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/rgb2hsv.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

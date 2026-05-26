@@ -9,9 +9,7 @@
     "binary data"
   ],
   "summary": "Read numeric or text data from a remote host through a MATLAB-compatible tcpclient struct.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/tcpclient.read.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Return the permutation indices that would sort tensors along a dimension.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/sort.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

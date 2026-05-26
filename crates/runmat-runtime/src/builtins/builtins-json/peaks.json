@@ -10,9 +10,7 @@
     "surface"
   ],
   "summary": "Sample data: 3-D test surface on an n-by-n grid.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/peaks.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

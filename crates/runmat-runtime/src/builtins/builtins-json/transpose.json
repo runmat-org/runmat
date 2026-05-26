@@ -8,9 +8,7 @@
     "gpu"
   ],
   "summary": "Swap the first two dimensions of arrays without taking the complex conjugate.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/transpose.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

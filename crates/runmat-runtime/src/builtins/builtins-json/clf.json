@@ -8,9 +8,7 @@
     "graphics handles"
   ],
   "summary": "Clear the contents of the current figure, selected figure handles, or all figures.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/clf.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

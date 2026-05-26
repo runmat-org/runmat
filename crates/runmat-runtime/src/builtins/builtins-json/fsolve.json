@@ -1,9 +1,15 @@
 {
   "title": "fsolve",
   "category": "math/optim",
-  "keywords": ["fsolve", "nonlinear solve", "root finding", "Jacobian", "Levenberg-Marquardt"],
+  "keywords": [
+    "fsolve",
+    "nonlinear solve",
+    "root finding",
+    "Jacobian",
+    "Levenberg-Marquardt"
+  ],
   "summary": "Solve scalar or vector nonlinear equation systems using finite-difference Levenberg-Marquardt iterations.",
-  "references": ["https://www.mathworks.com/help/optim/ug/fsolve.html"],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -42,9 +48,18 @@
     }
   ],
   "links": [
-    { "label": "fzero", "url": "./fzero" },
-    { "label": "optimset", "url": "./optimset" },
-    { "label": "linsolve", "url": "./linsolve" }
+    {
+      "label": "fzero",
+      "url": "./fzero"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/math/optim/fsolve.rs`",

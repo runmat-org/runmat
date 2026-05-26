@@ -9,9 +9,7 @@
     "gpu gather"
   ],
   "summary": "Parse UTF-8 JSON text into MATLAB-compatible RunMat values.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/jsondecode.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -8,9 +8,7 @@
     "row-wise join"
   ],
   "summary": "Join text across each input row using an explicit delimiter.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strjoin.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

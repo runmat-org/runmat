@@ -10,9 +10,7 @@
     "convert"
   ],
   "summary": "Convert image data to double precision, scaling integer images into [0,1].",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/im2double.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

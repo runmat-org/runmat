@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Estimate the reciprocal condition number of a square matrix (1 / cond(A)) with MATLAB-compatible behaviour.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/rcond.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

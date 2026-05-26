@@ -8,9 +8,7 @@
     "file identifier"
   ],
   "summary": "Query whether the file position indicator of a file identifier is at end-of-file.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/feof.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

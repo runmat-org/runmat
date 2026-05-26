@@ -9,9 +9,7 @@
     "screen"
   ],
   "summary": "Request that the host clear the visible Command Window or console display.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/clc.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

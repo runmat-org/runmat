@@ -9,9 +9,7 @@
     "provider"
   ],
   "summary": "Query metadata about the active GPU provider and return it as a MATLAB struct.",
-  "references": [
-    "https://www.mathworks.com/help/parallel-computing/gpudevice.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

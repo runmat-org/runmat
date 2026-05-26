@@ -9,9 +9,7 @@
     "MATLAB compatibility"
   ],
   "summary": "Create MATLAB-compatible duration arrays from hour, minute, and second components.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/duration.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

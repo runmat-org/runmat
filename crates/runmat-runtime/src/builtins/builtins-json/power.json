@@ -9,9 +9,7 @@
     "broadcasting"
   ],
   "summary": "Element-wise exponentiation A .^ B with MATLAB-compatible broadcasting, complex support, and GPU fallbacks.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/power.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

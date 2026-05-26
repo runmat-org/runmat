@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Compute the vector cross product of matching 3-element vectors along a chosen dimension.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/cross.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

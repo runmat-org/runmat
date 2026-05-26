@@ -8,9 +8,7 @@
     "newline"
   ],
   "summary": "Read the next line from a file, removing newline characters from the result.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/fgetl.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "toolbox cleanup"
   ],
   "summary": "Remove folders from the MATLAB search path used by RunMat.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/rmpath.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Solve X * B = A using MATLAB's right-division operator (`/`).",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/double.mrdivide.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,9 +10,7 @@
     "skip"
   ],
   "summary": "Write binary data to a file identifier with MATLAB-compatible precision, skip, and machine-format semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/fwrite.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,9 +10,7 @@
     "character arrays"
   ],
   "summary": "Pad strings, character arrays, and cell arrays to a target length using MATLAB-compatible options.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/pad.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -8,9 +8,7 @@
     "calendar year"
   ],
   "summary": "Extract year numbers from datetime values.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/datetime.year.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

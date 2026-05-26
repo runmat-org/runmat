@@ -9,9 +9,7 @@
     "character vector"
   ],
   "summary": "Compare text inputs for exact equality with MATLAB-compatible implicit expansion across text types.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strcmp.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

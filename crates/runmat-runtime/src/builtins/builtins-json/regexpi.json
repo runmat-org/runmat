@@ -9,9 +9,7 @@
     "match"
   ],
   "summary": "Perform case-insensitive regular expression matching with MATLAB-compatible outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/regexpi.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

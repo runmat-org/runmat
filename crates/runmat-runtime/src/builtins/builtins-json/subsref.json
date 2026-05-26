@@ -8,9 +8,7 @@
     "dot indexing"
   ],
   "summary": "Dispatch object indexing requests to a class-specific `Class.subsref` implementation.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/subsref.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

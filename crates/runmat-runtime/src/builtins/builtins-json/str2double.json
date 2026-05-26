@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Convert strings, character arrays, or cell arrays of text into double-precision numbers with MATLAB-compatible rules.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/str2double.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

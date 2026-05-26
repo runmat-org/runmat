@@ -8,9 +8,7 @@
     "gpu"
   ],
   "summary": "Sum the diagonal elements of matrices and matrix-like tensors.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/trace.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

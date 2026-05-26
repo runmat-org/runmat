@@ -9,9 +9,7 @@
     "rmpath"
   ],
   "summary": "Query or replace the MATLAB search path used by RunMat.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/path.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

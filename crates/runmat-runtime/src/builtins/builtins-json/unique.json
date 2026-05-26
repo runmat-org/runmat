@@ -13,9 +13,7 @@
     "char"
   ],
   "summary": "Return the unique elements or rows of arrays with optional index outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/unique.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

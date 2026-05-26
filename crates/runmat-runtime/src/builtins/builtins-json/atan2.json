@@ -9,9 +9,7 @@
     "arctangent"
   ],
   "summary": "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/atan2.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

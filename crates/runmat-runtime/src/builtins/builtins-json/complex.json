@@ -10,9 +10,7 @@
     "MATLAB complex"
   ],
   "summary": "Construct complex double values from real and imaginary parts.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/complex.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

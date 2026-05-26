@@ -9,9 +9,7 @@
     "gpuArray"
   ],
   "summary": "Test whether a value belongs to a specified MATLAB class or abstract category.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/isa.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

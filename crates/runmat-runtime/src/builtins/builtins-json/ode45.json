@@ -1,9 +1,15 @@
 {
   "title": "ode45",
   "category": "math/ode",
-  "keywords": ["ode45", "ode", "nonstiff", "Dormand-Prince", "adaptive step"],
+  "keywords": [
+    "ode45",
+    "ode",
+    "nonstiff",
+    "Dormand-Prince",
+    "adaptive step"
+  ],
   "summary": "Solve nonstiff ordinary differential equations with an adaptive Dormand-Prince 5(4) method.",
-  "references": ["https://www.mathworks.com/help/matlab/ref/ode45.html"],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -36,8 +42,14 @@
     }
   ],
   "links": [
-    { "label": "ode23", "url": "./ode23" },
-    { "label": "ode15s", "url": "./ode15s" }
+    {
+      "label": "ode23",
+      "url": "./ode23"
+    },
+    {
+      "label": "ode15s",
+      "url": "./ode15s"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/math/ode/ode45.rs`",

@@ -9,7 +9,7 @@
     "function handle"
   ],
   "summary": "Approximate a finite scalar definite integral using adaptive quadrature.",
-  "references": ["https://www.mathworks.com/help/matlab/ref/integral.html"],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -68,9 +68,18 @@
     }
   ],
   "links": [
-    { "label": "trapz", "url": "./trapz" },
-    { "label": "cumtrapz", "url": "./cumtrapz" },
-    { "label": "fzero", "url": "./fzero" }
+    {
+      "label": "trapz",
+      "url": "./trapz"
+    },
+    {
+      "label": "cumtrapz",
+      "url": "./cumtrapz"
+    },
+    {
+      "label": "fzero",
+      "url": "./fzero"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/math/optim/integral.rs`",

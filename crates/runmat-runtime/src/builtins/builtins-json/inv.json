@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Compute the inverse of a square matrix with MATLAB-compatible pivoting and GPU fallbacks.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/inv.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

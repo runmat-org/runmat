@@ -10,9 +10,7 @@
     "gpu"
   ],
   "summary": "Count paired observations into two-dimensional histogram bins.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/histcounts2.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

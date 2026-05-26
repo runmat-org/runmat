@@ -9,9 +9,7 @@
     "process environment"
   ],
   "summary": "Query environment variables as character vectors, strings, or structures.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/getenv.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

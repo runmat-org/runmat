@@ -8,9 +8,7 @@
     "subplot"
   ],
   "summary": "Clear the contents of the current axes without clearing the whole figure.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/cla.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

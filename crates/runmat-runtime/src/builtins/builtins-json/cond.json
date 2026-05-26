@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Compute the matrix condition number with MATLAB-compatible norm choices.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/cond.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

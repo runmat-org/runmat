@@ -9,9 +9,7 @@
     "elementwise"
   ],
   "summary": "Element-wise Euclidean norm sqrt(x.^2 + y.^2) with MATLAB-compatible broadcasting.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/hypot.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -10,9 +10,7 @@
     "loopback"
   ],
   "summary": "Create a TCP server that listens for MATLAB-compatible client connections.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/tcpserver.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

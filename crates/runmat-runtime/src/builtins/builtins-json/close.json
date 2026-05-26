@@ -9,10 +9,7 @@
     "networking"
   ],
   "summary": "Close TCP clients or servers that were created by tcpclient, tcpserver, or accept.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/tcpclient.html",
-    "https://www.mathworks.com/help/matlab/ref/tcpserver.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

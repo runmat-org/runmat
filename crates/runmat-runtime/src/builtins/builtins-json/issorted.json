@@ -11,9 +11,7 @@
     "missingplacement"
   ],
   "summary": "Determine whether an array is already sorted along a dimension or across rows.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/double.issorted.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "forcecelloutput"
   ],
   "summary": "Locate the starting indices of pattern matches in text inputs, returning doubles or cell arrays like MATLAB.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strfind.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

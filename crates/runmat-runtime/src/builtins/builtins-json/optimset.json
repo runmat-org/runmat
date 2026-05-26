@@ -1,9 +1,16 @@
 {
   "title": "optimset",
   "category": "math/optim",
-  "keywords": ["optimset", "options", "TolX", "TolFun", "MaxIter", "Display"],
+  "keywords": [
+    "optimset",
+    "options",
+    "TolX",
+    "TolFun",
+    "MaxIter",
+    "Display"
+  ],
   "summary": "Create or update an optimization options structure for fminbnd, fzero, and fsolve.",
-  "references": ["https://www.mathworks.com/help/matlab/ref/optimset.html"],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -35,9 +42,18 @@
     }
   ],
   "links": [
-    { "label": "fminbnd", "url": "./fminbnd" },
-    { "label": "fzero", "url": "./fzero" },
-    { "label": "fsolve", "url": "./fsolve" }
+    {
+      "label": "fminbnd",
+      "url": "./fminbnd"
+    },
+    {
+      "label": "fzero",
+      "url": "./fzero"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/math/optim/optimset.rs`",

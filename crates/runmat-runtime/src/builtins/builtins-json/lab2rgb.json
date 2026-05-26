@@ -10,9 +10,7 @@
     "image"
   ],
   "summary": "Convert CIE L*a*b* values to sRGB using D65 white.",
-  "references": [
-    "https://www.mathworks.com/help/images/ref/lab2rgb.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

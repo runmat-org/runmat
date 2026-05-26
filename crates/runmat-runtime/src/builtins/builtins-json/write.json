@@ -10,9 +10,7 @@
     "text"
   ],
   "summary": "Write numeric or text data to a remote host through a MATLAB-compatible tcpclient struct.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/tcpclient.write.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

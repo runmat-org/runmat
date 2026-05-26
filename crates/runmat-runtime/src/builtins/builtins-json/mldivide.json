@@ -14,9 +14,7 @@
     "gpu"
   ],
   "summary": "Solve A * X = B using MATLAB's left-division operator (`\\`).",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/double.mldivide.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

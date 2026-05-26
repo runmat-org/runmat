@@ -8,9 +8,7 @@
     "gpu"
   ],
   "summary": "Sort matrix rows lexicographically with optional column and direction control.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/sortrows.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

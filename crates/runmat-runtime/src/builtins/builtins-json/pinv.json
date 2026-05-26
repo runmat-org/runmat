@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Compute the Moore–Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/pinv.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

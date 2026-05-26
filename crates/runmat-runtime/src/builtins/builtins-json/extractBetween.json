@@ -10,9 +10,7 @@
     "string array"
   ],
   "summary": "Extract text that lies between two boundary markers using string or position inputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/extractbetween.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

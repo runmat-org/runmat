@@ -9,9 +9,7 @@
     "lookup"
   ],
   "summary": "Create MATLAB-compatible dictionary objects that map keys to values.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/containers.map-class.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

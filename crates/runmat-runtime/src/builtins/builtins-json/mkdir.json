@@ -11,9 +11,7 @@
     "messageid"
   ],
   "summary": "Create folders with MATLAB-compatible status, message, and message ID outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/mkdir.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

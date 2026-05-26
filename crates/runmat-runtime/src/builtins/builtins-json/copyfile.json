@@ -13,9 +13,7 @@
     "overwrite"
   ],
   "summary": "Copy files or folders with MATLAB-compatible status, diagnostic message, and message ID outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/copyfile.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

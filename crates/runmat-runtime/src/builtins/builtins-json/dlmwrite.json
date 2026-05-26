@@ -11,9 +11,7 @@
     "coffset"
   ],
   "summary": "Write numeric matrices to delimiter-separated text files with MATLAB-compatible precision and offset controls.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/dlmwrite.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
