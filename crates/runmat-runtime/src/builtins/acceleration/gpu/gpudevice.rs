@@ -48,7 +48,7 @@ const GPU_DEVICE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     },
 ];
 
-const GPU_DEVICE_ERROR_NO_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub(crate) const GPU_DEVICE_ERROR_NO_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.GPU_DEVICE.NO_PROVIDER",
     identifier: Some("RunMat:gpuDevice:NoProvider"),
     when: "No acceleration provider is registered.",
@@ -105,9 +105,6 @@ pub const GPU_DEVICE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &GPU_DEVICE_ERRORS,
 };
-
-/// Error used when no acceleration provider is registered.
-pub(crate) const ERR_NO_PROVIDER: &str = GPU_DEVICE_ERROR_NO_PROVIDER.message;
 
 fn gpu_device_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     gpu_device_error_with_message(error.message, error)

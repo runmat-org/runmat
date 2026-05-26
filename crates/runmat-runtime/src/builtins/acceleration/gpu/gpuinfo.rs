@@ -1,6 +1,6 @@
 //! MATLAB-compatible `gpuInfo` builtin that formats the active GPU device metadata.
 
-use super::gpudevice::{self, active_device_struct};
+use super::gpudevice::{active_device_struct, GPU_DEVICE_ERROR_NO_PROVIDER};
 use crate::builtins::acceleration::gpu::type_resolvers::gpuinfo_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -79,7 +79,7 @@ pub const GPU_INFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 async fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
     match active_device_struct() {
         Ok(info) => Ok(Value::String(format_summary(Some(&info)))),
-        Err(err) if err.message() == gpudevice::ERR_NO_PROVIDER => {
+        Err(err) if err.identifier() == GPU_DEVICE_ERROR_NO_PROVIDER.identifier => {
             Ok(Value::String(format_summary(None)))
         }
         Err(err) => Err(err),

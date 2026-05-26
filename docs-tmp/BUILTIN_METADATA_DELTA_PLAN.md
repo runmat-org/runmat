@@ -209,6 +209,7 @@ Rule:
 6. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
 7. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
 8. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
+9. If another module needs to branch on a migrated builtin error, branch on descriptor identifier (`err.identifier() == FOO_ERROR_BAR.identifier`), never on `err.message()` and never via a duplicated forwarded message constant.
 
 ## Shared Helper Reuse Strategy
 
