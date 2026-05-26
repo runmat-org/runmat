@@ -141,10 +141,11 @@ pub(crate) fn parse_contour_args(
     if is_option_token(&rest[0]) {
         return from_implicit_args(name, first, None, &rest);
     }
-    if rest
-        .get(1)
-        .and_then(value_as_string)
-        .is_some_and(|s| !s.trim().is_empty())
+    if is_implicit_level_style_value(&rest[0])
+        && rest
+            .get(1)
+            .and_then(value_as_string)
+            .is_some_and(|s| !s.trim().is_empty())
     {
         return from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]);
     }
@@ -555,7 +556,7 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
                 args.line_color = parse_line_color_option(&opts, &pair[1])?;
             }
             "color" => {
-                args.line_color = ContourLineColor::Color(parse_color_value(&opts, &pair[1])?);
+                args.line_color = parse_line_color_option(&opts, &pair[1])?;
             }
             "linewidth" => {
                 let width = value_as_f64(&pair[1]).ok_or_else(|| {
@@ -684,6 +685,20 @@ fn is_option_token(value: &Value) -> bool {
     value_as_string(value)
         .map(|s| is_contour_option_name(&s))
         .unwrap_or(false)
+}
+
+fn is_implicit_level_style_value(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
+        Value::Tensor(tensor) => {
+            tensor.data.len() == 1
+                || tensor
+                    .data
+                    .first()
+                    .is_some_and(|first| tensor.data.iter().all(|value| value == first))
+        }
+        _ => false,
+    }
 }
 
 fn is_contour_option_name(token: &str) -> bool {
@@ -1738,6 +1753,81 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn implicit_scalar_levels_with_style_parse_correctly() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z.clone(),
+            vec![Value::Num(12.0), Value::String("k".into())],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Count(count) => assert_eq!(count, 12),
+            other => panic!("expected scalar level count, found {other:?}"),
+        }
+        match args.line_color {
+            ContourLineColor::Color(color) => assert_eq!(color.to_array(), [0.0, 0.0, 0.0, 1.0]),
+            other => panic!("expected black linespec, found {other:?}"),
+        }
+
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::Num(12.0),
+                Value::String("LineWidth".into()),
+                Value::Num(2.0),
+            ],
+        )
+        .unwrap();
+        assert!((args.line_width - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn implicit_repeated_single_level_with_style_parses_correctly() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::Tensor(tensor_from(&[0.5, 0.5], 1, 2)),
+                Value::String("k".into()),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.5]),
+            other => panic!("expected repeated single level, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn missing_explicit_z_is_not_reinterpreted_as_implicit_levels() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let y = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+
+        let linespec = parse_contour_args(
+            "contour",
+            x.clone(),
+            vec![y.clone(), Value::String("k".into())],
+        );
+        assert!(linespec.is_err());
+
+        let option = parse_contour_args(
+            "contour",
+            x,
+            vec![y, Value::String("LineWidth".into()), Value::Num(2.0)],
+        );
+        assert!(option.is_err());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn explicit_meshgrid_axes_parse_correctly() {
         setup_plot_tests();
         let x = Value::Tensor(tensor_from(&[10.0, 10.0, 20.0, 20.0], 2, 2));
@@ -1938,6 +2028,34 @@ pub(crate) mod tests {
         match args.line_color {
             ContourLineColor::None => {}
             other => panic!("expected LineColor none, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn color_option_accepts_line_color_tokens() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let none_args = parse_contour_args(
+            "contour",
+            z.clone(),
+            vec![Value::String("Color".into()), Value::String("none".into())],
+        )
+        .unwrap();
+        match none_args.line_color {
+            ContourLineColor::None => {}
+            other => panic!("expected Color none, found {other:?}"),
+        }
+
+        let auto_args = parse_contour_args(
+            "contour",
+            z,
+            vec![Value::String("Color".into()), Value::String("auto".into())],
+        )
+        .unwrap();
+        match auto_args.line_color {
+            ContourLineColor::Auto => {}
+            other => panic!("expected Color auto, found {other:?}"),
         }
     }
 

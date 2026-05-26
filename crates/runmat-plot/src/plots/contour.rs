@@ -99,7 +99,7 @@ impl ContourPlot {
         }
 
         let bounds = self.bounds();
-        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
+        let (vertices, vertex_count, pipeline_type, render_bounds) = if self.line_width > 1.0 {
             let viewport_px = viewport_px.unwrap_or((600, 400));
             let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
             let width_data = self.line_width.max(0.1) * data_per_px;
@@ -112,7 +112,7 @@ impl ContourPlot {
                         Vec3::from_array(segment[0].position),
                         Vec3::from_array(segment[1].position),
                         color,
-                        width_data,
+                        width_data * 0.5,
                     ));
                 } else {
                     let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
@@ -123,11 +123,12 @@ impl ContourPlot {
                 }
             }
             let count = thick.len();
-            (thick, count, PipelineType::Triangles)
+            let render_bounds = expanded_bounds_for_vertices(bounds, &thick);
+            (thick, count, PipelineType::Triangles, render_bounds)
         } else {
             let verts = self.vertices().clone();
             let count = verts.len();
-            (verts, count, PipelineType::Lines)
+            (verts, count, PipelineType::Lines, bounds)
         };
 
         let material = Material {
@@ -149,7 +150,7 @@ impl ContourPlot {
             vertices,
             indices: None,
             gpu_vertices: None,
-            bounds: Some(bounds),
+            bounds: Some(render_bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,
@@ -159,12 +160,13 @@ impl ContourPlot {
     pub fn render_data(&mut self) -> RenderData {
         let using_gpu = self.gpu_vertices.is_some();
         let bounds = self.bounds();
-        let (vertices, vertex_count, gpu_vertices, pipeline_type) = if using_gpu {
+        let (vertices, vertex_count, gpu_vertices, pipeline_type, render_bounds) = if using_gpu {
             (
                 Vec::new(),
                 self.vertex_count,
                 self.gpu_vertices.clone(),
                 PipelineType::Lines,
+                bounds,
             )
         } else {
             let verts = self.vertices().clone();
@@ -191,10 +193,11 @@ impl ContourPlot {
                     }
                 }
                 let count = thick.len();
-                (thick, count, None, PipelineType::Triangles)
+                let render_bounds = expanded_bounds_for_vertices(bounds, &thick);
+                (thick, count, None, PipelineType::Triangles, render_bounds)
             } else {
                 let count = verts.len();
-                (verts, count, None, PipelineType::Lines)
+                (verts, count, None, PipelineType::Lines, bounds)
             }
         };
 
@@ -217,7 +220,7 @@ impl ContourPlot {
             vertices,
             indices: None,
             gpu_vertices,
-            bounds: Some(bounds),
+            bounds: Some(render_bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,
@@ -253,6 +256,13 @@ pub fn contour_bounds_3d(
     )
 }
 
+fn expanded_bounds_for_vertices(mut bounds: BoundingBox, vertices: &[Vertex]) -> BoundingBox {
+    for vertex in vertices {
+        bounds.expand(Vec3::from_array(vertex.position));
+    }
+    bounds
+}
+
 fn create_thick_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32) -> Vec<Vertex> {
     let dir = (end - start).normalize_or_zero();
     let mut normal = dir.cross(Vec3::Z);
@@ -272,4 +282,65 @@ fn create_thick_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32)
         Vertex::new(v2, color),
         Vertex::new(v3, color),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_vertex(x: f32, y: f32, z: f32) -> Vertex {
+        Vertex::new(Vec3::new(x, y, z), Vec4::ONE)
+    }
+
+    #[test]
+    fn viewport_thick_contour_bounds_include_extruded_geometry() {
+        let bounds = BoundingBox::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        let mut contour = ContourPlot::from_vertices(
+            vec![test_vertex(0.0, 0.0, 0.0), test_vertex(1.0, 0.0, 0.0)],
+            0.0,
+            bounds,
+        )
+        .with_line_width(2.0);
+
+        let render_data = contour.render_data_with_viewport(Some((100, 100)));
+        let render_bounds = render_data.bounds.expect("bounds");
+
+        assert!(render_bounds.min.y < bounds.min.y);
+        assert!(render_bounds.max.y > bounds.max.y);
+    }
+
+    #[test]
+    fn non_viewport_thick_3d_contour_bounds_include_extruded_geometry() {
+        let bounds = BoundingBox::new(Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 1.0, 1.0));
+        let mut contour = ContourPlot::from_vertices(
+            vec![test_vertex(0.0, 0.0, 1.0), test_vertex(0.0, 1.0, 1.0)],
+            0.0,
+            bounds,
+        )
+        .with_force_3d(true)
+        .with_line_width(2.0);
+
+        let render_data = contour.render_data();
+        let render_bounds = render_data.bounds.expect("bounds");
+
+        assert!(render_bounds.min.x < bounds.min.x);
+        assert!(render_bounds.max.x > bounds.max.x);
+    }
+
+    #[test]
+    fn viewport_thick_3d_contour_uses_half_width_data() {
+        let bounds = BoundingBox::new(Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 1.0, 1.0));
+        let mut contour = ContourPlot::from_vertices(
+            vec![test_vertex(0.0, 0.0, 1.0), test_vertex(1.0, 0.0, 1.0)],
+            0.0,
+            bounds,
+        )
+        .with_force_3d(true)
+        .with_line_width(4.0);
+
+        let render_data = contour.render_data_with_viewport(Some((100, 100)));
+        let render_bounds = render_data.bounds.expect("bounds");
+
+        assert!((render_bounds.min.y - -0.02).abs() < 1e-6);
+    }
 }
