@@ -1865,7 +1865,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for strings-core case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1885,7 +1886,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for strings-core case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1907,7 +1909,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for strings-core case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -2105,12 +2108,17 @@ mod tests {
             ("strcmp(\"a\", \"b\");", "tf = strcmp(A, B)"),
             ("strcmpi(\"a\", \"b\");", "tf = strcmpi(A, B)"),
             ("strncmp(\"abc\", \"abd\", 2);", "tf = strncmp(A, B, N)"),
+            ("strings();", "S = strings()"),
+            ("strings([2,3]);", "S = strings(sz)"),
+            ("strlength(\"abc\");", "L = strlength(str)"),
+            ("str2double(\"1.0\");", "X = str2double(str)"),
         ];
 
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("expected signature help for strings-core case: {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),

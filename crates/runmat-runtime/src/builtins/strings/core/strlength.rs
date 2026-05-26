@@ -1,6 +1,10 @@
 //! MATLAB-compatible `strlength` builtin for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -40,19 +44,81 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata-only builtin; not eligible for fusion and never emits GPU kernels.",
 };
 
-const ARG_TYPE_ERROR: &str =
-    "strlength: first argument must be a string array, character array, or cell array of character vectors";
-const CELL_ELEMENT_ERROR: &str =
-    "strlength: cell array elements must be character vectors or string scalars";
+const BUILTIN_NAME: &str = "strlength";
 
-fn strlength_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("strlength")
-        .build()
+const STRLENGTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "L",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Character counts for each text element.",
+}];
+
+const STRLENGTH_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String array, character array, or cell array of text scalars.",
+}];
+
+const STRLENGTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "L = strlength(str)",
+    inputs: &STRLENGTH_INPUT,
+    outputs: &STRLENGTH_OUTPUT,
+}];
+
+const STRLENGTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRLENGTH.INVALID_INPUT",
+    identifier: Some("RunMat:strlength:InvalidInput"),
+    when: "Input is not a string array, character array, or cell array of text scalars.",
+    message: "strlength: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const STRLENGTH_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRLENGTH.INVALID_CELL_ELEMENT",
+    identifier: Some("RunMat:strlength:InvalidCellElement"),
+    when: "A cell-array element is not a character row vector or scalar string.",
+    message: "strlength: cell array elements must be character vectors or string scalars",
+};
+
+const STRLENGTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRLENGTH.INTERNAL",
+    identifier: Some("RunMat:strlength:InternalError"),
+    when: "Internal tensor construction failed while building length results.",
+    message: "strlength: internal error",
+};
+
+const STRLENGTH_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    STRLENGTH_ERROR_INVALID_INPUT,
+    STRLENGTH_ERROR_INVALID_CELL_ELEMENT,
+    STRLENGTH_ERROR_INTERNAL,
+];
+
+pub const STRLENGTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRLENGTH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRLENGTH_ERRORS,
+};
+
+fn strlength_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strlength_error_with_message(error.message, error)
+}
+
+fn strlength_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "strlength")
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(
@@ -62,6 +128,7 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
     keywords = "strlength,string length,text,count,characters",
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),
+    descriptor(crate::builtins::strings::core::strlength::STRLENGTH_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::strlength"
 )]
 async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -73,7 +140,7 @@ async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::String(text) => Ok(Value::Num(string_scalar_length(&text))),
         Value::CharArray(array) => strlength_char_array(array),
         Value::Cell(cell) => strlength_cell_array(cell),
-        _ => Err(strlength_flow(ARG_TYPE_ERROR)),
+        _ => Err(strlength_error(&STRLENGTH_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -84,7 +151,7 @@ fn strlength_string_array(array: StringArray) -> BuiltinResult<Value> {
         lengths.push(string_scalar_length(text));
     }
     let tensor =
-        Tensor::new(lengths, shape).map_err(|e| strlength_flow(format!("strlength: {e}")))?;
+        Tensor::new(lengths, shape).map_err(|_| strlength_error(&STRLENGTH_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -100,7 +167,7 @@ fn strlength_char_array(array: CharArray) -> BuiltinResult<Value> {
         lengths.push(length);
     }
     let tensor = Tensor::new(lengths, vec![rows, 1])
-        .map_err(|e| strlength_flow(format!("strlength: {e}")))?;
+        .map_err(|_| strlength_error(&STRLENGTH_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -117,14 +184,16 @@ fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
                 Value::String(text) => string_scalar_length(text),
                 Value::StringArray(sa) if sa.data.len() == 1 => string_scalar_length(&sa.data[0]),
                 Value::CharArray(char_vec) if char_vec.rows == 1 => char_vec.cols as f64,
-                Value::CharArray(_) => return Err(strlength_flow(CELL_ELEMENT_ERROR)),
-                _ => return Err(strlength_flow(CELL_ELEMENT_ERROR)),
+                Value::CharArray(_) => {
+                    return Err(strlength_error(&STRLENGTH_ERROR_INVALID_CELL_ELEMENT));
+                }
+                _ => return Err(strlength_error(&STRLENGTH_ERROR_INVALID_CELL_ELEMENT)),
             };
             lengths.push(length);
         }
     }
     let tensor = Tensor::new(lengths, vec![rows, cols])
-        .map_err(|e| strlength_flow(format!("strlength: {e}")))?;
+        .map_err(|_| strlength_error(&STRLENGTH_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -295,7 +364,7 @@ pub(crate) mod tests {
     #[test]
     fn strlength_errors_on_invalid_input() {
         let err = error_message(strlength_builtin(Value::Num(1.0)).unwrap_err());
-        assert_eq!(err, ARG_TYPE_ERROR);
+        assert_eq!(err, STRLENGTH_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -308,7 +377,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let err = error_message(strlength_builtin(Value::Cell(cell)).unwrap_err());
-        assert_eq!(err, CELL_ELEMENT_ERROR);
+        assert_eq!(err, STRLENGTH_ERROR_INVALID_CELL_ELEMENT.message);
     }
 
     #[test]

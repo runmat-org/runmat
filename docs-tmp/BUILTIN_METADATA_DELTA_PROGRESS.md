@@ -21,9 +21,10 @@
 | Wave 16 (Struct Core C) | `getfield` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::getfield::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for scalar/nested/leading-index forms + stable descriptor error rows + descriptor-attached LSP signature-help coverage |
 | Wave 17 (Struct Core D) | `setfield` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::setfield::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for scalar/nested/leading-index assignment forms + stable descriptor error row set + LSP signature-help coverage |
 | Wave 18 (Strings Core Compare) | `strcmp`, `strcmpi`, `strncmp` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::strcmp::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strcmpi::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strncmp::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for case-sensitive, case-insensitive, and prefix text comparison builtins + stable descriptor error rows + LSP signature-help coverage |
+| Wave 19 (Strings Core Basics) | `strings`, `string.empty`, `strlength`, `str2double` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::strings::tests::`; `cargo test -p runmat-runtime builtins::strings::core::string_empty::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strlength::tests::`; `cargo test -p runmat-runtime builtins::strings::core::str2double::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core string array creation and scalar/array text numeric metadata conversions + descriptor-row stable errors + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `80`
-- Remaining: `488`
+- Migrated with attached descriptor: `84`
+- Remaining: `484`
