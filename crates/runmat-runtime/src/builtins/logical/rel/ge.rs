@@ -295,7 +295,7 @@ fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Valu
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| ge_error_with_message(format!("ge: {e}"), &GE_ERROR_INVALID_INPUT))
+            .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))
     }
 }
 
@@ -326,21 +326,13 @@ impl GeOperand {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|err| {
-                        ge_error_with_message(
-                            format!("{BUILTIN_NAME}: {err}"),
-                            &GE_ERROR_INVALID_INPUT,
-                        )
-                    })?;
+                    .map_err(|_| ge_error(&GE_ERROR_INVALID_INPUT))?;
                 Ok(GeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
                 Err(ge_error(&GE_ERROR_COMPLEX_UNSUPPORTED))
             }
-            unsupported => Err(ge_error_with_message(
-                format!("ge: unsupported input type {unsupported:?}"),
-                &GE_ERROR_INVALID_INPUT,
-            )),
+            _ => Err(ge_error(&GE_ERROR_INVALID_INPUT)),
         }
     }
 }
@@ -350,7 +342,7 @@ fn numeric_ge(
     rhs: &NumericBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| ge_error_with_message(err, &GE_ERROR_SIZE_MISMATCH))?;
+        .map_err(|_| ge_error(&GE_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -381,7 +373,7 @@ fn string_ge(
     rhs: &StringBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| ge_error_with_message(err, &GE_ERROR_SIZE_MISMATCH))?;
+        .map_err(|_| ge_error(&GE_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));

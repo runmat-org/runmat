@@ -300,7 +300,7 @@ fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Valu
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| eq_error_with_message(format!("eq: {e}"), &EQ_ERROR_INVALID_INPUT))
+            .map_err(|_| eq_error(&EQ_ERROR_INVALID_INPUT))
     }
 }
 
@@ -433,18 +433,10 @@ impl EqOperand {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|err| {
-                        eq_error_with_message(
-                            format!("{BUILTIN_NAME}: {err}"),
-                            &EQ_ERROR_INVALID_INPUT,
-                        )
-                    })?;
+                    .map_err(|_| eq_error(&EQ_ERROR_INVALID_INPUT))?;
                 Ok(EqOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
-            unsupported => Err(eq_error_with_message(
-                format!("eq: unsupported input type {unsupported:?}"),
-                &EQ_ERROR_INVALID_INPUT,
-            )),
+            _ => Err(eq_error(&EQ_ERROR_INVALID_INPUT)),
         }
     }
 }
@@ -454,7 +446,7 @@ fn numeric_eq(
     rhs: &NumericBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| eq_error_with_message(err, &EQ_ERROR_SIZE_MISMATCH))?;
+        .map_err(|_| eq_error(&EQ_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -485,7 +477,7 @@ fn complex_eq(
     rhs: &ComplexBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| eq_error_with_message(err, &EQ_ERROR_SIZE_MISMATCH))?;
+        .map_err(|_| eq_error(&EQ_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -520,7 +512,7 @@ fn string_eq(
     rhs: &StringBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| eq_error_with_message(err, &EQ_ERROR_SIZE_MISMATCH))?;
+        .map_err(|_| eq_error(&EQ_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));

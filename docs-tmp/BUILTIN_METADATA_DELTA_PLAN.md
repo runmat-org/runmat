@@ -245,6 +245,7 @@ Disallowed source:
 2. Do not invent error codes ad hoc; use stable code constants with one-to-one mapping to runtime error branches.
 3. Do not duplicate stable identifier/message strings in separate ad-hoc constants; descriptor rows are the canonical identifier/message source for migrated builtins.
 4. Do not build runtime errors with hard-coded identifiers/messages when a descriptor row already exists for that branch.
+5. When remapping parser/broadcast/helper failures into builtin error branches, throw via the descriptor row helper (`*_error(&FOO_ERROR_...)`) rather than `format!(...)` message copies.
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 
