@@ -45,6 +45,28 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("zeros").build()
 }
 
+fn zeros_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    zeros_error_with_message(error.message, error)
+}
+
+fn zeros_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    zeros_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn zeros_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("zeros");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
@@ -176,25 +198,39 @@ const ZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
 ];
 
-const ZEROS_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.ZEROS.LIKE_EXPECTED_PROTOTYPE",
-        identifier: None,
-        when: "The 'like' keyword is provided without a prototype argument.",
-        message: "zeros: expected prototype after 'like'",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ZEROS.CLASS_CONFLICT",
-        identifier: None,
-        when: "A class keyword and a 'like' prototype are both provided.",
-        message: "zeros: cannot combine 'like' with other class specifiers",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ZEROS.UNRECOGNIZED_OPTION",
-        identifier: None,
-        when: "A trailing option string is not a supported class keyword.",
-        message: "zeros: unrecognised option",
-    },
+const ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.LIKE_EXPECTED_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' keyword is provided without a prototype argument.",
+    message: "zeros: expected prototype after 'like'",
+};
+
+const ZEROS_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.CLASS_CONFLICT",
+    identifier: None,
+    when: "A class keyword and a 'like' prototype are both provided.",
+    message: "zeros: cannot combine 'like' with other class specifiers",
+};
+
+const ZEROS_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.UNRECOGNIZED_OPTION",
+    identifier: None,
+    when: "A trailing option string is not a supported class keyword.",
+    message: "zeros: unrecognised option",
+};
+
+const ZEROS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.LIKE_DUPLICATE",
+    identifier: None,
+    when: "The 'like' keyword is specified more than once.",
+    message: "zeros: multiple 'like' specifications are not supported",
+};
+
+const ZEROS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    ZEROS_ERROR_CLASS_CONFLICT,
+    ZEROS_ERROR_UNRECOGNIZED_OPTION,
+    ZEROS_ERROR_LIKE_DUPLICATE,
 ];
 
 pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -275,17 +311,13 @@ impl ParsedZeros {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: multiple 'like' specifications are not supported",
-                            ));
+                            return Err(zeros_error(&ZEROS_ERROR_LIKE_DUPLICATE));
                         }
                         if class_override.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with other class specifiers",
-                            ));
+                            return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err(builtin_error("zeros: expected prototype after 'like'"));
+                            return Err(zeros_error(&ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -296,8 +328,9 @@ impl ParsedZeros {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'logical'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "logical class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Logical);
@@ -306,8 +339,9 @@ impl ParsedZeros {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'double'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "double class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Double);
@@ -316,8 +350,9 @@ impl ParsedZeros {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'single'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "single class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Single);
@@ -326,8 +361,9 @@ impl ParsedZeros {
                     }
                     "gpuArray" | "gpuarray" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'gpuArray'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "gpuArray class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::GpuArray);
@@ -335,9 +371,10 @@ impl ParsedZeros {
                         continue;
                     }
                     other => {
-                        return Err(builtin_error(format!(
-                            "zeros: unrecognised option '{other}'"
-                        )));
+                        return Err(zeros_error_with_detail(
+                            &ZEROS_ERROR_UNRECOGNIZED_OPTION,
+                            format!("'{other}'"),
+                        ));
                     }
                 }
             }

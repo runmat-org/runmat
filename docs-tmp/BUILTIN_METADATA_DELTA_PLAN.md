@@ -204,14 +204,14 @@ Rule:
 1. Prefer profile constructor.
 2. Fall back to explicit struct only when behavior is uniquely shaped.
 3. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
-4. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable string constants or repeated literal throw strings.
+4. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable constants or repeated literal throw strings.
 5. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
 6. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
 7. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
 8. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
 9. If another module needs to branch on a migrated builtin error, branch on descriptor identifier (`err.identifier() == FOO_ERROR_BAR.identifier`), never on `err.message()` and never via a duplicated forwarded message constant.
-10. Migration audit guardrail: migrated builtins must not define standalone `const ...: &str = "RunMat:..."` identifier constants when the same identifier already exists in a `BuiltinErrorDescriptor` row. Keep identifier/message text authored only in descriptor rows.
-11. Stable-branch throw-sites must call `foo_error(&FOO_ERROR_...)` (or equivalent) so the emitted message comes from `FOO_ERROR_....message`; do not restate the same literal message string in the branch.
+10. Migration audit guardrail: migrated builtins must not define standalone stable error constants for identifier/message/code outside descriptor rows (for example `const ...: &str = "RunMat:..."`, `const ...: &str = "foo: ..."`, or `const ...: &str = "RM.FOO.BAR"` when they mirror a descriptor row). Keep stable identifier/message/code authored only in descriptor rows.
+11. Stable-branch throw-sites must call `foo_error(&FOO_ERROR_...)` (or equivalent) so the emitted message/code/identifier come from the descriptor row; do not restate the same literal message string or parallel code/identifier constants in the branch.
 12. Keep the helper split explicit:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches.
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
@@ -253,7 +253,7 @@ Disallowed source:
 
 1. Do not reverse-engineer signatures from markdown behavior paragraphs.
 2. Do not invent error codes ad hoc; use stable code constants with one-to-one mapping to runtime error branches.
-3. Do not duplicate stable identifier/message strings in separate ad-hoc constants; descriptor rows are the canonical identifier/message source for migrated builtins.
+3. Do not duplicate stable identifier/message/code in separate ad-hoc constants; descriptor rows are the canonical source for migrated builtins.
 4. Do not build runtime errors with hard-coded identifiers/messages when a descriptor row already exists for that branch.
 5. When remapping parser/broadcast/helper failures into builtin error branches, throw via the descriptor row helper (`*_error(&FOO_ERROR_...)`) rather than `format!(...)` message copies.
 6. If a branch needs extra context in the text, wrap the descriptor message (`format!("{base}: {detail}")`) while still anchoring the branch to that descriptor row.

@@ -44,6 +44,28 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("ones").build()
 }
 
+fn ones_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    ones_error_with_message(error.message, error)
+}
+
+fn ones_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    ones_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn ones_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("ones");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn ones_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
@@ -175,25 +197,39 @@ const ONES_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
 ];
 
-const ONES_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.ONES.LIKE_EXPECTED_PROTOTYPE",
-        identifier: None,
-        when: "The 'like' keyword is provided without a prototype argument.",
-        message: "ones: expected prototype after 'like'",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ONES.CLASS_CONFLICT",
-        identifier: None,
-        when: "A class keyword and a 'like' prototype are both provided.",
-        message: "ones: cannot combine 'like' with other class specifiers",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.ONES.UNRECOGNIZED_OPTION",
-        identifier: None,
-        when: "A trailing option string is not a supported class keyword.",
-        message: "ones: unrecognised option",
-    },
+const ONES_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.LIKE_EXPECTED_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' keyword is provided without a prototype argument.",
+    message: "ones: expected prototype after 'like'",
+};
+
+const ONES_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.CLASS_CONFLICT",
+    identifier: None,
+    when: "A class keyword and a 'like' prototype are both provided.",
+    message: "ones: cannot combine 'like' with other class specifiers",
+};
+
+const ONES_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.UNRECOGNIZED_OPTION",
+    identifier: None,
+    when: "A trailing option string is not a supported class keyword.",
+    message: "ones: unrecognised option",
+};
+
+const ONES_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ONES.LIKE_DUPLICATE",
+    identifier: None,
+    when: "The 'like' keyword is specified more than once.",
+    message: "ones: multiple 'like' specifications are not supported",
+};
+
+const ONES_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ONES_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    ONES_ERROR_CLASS_CONFLICT,
+    ONES_ERROR_UNRECOGNIZED_OPTION,
+    ONES_ERROR_LIKE_DUPLICATE,
 ];
 
 pub const ONES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -271,17 +307,13 @@ impl ParsedOnes {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "ones: multiple 'like' specifications are not supported",
-                            ));
+                            return Err(ones_error(&ONES_ERROR_LIKE_DUPLICATE));
                         }
                         if class_override.is_some() {
-                            return Err(builtin_error(
-                                "ones: cannot combine 'like' with other class specifiers",
-                            ));
+                            return Err(ones_error(&ONES_ERROR_CLASS_CONFLICT));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err(builtin_error("ones: expected prototype after 'like'"));
+                            return Err(ones_error(&ONES_ERROR_LIKE_EXPECTED_PROTOTYPE));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -292,8 +324,9 @@ impl ParsedOnes {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "ones: cannot combine 'like' with 'logical'",
+                            return Err(ones_error_with_detail(
+                                &ONES_ERROR_CLASS_CONFLICT,
+                                "logical class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Logical);
@@ -302,7 +335,10 @@ impl ParsedOnes {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error("ones: cannot combine 'like' with 'double'"));
+                            return Err(ones_error_with_detail(
+                                &ONES_ERROR_CLASS_CONFLICT,
+                                "double class override",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -310,16 +346,20 @@ impl ParsedOnes {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error("ones: cannot combine 'like' with 'single'"));
+                            return Err(ones_error_with_detail(
+                                &ONES_ERROR_CLASS_CONFLICT,
+                                "single class override",
+                            ));
                         }
                         class_override = Some(OutputTemplate::Single);
                         idx += 1;
                         continue;
                     }
                     other => {
-                        return Err(builtin_error(format!(
-                            "ones: unrecognised option '{other}'"
-                        )));
+                        return Err(ones_error_with_detail(
+                            &ONES_ERROR_UNRECOGNIZED_OPTION,
+                            format!("'{other}'"),
+                        ));
                     }
                 }
             }
