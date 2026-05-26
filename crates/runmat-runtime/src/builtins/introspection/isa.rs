@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::isa_type;
-use crate::{build_runtime_error, BuiltinResult};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::handle_is_logical;
 use runmat_builtins::{
     get_class, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
@@ -74,12 +74,16 @@ const ISA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
     outputs: &ISA_OUTPUT,
 }];
 
-const ISA_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
+const BUILTIN_NAME: &str = "isa";
+
+const ISA_ERROR_TYPE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.ISA.TYPE_NAME_INVALID",
     identifier: None,
     when: "Second argument is not a string scalar or row character vector.",
     message: "isa: TYPE must be a string scalar or character vector",
-}];
+};
+
+const ISA_ERRORS: [BuiltinErrorDescriptor; 1] = [ISA_ERROR_TYPE_NAME_INVALID];
 
 pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISA_SIGNATURES,
@@ -111,33 +115,26 @@ fn parse_type_name(value: &Value) -> BuiltinResult<String> {
             if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() {
                 Ok(sa.data[0].clone())
             } else {
-                Err(
-                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                        .with_builtin("isa")
-                        .build()
-                        .into(),
-                )
+                Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(ca.data.iter().collect())
             } else {
-                Err(
-                    build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                        .with_builtin("isa")
-                        .build()
-                        .into(),
-                )
+                Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
         }
-        _ => Err(
-            build_runtime_error("isa: TYPE must be a string scalar or character vector")
-                .with_builtin("isa")
-                .build()
-                .into(),
-        ),
+        _ => Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into()),
     }
+}
+
+fn isa_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn value_is_a(value: &Value, requested: &str) -> bool {

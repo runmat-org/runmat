@@ -204,10 +204,11 @@ Rule:
 1. Prefer profile constructor.
 2. Fall back to explicit struct only when behavior is uniquely shaped.
 3. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
-4. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
-5. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
-6. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
-7. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
+4. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable string constants or repeated literal throw strings.
+5. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
+6. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
+7. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
+8. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
 
 ## Shared Helper Reuse Strategy
 
@@ -256,6 +257,10 @@ Disallowed source:
    - Use `foo_error(&FOO_ERROR_...)` for stable branches.
    - Use `foo_error_with_detail(&FOO_ERROR_..., "...")` (or `format!(...)`) only for contextual/internal details.
    - Do not repeat the stable branch message prefix in callsites (avoid literal `"foo: ..."` throw strings once descriptor rows exist).
+9. Post-migration hygiene check for each touched builtin file:
+   - no `const IDENT_*` or `const *_ERROR: &str` for stable identifier/message rows
+   - no direct `build_runtime_error("...stable branch message...")` in migrated runtime paths
+   - all stable branches throw through descriptor-row helpers
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 
