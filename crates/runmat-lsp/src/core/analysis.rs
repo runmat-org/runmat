@@ -2600,6 +2600,19 @@ mod tests {
             ("fclose(3);", "status = fclose(fid)"),
             ("fclose(\"all\");", "status = fclose(\"all\")"),
             ("feof(3);", "tf = feof(fid)"),
+            ("fileread(\"demo.txt\");", "text = fileread(filename)"),
+            (
+                "fileread(\"demo.txt\", \"Encoding\", \"utf-8\");",
+                "text = fileread(filename, \"Encoding\", encoding)",
+            ),
+            (
+                "filewrite(\"demo.txt\", \"abc\");",
+                "count = filewrite(filename, data)",
+            ),
+            (
+                "filewrite(\"demo.txt\", \"abc\", \"WriteMode\", \"append\");",
+                "count = filewrite(filename, data, ..., \"WriteMode\", mode)",
+            ),
             ("fgetl(3);", "tline = fgetl(fid)"),
             ("fgets(3);", "tline = fgets(fid)"),
             ("fgets(3, 10);", "tline = fgets(fid, nchar)"),
