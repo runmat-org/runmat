@@ -1950,6 +1950,7 @@ mod tests {
             ("isa(1, \"double\");", "tf = isa(A, type_name)"),
             ("ischar('abc');", "tf = ischar(A)"),
             ("isstring(\"abc\");", "tf = isstring(A)"),
+            ("which(\"sin\");", "result = which(name)"),
             ("clear(\"x\");", "clear(name, ...)"),
             (
                 "clearvars(\"x\", \"-except\", \"y\");",

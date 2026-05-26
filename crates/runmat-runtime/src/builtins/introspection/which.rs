@@ -7,7 +7,11 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use runmat_builtins::{builtin_functions, CharArray, Value};
+use runmat_builtins::{
+    builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, CharArray, Value,
+};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
@@ -29,6 +33,133 @@ const ERROR_NOT_ENOUGH_ARGS: &str = "which: not enough input arguments";
 const ERROR_TOO_MANY_ARGS: &str = "which: too many input arguments";
 const ERROR_NAME_ARG: &str = "which: name must be a character vector or string scalar";
 const ERROR_OPTION_ARG: &str = "which: option must be a character vector or string scalar";
+
+const WHICH_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "result",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Single resolution result string.",
+}];
+
+const WHICH_OUTPUT_ALL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "results",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "All matching resolution strings (cell array of char rows).",
+}];
+
+const WHICH_SIG_NAME_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Name to resolve.",
+}];
+
+const WHICH_SIG_NAME_OPTION_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name to resolve.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"-all\""),
+        description: "Optional mode filter (-all|-builtin|-var|-file).",
+    },
+];
+
+const WHICH_SIG_OPTION_NAME_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Mode filter (-all|-builtin|-var|-file).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name to resolve.",
+    },
+];
+
+const WHICH_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "result = which(name)",
+        inputs: &WHICH_SIG_NAME_INPUTS,
+        outputs: &WHICH_OUTPUT_SINGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "result = which(name, option)",
+        inputs: &WHICH_SIG_NAME_OPTION_INPUTS,
+        outputs: &WHICH_OUTPUT_SINGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "result = which(option, name)",
+        inputs: &WHICH_SIG_OPTION_NAME_INPUTS,
+        outputs: &WHICH_OUTPUT_SINGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "results = which(\"-all\", name)",
+        inputs: &WHICH_SIG_OPTION_NAME_INPUTS,
+        outputs: &WHICH_OUTPUT_ALL,
+    },
+];
+
+const WHICH_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    BuiltinErrorDescriptor {
+        code: "RM.WHICH.ARG_COUNT_MIN",
+        identifier: None,
+        when: "No input arguments are provided.",
+        message: "which: not enough input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHICH.ARG_COUNT_MAX",
+        identifier: None,
+        when: "More than one name argument is provided.",
+        message: "which: too many input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHICH.NAME_ARG_TYPE",
+        identifier: None,
+        when: "Name argument is not a char row or string scalar.",
+        message: "which: name must be a character vector or string scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHICH.OPTION_ARG_TYPE",
+        identifier: None,
+        when: "Option argument is not a char row or string scalar.",
+        message: "which: option must be a character vector or string scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHICH.OPTION_CONFLICT",
+        identifier: None,
+        when: "Conflicting mode options are combined.",
+        message: "which: conflicting option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHICH.OPTION_UNRECOGNIZED",
+        identifier: None,
+        when: "An unrecognized mode option is provided.",
+        message: "which: unrecognized option",
+    },
+];
+
+pub const WHICH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &WHICH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &WHICH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::which")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -84,6 +215,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
     accel = "cpu",
     type_resolver(which_type),
+    descriptor(crate::builtins::introspection::which::WHICH_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::which"
 )]
 async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
