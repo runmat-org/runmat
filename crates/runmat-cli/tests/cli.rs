@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
@@ -17,12 +17,28 @@ fn get_binary_path() -> PathBuf {
 
 // Helper function to run runmat with arguments
 fn run_runmat(args: &[&str]) -> std::process::Output {
+    let temp_dir = TempDir::new().expect("failed to create temp dir for config");
+    let config_path = write_test_config(temp_dir.path());
     Command::new(get_binary_path())
         .args(args)
-        .env("RUNMAT_ACCEL_ENABLE", "0")
-        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
+        .env("RUNMAT_CONFIG", &config_path)
+        .env("NO_GUI", "1")
         .output()
         .expect("Failed to execute runmat binary")
+}
+
+fn write_test_config(dir: &Path) -> PathBuf {
+    let config_path = dir.join("runmat.toml");
+    fs::write(
+        &config_path,
+        r#"
+[runtime.accelerate]
+enabled = false
+provider = "inprocess"
+"#,
+    )
+    .expect("failed to write test config");
+    config_path
 }
 
 #[test]
@@ -343,10 +359,12 @@ fn test_repl_command() {
 
 #[test]
 fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let config_path = write_test_config(temp_dir.path());
     let mut child = Command::new(get_binary_path())
         .args(["repl"])
-        .env("RUNMAT_ACCEL_ENABLE", "0")
-        .env("RUNMAT_ACCEL_PROVIDER", "inprocess")
+        .env("RUNMAT_CONFIG", &config_path)
+        .env("NO_GUI", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()?;
