@@ -6,6 +6,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::structs::type_resolvers::fieldnames_type;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, HandleRef, Listener, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -40,10 +42,73 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion planner treats fieldnames as a host inspector; it terminates any pending fusion group.",
 };
 
-fn fieldnames_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("fieldnames")
-        .build()
+const BUILTIN_NAME: &str = "fieldnames";
+
+const FIELDNAMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "names",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell array of field names.",
+}];
+
+const FIELDNAMES_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct, struct array, or object input.",
+}];
+
+const FIELDNAMES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "names = fieldnames(S)",
+    inputs: &FIELDNAMES_INPUTS,
+    outputs: &FIELDNAMES_OUTPUT,
+}];
+
+const FIELDNAMES_ERROR_INVALID_TARGET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.INVALID_TARGET",
+    identifier: Some("RunMat:fieldnames:InvalidTarget"),
+    when: "Input is not a struct, struct array, or object value.",
+    message: "fieldnames: expected struct, struct array, or object",
+};
+
+const FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.STRUCT_ARRAY_CONTENTS",
+    identifier: Some("RunMat:fieldnames:StructArrayContents"),
+    when: "Struct-array backing cell contains non-struct elements.",
+    message: "fieldnames: expected struct array contents to be structs",
+};
+
+const FIELDNAMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIELDNAMES.INTERNAL",
+    identifier: Some("RunMat:fieldnames:InternalError"),
+    when: "Building the output cell array or internal metadata processing fails.",
+    message: "fieldnames: internal error",
+};
+
+const FIELDNAMES_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    FIELDNAMES_ERROR_INVALID_TARGET,
+    FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS,
+    FIELDNAMES_ERROR_INTERNAL,
+];
+
+pub const FIELDNAMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FIELDNAMES_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FIELDNAMES_ERRORS,
+};
+
+fn fieldnames_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -52,6 +117,7 @@ fn fieldnames_flow(message: impl Into<String>) -> RuntimeError {
     summary = "List the field names of scalar structs or struct arrays.",
     keywords = "fieldnames,struct,introspection,fields",
     type_resolver(fieldnames_type),
+    descriptor(crate::builtins::structs::core::fieldnames::FIELDNAMES_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
@@ -62,9 +128,13 @@ async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
         Value::HandleObject(handle) => collect_handle_fieldnames(handle)?,
         Value::Listener(listener) => collect_listener_fieldnames(listener),
         other => {
-            return Err(fieldnames_flow(format!(
-                "fieldnames: expected struct, struct array, or object (got {other:?})"
-            )))
+            return Err(fieldnames_error_with_message(
+                format!(
+                    "{} (got {other:?})",
+                    FIELDNAMES_ERROR_INVALID_TARGET.message
+                ),
+                &FIELDNAMES_ERROR_INVALID_TARGET,
+            ))
         }
     };
 
@@ -73,7 +143,9 @@ async fn fieldnames_builtin(value: Value) -> BuiltinResult<Value> {
         .into_iter()
         .map(|name| Value::CharArray(CharArray::new_row(&name)))
         .collect();
-    crate::make_cell(cells, rows, 1).map_err(|e| fieldnames_flow(format!("fieldnames: {e}")))
+    crate::make_cell(cells, rows, 1).map_err(|e| {
+        fieldnames_error_with_message(format!("fieldnames: {e}"), &FIELDNAMES_ERROR_INTERNAL)
+    })
 }
 
 fn collect_struct_fieldnames(st: &StructValue) -> Vec<String> {
@@ -87,8 +159,9 @@ fn collect_struct_array_fieldnames(array: &CellArray) -> BuiltinResult<Vec<Strin
     for handle in array.data.iter() {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(st) = value else {
-            return Err(fieldnames_flow(
-                "fieldnames: expected struct array contents to be structs",
+            return Err(fieldnames_error_with_message(
+                FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS.message,
+                &FIELDNAMES_ERROR_STRUCT_ARRAY_CONTENTS,
             ));
         };
         names.extend(st.fields.keys().cloned());

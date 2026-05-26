@@ -16,9 +16,10 @@
 | Wave 11 (Logical Bitwise) | `and`, `or`, `xor`, `not` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::logical::bit::` | Attached descriptors for unary/binary logical bit ops + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 | Wave 12 (Logical Conversion) | `logical` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::logical::ops::` | Attached descriptor for logical conversion + stable runtime identifiers/messages mapped through descriptor rows + LSP signature-help coverage |
 | Wave 13 (Timing) | `pause`, `tic`, `toc`, `timeit` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; `cargo test -p runmat-runtime builtins::timing::` | Attached descriptors for timing builtins + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
+| Wave 14 (Struct Core A) | `fieldnames`, `isfield`, `struct`, `rmfield` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::structs::core::fieldnames::tests::`; `cargo test -p runmat-runtime builtins::structs::core::isfield::tests::`; `cargo test -p runmat-runtime builtins::structs::core::struct::tests::`; `cargo test -p runmat-runtime builtins::structs::core::rmfield::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors + descriptor-row canonical error identifiers/messages (no duplicated identifier/message constants) + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `70`
-- Remaining: `498`
+- Migrated with attached descriptor: `74`
+- Remaining: `494`

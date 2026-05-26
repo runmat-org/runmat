@@ -67,7 +67,6 @@ impl Default for PauseState {
 }
 
 const BUILTIN_NAME: &str = "pause";
-const MSG_STATE_LOCK: &str = "pause: failed to acquire pause state";
 
 const PAUSE_OUTPUT_EMPTY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "out",
@@ -461,16 +460,15 @@ fn state_value(enabled: bool) -> Value {
 }
 
 fn pause_enabled() -> Result<bool, RuntimeError> {
-    PAUSE_STATE
-        .read()
-        .map(|guard| guard.enabled)
-        .map_err(|_| pause_error_with_message(MSG_STATE_LOCK, &PAUSE_ERROR_STATE_LOCK))
+    PAUSE_STATE.read().map(|guard| guard.enabled).map_err(|_| {
+        pause_error_with_message(PAUSE_ERROR_STATE_LOCK.message, &PAUSE_ERROR_STATE_LOCK)
+    })
 }
 
 fn set_pause_enabled(next: bool) -> Result<bool, RuntimeError> {
-    let mut guard = PAUSE_STATE
-        .write()
-        .map_err(|_| pause_error_with_message(MSG_STATE_LOCK, &PAUSE_ERROR_STATE_LOCK))?;
+    let mut guard = PAUSE_STATE.write().map_err(|_| {
+        pause_error_with_message(PAUSE_ERROR_STATE_LOCK.message, &PAUSE_ERROR_STATE_LOCK)
+    })?;
     let previous = guard.enabled;
     guard.enabled = next;
     Ok(previous)

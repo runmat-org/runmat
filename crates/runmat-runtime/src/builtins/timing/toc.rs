@@ -12,9 +12,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::timing::tic::{
-    decode_handle, take_latest_start, TOC_INVALID_HANDLE_IDENTIFIER, TOC_INVALID_HANDLE_MESSAGE,
-};
+use crate::builtins::timing::tic::{decode_handle, take_latest_start};
 use crate::builtins::timing::type_resolvers::toc_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::timing::toc")]
@@ -85,9 +83,9 @@ const TOC_ERROR_NO_MATCHING_TIC: BuiltinErrorDescriptor = BuiltinErrorDescriptor
 
 const TOC_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TOC.INVALID_HANDLE",
-    identifier: Some(TOC_INVALID_HANDLE_IDENTIFIER),
+    identifier: Some("RunMat:toc:InvalidTimerHandle"),
     when: "The timer handle is missing, malformed, non-finite, negative, or points to a future instant.",
-    message: TOC_INVALID_HANDLE_MESSAGE,
+    message: "toc: invalid timer handle",
 };
 
 const TOC_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -156,7 +154,7 @@ fn elapsed_from_value(value: &Value) -> Result<f64, crate::RuntimeError> {
     let handle = f64::try_from(value).map_err(|_| {
         toc_error_with_message(TOC_ERROR_INVALID_HANDLE.message, &TOC_ERROR_INVALID_HANDLE)
     })?;
-    let instant = decode_handle(handle, BUILTIN_NAME)?;
+    let instant = decode_handle(handle, BUILTIN_NAME, &TOC_ERROR_INVALID_HANDLE)?;
     let now = Instant::now();
     let elapsed = now.checked_duration_since(instant).ok_or_else(|| {
         toc_error_with_message(TOC_ERROR_INVALID_HANDLE.message, &TOC_ERROR_INVALID_HANDLE)

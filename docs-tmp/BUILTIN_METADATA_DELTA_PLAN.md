@@ -204,6 +204,7 @@ Rule:
 1. Prefer profile constructor.
 2. Fall back to explicit struct only when behavior is uniquely shaped.
 3. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
+4. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
 
 ## Shared Helper Reuse Strategy
 
@@ -243,6 +244,7 @@ Disallowed source:
 1. Do not reverse-engineer signatures from markdown behavior paragraphs.
 2. Do not invent error codes ad hoc; use stable code constants with one-to-one mapping to runtime error branches.
 3. Do not duplicate stable identifier/message strings in separate ad-hoc constants; descriptor rows are the canonical identifier/message source for migrated builtins.
+4. Do not build runtime errors with hard-coded identifiers/messages when a descriptor row already exists for that branch.
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 
@@ -256,6 +258,7 @@ For each builtin `B`, follow this exact loop:
 6. Encode error identifiers, stable error codes, and trigger text from actual runtime errors used by `B`.
    - Define per-error descriptor constants (for example `FOO_ERROR_INVALID_INPUT`) and build `FOO_ERRORS` from those constants.
    - Runtime throw helpers must take a descriptor row (or descriptor-derived identifier) rather than re-declaring identifier/message literals.
+   - If a shared helper in another module needs error context, pass `&BuiltinErrorDescriptor` into that helper instead of exporting free-floating identifier/message constants.
 7. Keep execution traits sourced from `BuiltinFunction` + semantics + GPU spec; descriptor does not duplicate these fields.
 8. Keep JSON narrative unchanged unless it contradicts typed metadata.
 9. Set `output_mode` and `completion_policy` explicitly for `B`.
