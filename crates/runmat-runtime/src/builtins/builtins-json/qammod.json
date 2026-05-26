@@ -1,0 +1,97 @@
+{
+  "title": "qammod",
+  "category": "comms/modulation",
+  "keywords": [
+    "qammod",
+    "qam",
+    "modulation",
+    "communications",
+    "gray",
+    "binary",
+    "constellation",
+    "gpu"
+  ],
+  "summary": "Map integer symbols onto a rectangular QAM complex-baseband constellation.",
+  "references": [
+    "https://www.mathworks.com/help/comm/ref/qammod.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64",
+      "i32",
+      "bool"
+    ],
+    "broadcasting": "none",
+    "notes": "gpuArray inputs are gathered through the active provider and modulated on the host because RunMat does not yet represent complex-valued GPU tensor handles. The result is a host ComplexTensor."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::comms::qammod::tests"
+  },
+  "description": "`qammod(X, M)` maps integer symbols in `X` to complex QAM constellation points for power-of-two modulation order `M`. The default symbol order is Gray-coded. `qammod(X, M, 'bin')` uses binary column-wise ordering, and a custom mapping vector assigns symbols to constellation points from the upper-left point downward by column and then left to right.",
+  "behaviors": [
+    "`X` must contain finite integer values in the inclusive range `[0, M-1]`.",
+    "`M` must be a power-of-two integer greater than one.",
+    "Square QAM orders such as 4, 16, 64, and 256 use symmetric odd integer amplitudes with minimum distance two.",
+    "Non-square power-of-two orders use a rectangular grid with the larger dimension on the in-phase axis.",
+    "The default `'gray'` order applies Gray coding independently to the in-phase and quadrature grid indexes.",
+    "`'UnitAveragePower', true` scales the complete constellation so its average power is one.",
+    "`'OutputDataType', 'single'` rounds the real and imaginary samples through single precision before returning the host complex tensor.",
+    "`'PlotConstellation', true` and `InputType='bit'` are not implemented yet."
+  ],
+  "examples": [
+    {
+      "description": "Default 16-QAM Gray mapping",
+      "input": "y = qammod(0:15, 16)",
+      "output": "y = [-3+3i -3+1i -3-3i -3-1i -1+3i -1+1i -1-3i -1-1i 3+3i 3+1i 3-3i 3-1i 1+3i 1+1i 1-3i 1-1i]"
+    },
+    {
+      "description": "Binary symbol ordering",
+      "input": "y = qammod(0:4, 16, 'bin')",
+      "output": "y = [-3+3i -3+1i -3-1i -3-3i -1+3i]"
+    },
+    {
+      "description": "Unit-average-power 16-QAM",
+      "input": "y = qammod(0:15, 16, 'UnitAveragePower', true);\nmean(abs(y).^2)",
+      "output": "ans = 1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does qammod execute on the GPU?",
+      "answer": "It accepts gpuArray inputs, but the current runtime gathers them to host memory and returns a host ComplexTensor because complex GPU tensor handles are not yet part of RunMat's value model."
+    },
+    {
+      "question": "Is bit input supported?",
+      "answer": "Not in this first implementation. Use integer symbols or convert bit groups to integer symbols before calling qammod."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/comms/qammod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/comms/qammod.rs"
+  },
+  "gpu_residency": "The builtin declares `GatherImmediately` residency. A gpuArray input is downloaded once through the dispatcher and then mapped to complex host output.",
+  "gpu_behavior": [
+    "RunMat's current accelerator API stores real-valued GPU buffers. Since `qammod` necessarily produces complex-valued samples, the GPU-aware implementation preserves correctness by gathering device input and producing a `ComplexTensor` on the host.",
+    "The registered GPU metadata advertises the supported input scalar classes and the provider hook name future accelerators can use once complex GPU outputs are represented."
+  ]
+}
