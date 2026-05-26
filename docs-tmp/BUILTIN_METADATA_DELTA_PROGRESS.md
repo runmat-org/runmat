@@ -52,9 +52,10 @@
 | Wave 47 (Stats Random Control) | `rng` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::random::rng::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for RNG query/seed/option/restore forms with stable descriptor-backed error coverage (seed, generator, state struct, invalid args, internal) and LSP random-family signature-help coverage |
 | Wave 48 (Stats Summary A) | `mode` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::summary::mode::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `mode` single/dimension/all forms with by-requested-output semantics (`M`, `[M,F]`, `[M,F,C]`), descriptor-row canonical runtime error mapping (invalid args/dimension/gpu/complex/internal), and LSP stats-summary signature-help coverage |
 | Wave 49 (Stats Summary B) | `cov`, `corrcoef` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::summary::cov::tests::`; `cargo test -p runmat-runtime builtins::stats::summary::corrcoef::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for covariance/correlation forms, descriptor-row canonical runtime error mapping (no duplicated stable identifier/message constants), and expanded LSP stats-summary signature-help coverage |
+| Wave 50 (Stats Histogram) | `histcounts`, `histcounts2` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::hist::histcounts::tests::`; `cargo test -p runmat-runtime builtins::stats::hist::histcounts2::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for histogram and 2-D histogram positional/name-value forms, descriptor-backed stable identifier branches (`BinMethodConflict`, `BinWidthInvalid`, `NumBinsInvalid`), and LSP signature-help coverage for stats/hist surface |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `151`
-- Remaining: `417`
+- Migrated with attached descriptor: `153`
+- Remaining: `415`

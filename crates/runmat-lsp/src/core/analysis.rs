@@ -1912,6 +1912,31 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_stats_hist_descriptors() {
+        let cases = [
+            ("histcounts([1 2 2 3]);", "N = histcounts(X)"),
+            ("histcounts([1 2 2 3], 5);", "N = histcounts(X, bins)"),
+            ("histcounts2([1 2 3], [4 5 6]);", "N = histcounts2(X, Y)"),
+            (
+                "histcounts2([1 2 3], [4 5 6], [1 2], [4 5]);",
+                "N = histcounts2(X, Y, binsX, binsY)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_empty_and_magic_descriptors() {
         let cases = [
             ("empty(0, 3);", "A = empty(m, n, ...)"),
