@@ -2807,6 +2807,41 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_io_tabular_descriptors() {
+        let cases = [
+            ("csvread(\"data.csv\");", "M = csvread(filename)"),
+            (
+                "csvread(\"data.csv\", 1, 2);",
+                "M = csvread(filename, row, col)",
+            ),
+            (
+                "csvread(\"data.csv\", 1, 2, \"B2:C4\");",
+                "M = csvread(filename, row, col, range)",
+            ),
+            (
+                "csvwrite(\"out.csv\", [1 2; 3 4]);",
+                "bytesWritten = csvwrite(filename, M)",
+            ),
+            (
+                "csvwrite(\"out.csv\", [1 2; 3 4], 1, 2);",
+                "bytesWritten = csvwrite(filename, M, row, col)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

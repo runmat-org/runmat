@@ -203,35 +203,39 @@ Rule:
 
 1. Prefer profile constructor.
 2. Fall back to explicit struct only when behavior is uniquely shaped.
-3. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
-4. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable constants or repeated literal throw strings.
-5. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
-6. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
-7. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
-8. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
-9. If another module needs to branch on a migrated builtin error, branch on descriptor identifier (`err.identifier() == FOO_ERROR_BAR.identifier`), never on `err.message()` and never via a duplicated forwarded message constant.
-10. Migration audit guardrail: migrated builtins must not define standalone stable error constants for identifier/message/code outside descriptor rows (for example `const ...: &str = "RunMat:..."`, `const ...: &str = "foo: ..."`, or `const ...: &str = "RM.FOO.BAR"` when they mirror a descriptor row). Keep stable identifier/message/code authored only in descriptor rows.
-11. Stable-branch throw-sites must call `foo_error(&FOO_ERROR_...)` (or equivalent) so the emitted message/code/identifier come from the descriptor row; do not restate the same literal message string or parallel code/identifier constants in the branch.
-12. Descriptor rows must own literal stable fields directly:
+3. `BuiltinErrorDescriptor` rows are the only stable error source-of-truth inside migrated builtin files:
+   - define `code`/`identifier`/`message` literals directly in the descriptor row,
+   - throw stable branches through `foo_error(&FOO_ERROR_...)`,
+   - never mirror those stable literals in separate `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` constants.
+4. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
+5. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable constants or repeated literal throw strings.
+6. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
+7. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
+8. Do not add standalone `*_ERROR` message constants when the text is the stable branch message; place the text only in the descriptor row and throw via that row.
+9. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
+10. If another module needs to branch on a migrated builtin error, branch on descriptor identifier (`err.identifier() == FOO_ERROR_BAR.identifier`), never on `err.message()` and never via a duplicated forwarded message constant.
+11. Migration audit guardrail: migrated builtins must not define standalone stable error constants for identifier/message/code outside descriptor rows (for example `const ...: &str = "RunMat:..."`, `const ...: &str = "foo: ..."`, or `const ...: &str = "RM.FOO.BAR"` when they mirror a descriptor row). Keep stable identifier/message/code authored only in descriptor rows.
+12. Stable-branch throw-sites must call `foo_error(&FOO_ERROR_...)` (or equivalent) so the emitted message/code/identifier come from the descriptor row; do not restate the same literal message string or parallel code/identifier constants in the branch.
+13. Descriptor rows must own literal stable fields directly:
    - required: `code: "RM.FOO.BAR"`, `identifier: Some("RunMat:foo:Bar")`, `message: "foo: ..."`
    - disallowed: `identifier: Some(IDENT_FOO_BAR)`, `code: FOO_BAR_CODE`, `message: FOO_BAR_MESSAGE`
-13. Keep any extra constants detail-only:
+14. Keep any extra constants detail-only:
    - allowed: `const ..._DETAIL: &str = "expects positive integer"`
    - disallowed: any const that mirrors stable branch `code`/`identifier`/`message`
-14. Keep non-stable detail strings separate from stable messages:
+15. Keep non-stable detail strings separate from stable messages:
    - allowed: `const ..._DETAIL: &str = "file identifier must be finite"` used with `foo_error_with_detail(&FOO_ERROR_INVALID_INPUT, ..._DETAIL)`.
    - disallowed: `const ..._MESSAGE: &str = "foo: invalid input"` mirroring `FOO_ERROR_INVALID_INPUT.message`.
    - disallowed: `const INVALID_IDENTIFIER_TEXT = "...";` when it duplicates `FOO_ERROR_INVALID_IDENTIFIER.message`.
-15. Keep the helper split explicit:
+16. Keep the helper split explicit:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches (including the branch's canonical message text).
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
-16. Canonical in-file source-of-truth:
+17. Canonical in-file source-of-truth:
    - Declare each stable branch as one `const FOO_ERROR_BAR: BuiltinErrorDescriptor = ...`.
    - Build `FOO_ERRORS` from those constants.
    - Throw only through helpers that accept `&'static BuiltinErrorDescriptor`.
    - Do not create parallel `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` mirrors.
 
-17. Exact anti-pattern to reject (this is not allowed in migrated builtins):
+18. Exact anti-pattern to reject (this is not allowed in migrated builtins):
 
 ```rust
 const IDENT_INVALID_INPUT: &str = "RunMat:foo:InvalidInput";
@@ -245,7 +249,7 @@ const FOO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 };
 ```
 
-18. Canonical replacement (required shape):
+19. Canonical replacement (required shape):
 
 ```rust
 const FOO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
