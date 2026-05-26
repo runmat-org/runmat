@@ -1,6 +1,10 @@
 //! MATLAB-compatible `strtrim` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -48,14 +52,75 @@ const ARG_TYPE_ERROR: &str =
 const CELL_ELEMENT_ERROR: &str =
     "strtrim: cell array elements must be string scalars or character vectors";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const STRTRIM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Trimmed text preserving input container kind and shape.",
+}];
+
+const STRTRIM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String/char/cell text input to trim.",
+}];
+
+const STRTRIM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = strtrim(str)",
+    inputs: &STRTRIM_INPUTS,
+    outputs: &STRTRIM_OUTPUT,
+}];
+
+const STRTRIM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRTRIM.INVALID_INPUT",
+    identifier: Some("RunMat:strtrim:InvalidInput"),
+    when: "Input is not a string array, character array, or cell array of text scalars.",
+    message: ARG_TYPE_ERROR,
+};
+
+const STRTRIM_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRTRIM.CELL_ELEMENT",
+    identifier: Some("RunMat:strtrim:CellElement"),
+    when: "Cell array contains a non-text element or non-row char array element.",
+    message: CELL_ELEMENT_ERROR,
+};
+
+const STRTRIM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRTRIM.INTERNAL",
+    identifier: Some("RunMat:strtrim:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "strtrim: internal error",
+};
+
+const STRTRIM_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    STRTRIM_ERROR_INVALID_INPUT,
+    STRTRIM_ERROR_CELL_ELEMENT,
+    STRTRIM_ERROR_INTERNAL,
+];
+
+pub const STRTRIM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRTRIM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRTRIM_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn strtrim_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -65,6 +130,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     keywords = "strtrim,trim,whitespace,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::strtrim::STRTRIM_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
 async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
@@ -74,15 +140,19 @@ async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(array) => strtrim_string_array(array),
         Value::CharArray(array) => strtrim_char_array(array),
         Value::Cell(cell) => strtrim_cell_array(cell).await,
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(strtrim_error_with_message(
+            ARG_TYPE_ERROR,
+            &STRTRIM_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
 fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let trimmed = data.into_iter().map(trim_string).collect::<Vec<_>>();
-    let out = StringArray::new(trimmed, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let out = StringArray::new(trimmed, shape).map_err(|e| {
+        strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(out))
 }
 
@@ -112,7 +182,9 @@ fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
 
     CharArray::new(new_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
+        })
 }
 
 async fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
@@ -124,8 +196,9 @@ async fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
         let trimmed = strtrim_cell_element(value).await?;
         trimmed_values.push(trimmed);
     }
-    make_cell(trimmed_values, rows, cols)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(trimmed_values, rows, cols).map_err(|e| {
+        strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
+    })
 }
 
 async fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
@@ -145,10 +218,21 @@ async fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
             let cols = chars.len();
             CharArray::new(chars, ca.rows, cols)
                 .map(Value::CharArray)
-                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+                .map_err(|e| {
+                    strtrim_error_with_message(
+                        format!("{BUILTIN_NAME}: {e}"),
+                        &STRTRIM_ERROR_INTERNAL,
+                    )
+                })
         }
-        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        Value::CharArray(_) => Err(strtrim_error_with_message(
+            CELL_ELEMENT_ERROR,
+            &STRTRIM_ERROR_CELL_ELEMENT,
+        )),
+        _ => Err(strtrim_error_with_message(
+            CELL_ELEMENT_ERROR,
+            &STRTRIM_ERROR_CELL_ELEMENT,
+        )),
     }
 }
 

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `strip` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -51,14 +55,182 @@ const CHARACTERS_ERROR: &str =
 const SIZE_MISMATCH_ERROR: &str =
     "strip: stripCharacters must be the same size as the input when supplying multiple values";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const STRIP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Stripped text preserving input container kind and shape.",
+}];
+
+const STRIP_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String/char/cell text input to strip.",
+}];
+
+const STRIP_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String/char/cell text input to strip.",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"both\""),
+        description: "Direction (`\"left\"|\"right\"|\"both\"`, plus leading/trailing synonyms).",
+    },
+];
+
+const STRIP_INPUTS_CHARACTERS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String/char/cell text input to strip.",
+    },
+    BuiltinParamDescriptor {
+        name: "stripCharacters",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Characters to strip (scalar or per-element text container).",
+    },
+];
+
+const STRIP_INPUTS_DIRECTION_CHARACTERS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String/char/cell text input to strip.",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Direction (`\"left\"|\"right\"|\"both\"`, plus leading/trailing synonyms).",
+    },
+    BuiltinParamDescriptor {
+        name: "stripCharacters",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Characters to strip (scalar or per-element text container).",
+    },
+];
+
+const STRIP_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "out = strip(str)",
+        inputs: &STRIP_INPUTS_BASE,
+        outputs: &STRIP_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = strip(str, direction)",
+        inputs: &STRIP_INPUTS_DIRECTION,
+        outputs: &STRIP_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = strip(str, stripCharacters)",
+        inputs: &STRIP_INPUTS_CHARACTERS,
+        outputs: &STRIP_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = strip(str, direction, stripCharacters)",
+        inputs: &STRIP_INPUTS_DIRECTION_CHARACTERS,
+        outputs: &STRIP_OUTPUT,
+    },
+];
+
+const STRIP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.INVALID_INPUT",
+    identifier: Some("RunMat:strip:InvalidInput"),
+    when: "Input is not a string array, character array, or cell array of text scalars.",
+    message: ARG_TYPE_ERROR,
+};
+
+const STRIP_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.CELL_ELEMENT",
+    identifier: Some("RunMat:strip:CellElement"),
+    when: "Cell array contains a non-text element or non-row char array element.",
+    message: CELL_ELEMENT_ERROR,
+};
+
+const STRIP_ERROR_DIRECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.DIRECTION",
+    identifier: Some("RunMat:strip:InvalidDirection"),
+    when: "Direction argument is not one of left/right/both (or leading/trailing synonyms).",
+    message: DIRECTION_ERROR,
+};
+
+const STRIP_ERROR_CHARACTERS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.CHARACTERS",
+    identifier: Some("RunMat:strip:InvalidCharacters"),
+    when: "stripCharacters argument is not a valid text container.",
+    message: CHARACTERS_ERROR,
+};
+
+const STRIP_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.SIZE_MISMATCH",
+    identifier: Some("RunMat:strip:SizeMismatch"),
+    when: "Per-element stripCharacters does not match input shape/size.",
+    message: SIZE_MISMATCH_ERROR,
+};
+
+const STRIP_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.ARG_COUNT",
+    identifier: Some("RunMat:strip:ArgCount"),
+    when: "More than three input arguments were supplied.",
+    message: "strip: too many input arguments",
+};
+
+const STRIP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRIP.INTERNAL",
+    identifier: Some("RunMat:strip:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "strip: internal error",
+};
+
+const STRIP_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    STRIP_ERROR_INVALID_INPUT,
+    STRIP_ERROR_CELL_ELEMENT,
+    STRIP_ERROR_DIRECTION,
+    STRIP_ERROR_CHARACTERS,
+    STRIP_ERROR_SIZE_MISMATCH,
+    STRIP_ERROR_ARG_COUNT,
+    STRIP_ERROR_INTERNAL,
+];
+
+pub const STRIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRIP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRIP_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn strip_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -133,6 +305,7 @@ impl PatternSpec {
     keywords = "strip,trim,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::strip::STRIP_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::strip"
 )]
 async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -142,7 +315,10 @@ async fn strip_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::StringArray(array) => strip_string_array(array, &rest).await,
         Value::CharArray(array) => strip_char_array(array, &rest).await,
         Value::Cell(cell) => strip_cell_array(cell, &rest).await,
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(strip_error_with_message(
+            ARG_TYPE_ERROR,
+            &STRIP_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
@@ -170,8 +346,9 @@ async fn strip_string_array(array: StringArray, args: &[Value]) -> BuiltinResult
             stripped.push(strip_text(&text, direction, pattern));
         }
     }
-    let result = StringArray::new(stripped, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let result = StringArray::new(stripped, shape).map_err(|e| {
+        strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(result))
 }
 
@@ -206,7 +383,9 @@ async fn strip_char_array(array: CharArray, args: &[Value]) -> BuiltinResult<Val
 
     CharArray::new(new_data, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
+        })
 }
 
 async fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Value> {
@@ -223,8 +402,9 @@ async fn strip_cell_array(cell: CellArray, args: &[Value]) -> BuiltinResult<Valu
         let stripped = strip_cell_element(value, direction, pattern).await?;
         stripped_values.push(stripped);
     }
-    make_cell(stripped_values, rows, cols)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(stripped_values, rows, cols).map_err(|e| {
+        strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
+    })
 }
 
 async fn strip_cell_element(
@@ -264,10 +444,18 @@ async fn strip_cell_element(
             let cols = if rows == 0 { ca.cols } else { len };
             CharArray::new(data, rows, cols)
                 .map(Value::CharArray)
-                .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+                .map_err(|e| {
+                    strip_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRIP_ERROR_INTERNAL)
+                })
         }
-        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        Value::CharArray(_) => Err(strip_error_with_message(
+            CELL_ELEMENT_ERROR,
+            &STRIP_ERROR_CELL_ELEMENT,
+        )),
+        _ => Err(strip_error_with_message(
+            CELL_ELEMENT_ERROR,
+            &STRIP_ERROR_CELL_ELEMENT,
+        )),
     }
 }
 
@@ -288,12 +476,20 @@ async fn parse_arguments(
         2 => {
             let direction = match try_parse_direction(&args[0], true)? {
                 Some(dir) => dir,
-                None => return Err(runtime_error_for(DIRECTION_ERROR)),
+                None => {
+                    return Err(strip_error_with_message(
+                        DIRECTION_ERROR,
+                        &STRIP_ERROR_DIRECTION,
+                    ))
+                }
             };
             let pattern = parse_pattern(&args[1], expectation).await?;
             Ok((direction, pattern))
         }
-        _ => Err(runtime_error_for("strip: too many input arguments")),
+        _ => Err(strip_error_with_message(
+            "strip: too many input arguments",
+            &STRIP_ERROR_ARG_COUNT,
+        )),
     }
 }
 
@@ -304,7 +500,10 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<Stri
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return if strict {
-            Err(runtime_error_for(DIRECTION_ERROR))
+            Err(strip_error_with_message(
+                DIRECTION_ERROR,
+                &STRIP_ERROR_DIRECTION,
+            ))
         } else {
             Ok(None)
         };
@@ -316,7 +515,10 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<Stri
         "right" | "trailing" => Some(StripDirection::Right),
         _ => {
             if strict {
-                return Err(runtime_error_for(DIRECTION_ERROR));
+                return Err(strip_error_with_message(
+                    DIRECTION_ERROR,
+                    &STRIP_ERROR_DIRECTION,
+                ));
             }
             None
         }
@@ -362,7 +564,10 @@ async fn parse_pattern(
             } else if sa.data.len() == expected_len {
                 if let Some(shape) = expectation.shape() {
                     if sa.shape != shape {
-                        return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+                        return Err(strip_error_with_message(
+                            SIZE_MISMATCH_ERROR,
+                            &STRIP_ERROR_SIZE_MISMATCH,
+                        ));
                     }
                 }
                 let mut patterns = Vec::with_capacity(sa.data.len());
@@ -371,7 +576,10 @@ async fn parse_pattern(
                 }
                 Ok(PatternSpec::PerElement(patterns))
             } else {
-                Err(runtime_error_for(SIZE_MISMATCH_ERROR))
+                Err(strip_error_with_message(
+                    SIZE_MISMATCH_ERROR,
+                    &STRIP_ERROR_SIZE_MISMATCH,
+                ))
             }
         }
         Value::CharArray(ca) => {
@@ -390,11 +598,17 @@ async fn parse_pattern(
                 }
                 Ok(PatternSpec::PerElement(patterns))
             } else {
-                Err(runtime_error_for(SIZE_MISMATCH_ERROR))
+                Err(strip_error_with_message(
+                    SIZE_MISMATCH_ERROR,
+                    &STRIP_ERROR_SIZE_MISMATCH,
+                ))
             }
         }
         Value::Cell(cell) => parse_pattern_cell(cell, expectation).await,
-        _ => Err(runtime_error_for(CHARACTERS_ERROR)),
+        _ => Err(strip_error_with_message(
+            CHARACTERS_ERROR,
+            &STRIP_ERROR_CHARACTERS,
+        )),
     }
 }
 
@@ -411,19 +625,28 @@ async fn parse_pattern_cell(
         return Ok(PatternSpec::Scalar(chars));
     }
     if len != expectation.len() {
-        return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+        return Err(strip_error_with_message(
+            SIZE_MISMATCH_ERROR,
+            &STRIP_ERROR_SIZE_MISMATCH,
+        ));
     }
     if let Some(shape) = expectation.shape() {
         match shape.len() {
             0 => {}
             1 => {
                 if cell.rows != shape[0] || cell.cols != 1 {
-                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+                    return Err(strip_error_with_message(
+                        SIZE_MISMATCH_ERROR,
+                        &STRIP_ERROR_SIZE_MISMATCH,
+                    ));
                 }
             }
             _ => {
                 if cell.rows != shape[0] || cell.cols != shape[1] {
-                    return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+                    return Err(strip_error_with_message(
+                        SIZE_MISMATCH_ERROR,
+                        &STRIP_ERROR_SIZE_MISMATCH,
+                    ));
                 }
             }
         }
@@ -448,8 +671,14 @@ async fn pattern_chars_from_value(value: &Value) -> BuiltinResult<Vec<char>> {
                 Ok(text.chars().collect())
             }
         }
-        Value::CharArray(_) => Err(runtime_error_for(CHARACTERS_ERROR)),
-        _ => Err(runtime_error_for(CHARACTERS_ERROR)),
+        Value::CharArray(_) => Err(strip_error_with_message(
+            CHARACTERS_ERROR,
+            &STRIP_ERROR_CHARACTERS,
+        )),
+        _ => Err(strip_error_with_message(
+            CHARACTERS_ERROR,
+            &STRIP_ERROR_CHARACTERS,
+        )),
     }
 }
 
