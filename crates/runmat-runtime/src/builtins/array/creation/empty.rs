@@ -1,6 +1,10 @@
 //! MATLAB-compatible `empty` constructor used by ClassName.empty fallbacks.
 
-use runmat_builtins::{CharArray, LogicalArray, NumericDType, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, LogicalArray, NumericDType, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{extract_dims, keyword_of, shape_from_value};
@@ -51,12 +55,161 @@ fn split_class_arg(mut args: Vec<Value>) -> (EmptyClass, Vec<Value>) {
     (EmptyClass::Double, args)
 }
 
+const EMPTY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Empty output array.",
+}];
+
+const EMPTY_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const EMPTY_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size with at least one zero dimension.",
+}];
+
+const EMPTY_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector with at least one zero dimension.",
+}];
+
+const EMPTY_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes with at least one zero dimension.",
+}];
+
+const EMPTY_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class override ('double'|'single'|'logical'|'char'|'string'|'cell'|'struct'|'gpuArray').",
+    },
+];
+
+const EMPTY_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used to infer shape.",
+    },
+];
+
+const EMPTY_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "A = empty()",
+        inputs: &EMPTY_SIG_EMPTY_INPUTS,
+        outputs: &EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = empty(n)",
+        inputs: &EMPTY_SIG_N_INPUTS,
+        outputs: &EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = empty(size_vector)",
+        inputs: &EMPTY_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = empty(m, n, ...)",
+        inputs: &EMPTY_SIG_DIMS_INPUTS,
+        outputs: &EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = empty(..., typename)",
+        inputs: &EMPTY_SIG_CLASS_INPUTS,
+        outputs: &EMPTY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = empty(..., \"like\", prototype)",
+        inputs: &EMPTY_SIG_LIKE_INPUTS,
+        outputs: &EMPTY_OUTPUT,
+    },
+];
+
+const EMPTY_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    BuiltinErrorDescriptor {
+        code: "RM.EMPTY.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "empty: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EMPTY.MULTIPLE_LIKE",
+        identifier: None,
+        when: "The 'like' keyword is provided multiple times.",
+        message: "empty: multiple 'like' prototypes are not supported",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EMPTY.INVALID_DIMS",
+        identifier: None,
+        when: "Size arguments are not numeric scalars or size vectors.",
+        message: "empty: size inputs must be numeric scalars or size vectors",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EMPTY.NON_EMPTY_SHAPE",
+        identifier: None,
+        when: "All dimensions are non-zero.",
+        message: "empty: at least one dimension must be zero",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.EMPTY.CHAR_DIMENSIONALITY",
+        identifier: None,
+        when: "Character empty arrays are requested with more than 2 dimensions.",
+        message: "empty: character arrays must be 2-D",
+    },
+];
+
+pub const EMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EMPTY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EMPTY_ERRORS,
+};
+
 #[runtime_builtin(
     name = "empty",
     category = "array/creation",
     summary = "Construct an empty array (used by ClassName.empty fallbacks).",
     keywords = "empty,preallocate,array",
     accel = "none",
+    descriptor(crate::builtins::array::creation::empty::EMPTY_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::empty"
 )]
 async fn empty_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
