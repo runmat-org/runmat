@@ -1,27 +1,159 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::extract_dims;
 use crate::builtins::common::tensor;
-use runmat_builtins::ResolveContext;
-use runmat_builtins::Type;
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("normrnd").build()
+const BUILTIN_NAME: &str = "normrnd";
+
+const NORMRND_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "r",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Random sample array from normal distribution.",
+}];
+
+const NORMRND_INPUTS_MU_SIGMA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "mu",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Mean parameter.",
+    },
+    BuiltinParamDescriptor {
+        name: "sigma",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Standard deviation parameter (must be >= 0).",
+    },
+];
+
+const NORMRND_INPUTS_MU_SIGMA_SZ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "mu",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Mean parameter.",
+    },
+    BuiltinParamDescriptor {
+        name: "sigma",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Standard deviation parameter (must be >= 0).",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Size scalar or size vector argument.",
+    },
+];
+
+const NORMRND_INPUTS_MU_SIGMA_DIMS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "mu",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Mean parameter.",
+    },
+    BuiltinParamDescriptor {
+        name: "sigma",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Standard deviation parameter (must be >= 0).",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension extents for output shape.",
+    },
+];
+
+const NORMRND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "r = normrnd(mu, sigma)",
+        inputs: &NORMRND_INPUTS_MU_SIGMA,
+        outputs: &NORMRND_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "r = normrnd(mu, sigma, sz)",
+        inputs: &NORMRND_INPUTS_MU_SIGMA_SZ,
+        outputs: &NORMRND_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "r = normrnd(mu, sigma, sz1, sz2, ...)",
+        inputs: &NORMRND_INPUTS_MU_SIGMA_DIMS,
+        outputs: &NORMRND_OUTPUT_R,
+    },
+];
+
+const NORMRND_ERROR_SIGMA_MUST_BE_NONNEGATIVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NORMRND.SIGMA_MUST_BE_NONNEGATIVE",
+    identifier: Some("RunMat:normrnd:SigmaMustBeNonnegative"),
+    when: "sigma is negative.",
+    message: "normrnd: sigma must be non-negative",
+};
+
+const NORMRND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NORMRND.INVALID_ARGUMENT",
+    identifier: Some("RunMat:normrnd:InvalidArgument"),
+    when: "Input parameters or size arguments are missing or malformed.",
+    message: "normrnd: invalid argument",
+};
+
+const NORMRND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NORMRND.INTERNAL",
+    identifier: Some("RunMat:normrnd:Internal"),
+    when: "Internal conversion/allocation/provider decode fails.",
+    message: "normrnd: internal operation failed",
+};
+
+const NORMRND_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    NORMRND_ERROR_SIGMA_MUST_BE_NONNEGATIVE,
+    NORMRND_ERROR_INVALID_ARGUMENT,
+    NORMRND_ERROR_INTERNAL,
+];
+
+pub const NORMRND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NORMRND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NORMRND_ERRORS,
+};
+
+fn normrnd_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-const NORMRND_ERR_SIGMA_MUST_BE_NONNEGATIVE: &str = "RunMat:normrnd:SigmaMustBeNonnegative";
+fn normrnd_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    normrnd_error_with(error, error.message)
+}
 
-fn builtin_error_with_identifier(
-    message: impl Into<String>,
-    identifier: &'static str,
-) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("normrnd")
-        .with_identifier(identifier)
-        .build()
+fn normrnd_internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    normrnd_error_with(&NORMRND_ERROR_INTERNAL, message)
 }
 
 fn normrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -38,28 +170,28 @@ fn normrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     summary = "Normally-distributed random numbers with mean mu and standard deviation sigma.",
     keywords = "normrnd,normal,gaussian,random,distribution,statistics",
     type_resolver(normrnd_type),
+    descriptor(crate::builtins::stats::random::normrnd::NORMRND_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::random::normrnd"
 )]
 async fn normrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mu, sigma, shape) = parse_args(args).await?;
     if sigma < 0.0 {
-        return Err(builtin_error_with_identifier(
-            "normrnd: sigma must be non-negative",
-            NORMRND_ERR_SIGMA_MUST_BE_NONNEGATIVE,
-        ));
+        return Err(normrnd_error(&NORMRND_ERROR_SIGMA_MUST_BE_NONNEGATIVE));
     }
     if let Some(value) = try_gpu_normrnd(mu, sigma, &shape)? {
         return Ok(value);
     }
     let len = tensor::element_count(&shape);
     let data = random::generate_normal_scaled(mu, sigma, len, "normrnd")?;
-    let t = Tensor::new(data, shape).map_err(|e| builtin_error(format!("normrnd: {e}")))?;
+    let t =
+        Tensor::new(data, shape).map_err(|e| normrnd_internal_error(format!("normrnd: {e}")))?;
     Ok(tensor::tensor_into_value(t))
 }
 
 async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, f64, Vec<usize>)> {
     if args.len() < 2 {
-        return Err(builtin_error(
+        return Err(normrnd_error_with(
+            &NORMRND_ERROR_INVALID_ARGUMENT,
             "normrnd: requires at least two arguments (mu, sigma)",
         ));
     }
@@ -74,9 +206,10 @@ fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
         Value::Num(v) => Ok(*v),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(builtin_error(format!(
-            "normrnd: expected scalar parameter, got {other:?}"
-        ))),
+        other => Err(normrnd_error_with(
+            &NORMRND_ERROR_INVALID_ARGUMENT,
+            format!("normrnd: expected scalar parameter, got {other:?}"),
+        )),
     }
 }
 
@@ -89,9 +222,10 @@ async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
         match extract_dims(arg, "normrnd").await? {
             Some(d) => dims.extend(d),
             None => {
-                return Err(builtin_error(format!(
-                    "normrnd: invalid size argument: {arg:?}"
-                )))
+                return Err(normrnd_error_with(
+                    &NORMRND_ERROR_INVALID_ARGUMENT,
+                    format!("normrnd: invalid size argument: {arg:?}"),
+                ))
             }
         }
     }
@@ -187,7 +321,7 @@ mod tests {
         let err = block_on(normrnd_builtin(args)).expect_err("negative sigma should error");
         assert_eq!(
             err.identifier(),
-            Some(NORMRND_ERR_SIGMA_MUST_BE_NONNEGATIVE)
+            NORMRND_ERROR_SIGMA_MUST_BE_NONNEGATIVE.identifier
         );
     }
 

@@ -1860,6 +1860,12 @@ mod tests {
             ("randn(2);", "A = randn(n)"),
             ("randi(10);", "R = randi(imax)"),
             ("randperm(10, 3);", "p = randperm(n, k)"),
+            ("exprnd(2);", "r = exprnd(mu)"),
+            (
+                "normrnd(0, 1, 3, 4);",
+                "r = normrnd(mu, sigma, sz1, sz2, ...)",
+            ),
+            ("unifrnd(0, 1, [3 4]);", "r = unifrnd(a, b, sz)"),
         ];
 
         for (text, expected_label) in cases {

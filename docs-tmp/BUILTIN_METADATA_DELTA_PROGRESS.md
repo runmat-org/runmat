@@ -48,9 +48,10 @@
 | Wave 43 (Array Sorting/Sets A) | `sort`, `argsort`, `issorted` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::sorting_sets::sort::tests::`; `cargo test -p runmat-runtime builtins::array::sorting_sets::argsort::tests::`; `cargo test -p runmat-runtime builtins::array::sorting_sets::issorted::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for sorting/ordering options + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 | Wave 44 (Array Sorting/Sets B) | `unique`, `union`, `intersect`, `setdiff`, `ismember` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime sorting_sets::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Completed descriptor migration for set-operation family with exhaustive signatures, attached descriptors, by-requested-output semantics, descriptor-row canonical runtime error identifiers/messages (no duplicated `RunMat:*` constants), and expanded LSP signature-help coverage |
 | Wave 45 (Array Sorting/Sets C) | `sortrows` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::sorting_sets::sortrows::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp signature_help_uses_array_sorting_sets_descriptors` | Attached descriptor for row-sorting forms (`column`, `direction`, `ComparisonMethod`, `MissingPlacement`) with by-requested-output semantics, descriptor-row canonical error mapping for parser/column-index/input/internal branches, and LSP signature-help coverage |
+| Wave 46 (Stats Random Distributions A) | `exprnd`, `normrnd`, `unifrnd` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::random::exprnd::tests::`; `cargo test -p runmat-runtime builtins::stats::random::normrnd::tests::`; `cargo test -p runmat-runtime builtins::stats::random::unifrnd::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp signature_help_uses_rand_family_descriptor_signatures` | Attached descriptors for exponential/normal/uniform random sampling forms (scalar + size-vector + variadic-dims) with descriptor-row canonical error mappings and LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `144`
-- Remaining: `424`
+- Migrated with attached descriptor: `147`
+- Remaining: `421`
