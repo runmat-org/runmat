@@ -1889,6 +1889,13 @@ mod tests {
             ("mode([1 2 2 3]);", "M = mode(X)"),
             ("mode([1 2 2 3], 1);", "M = mode(X, dim_or_all)"),
             ("mode([1 2 2 3], 'all');", "M = mode(X, dim_or_all)"),
+            ("cov([1 2; 3 4]);", "C = cov(X)"),
+            ("cov([1 2; 3 4], 0);", "C = cov(X, normalization)"),
+            (
+                "corrcoef([1 2; 3 4], 'rows', 'complete');",
+                "R = corrcoef(X, \"rows\", rows_option)",
+            ),
+            ("corrcoef([1 2; 3 4], [5 6; 7 8]);", "R = corrcoef(X, Y)"),
         ];
 
         for (text, expected_label) in cases {

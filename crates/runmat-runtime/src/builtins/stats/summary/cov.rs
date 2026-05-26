@@ -1,7 +1,11 @@
 //! MATLAB-compatible `cov` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{CovNormalization, CovRows, CovarianceOptions};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -14,25 +18,296 @@ use crate::builtins::stats::type_resolvers::cov_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cov";
-const COV_ERR_ROWS_MISMATCH: &str = "RunMat:cov:RowsMismatch";
-const COV_ERR_NORMALIZATION_INVALID: &str = "RunMat:cov:NormalizationInvalid";
-const COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH: &str = "RunMat:cov:WeightVectorLengthMismatch";
-const COV_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:cov:RowsOptionUnknown";
-const COV_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:cov:NormalizationDuplicate";
-const COV_ERR_TOO_MANY_ARRAY_ARGUMENTS: &str = "RunMat:cov:TooManyArrayArguments";
+const COV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Covariance matrix.",
+}];
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+const COV_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input observations (rows are observations, columns are variables).",
+}];
+
+const COV_INPUTS_X_Y_OR_W: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y_or_w",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset (Y) or weight vector (w), depending on shape/position.",
+    },
+];
+
+const COV_INPUTS_X_NORMALIZATION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "normalization",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("0"),
+        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
+    },
+];
+
+const COV_INPUTS_X_ROWS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "rows_option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"all\""),
+        description: "Rows handling mode: 'all', 'omitrows', or 'partialrows'.",
+    },
+];
+
+const COV_INPUTS_X_Y_OPT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset with matching row count.",
+    },
+    BuiltinParamDescriptor {
+        name: "opt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Normalization flag or rows option.",
+    },
+];
+
+const COV_INPUTS_X_Y_W: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset with matching row count.",
+    },
+    BuiltinParamDescriptor {
+        name: "w",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Weight vector with one weight per observation row.",
+    },
+];
+
+const COV_INPUTS_X_Y_W_OPT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset with matching row count.",
+    },
+    BuiltinParamDescriptor {
+        name: "w",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Weight vector with one weight per observation row.",
+    },
+    BuiltinParamDescriptor {
+        name: "opt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Normalization flag or rows option.",
+    },
+];
+
+const COV_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X)",
+        inputs: &COV_INPUTS_X,
+        outputs: &COV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X, Y_or_w)",
+        inputs: &COV_INPUTS_X_Y_OR_W,
+        outputs: &COV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X, normalization)",
+        inputs: &COV_INPUTS_X_NORMALIZATION,
+        outputs: &COV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X, rows_option)",
+        inputs: &COV_INPUTS_X_ROWS,
+        outputs: &COV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X, Y, opt)",
+        inputs: &COV_INPUTS_X_Y_OPT,
+        outputs: &COV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X, Y, w)",
+        inputs: &COV_INPUTS_X_Y_W,
+        outputs: &COV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cov(X, Y, w, opt)",
+        inputs: &COV_INPUTS_X_Y_W_OPT,
+        outputs: &COV_OUTPUT,
+    },
+];
+
+const COV_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.INVALID_ARGUMENT",
+    identifier: Some("RunMat:cov:InvalidArgument"),
+    when: "Arguments are malformed or unsupported for cov.",
+    message: "cov: invalid argument",
+};
+
+const COV_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:cov:ComplexUnsupported"),
+    when: "Any argument is complex-valued.",
+    message: "cov: complex inputs are not supported yet",
+};
+
+const COV_ERROR_ROWS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.ROWS_MISMATCH",
+    identifier: Some("RunMat:cov:RowsMismatch"),
+    when: "Two input datasets do not have the same number of rows.",
+    message: "cov: inputs must have the same number of rows",
+};
+
+const COV_ERROR_NORMALIZATION_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.NORMALIZATION_INVALID",
+    identifier: Some("RunMat:cov:NormalizationInvalid"),
+    when: "Normalization flag is non-finite, non-integer, or not 0/1.",
+    message: "cov: normalization flag is invalid",
+};
+
+const COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.WEIGHT_VECTOR_LENGTH_MISMATCH",
+    identifier: Some("RunMat:cov:WeightVectorLengthMismatch"),
+    when: "Weight vector length does not match observation row count.",
+    message: "cov: weight vector length mismatch",
+};
+
+const COV_ERROR_ROWS_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.ROWS_OPTION_UNKNOWN",
+    identifier: Some("RunMat:cov:RowsOptionUnknown"),
+    when: "Rows option is not one of all/omitrows/partialrows.",
+    message: "cov: unknown rows option",
+};
+
+const COV_ERROR_NORMALIZATION_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.NORMALIZATION_DUPLICATE",
+    identifier: Some("RunMat:cov:NormalizationDuplicate"),
+    when: "Normalization flag is provided more than once.",
+    message: "cov: normalization flag specified more than once",
+};
+
+const COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.TOO_MANY_ARRAY_ARGUMENTS",
+    identifier: Some("RunMat:cov:TooManyArrayArguments"),
+    when: "More than two data arrays (or Y plus weight) are provided.",
+    message: "cov: too many array arguments",
+};
+
+const COV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COV.INTERNAL",
+    identifier: Some("RunMat:cov:Internal"),
+    when: "Internal tensor conversion/allocation or covariance computation fails.",
+    message: "cov: internal operation failed",
+};
+
+const COV_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    COV_ERROR_INVALID_ARGUMENT,
+    COV_ERROR_COMPLEX_UNSUPPORTED,
+    COV_ERROR_ROWS_MISMATCH,
+    COV_ERROR_NORMALIZATION_INVALID,
+    COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+    COV_ERROR_ROWS_OPTION_UNKNOWN,
+    COV_ERROR_NORMALIZATION_DUPLICATE,
+    COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS,
+    COV_ERROR_INTERNAL,
+];
+
+pub const COV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COV_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COV_ERRORS,
+};
+
+fn cov_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn builtin_error_with_identifier(
-    message: impl Into<String>,
-    identifier: &'static str,
+fn cov_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    cov_error_with(error, error.message)
+}
+
+fn cov_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
 ) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier(identifier)
-        .build()
+    cov_error_with(error, format!("{}: {detail}", error.message))
+}
+
+fn cov_internal_error(message: impl Into<String>) -> RuntimeError {
+    cov_error_with(&COV_ERROR_INTERNAL, message)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::cov")]
@@ -69,6 +344,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "cov,covariance,statistics,weights,gpu",
     accel = "reduction",
     type_resolver(cov_type),
+    descriptor(crate::builtins::stats::summary::cov::COV_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::cov"
 )]
 async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -89,9 +365,9 @@ pub fn cov_from_tensors(
     let matrix = combine_tensors(left, right)?;
     if let CovWeightSpec::Vector(ref vec) = weight {
         if matrix.rows != vec.len() {
-            return Err(builtin_error_with_identifier(
-                format!("cov: weight vector must contain {} elements", matrix.rows),
-                COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+            return Err(cov_error_with_detail(
+                &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+                format!("expected {} elements", matrix.rows),
             ));
         }
     }
@@ -127,7 +403,7 @@ impl CovArgs {
             match arg {
                 Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
                     let key = tensor::value_to_string(&arg)
-                        .ok_or_else(|| builtin_error("cov: expected string option"))?;
+                        .ok_or_else(|| cov_error(&COV_ERROR_INVALID_ARGUMENT))?;
                     let lowered = key.trim().to_ascii_lowercase();
                     rows = parse_rows_option(&lowered)?;
                 }
@@ -137,30 +413,24 @@ impl CovArgs {
                     } else if weight_candidate.is_none() {
                         weight_candidate = Some(arg);
                     } else {
-                        return Err(builtin_error_with_identifier(
-                            "cov: too many array arguments",
-                            COV_ERR_TOO_MANY_ARRAY_ARGUMENTS,
-                        ));
+                        return Err(cov_error(&COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS));
                     }
                 }
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
                     if normalization_explicit || weight_candidate.is_some() {
-                        return Err(builtin_error_with_identifier(
-                            "cov: normalization flag specified more than once",
-                            COV_ERR_NORMALIZATION_DUPLICATE,
-                        ));
+                        return Err(cov_error(&COV_ERROR_NORMALIZATION_DUPLICATE));
                     }
                     normalization = parse_normalization(arg)?;
                     normalization_explicit = true;
                 }
                 Value::ComplexTensor(_) => {
-                    return Err(builtin_error("cov: complex inputs are not supported yet"));
+                    return Err(cov_error(&COV_ERROR_COMPLEX_UNSUPPORTED));
                 }
                 other => {
-                    return Err(builtin_error(format!(
-                        "cov: unsupported argument type {:?}",
-                        other
-                    )));
+                    return Err(cov_error_with_detail(
+                        &COV_ERROR_INVALID_ARGUMENT,
+                        format!("{other:?}"),
+                    ))
                 }
             }
         }
@@ -268,8 +538,10 @@ async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
 async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
-        Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical).map_err(builtin_error),
-        other => tensor::value_into_tensor_for("cov", other).map_err(builtin_error),
+        Value::LogicalArray(logical) => {
+            tensor::logical_to_tensor(&logical).map_err(cov_internal_error)
+        }
+        other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error),
     }
 }
 
@@ -277,29 +549,36 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
     let tensor = match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await?,
         Value::LogicalArray(logical) => {
-            tensor::logical_to_tensor(&logical).map_err(builtin_error)?
+            tensor::logical_to_tensor(&logical).map_err(cov_internal_error)?
         }
-        other => tensor::value_into_tensor_for("cov", other).map_err(builtin_error)?,
+        other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error)?,
     };
 
     if tensor.shape.len() > 2 {
-        return Err(builtin_error("cov: weight vector must be one-dimensional"));
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "weight vector must be one-dimensional",
+        ));
     }
     if tensor.rows() != expected_rows && tensor.cols() != expected_rows {
-        return Err(builtin_error_with_identifier(
-            format!("cov: weight vector must contain {} elements", expected_rows),
-            COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+        return Err(cov_error_with_detail(
+            &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+            format!("expected {expected_rows} elements"),
         ));
     }
     for (idx, weight) in tensor.data.iter().enumerate() {
         if !weight.is_finite() || *weight < 0.0 {
-            return Err(builtin_error(format!(
-                "cov: weights must be non-negative finite values (index {idx})"
-            )));
+            return Err(cov_error_with_detail(
+                &COV_ERROR_INVALID_ARGUMENT,
+                format!("weights must be non-negative finite values (index {idx})"),
+            ));
         }
     }
     if tensor.data.is_empty() {
-        return Err(builtin_error("cov: weight vector cannot be empty"));
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "weight vector cannot be empty",
+        ));
     }
     Ok(tensor.data)
 }
@@ -309,9 +588,9 @@ fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {
         "all" => Ok(CovRows::All),
         "omitrows" | "omit" => Ok(CovRows::OmitRows),
         "partialrows" | "partial" | "pairwise" => Ok(CovRows::PartialRows),
-        other => Err(builtin_error_with_identifier(
-            format!("cov: unknown rows option '{other}'"),
-            COV_ERR_ROWS_OPTION_UNKNOWN,
+        other => Err(cov_error_with_detail(
+            &COV_ERROR_ROWS_OPTION_UNKNOWN,
+            format!("'{other}'"),
         )),
     }
 }
@@ -321,31 +600,31 @@ fn parse_normalization(value: Value) -> BuiltinResult<CovNormalization> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(CovNormalization::Unbiased),
             1 => Ok(CovNormalization::Biased),
-            other => Err(builtin_error_with_identifier(
-                format!("cov: normalization flag must be 0 or 1, received {other}"),
-                COV_ERR_NORMALIZATION_INVALID,
+            other => Err(cov_error_with_detail(
+                &COV_ERROR_NORMALIZATION_INVALID,
+                format!("expected 0 or 1, received {other}"),
             )),
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(builtin_error_with_identifier(
-                    "cov: normalization flag must be finite",
-                    COV_ERR_NORMALIZATION_INVALID,
+                return Err(cov_error_with_detail(
+                    &COV_ERROR_NORMALIZATION_INVALID,
+                    "value must be finite",
                 ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
-                return Err(builtin_error_with_identifier(
-                    "cov: normalization flag must be an integer",
-                    COV_ERR_NORMALIZATION_INVALID,
+                return Err(cov_error_with_detail(
+                    &COV_ERROR_NORMALIZATION_INVALID,
+                    "value must be an integer",
                 ));
             }
             match rounded as i64 {
                 0 => Ok(CovNormalization::Unbiased),
                 1 => Ok(CovNormalization::Biased),
-                other => Err(builtin_error_with_identifier(
-                    format!("cov: normalization flag must be 0 or 1, received {other}"),
-                    COV_ERR_NORMALIZATION_INVALID,
+                other => Err(cov_error_with_detail(
+                    &COV_ERROR_NORMALIZATION_INVALID,
+                    format!("expected 0 or 1, received {other}"),
                 )),
             }
         }
@@ -354,12 +633,9 @@ fn parse_normalization(value: Value) -> BuiltinResult<CovNormalization> {
         } else {
             CovNormalization::Unbiased
         }),
-        other => Err(builtin_error_with_identifier(
-            format!(
-                "cov: normalization flag must be numeric, received {:?}",
-                other
-            ),
-            COV_ERR_NORMALIZATION_INVALID,
+        other => Err(cov_error_with_detail(
+            &COV_ERROR_NORMALIZATION_INVALID,
+            format!("value must be numeric, received {other:?}"),
         )),
     }
 }
@@ -400,7 +676,10 @@ fn value_rows_cols(value: &Value) -> BuiltinResult<(usize, usize)> {
         Value::Tensor(tensor) => Ok((tensor.rows(), tensor.cols())),
         Value::LogicalArray(array) => {
             if array.shape.len() > 2 {
-                return Err(builtin_error("cov: inputs must be 2-D matrices or vectors"));
+                return Err(cov_error_with_detail(
+                    &COV_ERROR_INVALID_ARGUMENT,
+                    "inputs must be 2-D matrices or vectors",
+                ));
             }
             let rows = if array.shape.is_empty() {
                 1
@@ -416,7 +695,10 @@ fn value_rows_cols(value: &Value) -> BuiltinResult<(usize, usize)> {
         }
         Value::GpuTensor(handle) => {
             if handle.shape.len() > 2 {
-                return Err(builtin_error("cov: inputs must be 2-D matrices or vectors"));
+                return Err(cov_error_with_detail(
+                    &COV_ERROR_INVALID_ARGUMENT,
+                    "inputs must be 2-D matrices or vectors",
+                ));
             }
             let rows = if handle.shape.is_empty() {
                 1
@@ -431,10 +713,10 @@ fn value_rows_cols(value: &Value) -> BuiltinResult<(usize, usize)> {
             Ok((rows, cols))
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok((1, 1)),
-        other => Err(builtin_error(format!(
-            "cov: unsupported input type for shape inspection: {:?}",
-            other
-        ))),
+        other => Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            format!("unsupported input type for shape inspection: {other:?}"),
+        )),
     }
 }
 
@@ -448,9 +730,10 @@ struct Matrix {
 impl Matrix {
     fn from_tensor(name: &str, tensor: Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(builtin_error(format!(
-                "{name}: inputs must be 2-D matrices or vectors"
-            )));
+            return Err(cov_error_with_detail(
+                &COV_ERROR_INVALID_ARGUMENT,
+                format!("{name}: inputs must be 2-D matrices or vectors"),
+            ));
         }
         Ok(Self {
             rows: tensor.rows(),
@@ -477,10 +760,7 @@ fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix>
     if let Some(second) = right {
         let right_matrix = Matrix::from_tensor("cov", second)?;
         if matrix.rows != right_matrix.rows {
-            return Err(builtin_error_with_identifier(
-                "cov: inputs must have the same number of rows",
-                COV_ERR_ROWS_MISMATCH,
-            ));
+            return Err(cov_error(&COV_ERROR_ROWS_MISMATCH));
         }
         matrix.cols += right_matrix.cols;
         matrix
@@ -495,7 +775,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
     let rows = matrix.rows;
 
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| builtin_error(format!("cov: {e}")));
+        return Tensor::new(Vec::new(), vec![0, 0]).map_err(cov_internal_error);
     }
 
     let mut result = vec![f64::NAN; cols * cols];
@@ -507,8 +787,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
                 CovNormalization::Biased => rows as f64,
             };
             if denom <= 0.0 {
-                return Tensor::new(result, vec![cols, cols])
-                    .map_err(|e| builtin_error(format!("cov: {e}")));
+                return Tensor::new(result, vec![cols, cols]).map_err(cov_internal_error);
             }
 
             let mut means = vec![0.0; cols];
@@ -535,20 +814,18 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
         }
         CovWeightSpec::Vector(weights) => {
             if weights.len() != rows {
-                return Err(builtin_error_with_identifier(
-                    format!("cov: weight vector must contain {} elements", rows),
-                    COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+                return Err(cov_error_with_detail(
+                    &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+                    format!("expected {rows} elements"),
                 ));
             }
             let sum_w: f64 = weights.iter().sum();
             if sum_w <= 0.0 {
-                return Tensor::new(result, vec![cols, cols])
-                    .map_err(|e| builtin_error(format!("cov: {e}")));
+                return Tensor::new(result, vec![cols, cols]).map_err(cov_internal_error);
             }
             let denom = sum_w - 1.0;
             if denom <= 0.0 {
-                return Tensor::new(result, vec![cols, cols])
-                    .map_err(|e| builtin_error(format!("cov: {e}")));
+                return Tensor::new(result, vec![cols, cols]).map_err(cov_internal_error);
             }
 
             let mut means = vec![0.0; cols];
@@ -579,7 +856,7 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
         }
     }
 
-    Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("cov: {e}")))
+    Tensor::new(result, vec![cols, cols]).map_err(cov_internal_error)
 }
 
 fn filter_complete_rows(matrix: &Matrix, weight: CovWeightSpec) -> (Matrix, CovWeightSpec) {
@@ -643,7 +920,7 @@ fn filter_complete_rows(matrix: &Matrix, weight: CovWeightSpec) -> (Matrix, CovW
 fn covariance_pairwise(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Tensor> {
     let cols = matrix.cols;
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| builtin_error(format!("cov: {e}")));
+        return Tensor::new(Vec::new(), vec![0, 0]).map_err(cov_internal_error);
     }
     let mut result = vec![f64::NAN; cols * cols];
     for i in 0..cols {
@@ -654,7 +931,7 @@ fn covariance_pairwise(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult
             set_entry(&mut result, cols, i, j, sanitize_covariance(false, value));
         }
     }
-    Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("cov: {e}")))
+    Tensor::new(result, vec![cols, cols]).map_err(cov_internal_error)
 }
 
 fn covariance_unweighted_pair(
@@ -867,6 +1144,18 @@ pub(crate) mod tests {
         assert_eq!(out, Type::Num);
     }
 
+    #[test]
+    fn cov_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = COV_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = cov(X)"));
+        assert!(labels.contains(&"C = cov(X, normalization)"));
+        assert!(labels.contains(&"C = cov(X, Y, w, opt)"));
+    }
+
     #[cfg(feature = "wgpu")]
     fn cov_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cov_builtin(value, rest))
@@ -1032,7 +1321,7 @@ pub(crate) mod tests {
         let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
             .expect_err("expected mismatch error");
-        assert_eq!(err.identifier(), Some(COV_ERR_ROWS_MISMATCH));
+        assert_eq!(err.identifier(), COV_ERROR_ROWS_MISMATCH.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1041,7 +1330,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)]))
             .expect_err("expected invalid flag error");
-        assert_eq!(err.identifier(), Some(COV_ERR_NORMALIZATION_INVALID));
+        assert_eq!(err.identifier(), COV_ERROR_NORMALIZATION_INVALID.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1057,7 +1346,7 @@ pub(crate) mod tests {
         .expect_err("expected weight length mismatch");
         assert_eq!(
             err.identifier(),
-            Some(COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH)
+            COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH.identifier
         );
     }
 
@@ -1070,7 +1359,7 @@ pub(crate) mod tests {
             vec![Value::from("rows"), Value::from("bogus")],
         ))
         .expect_err("expected unknown rows option error");
-        assert_eq!(err.identifier(), Some(COV_ERR_ROWS_OPTION_UNKNOWN));
+        assert_eq!(err.identifier(), COV_ERROR_ROWS_OPTION_UNKNOWN.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1082,7 +1371,10 @@ pub(crate) mod tests {
             vec![Value::Num(0.0), Value::Num(1.0)],
         ))
         .expect_err("expected duplicate normalization flag error");
-        assert_eq!(err.identifier(), Some(COV_ERR_NORMALIZATION_DUPLICATE));
+        assert_eq!(
+            err.identifier(),
+            COV_ERROR_NORMALIZATION_DUPLICATE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1097,7 +1389,10 @@ pub(crate) mod tests {
             vec![Value::Tensor(y), Value::Tensor(w), Value::Tensor(z)],
         ))
         .expect_err("expected too many array arguments error");
-        assert_eq!(err.identifier(), Some(COV_ERR_TOO_MANY_ARRAY_ARGUMENTS));
+        assert_eq!(
+            err.identifier(),
+            COV_ERROR_TOO_MANY_ARRAY_ARGUMENTS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

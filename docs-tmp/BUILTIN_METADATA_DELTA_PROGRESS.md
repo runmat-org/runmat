@@ -51,9 +51,10 @@
 | Wave 46 (Stats Random Distributions A) | `exprnd`, `normrnd`, `unifrnd` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::random::exprnd::tests::`; `cargo test -p runmat-runtime builtins::stats::random::normrnd::tests::`; `cargo test -p runmat-runtime builtins::stats::random::unifrnd::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp signature_help_uses_rand_family_descriptor_signatures` | Attached descriptors for exponential/normal/uniform random sampling forms (scalar + size-vector + variadic-dims) with descriptor-row canonical error mappings and LSP signature-help coverage |
 | Wave 47 (Stats Random Control) | `rng` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::random::rng::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for RNG query/seed/option/restore forms with stable descriptor-backed error coverage (seed, generator, state struct, invalid args, internal) and LSP random-family signature-help coverage |
 | Wave 48 (Stats Summary A) | `mode` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::summary::mode::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `mode` single/dimension/all forms with by-requested-output semantics (`M`, `[M,F]`, `[M,F,C]`), descriptor-row canonical runtime error mapping (invalid args/dimension/gpu/complex/internal), and LSP stats-summary signature-help coverage |
+| Wave 49 (Stats Summary B) | `cov`, `corrcoef` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::stats::summary::cov::tests::`; `cargo test -p runmat-runtime builtins::stats::summary::corrcoef::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for covariance/correlation forms, descriptor-row canonical runtime error mapping (no duplicated stable identifier/message constants), and expanded LSP stats-summary signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `149`
-- Remaining: `419`
+- Migrated with attached descriptor: `151`
+- Remaining: `417`

@@ -3,7 +3,11 @@
 use runmat_accelerate_api::{
     CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, GpuTensorHandle,
 };
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -16,26 +20,318 @@ use crate::builtins::stats::type_resolvers::corrcoef_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corrcoef";
-const CORRCOEF_ERR_ROWS_MISMATCH: &str = "RunMat:corrcoef:RowsMismatch";
-const CORRCOEF_ERR_NORMALIZATION_INVALID: &str = "RunMat:corrcoef:NormalizationInvalid";
-const CORRCOEF_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:corrcoef:RowsOptionUnknown";
-const CORRCOEF_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:corrcoef:NormalizationDuplicate";
-const CORRCOEF_ERR_ROWS_OPTION_MALFORMED: &str = "RunMat:corrcoef:RowsOptionMalformed";
-const CORRCOEF_ERR_OPTION_UNKNOWN: &str = "RunMat:corrcoef:OptionUnknown";
-const CORRCOEF_ERR_TOO_MANY_INPUT_ARRAYS: &str = "RunMat:corrcoef:TooManyInputArrays";
+const CORRCOEF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Correlation coefficient matrix.",
+}];
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+const CORRCOEF_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input observations (rows are observations, columns are variables).",
+}];
+
+const CORRCOEF_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset with matching row count.",
+    },
+];
+
+const CORRCOEF_INPUTS_X_NORMALIZATION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "normalization",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("0"),
+        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
+    },
+];
+
+const CORRCOEF_INPUTS_X_ROWS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"rows\""),
+        description: "Rows option keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "rows_option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"all\""),
+        description: "Rows handling mode: 'all', 'complete', or 'pairwise'.",
+    },
+];
+
+const CORRCOEF_INPUTS_X_Y_NORMALIZATION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset with matching row count.",
+    },
+    BuiltinParamDescriptor {
+        name: "normalization",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("0"),
+        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
+    },
+];
+
+const CORRCOEF_INPUTS_X_Y_ROWS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second dataset with matching row count.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"rows\""),
+        description: "Rows option keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "rows_option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"all\""),
+        description: "Rows handling mode: 'all', 'complete', or 'pairwise'.",
+    },
+];
+
+const CORRCOEF_INPUTS_X_NORM_ROWS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input observations (rows are observations, columns are variables).",
+    },
+    BuiltinParamDescriptor {
+        name: "normalization",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("0"),
+        description: "Normalization flag: 0 (unbiased) or 1 (biased).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"rows\""),
+        description: "Rows option keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "rows_option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"all\""),
+        description: "Rows handling mode: 'all', 'complete', or 'pairwise'.",
+    },
+];
+
+const CORRCOEF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X)",
+        inputs: &CORRCOEF_INPUTS_X,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X, Y)",
+        inputs: &CORRCOEF_INPUTS_X_Y,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X, normalization)",
+        inputs: &CORRCOEF_INPUTS_X_NORMALIZATION,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X, \"rows\", rows_option)",
+        inputs: &CORRCOEF_INPUTS_X_ROWS,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X, Y, normalization)",
+        inputs: &CORRCOEF_INPUTS_X_Y_NORMALIZATION,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X, Y, \"rows\", rows_option)",
+        inputs: &CORRCOEF_INPUTS_X_Y_ROWS,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = corrcoef(X, normalization, \"rows\", rows_option)",
+        inputs: &CORRCOEF_INPUTS_X_NORM_ROWS,
+        outputs: &CORRCOEF_OUTPUT,
+    },
+];
+
+const CORRCOEF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.INVALID_ARGUMENT",
+    identifier: Some("RunMat:corrcoef:InvalidArgument"),
+    when: "Arguments are malformed or unsupported for corrcoef.",
+    message: "corrcoef: invalid argument",
+};
+
+const CORRCOEF_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:corrcoef:ComplexUnsupported"),
+    when: "Any input argument is complex-valued.",
+    message: "corrcoef: complex inputs are not supported yet",
+};
+
+const CORRCOEF_ERROR_ROWS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.ROWS_MISMATCH",
+    identifier: Some("RunMat:corrcoef:RowsMismatch"),
+    when: "Two input datasets do not have the same number of rows.",
+    message: "corrcoef: inputs must have the same number of rows",
+};
+
+const CORRCOEF_ERROR_NORMALIZATION_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.NORMALIZATION_INVALID",
+    identifier: Some("RunMat:corrcoef:NormalizationInvalid"),
+    when: "Normalization flag is non-finite, non-integer, or not 0/1.",
+    message: "corrcoef: normalization flag is invalid",
+};
+
+const CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.ROWS_OPTION_UNKNOWN",
+    identifier: Some("RunMat:corrcoef:RowsOptionUnknown"),
+    when: "Rows option value is not supported.",
+    message: "corrcoef: unknown rows option",
+};
+
+const CORRCOEF_ERROR_NORMALIZATION_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.NORMALIZATION_DUPLICATE",
+    identifier: Some("RunMat:corrcoef:NormalizationDuplicate"),
+    when: "Normalization flag is provided more than once.",
+    message: "corrcoef: normalization flag specified more than once",
+};
+
+const CORRCOEF_ERROR_ROWS_OPTION_MALFORMED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.ROWS_OPTION_MALFORMED",
+    identifier: Some("RunMat:corrcoef:RowsOptionMalformed"),
+    when: "Rows keyword is not followed by a valid string option.",
+    message: "corrcoef: rows option is malformed",
+};
+
+const CORRCOEF_ERROR_OPTION_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.OPTION_UNKNOWN",
+    identifier: Some("RunMat:corrcoef:OptionUnknown"),
+    when: "An unknown option keyword is provided.",
+    message: "corrcoef: unknown option",
+};
+
+const CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.TOO_MANY_INPUT_ARRAYS",
+    identifier: Some("RunMat:corrcoef:TooManyInputArrays"),
+    when: "More than two data arrays are provided.",
+    message: "corrcoef: too many input arrays",
+};
+
+const CORRCOEF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CORRCOEF.INTERNAL",
+    identifier: Some("RunMat:corrcoef:Internal"),
+    when: "Internal tensor conversion/allocation or corrcoef computation fails.",
+    message: "corrcoef: internal operation failed",
+};
+
+const CORRCOEF_ERRORS: [BuiltinErrorDescriptor; 10] = [
+    CORRCOEF_ERROR_INVALID_ARGUMENT,
+    CORRCOEF_ERROR_COMPLEX_UNSUPPORTED,
+    CORRCOEF_ERROR_ROWS_MISMATCH,
+    CORRCOEF_ERROR_NORMALIZATION_INVALID,
+    CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN,
+    CORRCOEF_ERROR_NORMALIZATION_DUPLICATE,
+    CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
+    CORRCOEF_ERROR_OPTION_UNKNOWN,
+    CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS,
+    CORRCOEF_ERROR_INTERNAL,
+];
+
+pub const CORRCOEF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CORRCOEF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CORRCOEF_ERRORS,
+};
+
+fn corrcoef_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn builtin_error_with_identifier(
-    message: impl Into<String>,
-    identifier: &'static str,
+fn corrcoef_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    corrcoef_error_with(error, error.message)
+}
+
+fn corrcoef_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
 ) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(NAME)
-        .with_identifier(identifier)
-        .build()
+    corrcoef_error_with(error, format!("{}: {detail}", error.message))
+}
+
+fn corrcoef_internal_error(message: impl Into<String>) -> RuntimeError {
+    corrcoef_error_with(&CORRCOEF_ERROR_INTERNAL, message)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
@@ -72,6 +368,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "corrcoef,correlation,statistics,rows,normalization,gpu",
     accel = "reduction",
     type_resolver(corrcoef_type),
+    descriptor(crate::builtins::stats::summary::corrcoef::CORRCOEF_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
 async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -119,62 +416,54 @@ impl CorrcoefArgs {
             match arg {
                 Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
                     let key = value_to_string(&arg)
-                        .ok_or_else(|| builtin_error("corrcoef: expected string argument"))?
+                        .ok_or_else(|| corrcoef_error(&CORRCOEF_ERROR_INVALID_ARGUMENT))?
                         .to_ascii_lowercase();
                     match key.as_str() {
                         "rows" => {
                             let option = iter.next().ok_or_else(|| {
-                                builtin_error_with_identifier(
-                                    "corrcoef: expected a rows option after 'rows'",
-                                    CORRCOEF_ERR_ROWS_OPTION_MALFORMED,
+                                corrcoef_error_with_detail(
+                                    &CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
+                                    "expected a rows option after 'rows'",
                                 )
                             })?;
                             let choice = value_to_string(&option)
                                 .ok_or_else(|| {
-                                    builtin_error_with_identifier(
-                                        "corrcoef: rows option must be a string value",
-                                        CORRCOEF_ERR_ROWS_OPTION_MALFORMED,
+                                    corrcoef_error_with_detail(
+                                        &CORRCOEF_ERROR_ROWS_OPTION_MALFORMED,
+                                        "rows option must be a string value",
                                     )
                                 })?
                                 .to_ascii_lowercase();
                             rows = parse_rows_option(&choice)?;
                         }
                         _ => {
-                            return Err(builtin_error_with_identifier(
-                                format!("corrcoef: unknown option '{key}'"),
-                                CORRCOEF_ERR_OPTION_UNKNOWN,
+                            return Err(corrcoef_error_with_detail(
+                                &CORRCOEF_ERROR_OPTION_UNKNOWN,
+                                format!("'{key}'"),
                             ))
                         }
                     }
                 }
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
                     if normalization.is_some() {
-                        return Err(builtin_error_with_identifier(
-                            "corrcoef: normalization flag specified more than once",
-                            CORRCOEF_ERR_NORMALIZATION_DUPLICATE,
-                        ));
+                        return Err(corrcoef_error(&CORRCOEF_ERROR_NORMALIZATION_DUPLICATE));
                     }
                     normalization = Some(parse_normalization(arg)?);
                 }
                 Value::Tensor(_) | Value::LogicalArray(_) | Value::GpuTensor(_) => {
                     if second.is_some() {
-                        return Err(builtin_error_with_identifier(
-                            "corrcoef: too many input arrays",
-                            CORRCOEF_ERR_TOO_MANY_INPUT_ARRAYS,
-                        ));
+                        return Err(corrcoef_error(&CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS));
                     }
                     second = Some(arg);
                 }
                 Value::ComplexTensor(_) => {
-                    return Err(builtin_error(
-                        "corrcoef: complex inputs are not supported yet",
-                    ));
+                    return Err(corrcoef_error(&CORRCOEF_ERROR_COMPLEX_UNSUPPORTED));
                 }
                 other => {
-                    return Err(builtin_error(format!(
-                        "corrcoef: unsupported argument type {:?}",
-                        other
-                    )))
+                    return Err(corrcoef_error_with_detail(
+                        &CORRCOEF_ERROR_INVALID_ARGUMENT,
+                        format!("{other:?}"),
+                    ))
                 }
             }
         }
@@ -261,7 +550,7 @@ async fn corrcoef_host(args: CorrcoefArgs) -> BuiltinResult<Value> {
 async fn value_to_tensor_gather(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle).await,
-        other => tensor::value_into_tensor_for("corrcoef", other).map_err(builtin_error),
+        other => tensor::value_into_tensor_for("corrcoef", other).map_err(corrcoef_internal_error),
     }
 }
 
@@ -272,9 +561,9 @@ fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
         "pairwise" | "pairwisecomplete" | "pairwisecompletecase" | "pairwisecompletecases" => {
             Ok(CorrcoefRows::Pairwise)
         }
-        other => Err(builtin_error_with_identifier(
-            format!("corrcoef: unknown rows option '{other}'"),
-            CORRCOEF_ERR_ROWS_OPTION_UNKNOWN,
+        other => Err(corrcoef_error_with_detail(
+            &CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN,
+            format!("'{other}'"),
         )),
     }
 }
@@ -284,31 +573,31 @@ fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(CorrcoefNormalization::Unbiased),
             1 => Ok(CorrcoefNormalization::Biased),
-            other => Err(builtin_error_with_identifier(
-                format!("corrcoef: normalization flag must be 0 or 1, received {other}"),
-                CORRCOEF_ERR_NORMALIZATION_INVALID,
+            other => Err(corrcoef_error_with_detail(
+                &CORRCOEF_ERROR_NORMALIZATION_INVALID,
+                format!("expected 0 or 1, received {other}"),
             )),
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(builtin_error_with_identifier(
-                    "corrcoef: normalization flag must be finite",
-                    CORRCOEF_ERR_NORMALIZATION_INVALID,
+                return Err(corrcoef_error_with_detail(
+                    &CORRCOEF_ERROR_NORMALIZATION_INVALID,
+                    "value must be finite",
                 ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
-                return Err(builtin_error_with_identifier(
-                    "corrcoef: normalization flag must be an integer",
-                    CORRCOEF_ERR_NORMALIZATION_INVALID,
+                return Err(corrcoef_error_with_detail(
+                    &CORRCOEF_ERROR_NORMALIZATION_INVALID,
+                    "value must be an integer",
                 ));
             }
             match rounded as i64 {
                 0 => Ok(CorrcoefNormalization::Unbiased),
                 1 => Ok(CorrcoefNormalization::Biased),
-                other => Err(builtin_error_with_identifier(
-                    format!("corrcoef: normalization flag must be 0 or 1, received {other}"),
-                    CORRCOEF_ERR_NORMALIZATION_INVALID,
+                other => Err(corrcoef_error_with_detail(
+                    &CORRCOEF_ERROR_NORMALIZATION_INVALID,
+                    format!("expected 0 or 1, received {other}"),
                 )),
             }
         }
@@ -317,9 +606,9 @@ fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
         } else {
             CorrcoefNormalization::Unbiased
         }),
-        other => Err(builtin_error_with_identifier(
-            format!("corrcoef: normalization flag must be numeric or logical, received {other:?}"),
-            CORRCOEF_ERR_NORMALIZATION_INVALID,
+        other => Err(corrcoef_error_with_detail(
+            &CORRCOEF_ERROR_NORMALIZATION_INVALID,
+            format!("value must be numeric or logical, received {other:?}"),
         )),
     }
 }
@@ -341,8 +630,9 @@ struct Matrix {
 impl Matrix {
     fn from_tensor(tensor: Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(builtin_error(
-                "corrcoef: inputs must be 2-D matrices or vectors",
+            return Err(corrcoef_error_with_detail(
+                &CORRCOEF_ERROR_INVALID_ARGUMENT,
+                "inputs must be 2-D matrices or vectors",
             ));
         }
         Ok(Self {
@@ -370,10 +660,7 @@ fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix>
     if let Some(second) = right {
         let right_matrix = Matrix::from_tensor(second)?;
         if matrix.rows != right_matrix.rows {
-            return Err(builtin_error_with_identifier(
-                "corrcoef: inputs must have the same number of rows",
-                CORRCOEF_ERR_ROWS_MISMATCH,
-            ));
+            return Err(corrcoef_error(&CORRCOEF_ERROR_ROWS_MISMATCH));
         }
         matrix.cols += right_matrix.cols;
         matrix
@@ -433,21 +720,18 @@ fn filter_complete_rows(matrix: &Matrix) -> Matrix {
 fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> BuiltinResult<Tensor> {
     let cols = matrix.cols;
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(Vec::new(), vec![0, 0]).map_err(corrcoef_internal_error);
     }
 
     let mut result = vec![f64::NAN; cols * cols];
     let rows = matrix.rows;
     if rows == 0 {
-        return Tensor::new(result, vec![cols, cols])
-            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error);
     }
 
     let denom = normalization_denominator(normalization, rows);
     if denom <= 0.0 {
-        return Tensor::new(result, vec![cols, cols])
-            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error);
     }
 
     let mut means = vec![0.0; cols];
@@ -499,7 +783,7 @@ fn corrcoef_dense(matrix: &Matrix, normalization: CorrcoefNormalization) -> Buil
         }
     }
 
-    Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("corrcoef: {e}")))
+    Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error)
 }
 
 fn column_pair_corr(matrix: &Matrix, lhs: usize, rhs: usize, means: &[f64], denom: f64) -> f64 {
@@ -538,8 +822,7 @@ fn corrcoef_pairwise(
 ) -> BuiltinResult<Tensor> {
     let cols = matrix.cols;
     if cols == 0 {
-        return Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| builtin_error(format!("corrcoef: {e}")));
+        return Tensor::new(Vec::new(), vec![0, 0]).map_err(corrcoef_internal_error);
     }
     let mut result = vec![f64::NAN; cols * cols];
     for col in 0..cols {
@@ -549,7 +832,7 @@ fn corrcoef_pairwise(
             set_entry(&mut result, cols, col, other, corr);
         }
     }
-    Tensor::new(result, vec![cols, cols]).map_err(|e| builtin_error(format!("corrcoef: {e}")))
+    Tensor::new(result, vec![cols, cols]).map_err(corrcoef_internal_error)
 }
 
 fn pairwise_corr(
@@ -703,6 +986,18 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn corrcoef_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CORRCOEF_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"R = corrcoef(X)"));
+        assert!(labels.contains(&"R = corrcoef(X, Y)"));
+        assert!(labels.contains(&"R = corrcoef(X, \"rows\", rows_option)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -928,7 +1223,7 @@ pub(crate) mod tests {
             vec![Value::Tensor(right)],
         ))
         .expect_err("expected mismatch error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_MISMATCH));
+        assert_eq!(err.identifier(), CORRCOEF_ERROR_ROWS_MISMATCH.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -940,7 +1235,10 @@ pub(crate) mod tests {
             vec![Value::Num(2.5)],
         ))
         .expect_err("expected invalid flag error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_NORMALIZATION_INVALID));
+        assert_eq!(
+            err.identifier(),
+            CORRCOEF_ERROR_NORMALIZATION_INVALID.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -952,7 +1250,10 @@ pub(crate) mod tests {
             vec![Value::from("rows"), Value::from("bogus")],
         ))
         .expect_err("expected unknown rows option error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_OPTION_UNKNOWN));
+        assert_eq!(
+            err.identifier(),
+            CORRCOEF_ERROR_ROWS_OPTION_UNKNOWN.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -964,7 +1265,10 @@ pub(crate) mod tests {
             vec![Value::Num(0.0), Value::Num(1.0)],
         ))
         .expect_err("expected duplicate normalization flag error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_NORMALIZATION_DUPLICATE));
+        assert_eq!(
+            err.identifier(),
+            CORRCOEF_ERROR_NORMALIZATION_DUPLICATE.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -976,7 +1280,7 @@ pub(crate) mod tests {
             vec![Value::from("bogus"), Value::from("value")],
         ))
         .expect_err("expected unknown option error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_OPTION_UNKNOWN));
+        assert_eq!(err.identifier(), CORRCOEF_ERROR_OPTION_UNKNOWN.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -989,7 +1293,10 @@ pub(crate) mod tests {
             vec![Value::from("rows"), Value::Tensor(non_string_option)],
         ))
         .expect_err("expected malformed rows option error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_OPTION_MALFORMED));
+        assert_eq!(
+            err.identifier(),
+            CORRCOEF_ERROR_ROWS_OPTION_MALFORMED.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1003,7 +1310,10 @@ pub(crate) mod tests {
             vec![Value::Tensor(b), Value::Tensor(c)],
         ))
         .expect_err("expected too many input arrays error");
-        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_TOO_MANY_INPUT_ARRAYS));
+        assert_eq!(
+            err.identifier(),
+            CORRCOEF_ERROR_TOO_MANY_INPUT_ARRAYS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
