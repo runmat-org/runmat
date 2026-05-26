@@ -1397,6 +1397,74 @@ pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolver
     TypeResolverKind::WithContext(resolver)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinOutputMode {
+    Fixed,
+    ByRequestedOutputCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinCompletionPolicy {
+    Public,
+    MethodOnly,
+    HiddenInternal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinParamArity {
+    Required,
+    Optional,
+    Variadic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinParamType {
+    Any,
+    NumericScalar,
+    IntegerScalar,
+    StringScalar,
+    NumericArray,
+    LogicalArray,
+    SizeArg,
+    LikePrototype,
+    AxesHandle,
+    StyleSpec,
+    PropertyName,
+    PropertyValue,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinParamDescriptor {
+    pub name: &'static str,
+    pub ty: BuiltinParamType,
+    pub arity: BuiltinParamArity,
+    pub default: Option<&'static str>,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinSignatureDescriptor {
+    pub label: &'static str,
+    pub inputs: &'static [BuiltinParamDescriptor],
+    pub outputs: &'static [BuiltinParamDescriptor],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinErrorDescriptor {
+    pub code: &'static str,
+    pub identifier: Option<&'static str>,
+    pub when: &'static str,
+    pub message: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinDescriptor {
+    pub signatures: &'static [BuiltinSignatureDescriptor],
+    pub output_mode: BuiltinOutputMode,
+    pub completion_policy: BuiltinCompletionPolicy,
+    pub errors: &'static [BuiltinErrorDescriptor],
+}
+
 /// Simple builtin function definition using the unified type system
 #[derive(Debug, Clone)]
 pub struct BuiltinFunction {
@@ -1412,6 +1480,7 @@ pub struct BuiltinFunction {
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
+    pub descriptor: Option<&'static BuiltinDescriptor>,
 }
 
 impl BuiltinFunction {
@@ -1443,7 +1512,21 @@ impl BuiltinFunction {
             accel_tags,
             is_sink,
             suppress_auto_output,
+            descriptor: None,
         }
+    }
+
+    pub fn with_descriptor(mut self, descriptor: &'static BuiltinDescriptor) -> Self {
+        self.descriptor = Some(descriptor);
+        self
+    }
+
+    pub fn with_descriptor_option(
+        mut self,
+        descriptor: Option<&'static BuiltinDescriptor>,
+    ) -> Self {
+        self.descriptor = descriptor;
+        self
     }
 
     pub fn infer_return_type(&self, args: &[Type]) -> Type {

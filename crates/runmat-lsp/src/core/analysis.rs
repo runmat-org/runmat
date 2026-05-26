@@ -641,6 +641,28 @@ pub fn signature_help_at(
     let offset = position_to_offset(_text, _position);
     let token = token_at_offset(&_analysis.tokens, offset)?;
     let name = token.lexeme.clone();
+    if let Some(func) = runmat_builtins::builtin_functions()
+        .into_iter()
+        .find(|builtin| builtin.name.eq_ignore_ascii_case(&name))
+    {
+        if let Some(labels) = docs::signature_labels(func) {
+            let signatures = labels
+                .into_iter()
+                .map(|label| lsp_types::SignatureInformation {
+                    label,
+                    documentation: None,
+                    parameters: None,
+                    active_parameter: None,
+                })
+                .collect();
+            return Some(SignatureHelp {
+                signatures,
+                active_signature: Some(0),
+                active_parameter: None,
+            });
+        }
+    }
+
     let funcs = semantic.function_lookup.get(&name)?;
 
     let mut sigs = Vec::new();
@@ -1258,7 +1280,9 @@ fn function_completion(func: &FunctionSemantic) -> CompletionItem {
 }
 
 fn builtin_completion(func: &BuiltinFunction) -> CompletionItem {
-    let detail = if !func.param_types.is_empty() {
+    let detail = if let Some(label) = docs::completion_signature_label(func) {
+        label
+    } else if !func.param_types.is_empty() {
         let params: Vec<String> = func.param_types.iter().map(format_type).collect();
         format!(
             "({}) -> {}",

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, LogicalArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
@@ -51,6 +55,155 @@ fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
     tensor_type_from_rank(args, ctx)
 }
 
+const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output array.",
+}];
+
+const ZEROS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const ZEROS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const ZEROS_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const ZEROS_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::LikePrototype,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value when no numeric dimension arguments are provided.",
+}];
+
+const ZEROS_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const ZEROS_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class name override (double|single|logical|gpuArray).",
+    },
+];
+
+const ZEROS_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const ZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "A = zeros()",
+        inputs: &ZEROS_SIG_EMPTY_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(n)",
+        inputs: &ZEROS_SIG_N_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(size_vector)",
+        inputs: &ZEROS_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(m, n, ...)",
+        inputs: &ZEROS_SIG_DIMS_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(prototype)",
+        inputs: &ZEROS_SIG_PROTOTYPE_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(..., typename)",
+        inputs: &ZEROS_SIG_CLASS_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(..., \"like\", prototype)",
+        inputs: &ZEROS_SIG_LIKE_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+];
+
+const ZEROS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    BuiltinErrorDescriptor {
+        code: "RM.ZEROS.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "zeros: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ZEROS.CLASS_CONFLICT",
+        identifier: None,
+        when: "A class keyword and a 'like' prototype are both provided.",
+        message: "zeros: cannot combine 'like' with other class specifiers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.ZEROS.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not a supported class keyword.",
+        message: "zeros: unrecognised option",
+    },
+];
+
+pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ZEROS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ZEROS_ERRORS,
+};
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "zeros",
@@ -80,6 +233,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(zeros_type),
+    descriptor(crate::builtins::array::creation::zeros::ZEROS_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
