@@ -211,6 +211,10 @@ Rule:
 8. In migrated builtins, `BuiltinErrorDescriptor` constants are the in-file source of truth for stable identifier/message pairs. Throw sites must reference those constants, never duplicate the same identifier/message text.
 9. If another module needs to branch on a migrated builtin error, branch on descriptor identifier (`err.identifier() == FOO_ERROR_BAR.identifier`), never on `err.message()` and never via a duplicated forwarded message constant.
 10. Migration audit guardrail: migrated builtins must not define standalone `const ...: &str = "RunMat:..."` identifier constants when the same identifier already exists in a `BuiltinErrorDescriptor` row. Keep identifier/message text authored only in descriptor rows.
+11. Stable-branch throw-sites must call `foo_error(&FOO_ERROR_...)` (or equivalent) so the emitted message comes from `FOO_ERROR_....message`; do not restate the same literal message string in the branch.
+12. Keep the helper split explicit:
+   - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches.
+   - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
 
 ## Shared Helper Reuse Strategy
 

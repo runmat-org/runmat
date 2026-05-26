@@ -2283,6 +2283,28 @@ mod tests {
                 "issorted([1 2 3], 'MissingPlacement', 'last');",
                 "tf = issorted(A, ..., \"MissingPlacement\", placement)",
             ),
+            ("unique([3 1 3 2]);", "C = unique(A)"),
+            ("unique([3 1 3 2], 'stable');", "C = unique(A, option...)"),
+            ("union([1 3], [2 3]);", "C = union(A, B)"),
+            (
+                "union([1 3], [2 3], 'stable');",
+                "C = union(A, B, option...)",
+            ),
+            ("intersect([1 2 3], [2 4]);", "C = intersect(A, B)"),
+            (
+                "intersect([1 2 3], [2 4], 'stable');",
+                "C = intersect(A, B, option...)",
+            ),
+            ("setdiff([1 2 3], [2]);", "C = setdiff(A, B)"),
+            (
+                "setdiff([1 2 3], [2], 'stable');",
+                "C = setdiff(A, B, option...)",
+            ),
+            ("ismember([1 2 3], [2 4]);", "tf = ismember(A, B)"),
+            (
+                "ismember([1 2 3], [2 4], 'rows');",
+                "tf = ismember(A, B, option...)",
+            ),
         ];
 
         for (text, expected_label) in cases {
