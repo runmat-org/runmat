@@ -8,10 +8,15 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 type AlignedShapes = (Vec<usize>, Vec<usize>, Vec<usize>);
+const BUILTIN_NAME: &str = "kron";
 
 fn kron_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -58,8 +63,84 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Kronecker products allocate a fresh tensor and terminate fusion graphs.",
 };
 
-fn kron_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("kron").build()
+const KRON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Kronecker product of inputs A and B.",
+}];
+
+const KRON_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical/complex input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical/complex input array.",
+    },
+];
+
+const KRON_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "C = kron(A, B)",
+    inputs: &KRON_INPUTS_A_B,
+    outputs: &KRON_OUTPUT,
+}];
+
+const KRON_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.KRON.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:kron:TooManyInputs"),
+    when: "Extra arguments were supplied after A and B.",
+    message: "kron: too many input arguments",
+};
+
+const KRON_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.KRON.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:kron:UnsupportedInput"),
+    when: "Input values are not numeric/logical/complex arrays.",
+    message: "kron: unsupported input type",
+};
+
+const KRON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.KRON.INTERNAL",
+    identifier: Some("RunMat:kron:Internal"),
+    when: "Internal conversion/allocation/provider path fails.",
+    message: "kron: internal operation failed",
+};
+
+const KRON_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    KRON_ERROR_TOO_MANY_INPUTS,
+    KRON_ERROR_UNSUPPORTED_INPUT,
+    KRON_ERROR_INTERNAL,
+];
+
+pub const KRON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &KRON_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &KRON_ERRORS,
+};
+
+fn kron_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    kron_error_with_message(error.message, error)
+}
+
+fn kron_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone)]
@@ -81,11 +162,12 @@ enum KronInput {
     keywords = "kron,kronecker product,tensor product,block matrix,gpu",
     accel = "custom",
     type_resolver(kron_type),
+    descriptor(crate::builtins::array::shape::kron::KRON_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::kron"
 )]
 async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(kron_error("kron: too many input arguments"));
+        return Err(kron_error(&KRON_ERROR_TOO_MANY_INPUTS));
     }
 
     match (a, b) {
@@ -240,39 +322,45 @@ fn value_into_kron_input(value: Value) -> crate::BuiltinResult<KronInput> {
         Value::Tensor(tensor) => Ok(KronInput::Real(tensor)),
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
             .map(KronInput::Real)
-            .map_err(|e| kron_error(format!("kron: {e}"))),
+            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL)),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             tensor::value_into_tensor_for("kron", value)
                 .map(KronInput::Real)
-                .map_err(|e| kron_error(e))
+                .map_err(|e| kron_error_with_message(e, &KRON_ERROR_INTERNAL))
         }
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
             .map(KronInput::Complex)
-            .map_err(|e| kron_error(format!("kron: {e}"))),
+            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL)),
         Value::ComplexTensor(tensor) => Ok(KronInput::Complex(tensor)),
         Value::CharArray(chars) => char_array_to_tensor(&chars).map(KronInput::Real),
-        other => Err(kron_error(format!(
-            "kron: unsupported input type {:?}; expected numeric, logical, or complex values",
-            other
-        ))),
+        other => Err(kron_error_with_message(
+            format!(
+                "kron: unsupported input type {:?}; expected numeric, logical, or complex values",
+                other
+            ),
+            &KRON_ERROR_UNSUPPORTED_INPUT,
+        )),
     }
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
     let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|e| kron_error(format!("kron: {e}")))
+    Tensor::new(data, vec![chars.rows, chars.cols])
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
 
 fn tensor_to_complex(tensor: &Tensor) -> crate::BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape.clone()).map_err(|e| kron_error(format!("kron: {e}")))
+    ComplexTensor::new(data, tensor.shape.clone())
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
 
 fn kron_tensor(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<Tensor> {
     let (shape_a, shape_b, shape_out) = aligned_shapes(&a.shape, &b.shape)?;
     let total_out = checked_total(&shape_out, "kron")?;
     if total_out == 0 {
-        return Tensor::new(Vec::new(), shape_out).map_err(|e| kron_error(format!("kron: {e}")));
+        return Tensor::new(Vec::new(), shape_out)
+            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL));
     }
 
     let strides_out = column_major_strides(&shape_out);
@@ -289,7 +377,8 @@ fn kron_tensor(a: &Tensor, b: &Tensor) -> crate::BuiltinResult<Tensor> {
         }
     }
 
-    Tensor::new(data, shape_out).map_err(|e| kron_error(format!("kron: {e}")))
+    Tensor::new(data, shape_out)
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
 
 fn kron_complex_tensor(
@@ -300,7 +389,7 @@ fn kron_complex_tensor(
     let total_out = checked_total(&shape_out, "kron")?;
     if total_out == 0 {
         return ComplexTensor::new(Vec::new(), shape_out)
-            .map_err(|e| kron_error(format!("kron: {e}")));
+            .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL));
     }
 
     let strides_out = column_major_strides(&shape_out);
@@ -319,7 +408,8 @@ fn kron_complex_tensor(
         }
     }
 
-    ComplexTensor::new(data, shape_out).map_err(|e| kron_error(format!("kron: {e}")))
+    ComplexTensor::new(data, shape_out)
+        .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
 
 fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> crate::BuiltinResult<AlignedShapes> {
@@ -336,11 +426,12 @@ fn aligned_shapes(shape_a: &[usize], shape_b: &[usize]) -> crate::BuiltinResult<
 
     let mut output = Vec::with_capacity(rank);
     for i in 0..rank {
-        output.push(
-            padded_a[i]
-                .checked_mul(padded_b[i])
-                .ok_or_else(|| kron_error("kron: requested output exceeds maximum size"))?,
-        );
+        output.push(padded_a[i].checked_mul(padded_b[i]).ok_or_else(|| {
+            kron_error_with_message(
+                "kron: requested output exceeds maximum size",
+                &KRON_ERROR_INTERNAL,
+            )
+        })?);
     }
 
     Ok((padded_a, padded_b, output))
@@ -380,17 +471,15 @@ fn combine_indices(
             .copied()
             .unwrap_or(0)
             .checked_mul(shape_b.get(dim).copied().unwrap_or(1))
-            .ok_or_else(|| kron_error("kron: index overflow"))?;
+            .ok_or_else(|| kron_error_with_message("kron: index overflow", &KRON_ERROR_INTERNAL))?;
         let coord = scaled
             .checked_add(coords_b.get(dim).copied().unwrap_or(0))
-            .ok_or_else(|| kron_error("kron: index overflow"))?;
+            .ok_or_else(|| kron_error_with_message("kron: index overflow", &KRON_ERROR_INTERNAL))?;
         index = index
-            .checked_add(
-                coord
-                    .checked_mul(*stride)
-                    .ok_or_else(|| kron_error("kron: index overflow"))?,
-            )
-            .ok_or_else(|| kron_error("kron: index overflow"))?;
+            .checked_add(coord.checked_mul(*stride).ok_or_else(|| {
+                kron_error_with_message("kron: index overflow", &KRON_ERROR_INTERNAL)
+            })?)
+            .ok_or_else(|| kron_error_with_message("kron: index overflow", &KRON_ERROR_INTERNAL))?;
     }
     Ok(index)
 }
@@ -402,7 +491,10 @@ fn checked_total(shape: &[usize], context: &str) -> crate::BuiltinResult<usize> 
             return Ok(0);
         }
         total = total.checked_mul(dim).ok_or_else(|| {
-            kron_error(format!("{context}: requested output exceeds maximum size"))
+            kron_error_with_message(
+                format!("{context}: requested output exceeds maximum size"),
+                &KRON_ERROR_INTERNAL,
+            )
         })?;
     }
     Ok(total)
@@ -537,6 +629,16 @@ pub(crate) mod tests {
             err.to_string().to_ascii_lowercase().contains("too many"),
             "unexpected error: {err}"
         );
+        assert_eq!(err.identifier(), KRON_ERROR_TOO_MANY_INPUTS.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn kron_rejects_unsupported_input_with_stable_identifier() {
+        let a = Value::String("bad".to_string());
+        let b = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
+        let err = kron_builtin(a, b, Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), KRON_ERROR_UNSUPPORTED_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

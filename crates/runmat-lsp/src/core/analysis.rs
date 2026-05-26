@@ -2220,6 +2220,27 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_array_shape_rotation_product_descriptors() {
+        let cases = [
+            ("rot90([1 2; 3 4]);", "B = rot90(A)"),
+            ("rot90([1 2; 3 4], -1);", "B = rot90(A, k_or_direction)"),
+            ("kron([1 2], [3 4]);", "C = kron(A, B)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
             ("assert(true);", "out = assert(condition)"),
