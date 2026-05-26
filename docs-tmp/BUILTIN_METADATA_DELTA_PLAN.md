@@ -212,14 +212,20 @@ Rule:
 9. If another module needs to branch on a migrated builtin error, branch on descriptor identifier (`err.identifier() == FOO_ERROR_BAR.identifier`), never on `err.message()` and never via a duplicated forwarded message constant.
 10. Migration audit guardrail: migrated builtins must not define standalone stable error constants for identifier/message/code outside descriptor rows (for example `const ...: &str = "RunMat:..."`, `const ...: &str = "foo: ..."`, or `const ...: &str = "RM.FOO.BAR"` when they mirror a descriptor row). Keep stable identifier/message/code authored only in descriptor rows.
 11. Stable-branch throw-sites must call `foo_error(&FOO_ERROR_...)` (or equivalent) so the emitted message/code/identifier come from the descriptor row; do not restate the same literal message string or parallel code/identifier constants in the branch.
-12. Keep non-stable detail strings separate from stable messages:
+12. Descriptor rows must own literal stable fields directly:
+   - required: `code: "RM.FOO.BAR"`, `identifier: Some("RunMat:foo:Bar")`, `message: "foo: ..."`
+   - disallowed: `identifier: Some(IDENT_FOO_BAR)`, `code: FOO_BAR_CODE`, `message: FOO_BAR_MESSAGE`
+13. Keep any extra constants detail-only:
+   - allowed: `const ..._DETAIL: &str = "expects positive integer"`
+   - disallowed: any const that mirrors stable branch `code`/`identifier`/`message`
+14. Keep non-stable detail strings separate from stable messages:
    - allowed: `const ..._DETAIL: &str = "file identifier must be finite"` used with `foo_error_with_detail(&FOO_ERROR_INVALID_INPUT, ..._DETAIL)`.
    - disallowed: `const ..._MESSAGE: &str = "foo: invalid input"` mirroring `FOO_ERROR_INVALID_INPUT.message`.
    - disallowed: `const INVALID_IDENTIFIER_TEXT = "...";` when it duplicates `FOO_ERROR_INVALID_IDENTIFIER.message`.
-13. Keep the helper split explicit:
+15. Keep the helper split explicit:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches (including the branch's canonical message text).
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
-14. Canonical in-file source-of-truth:
+16. Canonical in-file source-of-truth:
    - Declare each stable branch as one `const FOO_ERROR_BAR: BuiltinErrorDescriptor = ...`.
    - Build `FOO_ERRORS` from those constants.
    - Throw only through helpers that accept `&'static BuiltinErrorDescriptor`.
@@ -289,6 +295,7 @@ Disallowed source:
    - `for f in $(rg -l "BuiltinErrorDescriptor" crates/runmat-runtime/src/builtins); do`
    - `  rg -n 'const\\s+((IDENT|MESSAGE_ID|ERROR|CODE)_[A-Z0-9_]+|[A-Z0-9_]+_(IDENT|CODE|MESSAGE|ERROR)):\\s*&str\\s*=\\s*"' "$f" && echo "^^ remove duplicated stable strings in $f";`
    - `  rg -n 'identifier:\\s*Some\\([A-Z0-9_]+\\)' "$f" && echo "^^ use inline identifier text in descriptor row, not a forwarded const in $f";`
+   - `  rg -n '^(\\s*)(code|message):\\s*[A-Z0-9_]+\\b' "$f" && echo "^^ use inline literal code/message in descriptor row, not forwarded constants in $f";`
    - `done`
 
 ## Per-Builtin Execution Loop (Exact Procedure)

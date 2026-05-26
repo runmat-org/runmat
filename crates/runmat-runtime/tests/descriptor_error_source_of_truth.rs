@@ -21,6 +21,14 @@ fn pre_test_source(source: &str) -> &str {
     source.split("#[cfg(test)]").next().unwrap_or(source)
 }
 
+fn is_upper_snake_token(token: &str) -> bool {
+    let token = token.trim();
+    !token.is_empty()
+        && token
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
 #[test]
 fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
     let builtins_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/builtins");
@@ -44,6 +52,7 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
             file.display()
         );
 
+        let mut in_error_descriptor = false;
         for line in runtime_source.lines() {
             let trimmed = line.trim();
             let is_error_const = trimmed.starts_with("const ")
@@ -54,6 +63,50 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
                 "{} defines standalone *_MESSAGE/*_CODE constant in descriptor-migrated file; keep stable error fields in BuiltinErrorDescriptor rows",
                 file.display()
             );
+
+            if trimmed.starts_with("const ")
+                && trimmed.contains(": BuiltinErrorDescriptor = BuiltinErrorDescriptor {")
+            {
+                in_error_descriptor = true;
+                continue;
+            }
+            if in_error_descriptor && trimmed == "};" {
+                in_error_descriptor = false;
+                continue;
+            }
+            if !in_error_descriptor {
+                continue;
+            }
+
+            if trimmed.starts_with("identifier:") && trimmed.contains("Some(") {
+                assert!(
+                    trimmed.contains("Some(\""),
+                    "{} forwards identifier via constant/expression ({trimmed}); keep identifier text authored inline in BuiltinErrorDescriptor rows",
+                    file.display()
+                );
+            }
+
+            if trimmed.starts_with("code:") {
+                let rhs = trimmed.trim_start_matches("code:").trim_start();
+                let token = rhs.trim_end_matches(',').trim();
+                if is_upper_snake_token(token) {
+                    panic!(
+                        "{} forwards error code via constant/expression ({trimmed}); keep code text authored inline in BuiltinErrorDescriptor rows",
+                        file.display()
+                    );
+                }
+            }
+
+            if trimmed.starts_with("message:") {
+                let rhs = trimmed.trim_start_matches("message:").trim_start();
+                let token = rhs.trim_end_matches(',').trim();
+                if is_upper_snake_token(token) {
+                    panic!(
+                        "{} forwards error message via constant/expression ({trimmed}); keep message text authored inline in BuiltinErrorDescriptor rows",
+                        file.display()
+                    );
+                }
+            }
         }
 
         assert!(

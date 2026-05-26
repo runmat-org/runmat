@@ -5,7 +5,11 @@ use runmat_filesystem as vfs;
 use std::env;
 use std::path::Path;
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -43,10 +47,53 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "pwd";
 
+const PWD_OUTPUT_PATH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Current working folder.",
+}];
+const PWD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const PWD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "folder = pwd()",
+    inputs: &PWD_INPUTS_NONE,
+    outputs: &PWD_OUTPUT_PATH,
+}];
+
+const PWD_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PWD.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "One or more positional arguments are provided.",
+    message: "pwd: too many input arguments",
+};
+const PWD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PWD.INTERNAL",
+    identifier: None,
+    when: "Current working directory cannot be resolved.",
+    message: "pwd: unable to determine current directory",
+};
+const PWD_ERRORS: [BuiltinErrorDescriptor; 2] = [PWD_ERROR_TOO_MANY_INPUTS, PWD_ERROR_INTERNAL];
+pub const PWD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PWD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PWD_ERRORS,
+};
+
 fn pwd_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn pwd_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("pwd: ").unwrap_or(detail);
+    pwd_error(format!("{}: {}", error.message, detail))
 }
 
 #[runtime_builtin(
@@ -57,16 +104,18 @@ fn pwd_error(message: impl Into<String>) -> RuntimeError {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::pwd_type),
+    descriptor(crate::builtins::io::repl_fs::pwd::PWD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
 async fn pwd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
-        return Err(pwd_error("pwd: too many input arguments"));
+        return Err(pwd_error(PWD_ERROR_TOO_MANY_INPUTS.message));
     }
     let current = vfs::current_dir().map_err(|err| {
-        pwd_error(format!(
-            "pwd: unable to determine current directory ({err})"
-        ))
+        pwd_error_with_detail(
+            &PWD_ERROR_INTERNAL,
+            format!("pwd: unable to determine current directory ({err})"),
+        )
     })?;
     Ok(path_to_value(&current))
 }
@@ -88,6 +137,17 @@ pub(crate) mod tests {
 
     fn pwd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::pwd_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pwd_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = PWD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"folder = pwd()"));
     }
 
     struct DirGuard {
