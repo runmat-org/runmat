@@ -183,6 +183,10 @@ fn read_error_with_message(
     builder.build()
 }
 
+fn read_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    read_error_with_message(error.message, error)
+}
+
 fn read_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -253,10 +257,7 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
     let (stream, timeout, byte_order, connected) = {
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(read_flow(
-                &READ_ERROR_NOT_CONNECTED,
-                "read: tcpclient is disconnected",
-            ));
+            return Err(read_error(&READ_ERROR_NOT_CONNECTED));
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
@@ -288,17 +289,11 @@ async fn read_builtin(client: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
 
     if let ReadMode::Count(count) = options.mode {
         if read_result.bytes.is_empty() && count > 0 {
-            return Err(read_flow(
-                &READ_ERROR_CONNECTION_CLOSED,
-                "read: connection closed before the requested data was received",
-            ));
+            return Err(read_error(&READ_ERROR_CONNECTION_CLOSED));
         }
         let expected = count.saturating_mul(element_size);
         if read_result.bytes.len() != expected {
-            return Err(read_flow(
-                &READ_ERROR_CONNECTION_CLOSED,
-                "read: connection closed before the requested data was received",
-            ));
+            return Err(read_error(&READ_ERROR_CONNECTION_CLOSED));
         }
     }
 
@@ -369,14 +364,8 @@ fn perform_read(
 ) -> BuiltinResult<ReadOutcome> {
     match read_from_stream(stream, mode, element_size) {
         Ok(outcome) => Ok(outcome),
-        Err(ReadError::Timeout) => Err(read_flow(
-            &READ_ERROR_TIMEOUT,
-            "read: timed out waiting for data",
-        )),
-        Err(ReadError::ConnectionClosed) => Err(read_flow(
-            &READ_ERROR_CONNECTION_CLOSED,
-            "read: connection closed before the requested data was received",
-        )),
+        Err(ReadError::Timeout) => Err(read_error(&READ_ERROR_TIMEOUT)),
+        Err(ReadError::ConnectionClosed) => Err(read_error(&READ_ERROR_CONNECTION_CLOSED)),
         Err(ReadError::Io(err)) => Err(read_flow(
             &READ_ERROR_INTERNAL,
             format!("read: socket error ({err})"),
@@ -641,10 +630,7 @@ async fn parse_arguments(rest: Vec<Value>) -> BuiltinResult<ReadOptions> {
                 datatype,
             })
         }
-        _ => Err(read_flow(
-            &READ_ERROR_INVALID_INPUT,
-            "read: invalid argument list",
-        )),
+        _ => Err(read_error(&READ_ERROR_INVALID_INPUT)),
     }
 }
 

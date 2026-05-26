@@ -170,6 +170,10 @@ fn write_error_with_message(
     builder.build()
 }
 
+fn write_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    write_error_with_message(error.message, error)
+}
+
 fn write_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -256,10 +260,7 @@ async fn write_builtin(
     let (mut stream, timeout, byte_order) = {
         let guard = handle.lock().unwrap_or_else(|poison| poison.into_inner());
         if !guard.connected {
-            return Err(write_flow(
-                &WRITE_ERROR_NOT_CONNECTED,
-                "write: tcpclient is disconnected",
-            ));
+            return Err(write_error(&WRITE_ERROR_NOT_CONNECTED));
         }
         let timeout = guard.timeout;
         let byte_order = parse_byte_order(&guard.byte_order);
@@ -286,18 +287,12 @@ async fn write_builtin(
 
     match write_bytes(&mut stream, &payload.bytes) {
         Ok(_) => Ok(Value::Num(payload.elements as f64)),
-        Err(WriteError::Timeout) => Err(write_flow(
-            &WRITE_ERROR_TIMEOUT,
-            "write: timed out while sending data",
-        )),
+        Err(WriteError::Timeout) => Err(write_error(&WRITE_ERROR_TIMEOUT)),
         Err(WriteError::ConnectionClosed) => {
             if let Ok(mut guard) = handle.lock() {
                 guard.connected = false;
             }
-            Err(write_flow(
-                &WRITE_ERROR_CONNECTION_CLOSED,
-                "write: connection closed before all data was sent",
-            ))
+            Err(write_error(&WRITE_ERROR_CONNECTION_CLOSED))
         }
         Err(WriteError::Io(err)) => Err(write_flow(
             &WRITE_ERROR_INTERNAL,

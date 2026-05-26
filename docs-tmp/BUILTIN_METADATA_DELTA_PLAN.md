@@ -217,7 +217,7 @@ Rule:
    - disallowed: `const ..._MESSAGE: &str = "foo: invalid input"` mirroring `FOO_ERROR_INVALID_INPUT.message`.
    - disallowed: `const INVALID_IDENTIFIER_TEXT = "...";` when it duplicates `FOO_ERROR_INVALID_IDENTIFIER.message`.
 13. Keep the helper split explicit:
-   - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches.
+   - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches (including the branch's canonical message text).
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
 14. Canonical in-file source-of-truth:
    - Declare each stable branch as one `const FOO_ERROR_BAR: BuiltinErrorDescriptor = ...`.
@@ -277,6 +277,7 @@ Disallowed source:
    - `fn foo_error_with_detail(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError { foo_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error) }`
    - Use `foo_error(&FOO_ERROR_...)` for stable branches.
    - Use `foo_error_with_detail(&FOO_ERROR_..., "...")` (or `format!(...)`) only for contextual/internal details.
+   - Do not call `foo_error_with_detail(&FOO_ERROR_..., "foo: ...")` with a full stable message literal; pass only suffix detail text (for example `"unsupported datatype 'x'"`).
    - Do not repeat the stable branch message prefix in callsites (avoid literal `"foo: ..."` throw strings once descriptor rows exist).
 9. Post-migration hygiene check for each touched builtin file:
    - no `const IDENT_*` or `const *_ERROR: &str` for stable identifier/message rows

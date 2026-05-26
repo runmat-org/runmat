@@ -2679,6 +2679,9 @@ mod tests {
                 "write(1, [1 2 3], \"double\");",
                 "count = write(client, data, datatype)",
             ),
+            ("close();", "status = close()"),
+            ("close(1);", "status = close(resource)"),
+            ("readline(1);", "line = readline(client)"),
         ];
 
         for (text, expected_label) in cases {
