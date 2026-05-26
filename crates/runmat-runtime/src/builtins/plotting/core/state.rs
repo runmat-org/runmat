@@ -488,15 +488,6 @@ pub(crate) fn close_figure_with_builtin(
     close_figure(target).map_err(|err| map_figure_error(builtin, err))
 }
 
-pub(crate) fn configure_subplot_with_builtin(
-    builtin: &'static str,
-    rows: usize,
-    cols: usize,
-    index: usize,
-) -> BuiltinResult<()> {
-    configure_subplot(rows, cols, index).map_err(|err| map_figure_error(builtin, err))
-}
-
 pub fn set_grid_enabled(enabled: bool) {
     let (handle, figure_clone) = {
         let mut reg = registry();

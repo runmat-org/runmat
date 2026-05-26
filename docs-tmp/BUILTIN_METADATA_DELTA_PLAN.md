@@ -108,33 +108,33 @@ Plan-of-record shape (code-level):
 
 ```rust
 pub struct BuiltinDescriptor {
-    pub signatures: &'static [BuiltinSignatureSpec],
+    pub signatures: &'static [BuiltinSignatureDescriptor],
     pub output_mode: BuiltinOutputMode,
-    pub errors: &'static [BuiltinErrorSpec],
     pub completion_policy: BuiltinCompletionPolicy,
+    pub errors: &'static [BuiltinErrorDescriptor],
 }
 
-pub struct BuiltinSignatureSpec {
-    pub inputs: &'static [BuiltinParamSpec],
-    pub outputs: &'static [BuiltinParamSpec],
-    pub notes: &'static [&'static str],
+pub struct BuiltinSignatureDescriptor {
+    pub label: &'static str,
+    pub inputs: &'static [BuiltinParamDescriptor],
+    pub outputs: &'static [BuiltinParamDescriptor],
 }
 
-pub struct BuiltinParamSpec {
+pub struct BuiltinParamDescriptor {
     pub name: &'static str,
-    pub ty: BuiltinTypeSpec,
-    pub arity: BuiltinArity,
+    pub ty: BuiltinParamType,
+    pub arity: BuiltinParamArity,
     pub default: Option<&'static str>,
     pub description: &'static str,
 }
 
-pub enum BuiltinArity {
+pub enum BuiltinParamArity {
     Required,
     Optional,
     Variadic,
 }
 
-pub struct BuiltinErrorSpec {
+pub struct BuiltinErrorDescriptor {
     pub code: &'static str,
     pub identifier: Option<&'static str>,
     pub when: &'static str,
@@ -215,6 +215,11 @@ Rule:
 12. Keep the helper split explicit:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches.
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
+13. Canonical in-file source-of-truth:
+   - Declare each stable branch as one `const FOO_ERROR_BAR: BuiltinErrorDescriptor = ...`.
+   - Build `FOO_ERRORS` from those constants.
+   - Throw only through helpers that accept `&'static BuiltinErrorDescriptor`.
+   - Do not create parallel `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` mirrors.
 
 ## Shared Helper Reuse Strategy
 
@@ -271,7 +276,8 @@ Disallowed source:
    - if an error row exists, any contextual variant must use `foo_error_with_detail(&FOO_ERROR_..., detail)` so the prefix text still comes from the descriptor row
 10. Repo-level audit command for migrated builtins (must be clean before commit):
    - `for f in $(rg -l "BuiltinErrorDescriptor" crates/runmat-runtime/src/builtins); do`
-   - `  rg -n 'const\\s+(IDENT|ERROR)_[A-Z0-9_]+:\\s*&str\\s*=\\s*"' "$f" && echo "^^ remove duplicated stable strings in $f";`
+   - `  rg -n 'const\\s+((IDENT|MESSAGE_ID|ERROR|CODE)_[A-Z0-9_]+|[A-Z0-9_]+_(IDENT|CODE|MESSAGE|ERROR)):\\s*&str\\s*=\\s*"' "$f" && echo "^^ remove duplicated stable strings in $f";`
+   - `  rg -n 'identifier:\\s*Some\\([A-Z0-9_]+\\)' "$f" && echo "^^ use inline identifier text in descriptor row, not a forwarded const in $f";`
    - `done`
 
 ## Per-Builtin Execution Loop (Exact Procedure)
@@ -594,7 +600,7 @@ Gate D: Native/wasm parity.
 
 Gate E: Error-code stability.
 
-1. Every `BuiltinErrorSpec` has a stable `code`.
+1. Every `BuiltinErrorDescriptor` has a stable `code`.
 2. Codes are unique per builtin and deterministic across native/wasm.
 
 ## Validator Tooling
