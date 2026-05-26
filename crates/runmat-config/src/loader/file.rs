@@ -17,7 +17,6 @@ struct RuntimeFileDocument {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RuntimeFileSection {
-    timeout: Option<u64>,
     callstack_limit: Option<usize>,
     error_namespace: Option<String>,
     verbose: Option<bool>,
@@ -33,9 +32,6 @@ struct RuntimeFileSection {
 
 impl RuntimeFileSection {
     fn apply_to(self, config: &mut RunMatConfig) {
-        if let Some(timeout) = self.timeout {
-            config.runtime.timeout = timeout;
-        }
         if let Some(callstack_limit) = self.callstack_limit {
             config.runtime.callstack_limit = callstack_limit;
         }
@@ -76,7 +72,6 @@ impl From<&RunMatConfig> for RuntimeFileDocument {
     fn from(value: &RunMatConfig) -> Self {
         Self {
             runtime: RuntimeFileSection {
-                timeout: Some(value.runtime.timeout),
                 callstack_limit: Some(value.runtime.callstack_limit),
                 error_namespace: Some(value.runtime.error_namespace.clone()),
                 verbose: Some(value.runtime.verbose),
@@ -159,7 +154,6 @@ module = "app"
 function = "main"
 
 [runtime]
-timeout = 300
 callstack_limit = 200
 error_namespace = "RunMat"
 verbose = false

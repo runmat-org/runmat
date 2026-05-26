@@ -7,13 +7,13 @@ fn toml_round_trip() {
     let path = temp_dir.path().join("runmat.toml");
 
     let mut config = RunMatConfig::default();
-    config.runtime.timeout = 777;
+    config.runtime.callstack_limit = 777;
     config.jit.threshold = 25;
 
     ConfigLoader::save_to_file(&config, &path).unwrap();
     let loaded = ConfigLoader::load_from_file(&path).unwrap();
 
-    assert_eq!(loaded.runtime.timeout, 777);
+    assert_eq!(loaded.runtime.callstack_limit, 777);
     assert_eq!(loaded.jit.threshold, 25);
 }
 

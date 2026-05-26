@@ -275,7 +275,6 @@ Global flags apply to both direct script execution and subcommands.
 
 ### Execution and diagnostics
 
-- `--timeout <secs>`: execution timeout, default `300`
 - `--callstack-limit <n>`: retained call-stack frames, default `200`
 - `--error-namespace <name>`: error identifier prefix
 - `--verbose`: verbose REPL / execution output
@@ -318,7 +317,6 @@ values accept `1/0`, `true/false`, `yes/no`, `on/off`, and `enable/disable`.
 
 - `RUNMAT_DEBUG`
 - `RUNMAT_LOG_LEVEL`
-- `RUNMAT_TIMEOUT`
 - `RUNMAT_CALLSTACK_LIMIT`
 - `RUNMAT_ERROR_NAMESPACE`
 - `RUNMAT_CONFIG`
@@ -389,4 +387,3 @@ CMD ["runmat", "info"]
 - `0`: success
 - `1`: command execution, runtime, validation, or file/config errors
 - `2`: invalid CLI usage (for example, unknown flags or malformed arguments)
-

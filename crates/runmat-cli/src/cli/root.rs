@@ -66,10 +66,6 @@ pub struct Cli {
     #[arg(long, value_enum, default_value = "warn", value_parser = parse_log_level_env)]
     pub log_level: LogLevel,
 
-    /// Execution timeout in seconds
-    #[arg(long, default_value = "300")]
-    pub timeout: u64,
-
     /// Maximum number of call stack frames to record
     #[arg(long, default_value = "200")]
     pub callstack_limit: usize,
@@ -178,7 +174,6 @@ pub struct Cli {
 pub struct CliOverrideSources {
     pub debug: bool,
     pub log_level: bool,
-    pub timeout: bool,
     pub callstack_limit: bool,
     pub jit_threshold: bool,
     pub jit_opt_level: bool,
@@ -191,7 +186,6 @@ impl CliOverrideSources {
         Self {
             debug: Self::was_provided(matches, "debug"),
             log_level: Self::was_provided(matches, "log_level"),
-            timeout: Self::was_provided(matches, "timeout"),
             callstack_limit: Self::was_provided(matches, "callstack_limit"),
             jit_threshold: Self::was_provided(matches, "jit_threshold"),
             jit_opt_level: Self::was_provided(matches, "jit_opt_level"),

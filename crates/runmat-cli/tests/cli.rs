@@ -210,12 +210,6 @@ fn test_debug_flag() {
 }
 
 #[test]
-fn test_timeout_configuration() {
-    let output = run_runmat(&["--timeout", "60", "info"]);
-    assert!(output.status.success());
-}
-
-#[test]
 fn test_jit_threshold_configuration() {
     let output = run_runmat(&["--jit-threshold", "5", "info"]);
     assert!(output.status.success());
@@ -435,12 +429,6 @@ fn test_invalid_gc_threads() {
 #[test]
 fn test_invalid_jit_threshold() {
     let output = run_runmat(&["--jit-threshold", "invalid", "info"]);
-    assert!(!output.status.success());
-}
-
-#[test]
-fn test_invalid_timeout() {
-    let output = run_runmat(&["--timeout", "invalid", "info"]);
     assert!(!output.status.success());
 }
 

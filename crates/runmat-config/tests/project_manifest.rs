@@ -58,7 +58,6 @@ version = "0.1.0"
 roots = ["src"]
 
 [runtime]
-timeout = 120
 verbose = true
 "#,
     )

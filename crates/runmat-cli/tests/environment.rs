@@ -34,7 +34,7 @@ fn runmat_config_env_loads_toml_runtime_settings() {
         &config_path,
         r#"
 [runtime]
-timeout = 42
+callstack_limit = 42
 jit = { enabled = true, threshold = 25, optimization_level = "size" }
 gc = { collect_stats = true }
 "#,

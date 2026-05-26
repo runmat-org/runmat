@@ -147,9 +147,6 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
         };
     }
 
-    if sources.timeout {
-        config.runtime.timeout = cli.timeout;
-    }
     if sources.callstack_limit {
         config.runtime.callstack_limit = cli.callstack_limit;
     }

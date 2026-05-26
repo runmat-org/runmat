@@ -6,9 +6,6 @@ use super::defaults::default_true;
 /// Runtime execution configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
-    /// Execution timeout in seconds
-    #[serde(default = "default_timeout")]
-    pub timeout: u64,
     /// Maximum number of call stack frames to record
     #[serde(default = "default_callstack_limit")]
     pub callstack_limit: usize,
@@ -73,7 +70,6 @@ pub enum GcPreset {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            timeout: default_timeout(),
             callstack_limit: default_callstack_limit(),
             error_namespace: default_error_namespace(),
             verbose: false,
@@ -96,10 +92,6 @@ impl Default for JitOptLevel {
     fn default() -> Self {
         Self::Speed
     }
-}
-
-fn default_timeout() -> u64 {
-    300
 }
 
 fn default_callstack_limit() -> usize {
