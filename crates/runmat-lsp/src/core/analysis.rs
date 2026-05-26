@@ -1,12 +1,15 @@
 use crate::core::docs;
 use crate::core::position::{offset_to_position, position_to_offset};
+use crate::core::project::ProjectContext;
+use crate::core::semantic_tokens::{IdentifierRole, SemanticHint};
 use lsp_types::{
-    CompletionItem, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover, Position, Range,
-    SignatureHelp,
+    CompletionItem, Diagnostic, DiagnosticSeverity, DocumentSymbol, Hover, Location, Position,
+    Range, SignatureHelp, Url,
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
-    FunctionKind, HirDiagnostic, HirDiagnosticSeverity, HirError, LoweringContext, LoweringResult,
+    CallKind, DefPath, FunctionKind, HirDiagnostic, HirDiagnosticSeverity, HirError,
+    LoweringContext, LoweringResult, ReferenceKind,
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
@@ -15,6 +18,7 @@ use runmat_vm::CompileError;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct DocumentAnalysis {
@@ -22,6 +26,7 @@ pub struct DocumentAnalysis {
     pub syntax_error: Option<SyntaxErrorInfo>,
     pub lowering_error: Option<HirError>,
     pub compile_error: Option<CompileError>,
+    pub lowering: Option<LoweringResult>,
     pub semantic: Option<AnalysisModel>,
 }
 
@@ -96,19 +101,21 @@ pub fn analyze_document_with_compat_and_source(
                         syntax_error: None,
                         lowering_error: Some(err),
                         compile_error: None,
+                        lowering: None,
                         semantic: None,
                     };
                 }
             };
             let compile_error = compile_error_for_lowering(&lowering);
 
-            let semantic = build_semantic_model(lowering, &tokens, text);
+            let semantic = build_semantic_model(&lowering, &tokens, text);
 
             DocumentAnalysis {
                 tokens,
                 syntax_error: None,
                 lowering_error: None,
                 compile_error,
+                lowering: Some(lowering),
                 semantic: Some(semantic),
             }
         }
@@ -129,6 +136,72 @@ pub fn analyze_document_with_compat_and_source(
                 }),
                 lowering_error: None,
                 compile_error: None,
+                lowering: None,
+                semantic: None,
+            }
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub async fn analyze_document_with_compat_and_source_async(
+    text: &str,
+    compat: CompatMode,
+    source_name: Option<&str>,
+) -> DocumentAnalysis {
+    let tokens = tokenize_detailed(text);
+    let known_project_symbols = discover_known_project_symbols_async(source_name).await;
+    match parse_with_options(text, ParserOptions::new(compat)) {
+        Ok(ast) => {
+            let mut lowering_context = LoweringContext::empty()
+                .with_runmat_extensions_enabled(compat.allows_runmat_extensions());
+            if !known_project_symbols.is_empty() {
+                lowering_context =
+                    lowering_context.with_known_project_symbols(&known_project_symbols);
+            }
+            let lowering = match runmat_hir::lower(&ast, &lowering_context) {
+                Ok(result) => result,
+                Err(err) => {
+                    return DocumentAnalysis {
+                        tokens,
+                        syntax_error: None,
+                        lowering_error: Some(err),
+                        compile_error: None,
+                        lowering: None,
+                        semantic: None,
+                    };
+                }
+            };
+            let compile_error = compile_error_for_lowering(&lowering);
+            let semantic = build_semantic_model(&lowering, &tokens, text);
+
+            DocumentAnalysis {
+                tokens,
+                syntax_error: None,
+                lowering_error: None,
+                compile_error,
+                lowering: Some(lowering),
+                semantic: Some(semantic),
+            }
+        }
+        Err(err) => {
+            let mut message = err.message.clone();
+            if let Some(expected) = &err.expected {
+                message = format!("{message} (expected {expected})");
+            }
+            if let Some(found) = &err.found_token {
+                message = format!("{message} (found '{found}')");
+            }
+
+            DocumentAnalysis {
+                tokens,
+                syntax_error: Some(SyntaxErrorInfo {
+                    message,
+                    position: err.position,
+                }),
+                lowering_error: None,
+                compile_error: None,
+                lowering: None,
                 semantic: None,
             }
         }
@@ -136,12 +209,51 @@ pub fn analyze_document_with_compat_and_source(
 }
 
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
-    use runmat_config::discover_known_project_symbols_from_source_name;
+    let cwd = source_name
+        .and_then(|name| {
+            let path = PathBuf::from(name);
+            if path.is_absolute() {
+                path.parent().map(|p| p.to_path_buf())
+            } else {
+                None
+            }
+        })
+        .or_else(|| runmat_filesystem::current_dir().ok());
 
-    let Ok(cwd) = std::env::current_dir() else {
+    let Some(cwd) = cwd else {
         return HashSet::new();
     };
-    discover_known_project_symbols_from_source_name(source_name, &cwd)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        futures::executor::block_on(
+            runmat_config::discover_known_project_symbols_from_source_name_async(source_name, &cwd),
+        )
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = source_name;
+        let _ = cwd;
+        HashSet::new()
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+async fn discover_known_project_symbols_async(source_name: Option<&str>) -> HashSet<String> {
+    let cwd = source_name
+        .and_then(|name| {
+            let path = PathBuf::from(name);
+            if path.is_absolute() {
+                path.parent().map(|p| p.to_path_buf())
+            } else {
+                None
+            }
+        })
+        .or_else(|| runmat_filesystem::current_dir().ok());
+
+    let Some(cwd) = cwd else {
+        return HashSet::new();
+    };
+    runmat_config::discover_known_project_symbols_from_source_name_async(source_name, &cwd).await
 }
 
 fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {
@@ -362,6 +474,164 @@ pub fn definition_at(
     ranges
 }
 
+pub fn definition_locations_at(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    uri: &Url,
+) -> Vec<Location> {
+    let mut locations = definition_at(text, analysis, position)
+        .into_iter()
+        .map(|range| Location {
+            uri: uri.clone(),
+            range,
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(symbol) = symbol_name_at(text, analysis, position) {
+        if !symbol.is_local {
+            if let Some(source_name) = uri_file_source_name(uri) {
+                if let Some(project) = ProjectContext::discover_from_source_name(Some(&source_name))
+                {
+                    locations.extend(project_function_definitions(
+                        &project,
+                        &symbol.name,
+                        CompatMode::RunMat,
+                    ));
+                }
+            }
+        }
+    }
+    dedupe_locations(&mut locations);
+    locations
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub async fn definition_locations_at_async(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    uri: &Url,
+) -> Vec<Location> {
+    let mut locations = definition_at(text, analysis, position)
+        .into_iter()
+        .map(|range| Location {
+            uri: uri.clone(),
+            range,
+        })
+        .collect::<Vec<_>>();
+    if let Some(symbol) = symbol_name_at(text, analysis, position) {
+        if !symbol.is_local {
+            if let Some(source_name) = uri_file_source_name(uri) {
+                if let Some(project) =
+                    ProjectContext::discover_from_source_name_async(Some(&source_name)).await
+                {
+                    locations.extend(
+                        project_function_definitions_async(
+                            &project,
+                            &symbol.name,
+                            CompatMode::RunMat,
+                        )
+                        .await,
+                    );
+                }
+            }
+        }
+    }
+    dedupe_locations(&mut locations);
+    locations
+}
+
+pub fn references_locations_at(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    uri: &Url,
+) -> Vec<Location> {
+    let Some(symbol) = symbol_name_at(text, analysis, position) else {
+        return Vec::new();
+    };
+    if symbol.is_local {
+        return local_symbol_references(text, analysis, position, uri, &symbol.name);
+    }
+    let mut locations = function_references_in_document(text, analysis, &symbol.name)
+        .into_iter()
+        .map(|range| Location {
+            uri: uri.clone(),
+            range,
+        })
+        .collect::<Vec<_>>();
+    locations.extend(
+        function_definitions_in_document(text, analysis, &symbol.name)
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range,
+            }),
+    );
+    if let Some(source_name) = uri_file_source_name(uri) {
+        if let Some(project) = ProjectContext::discover_from_source_name(Some(&source_name)) {
+            locations.extend(project_function_references(
+                &project,
+                &symbol.name,
+                CompatMode::RunMat,
+            ));
+            locations.extend(project_function_definitions(
+                &project,
+                &symbol.name,
+                CompatMode::RunMat,
+            ));
+        }
+    }
+    dedupe_locations(&mut locations);
+    locations
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub async fn references_locations_at_async(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    uri: &Url,
+) -> Vec<Location> {
+    let Some(symbol) = symbol_name_at(text, analysis, position) else {
+        return Vec::new();
+    };
+    if symbol.is_local {
+        return local_symbol_references(text, analysis, position, uri, &symbol.name);
+    }
+    let mut locations = function_references_in_document(text, analysis, &symbol.name)
+        .into_iter()
+        .map(|range| Location {
+            uri: uri.clone(),
+            range,
+        })
+        .collect::<Vec<_>>();
+    locations.extend(
+        function_definitions_in_document(text, analysis, &symbol.name)
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range,
+            }),
+    );
+    if let Some(source_name) = uri_file_source_name(uri) {
+        if let Some(project) =
+            ProjectContext::discover_from_source_name_async(Some(&source_name)).await
+        {
+            locations.extend(
+                project_function_references_async(&project, &symbol.name, CompatMode::RunMat).await,
+            );
+            locations.extend(
+                project_function_definitions_async(&project, &symbol.name, CompatMode::RunMat)
+                    .await,
+            );
+        }
+    }
+    dedupe_locations(&mut locations);
+    locations
+}
+
 pub fn signature_help_at(
     _text: &str,
     _analysis: &DocumentAnalysis,
@@ -431,7 +701,12 @@ pub fn semantic_tokens_full(
     text: &str,
     analysis: &DocumentAnalysis,
 ) -> Option<lsp_types::SemanticTokens> {
-    crate::core::semantic_tokens::full(text, &analysis.tokens)
+    let hints = analysis
+        .semantic
+        .as_ref()
+        .map(|semantic| semantic.token_hints.as_slice())
+        .unwrap_or(&[]);
+    crate::core::semantic_tokens::full(text, &analysis.tokens, hints)
 }
 
 pub fn formatting_edits(text: &str, _analysis: &DocumentAnalysis) -> Vec<lsp_types::TextEdit> {
@@ -579,6 +854,276 @@ fn token_at_offset(tokens: &[SpannedToken], offset: usize) -> Option<&SpannedTok
     None
 }
 
+#[derive(Clone, Debug)]
+struct SymbolAtCursor {
+    name: String,
+    is_local: bool,
+}
+
+fn symbol_name_at(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+) -> Option<SymbolAtCursor> {
+    let offset = position_to_offset(text, position);
+    let token = token_at_offset(&analysis.tokens, offset)?;
+    let semantic = analysis.semantic.as_ref()?;
+    if let Some(func) = semantic.function_at_offset(offset) {
+        if func.variables.contains_key(&token.lexeme) {
+            return Some(SymbolAtCursor {
+                name: token.lexeme.clone(),
+                is_local: true,
+            });
+        }
+    }
+    Some(SymbolAtCursor {
+        name: token.lexeme.clone(),
+        is_local: false,
+    })
+}
+
+fn local_symbol_references(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &Position,
+    uri: &Url,
+    symbol_name: &str,
+) -> Vec<Location> {
+    let offset = position_to_offset(text, position);
+    let function_range = analysis
+        .semantic
+        .as_ref()
+        .and_then(|semantic| semantic.function_at_offset(offset).map(|f| f.range));
+    analysis
+        .tokens
+        .iter()
+        .filter(|token| token.lexeme == symbol_name)
+        .filter(|token| {
+            if let Some(range) = function_range {
+                return token.start >= range.start && token.end <= range.end;
+            }
+            true
+        })
+        .map(|token| Location {
+            uri: uri.clone(),
+            range: TextRange {
+                start: token.start,
+                end: token.end,
+            }
+            .to_lsp_range(text),
+        })
+        .collect()
+}
+
+fn project_function_definitions(
+    project: &ProjectContext,
+    symbol_name: &str,
+    compat: CompatMode,
+) -> Vec<Location> {
+    let mut locations = Vec::new();
+    for source_file in project.all_source_files() {
+        let Some(text) = read_file_text(source_file) else {
+            continue;
+        };
+        let Some(source_name) = source_file.to_str() else {
+            continue;
+        };
+        let analysis = analyze_document_with_compat_and_source(&text, compat, Some(source_name));
+        for range in function_definitions_in_document(&text, &analysis, symbol_name) {
+            if let Some(uri) = file_path_to_url(source_file) {
+                locations.push(Location { uri, range });
+            }
+        }
+    }
+    locations
+}
+
+fn project_function_references(
+    project: &ProjectContext,
+    symbol_name: &str,
+    compat: CompatMode,
+) -> Vec<Location> {
+    let mut locations = Vec::new();
+    for source_file in project.all_source_files() {
+        let Some(text) = read_file_text(source_file) else {
+            continue;
+        };
+        let Some(source_name) = source_file.to_str() else {
+            continue;
+        };
+        let analysis = analyze_document_with_compat_and_source(&text, compat, Some(source_name));
+        for range in function_references_in_document(&text, &analysis, symbol_name) {
+            if let Some(uri) = file_path_to_url(source_file) {
+                locations.push(Location { uri, range });
+            }
+        }
+    }
+    locations
+}
+
+async fn project_function_definitions_async(
+    project: &ProjectContext,
+    symbol_name: &str,
+    compat: CompatMode,
+) -> Vec<Location> {
+    let mut locations = Vec::new();
+    for source_file in project.all_source_files() {
+        let Ok(text) = runmat_filesystem::read_to_string_async(source_file).await else {
+            continue;
+        };
+        let Some(source_name) = source_file.to_str() else {
+            continue;
+        };
+        let analysis =
+            analyze_document_with_compat_and_source_async(&text, compat, Some(source_name)).await;
+        for range in function_definitions_in_document(&text, &analysis, symbol_name) {
+            if let Some(uri) = file_path_to_url(source_file) {
+                locations.push(Location { uri, range });
+            }
+        }
+    }
+    locations
+}
+
+async fn project_function_references_async(
+    project: &ProjectContext,
+    symbol_name: &str,
+    compat: CompatMode,
+) -> Vec<Location> {
+    let mut locations = Vec::new();
+    for source_file in project.all_source_files() {
+        let Ok(text) = runmat_filesystem::read_to_string_async(source_file).await else {
+            continue;
+        };
+        let Some(source_name) = source_file.to_str() else {
+            continue;
+        };
+        let analysis =
+            analyze_document_with_compat_and_source_async(&text, compat, Some(source_name)).await;
+        for range in function_references_in_document(&text, &analysis, symbol_name) {
+            if let Some(uri) = file_path_to_url(source_file) {
+                locations.push(Location { uri, range });
+            }
+        }
+    }
+    locations
+}
+
+fn read_file_text(path: &std::path::Path) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        futures::executor::block_on(runmat_filesystem::read_to_string_async(path)).ok()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = path;
+        None
+    }
+}
+
+fn uri_file_source_name(uri: &Url) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        return uri
+            .to_file_path()
+            .ok()
+            .and_then(|path| path.to_str().map(str::to_owned));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        if uri.scheme() != "file" {
+            return None;
+        }
+        let path = uri.path();
+        if path.is_empty() {
+            None
+        } else {
+            Some(path.to_string())
+        }
+    }
+}
+
+fn dedupe_locations(locations: &mut Vec<Location>) {
+    let mut seen = std::collections::HashSet::new();
+    locations.retain(|loc| {
+        let key = format!(
+            "{}:{}:{}:{}:{}",
+            loc.uri,
+            loc.range.start.line,
+            loc.range.start.character,
+            loc.range.end.line,
+            loc.range.end.character
+        );
+        seen.insert(key)
+    });
+}
+
+fn file_path_to_url(path: &std::path::Path) -> Option<Url> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        return Url::from_file_path(path).ok();
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let raw = path.to_str()?;
+        let normalized = if raw.starts_with('/') {
+            raw.to_string()
+        } else {
+            format!("/{raw}")
+        };
+        Url::parse(&format!("file://{normalized}")).ok()
+    }
+}
+
+pub fn function_definitions_in_document(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    symbol_name: &str,
+) -> Vec<Range> {
+    let Some(semantic) = analysis.semantic.as_ref() else {
+        return Vec::new();
+    };
+    semantic
+        .functions
+        .iter()
+        .filter(|function| function.name == symbol_name)
+        .map(|function| function.signature.name_range.to_lsp_range(text))
+        .collect()
+}
+
+pub fn function_references_in_document(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    symbol_name: &str,
+) -> Vec<Range> {
+    let Some(lowering) = analysis.lowering.as_ref() else {
+        return Vec::new();
+    };
+    lowering
+        .hir_index
+        .calls
+        .iter()
+        .filter(|call| call_resolution_matches_symbol(call, symbol_name))
+        .filter_map(|call| span_to_text_range(call.span, text.len()))
+        .map(|range| range.to_lsp_range(text))
+        .collect()
+}
+
+fn call_resolution_matches_symbol(call: &runmat_hir::CallResolution, symbol_name: &str) -> bool {
+    let Some(display) = call.name.display_name() else {
+        return false;
+    };
+    if display == symbol_name {
+        return true;
+    }
+    if let CallKind::PackageFunction(path) = &call.kind {
+        return def_path_symbol_variants(path)
+            .iter()
+            .any(|variant| variant == symbol_name);
+    }
+    false
+}
+
 fn find_symbol_range(
     tokens: &[SpannedToken],
     name: &str,
@@ -625,6 +1170,7 @@ pub struct VariableSymbol {
     pub name: String,
     pub ty: Type,
     pub kind: VariableKind,
+    pub declared_span: Option<TextRange>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -632,6 +1178,7 @@ pub enum VariableKind {
     Global,
     Parameter,
     Output,
+    Local,
 }
 
 impl VariableKind {
@@ -640,6 +1187,7 @@ impl VariableKind {
             VariableKind::Global => "global",
             VariableKind::Parameter => "parameter",
             VariableKind::Output => "output",
+            VariableKind::Local => "local",
         }
     }
 }
@@ -658,6 +1206,9 @@ pub struct AnalysisModel {
     pub globals: HashMap<String, VariableSymbol>,
     pub functions: Vec<FunctionSemantic>,
     pub function_lookup: HashMap<String, Vec<usize>>,
+    pub token_hints: Vec<SemanticHint>,
+    pub exported_symbols: HashSet<String>,
+    pub referenced_symbols: HashSet<String>,
     pub status_message: String,
     pub diagnostics: Vec<HirDiagnostic>,
 }
@@ -786,7 +1337,7 @@ fn format_variable_hover(name: &str, symbol: &VariableSymbol) -> String {
 }
 
 fn build_semantic_model(
-    lowering: LoweringResult,
+    lowering: &LoweringResult,
     tokens: &[SpannedToken],
     text: &str,
 ) -> AnalysisModel {
@@ -810,6 +1361,7 @@ fn build_semantic_model(
                 name: name.clone(),
                 ty: Type::Unknown,
                 kind: VariableKind::Global,
+                declared_span: span_to_text_range(binding.declared_span, text.len()),
             });
         if let Some(shape) = binding_shapes.get(&binding.id) {
             symbol.ty = type_from_shape(shape.clone());
@@ -839,6 +1391,7 @@ fn build_semantic_model(
                     name: name.clone(),
                     ty,
                     kind: VariableKind::Parameter,
+                    declared_span: span_to_text_range(binding.declared_span, text.len()),
                 },
             );
         }
@@ -858,8 +1411,47 @@ fn build_semantic_model(
                     name: name.clone(),
                     ty,
                     kind: VariableKind::Output,
+                    declared_span: span_to_text_range(binding.declared_span, text.len()),
                 },
             );
+        }
+        for local in &function.locals {
+            let Some(binding) = lowering.assembly.bindings.get(local.0) else {
+                continue;
+            };
+            let name = binding.name.0.clone();
+            let ty = binding_shapes
+                .get(local)
+                .cloned()
+                .map(type_from_shape)
+                .unwrap_or(Type::Unknown);
+            variables
+                .entry(name.clone())
+                .or_insert_with(|| VariableSymbol {
+                    name,
+                    ty,
+                    kind: VariableKind::Local,
+                    declared_span: span_to_text_range(binding.declared_span, text.len()),
+                });
+        }
+        for capture in &function.captures {
+            let Some(binding) = lowering.assembly.bindings.get(capture.binding.0) else {
+                continue;
+            };
+            let name = binding.name.0.clone();
+            let ty = binding_shapes
+                .get(&capture.binding)
+                .cloned()
+                .map(type_from_shape)
+                .unwrap_or(Type::Unknown);
+            variables
+                .entry(name.clone())
+                .or_insert_with(|| VariableSymbol {
+                    name,
+                    ty,
+                    kind: VariableKind::Local,
+                    declared_span: span_to_text_range(binding.declared_span, text.len()),
+                });
         }
 
         let name_range =
@@ -907,14 +1499,215 @@ fn build_semantic_model(
 
     let mut diagnostics = runmat_static_analysis::lint_shapes(&lowering);
     diagnostics.extend(runmat_static_analysis::lint_mir_analysis(&lowering));
+    let token_hints = build_semantic_hints(lowering, tokens, &functions);
+    let exported_symbols = build_exported_symbol_set(&functions);
+    let referenced_symbols = build_referenced_symbol_set(lowering);
 
     AnalysisModel {
         globals,
         functions,
         function_lookup,
+        token_hints,
+        exported_symbols,
+        referenced_symbols,
         status_message: String::new(),
         diagnostics,
     }
+}
+
+fn span_to_text_range(span: runmat_hir::Span, text_len: usize) -> Option<TextRange> {
+    if span.end <= span.start || span.start >= text_len {
+        return None;
+    }
+    Some(TextRange {
+        start: span.start,
+        end: span.end.min(text_len),
+    })
+}
+
+fn build_semantic_hints(
+    lowering: &LoweringResult,
+    tokens: &[SpannedToken],
+    functions: &[FunctionSemantic],
+) -> Vec<SemanticHint> {
+    let mut hint_map: HashMap<(usize, usize), (u8, SemanticHint)> = HashMap::new();
+    for function in functions {
+        insert_hint(
+            &mut hint_map,
+            function.signature.name_range,
+            SemanticHint {
+                start: function.signature.name_range.start,
+                end: function.signature.name_range.end,
+                role: IdentifierRole::Function,
+                declaration: true,
+                default_library: false,
+            },
+            80,
+        );
+        for token in tokens
+            .iter()
+            .filter(|token| matches!(token.token, Token::Ident))
+            .filter(|token| function.range.contains(token.start))
+        {
+            let Some(variable) = function.variables.get(&token.lexeme) else {
+                continue;
+            };
+            let role = match variable.kind {
+                VariableKind::Parameter => IdentifierRole::Parameter,
+                VariableKind::Output | VariableKind::Local | VariableKind::Global => {
+                    IdentifierRole::Variable
+                }
+            };
+            let declaration = variable
+                .declared_span
+                .is_some_and(|span| span.start == token.start && span.end == token.end);
+            insert_hint(
+                &mut hint_map,
+                TextRange {
+                    start: token.start,
+                    end: token.end,
+                },
+                SemanticHint {
+                    start: token.start,
+                    end: token.end,
+                    role,
+                    declaration,
+                    default_library: false,
+                },
+                20,
+            );
+        }
+    }
+
+    for reference in &lowering.hir_index.references {
+        let role = match &reference.kind {
+            ReferenceKind::Imported(_) | ReferenceKind::Package(_) => {
+                Some(IdentifierRole::Namespace)
+            }
+            _ => None,
+        };
+        let Some(role) = role else {
+            continue;
+        };
+        if let Some(range) =
+            find_token_range_by_lexeme_in_span(tokens, &reference.name.0, reference.span)
+        {
+            insert_hint(
+                &mut hint_map,
+                range,
+                SemanticHint {
+                    start: range.start,
+                    end: range.end,
+                    role,
+                    declaration: false,
+                    default_library: false,
+                },
+                50,
+            );
+        }
+    }
+
+    for call in &lowering.hir_index.calls {
+        let Some(name) = call.name.display_name() else {
+            continue;
+        };
+        let Some(range) = find_token_range_by_lexeme_in_span(tokens, &name, call.span) else {
+            continue;
+        };
+        insert_hint(
+            &mut hint_map,
+            range,
+            SemanticHint {
+                start: range.start,
+                end: range.end,
+                role: IdentifierRole::Function,
+                declaration: false,
+                default_library: matches!(call.kind, CallKind::Builtin(_)),
+            },
+            if matches!(call.kind, CallKind::Builtin(_)) {
+                95
+            } else {
+                70
+            },
+        );
+    }
+
+    hint_map
+        .into_values()
+        .map(|(_, hint)| hint)
+        .collect::<Vec<_>>()
+}
+
+fn build_exported_symbol_set(functions: &[FunctionSemantic]) -> HashSet<String> {
+    let mut symbols = HashSet::new();
+    for function in functions {
+        symbols.insert(function.name.clone());
+    }
+    symbols
+}
+
+fn build_referenced_symbol_set(lowering: &LoweringResult) -> HashSet<String> {
+    let mut symbols = HashSet::new();
+    for call in &lowering.hir_index.calls {
+        if let Some(name) = call.name.display_name() {
+            symbols.insert(name);
+        }
+        if let CallKind::PackageFunction(path) = &call.kind {
+            for name in def_path_symbol_variants(path) {
+                symbols.insert(name);
+            }
+        }
+    }
+    symbols
+}
+
+fn def_path_symbol_variants(path: &DefPath) -> Vec<String> {
+    let mut variants = Vec::new();
+    let item = path.display_name();
+    let module = path.module.display_name();
+    if let Some(item_name) = item.as_ref() {
+        variants.push(item_name.clone());
+    }
+    if let (Some(module_name), Some(item_name)) = (module.as_ref(), item.as_ref()) {
+        variants.push(format!("{module_name}.{item_name}"));
+        variants.push(format!("{}.{}.{}", path.package.0, module_name, item_name));
+    }
+    if variants.is_empty() {
+        if let Some(item_name) = path.display_name() {
+            variants.push(item_name);
+        }
+    }
+    variants
+}
+
+fn insert_hint(
+    hints: &mut HashMap<(usize, usize), (u8, SemanticHint)>,
+    range: TextRange,
+    hint: SemanticHint,
+    priority: u8,
+) {
+    let key = (range.start, range.end);
+    match hints.get(&key) {
+        Some((existing, _)) if *existing >= priority => {}
+        _ => {
+            hints.insert(key, (priority, hint));
+        }
+    }
+}
+
+fn find_token_range_by_lexeme_in_span(
+    tokens: &[SpannedToken],
+    lexeme: &str,
+    span: runmat_hir::Span,
+) -> Option<TextRange> {
+    tokens
+        .iter()
+        .filter(|token| matches!(token.token, Token::Ident))
+        .find(|token| token.lexeme == lexeme && token.start >= span.start && token.end <= span.end)
+        .map(|token| TextRange {
+            start: token.start,
+            end: token.end,
+        })
 }
 
 fn type_from_shape(shape: Vec<Option<usize>>) -> Type {
@@ -924,7 +1717,11 @@ fn type_from_shape(shape: Vec<Option<usize>>) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::workspace::workspace_symbols_with_project;
+    use futures::executor::block_on;
+    use lsp_types::Url;
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1125,6 +1922,69 @@ end
     }
 
     #[test]
+    fn semantic_tokens_encode_function_parameter_and_local_roles() {
+        let text = "function y = foo(x)\nlocal = x + 1;\ny = local;\nend\nz = foo(1);";
+        let analysis = analyze_document_with_compat(text, CompatMode::RunMat);
+        let tokens = semantic_tokens_full(text, &analysis).expect("semantic tokens");
+        let legend = semantic_tokens_legend();
+        let decoded = decode_semantic_tokens(text, &tokens);
+
+        let foo_decl = text.find("foo").expect("foo decl");
+        let x_param = text.find("(x)").expect("x param") + 1;
+        let local_decl = text.find("local =").expect("local decl");
+        let foo_call = text.rfind("foo").expect("foo call");
+
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            foo_decl,
+            lsp_types::SemanticTokenType::FUNCTION,
+        );
+        assert_modifier_at(text, &decoded, foo_decl, 0);
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            x_param,
+            lsp_types::SemanticTokenType::PARAMETER,
+        );
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            local_decl,
+            lsp_types::SemanticTokenType::VARIABLE,
+        );
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            foo_call,
+            lsp_types::SemanticTokenType::FUNCTION,
+        );
+    }
+
+    #[test]
+    fn semantic_tokens_mark_builtin_calls_as_default_library() {
+        let text = "y = sin(1);";
+        let analysis = analyze_document_with_compat(text, CompatMode::RunMat);
+        let tokens = semantic_tokens_full(text, &analysis).expect("semantic tokens");
+        let legend = semantic_tokens_legend();
+        let decoded = decode_semantic_tokens(text, &tokens);
+        let sin_offset = text.find("sin").expect("sin offset");
+
+        assert_role_at(
+            text,
+            &decoded,
+            &legend,
+            sin_offset,
+            lsp_types::SemanticTokenType::FUNCTION,
+        );
+        assert_modifier_at(text, &decoded, sin_offset, 1);
+    }
+
+    #[test]
     fn source_context_symbol_discovery_reads_manifest_project_symbols() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1158,5 +2018,294 @@ roots = ["."]
         );
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cross_file_definition_and_references_resolve_project_symbols() {
+        let root = create_project_fixture("lsp_cross_file");
+        let main_source = root.join("src/main.m");
+        let main_text = fs::read_to_string(&main_source).expect("read main source");
+        let uri = Url::from_file_path(&main_source).expect("main uri");
+
+        let analysis = analyze_document_with_compat_and_source(
+            &main_text,
+            CompatMode::RunMat,
+            main_source.to_str(),
+        );
+        let call_offset = main_text.find("summarize").expect("call offset");
+        let call_position = offset_to_position(&main_text, call_offset);
+
+        let defs = definition_locations_at(&main_text, &analysis, &call_position, &uri);
+        assert!(
+            defs.iter()
+                .any(|loc| loc.uri.path().ends_with("/src/+stats/summarize.m")),
+            "expected cross-file definition to resolve stats.summarize, got: {defs:?}"
+        );
+
+        let refs = references_locations_at(&main_text, &analysis, &call_position, &uri);
+        assert!(
+            refs.iter()
+                .any(|loc| loc.uri.path().ends_with("/src/main.m")),
+            "expected references to include callsite in main.m, got: {refs:?}"
+        );
+        assert!(
+            refs.iter()
+                .any(|loc| loc.uri.path().ends_with("/src/+stats/summarize.m")),
+            "expected references to include package function file, got: {refs:?}"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_symbols_include_unopened_project_files() {
+        let root = create_project_fixture("lsp_workspace_symbols");
+        let main_source = root.join("src/main.m");
+        let helper_source = root.join("src/helpers/extra.m");
+        let main_text = fs::read_to_string(&main_source).expect("read main source");
+
+        let main_analysis = analyze_document_with_compat_and_source(
+            &main_text,
+            CompatMode::RunMat,
+            main_source.to_str(),
+        );
+        let docs = vec![(
+            Url::from_file_path(&main_source).expect("main uri"),
+            main_text,
+            main_analysis,
+        )];
+
+        let symbols = workspace_symbols_with_project(&docs, CompatMode::RunMat, None);
+        assert!(
+            symbols
+                .iter()
+                .any(|sym| sym.location.uri.path().ends_with("/src/helpers/extra.m")),
+            "expected unopened helper symbol to appear in workspace symbols, got: {symbols:?}"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|sym| sym.location.uri.path().ends_with("/src/@MyClass/scale.m")),
+            "expected class-folder method symbol to appear in workspace symbols, got: {symbols:?}"
+        );
+
+        // sanity: unopened helper file exists and was not in docs input
+        assert!(helper_source.is_file(), "helper source missing");
+        assert_eq!(docs.len(), 1, "expected only main doc to be open");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sync_async_project_navigation_and_symbols_are_equivalent() {
+        let root = create_project_fixture("lsp_parity");
+        let main_source = root.join("src/main.m");
+        let main_text = fs::read_to_string(&main_source).expect("read main source");
+        let uri = Url::from_file_path(&main_source).expect("main uri");
+        let analysis = analyze_document_with_compat_and_source(
+            &main_text,
+            CompatMode::RunMat,
+            main_source.to_str(),
+        );
+        let call_offset = main_text.find("summarize").expect("call offset");
+        let call_position = offset_to_position(&main_text, call_offset);
+
+        let sync_defs = definition_locations_at(&main_text, &analysis, &call_position, &uri);
+        let async_defs = block_on(definition_locations_at_async(
+            &main_text,
+            &analysis,
+            &call_position,
+            &uri,
+        ));
+        assert_eq!(
+            location_keys(&sync_defs),
+            location_keys(&async_defs),
+            "sync/async definitions diverged"
+        );
+
+        let sync_refs = references_locations_at(&main_text, &analysis, &call_position, &uri);
+        let async_refs = block_on(references_locations_at_async(
+            &main_text,
+            &analysis,
+            &call_position,
+            &uri,
+        ));
+        assert_eq!(
+            location_keys(&sync_refs),
+            location_keys(&async_refs),
+            "sync/async references diverged"
+        );
+
+        let docs = vec![(uri, main_text, analysis)];
+        let sync_syms = workspace_symbols_with_project(&docs, CompatMode::RunMat, None);
+        let async_syms = block_on(
+            crate::core::workspace::workspace_symbols_with_project_async(
+                &docs,
+                CompatMode::RunMat,
+                None,
+            ),
+        );
+        assert_eq!(
+            symbol_keys(&sync_syms),
+            symbol_keys(&async_syms),
+            "sync/async workspace symbols diverged"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn create_project_fixture(prefix: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("{prefix}_{suffix}"));
+        fs::create_dir_all(root.join("src/+stats")).expect("create package dir");
+        fs::create_dir_all(root.join("src/helpers")).expect("create helper dir");
+        fs::create_dir_all(root.join("src/@MyClass")).expect("create class folder dir");
+        fs::create_dir_all(root.join("deps/tools/src")).expect("create dep dir");
+
+        fs::write(
+            root.join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+tools = { path = "deps/tools" }
+"#,
+        )
+        .expect("write root manifest");
+        fs::write(
+            root.join("deps/tools/runmat.toml"),
+            r#"
+[package]
+name = "tools"
+
+[sources]
+roots = ["src"]
+"#,
+        )
+        .expect("write dep manifest");
+        fs::write(
+            root.join("src/+stats/summarize.m"),
+            "function y = summarize(x); y = x + 1; end",
+        )
+        .expect("write package function");
+        fs::write(
+            root.join("src/helpers/extra.m"),
+            "function y = extra(x); y = x; end",
+        )
+        .expect("write helper function");
+        fs::write(
+            root.join("src/@MyClass/scale.m"),
+            "function y = scale(x); y = x; end",
+        )
+        .expect("write class method");
+        fs::write(
+            root.join("deps/tools/src/util.m"),
+            "function y = util(x); y = x; end",
+        )
+        .expect("write dependency function");
+        fs::write(
+            root.join("src/main.m"),
+            "x = summarize(41);\ny = tools.util(x);",
+        )
+        .expect("write main");
+        root
+    }
+
+    fn location_keys(locations: &[Location]) -> std::collections::BTreeSet<String> {
+        locations
+            .iter()
+            .map(|loc| {
+                format!(
+                    "{}:{}:{}:{}:{}",
+                    loc.uri,
+                    loc.range.start.line,
+                    loc.range.start.character,
+                    loc.range.end.line,
+                    loc.range.end.character
+                )
+            })
+            .collect()
+    }
+
+    fn symbol_keys(symbols: &[lsp_types::SymbolInformation]) -> std::collections::BTreeSet<String> {
+        symbols
+            .iter()
+            .map(|sym| {
+                format!(
+                    "{}:{}:{}:{}:{}:{}",
+                    sym.name,
+                    sym.location.uri,
+                    sym.location.range.start.line,
+                    sym.location.range.start.character,
+                    sym.location.range.end.line,
+                    sym.location.range.end.character
+                )
+            })
+            .collect()
+    }
+
+    fn decode_semantic_tokens(
+        text: &str,
+        tokens: &lsp_types::SemanticTokens,
+    ) -> Vec<(lsp_types::Position, u32, u32)> {
+        let mut out = Vec::new();
+        let mut line = 0u32;
+        let mut col = 0u32;
+        for token in &tokens.data {
+            line += token.delta_line;
+            if token.delta_line > 0 {
+                col = token.delta_start;
+            } else {
+                col += token.delta_start;
+            }
+            let position = lsp_types::Position::new(line, col);
+            let offset = position_to_offset(text, &position);
+            let _ = offset;
+            out.push((position, token.token_type, token.token_modifiers_bitset));
+        }
+        out
+    }
+
+    fn assert_role_at(
+        text: &str,
+        decoded: &[(lsp_types::Position, u32, u32)],
+        legend: &lsp_types::SemanticTokensLegend,
+        offset: usize,
+        expected: lsp_types::SemanticTokenType,
+    ) {
+        let position = offset_to_position(text, offset);
+        let Some((_, token_type_idx, _)) = decoded.iter().find(|(pos, _, _)| *pos == position)
+        else {
+            panic!("no semantic token at {position:?}");
+        };
+        let actual = legend
+            .token_types
+            .get(*token_type_idx as usize)
+            .expect("token type in range");
+        assert_eq!(actual, &expected, "unexpected token type at {position:?}");
+    }
+
+    fn assert_modifier_at(
+        text: &str,
+        decoded: &[(lsp_types::Position, u32, u32)],
+        offset: usize,
+        modifier_idx: u32,
+    ) {
+        let position = offset_to_position(text, offset);
+        let Some((_, _, bitset)) = decoded.iter().find(|(pos, _, _)| *pos == position) else {
+            panic!("no semantic token at {position:?}");
+        };
+        let mask = 1u32 << modifier_idx;
+        assert!(
+            (*bitset & mask) != 0,
+            "expected modifier bit {modifier_idx} at {position:?}"
+        );
     }
 }

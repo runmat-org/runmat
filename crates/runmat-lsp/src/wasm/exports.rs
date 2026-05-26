@@ -1,6 +1,6 @@
 use lsp_types::{
-    CompletionList, Diagnostic, DocumentSymbol, Location, Position, SemanticTokens,
-    SymbolInformation, TextEdit, Url,
+    CompletionList, Diagnostic, DocumentSymbol, Position, SemanticTokens, SymbolInformation,
+    TextEdit, Url,
 };
 use runmat_thread_local::runmat_thread_local;
 use serde::Serialize;
@@ -11,11 +11,12 @@ use std::sync::Once;
 use wasm_bindgen::prelude::*;
 
 use crate::core::analysis::{
-    analyze_document_with_compat_and_source, completion_at, definition_at,
+    analyze_document_with_compat_and_source_async, completion_at, definition_locations_at_async,
     diagnostics_for_document, document_symbols as core_document_symbols, formatting_edits,
-    hover_at, semantic_tokens_full, signature_help_at, CompatMode, DocumentAnalysis,
+    hover_at, references_locations_at_async, semantic_tokens_full, signature_help_at, CompatMode,
+    DocumentAnalysis,
 };
-use crate::core::workspace::workspace_symbols;
+use crate::core::workspace::workspace_symbols_with_project_async;
 
 #[derive(Default)]
 struct DocStore {
@@ -53,8 +54,15 @@ fn ensure_builtins_registered() {
 
 fn source_name_from_uri(uri: &str) -> Option<String> {
     let parsed = Url::parse(uri).ok()?;
-    let path = parsed.to_file_path().ok()?;
-    path.to_str().map(str::to_string)
+    if parsed.scheme() != "file" {
+        return None;
+    }
+    let path = parsed.path();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    }
 }
 
 #[wasm_bindgen]
@@ -68,22 +76,24 @@ pub fn builtin_inventory_counts() -> JsValue {
 }
 
 #[wasm_bindgen]
-pub fn open_document(uri: String, text: String) {
+pub async fn open_document(uri: String, text: String) {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
     let source_name = source_name_from_uri(&uri);
-    let analysis = analyze_document_with_compat_and_source(&text, compat, source_name.as_deref());
+    let analysis =
+        analyze_document_with_compat_and_source_async(&text, compat, source_name.as_deref()).await;
     DOCS.with(|d| {
         d.borrow_mut().docs.insert(uri, DocEntry { text, analysis });
     });
 }
 
 #[wasm_bindgen]
-pub fn change_document(uri: String, text: String) {
+pub async fn change_document(uri: String, text: String) {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
     let source_name = source_name_from_uri(&uri);
-    let analysis = analyze_document_with_compat_and_source(&text, compat, source_name.as_deref());
+    let analysis =
+        analyze_document_with_compat_and_source_async(&text, compat, source_name.as_deref()).await;
     DOCS.with(|d| {
         d.borrow_mut().docs.insert(uri, DocEntry { text, analysis });
     });
@@ -128,29 +138,29 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
 }
 
 #[wasm_bindgen]
-pub fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
+pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
     let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
     let Some(doc) = entry else {
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
-    let ranges = definition_at(&doc.text, &doc.analysis, &position);
-    let locations: Vec<Location> = ranges
-        .into_iter()
-        .map(|range| Location {
-            uri: Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap()),
-            range,
-        })
-        .collect();
+    let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+    let locations = definition_locations_at_async(&doc.text, &doc.analysis, &position, &uri).await;
     to_js(&locations)
 }
 
 #[wasm_bindgen]
-pub fn references(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
+pub async fn references(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
-    // For now, reuse definitions as placeholder references.
-    definition(_uri, _line, _character)
+    let entry = DOCS.with(|d| d.borrow().docs.get(&_uri).cloned());
+    let Some(doc) = entry else {
+        return Ok(JsValue::NULL);
+    };
+    let position = Position::new(_line, _character);
+    let uri = Url::parse(&_uri).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+    let locations = references_locations_at_async(&doc.text, &doc.analysis, &position, &uri).await;
+    to_js(&locations)
 }
 
 #[wasm_bindgen]
@@ -194,8 +204,9 @@ pub fn document_symbols(_uri: String) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn workspace_symbols_all() -> Result<JsValue, JsValue> {
+pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
+    let compat = COMPAT_MODE.with(|c| c.get());
     let docs = DOCS.with(|d| {
         d.borrow()
             .docs
@@ -209,7 +220,8 @@ pub fn workspace_symbols_all() -> Result<JsValue, JsValue> {
             })
             .collect::<Vec<_>>()
     });
-    let syms: Vec<SymbolInformation> = workspace_symbols(&docs);
+    let syms: Vec<SymbolInformation> =
+        workspace_symbols_with_project_async(&docs, compat, None).await;
     to_js(&syms)
 }
 
