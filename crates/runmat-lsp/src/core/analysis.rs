@@ -2679,8 +2679,29 @@ mod tests {
                 "write(1, [1 2 3], \"double\");",
                 "count = write(client, data, datatype)",
             ),
+            (
+                "tcpclient(\"127.0.0.1\", 80);",
+                "client = tcpclient(host, port)",
+            ),
+            (
+                "tcpclient(\"127.0.0.1\", 80, \"Timeout\", 1);",
+                "client = tcpclient(host, port, Name, Value, ...)",
+            ),
+            (
+                "tcpserver(\"127.0.0.1\", 0);",
+                "server = tcpserver(address, port)",
+            ),
+            (
+                "tcpserver(\"127.0.0.1\", 0, \"Timeout\", 1);",
+                "server = tcpserver(address, port, Name, Value, ...)",
+            ),
             ("close();", "status = close()"),
             ("close(1);", "status = close(resource)"),
+            ("accept(1);", "client = accept(server)"),
+            (
+                "accept(1, \"Timeout\", 1);",
+                "client = accept(server, \"Timeout\", timeout)",
+            ),
             ("readline(1);", "line = readline(client)"),
         ];
 
