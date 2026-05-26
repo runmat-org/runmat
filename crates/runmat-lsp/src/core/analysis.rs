@@ -2191,6 +2191,35 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_array_shape_diagonal_descriptors() {
+        let cases = [
+            ("diag([1 2 3]);", "B = diag(A)"),
+            ("diag([1 2 3], 1);", "B = diag(A, k)"),
+            ("diag([1 2 3], [3 4]);", "B = diag(A, sz)"),
+            (
+                "diag([1 2 3], \"like\", [0]);",
+                "B = diag(A, \"like\", prototype)",
+            ),
+            ("tril([1 2; 3 4]);", "B = tril(A)"),
+            ("tril([1 2; 3 4], -1);", "B = tril(A, k)"),
+            ("triu([1 2; 3 4]);", "B = triu(A)"),
+            ("triu([1 2; 3 4], 1);", "B = triu(A, k)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
             ("assert(true);", "out = assert(condition)"),

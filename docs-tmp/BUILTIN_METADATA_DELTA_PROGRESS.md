@@ -42,9 +42,10 @@
 | Wave 37 (Array Shape Flip) | `flip`, `fliplr`, `flipud` | Done | `335b84a1` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::flip::tests::`; `cargo test -p runmat-runtime builtins::array::shape::fliplr::tests::`; `cargo test -p runmat-runtime builtins::array::shape::flipud::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for flip-family shape transforms + descriptor-backed stable error sets with shared-helper remap boundaries + LSP signature-help coverage |
 | Wave 38 (Array Shape Permute/Reshape) | `permute`, `ipermute`, `reshape`, `squeeze` | Done | `fe87a4c0` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::permute::tests::`; `cargo test -p runmat-runtime builtins::array::shape::ipermute::tests::`; `cargo test -p runmat-runtime builtins::array::shape::reshape::tests::`; `cargo test -p runmat-runtime builtins::array::shape::squeeze::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for dimension reorder/reshape/singleton-removal shape transforms + stable descriptor error sets + LSP signature-help coverage |
 | Wave 39 (Array Shape Concat) | `cat`, `horzcat`, `vertcat` | Done | `078d93d6` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::cat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::horzcat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::vertcat::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core/wrapper concat forms (including `\"like\"` variant for `cat`) + stable descriptor error sets + LSP signature-help coverage |
+| Wave 40 (Array Shape Diagonal/Triangular) | `diag`, `tril`, `triu` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::diag::tests::`; `cargo test -p runmat-runtime builtins::array::shape::tril::tests::`; `cargo test -p runmat-runtime builtins::array::shape::triu::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for diagonal extraction/construction and triangular masking forms + descriptor-backed stable error identifiers + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `127`
-- Remaining: `441`
+- Migrated with attached descriptor: `130`
+- Remaining: `438`

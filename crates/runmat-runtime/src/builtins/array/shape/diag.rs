@@ -10,13 +10,14 @@ use crate::builtins::common::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LiteralValue, LogicalArray, NumericDType, ResolveContext, Tensor,
     Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
-const MESSAGE_ID_INVALID_INPUT: &str = "RunMat:diag:InvalidInput";
-const MESSAGE_ID_INVALID_OFFSET: &str = "RunMat:diag:InvalidOffset";
+const BUILTIN_NAME: &str = "diag";
 
 fn diag_type(args: &[Type], context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -189,11 +190,231 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "diag is a host-only shape helper.",
 };
 
-fn diag_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(message_id)
-        .with_builtin("diag")
-        .build()
+const DIAG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Diagonal matrix or diagonal vector extracted from the input.",
+}];
+
+const DIAG_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, vector, or matrix.",
+}];
+
+const DIAG_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal offset index.",
+    },
+];
+
+const DIAG_INPUTS_A_SZ: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output matrix size override as [m n] or scalar n.",
+    },
+];
+
+const DIAG_INPUTS_A_K_SZ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal offset index.",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output matrix size override as [m n] or scalar n.",
+    },
+];
+
+const DIAG_INPUTS_A_VECTOR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"vector\""),
+        description: "Vector extraction option ('vector').",
+    },
+];
+
+const DIAG_INPUTS_A_CLASS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "class",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class override ('logical' or 'double').",
+    },
+];
+
+const DIAG_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Literal option name ('like').",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value controlling output class/residency.",
+    },
+];
+
+const DIAG_INPUTS_A_ARGS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, vector, or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "args",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional offset/size/options parsed by diag argument grammar.",
+    },
+];
+
+const DIAG_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A)",
+        inputs: &DIAG_INPUTS_A,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, k)",
+        inputs: &DIAG_INPUTS_A_K,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, sz)",
+        inputs: &DIAG_INPUTS_A_SZ,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, k, sz)",
+        inputs: &DIAG_INPUTS_A_K_SZ,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, \"vector\")",
+        inputs: &DIAG_INPUTS_A_VECTOR,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, class)",
+        inputs: &DIAG_INPUTS_A_CLASS,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, \"like\", prototype)",
+        inputs: &DIAG_INPUTS_A_LIKE,
+        outputs: &DIAG_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = diag(A, args...)",
+        inputs: &DIAG_INPUTS_A_ARGS,
+        outputs: &DIAG_OUTPUT,
+    },
+];
+
+const DIAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIAG.INVALID_INPUT",
+    identifier: Some("RunMat:diag:InvalidInput"),
+    when: "Input type, option grammar, size override, or output conversion is invalid.",
+    message: "diag: invalid input argument",
+};
+
+const DIAG_ERROR_INVALID_OFFSET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DIAG.INVALID_OFFSET",
+    identifier: Some("RunMat:diag:InvalidOffset"),
+    when: "Diagonal offset is not a finite integer scalar.",
+    message: "diag: invalid diagonal offset",
+};
+
+const DIAG_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [DIAG_ERROR_INVALID_INPUT, DIAG_ERROR_INVALID_OFFSET];
+
+const MESSAGE_ID_INVALID_INPUT: &BuiltinErrorDescriptor = &DIAG_ERROR_INVALID_INPUT;
+const MESSAGE_ID_INVALID_OFFSET: &BuiltinErrorDescriptor = &DIAG_ERROR_INVALID_OFFSET;
+
+pub const DIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DIAG_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DIAG_ERRORS,
+};
+
+fn diag_error(error: &'static BuiltinErrorDescriptor, message: impl Into<String>) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone)]
@@ -393,6 +614,7 @@ async fn try_parse_size_override(value: &Value) -> BuiltinResult<Option<(usize, 
     summary = "Extract or create a diagonal from a vector or matrix.",
     keywords = "diag,diagonal,matrix",
     type_resolver(diag_type),
+    descriptor(crate::builtins::array::shape::diag::DIAG_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::diag"
 )]
 async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1259,6 +1481,12 @@ mod tests {
                     .contains("diagonal offset must be a numeric scalar"),
             "unexpected error: {}",
             err.message()
+        );
+        assert!(
+            err.identifier() == DIAG_ERROR_INVALID_INPUT.identifier
+                || err.identifier() == DIAG_ERROR_INVALID_OFFSET.identifier,
+            "unexpected identifier: {:?}",
+            err.identifier()
         );
     }
 }

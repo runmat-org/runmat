@@ -13,8 +13,14 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "triu";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::triu")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -75,8 +81,107 @@ fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-fn triu_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("triu").build()
+const TRIU_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Upper triangular output array with preserved shape/type domain.",
+}];
+
+const TRIU_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, matrix, or paged matrix array.",
+}];
+
+const TRIU_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, matrix, or paged matrix array.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal offset for the preserved upper triangle.",
+    },
+];
+
+const TRIU_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = triu(A)",
+        inputs: &TRIU_INPUTS_A,
+        outputs: &TRIU_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = triu(A, k)",
+        inputs: &TRIU_INPUTS_A_K,
+        outputs: &TRIU_OUTPUT,
+    },
+];
+
+const TRIU_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIU.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:triu:TooManyInputs"),
+    when: "More than one optional argument is supplied after A.",
+    message: "triu: too many input arguments",
+};
+
+const TRIU_ERROR_INVALID_OFFSET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIU.INVALID_OFFSET",
+    identifier: Some("RunMat:triu:InvalidOffset"),
+    when: "Diagonal offset is not a finite integer scalar value.",
+    message: "triu: invalid diagonal offset",
+};
+
+const TRIU_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIU.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:triu:UnsupportedInput"),
+    when: "Input value is not supported by triu.",
+    message: "triu: unsupported input type",
+};
+
+const TRIU_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIU.INTERNAL",
+    identifier: Some("RunMat:triu:Internal"),
+    when: "Internal masking/upload path fails.",
+    message: "triu: internal operation failed",
+};
+
+const TRIU_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    TRIU_ERROR_TOO_MANY_INPUTS,
+    TRIU_ERROR_INVALID_OFFSET,
+    TRIU_ERROR_UNSUPPORTED_INPUT,
+    TRIU_ERROR_INTERNAL,
+];
+
+pub const TRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TRIU_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRIU_ERRORS,
+};
+
+fn triu_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    triu_error_with_message(error.message, error)
+}
+
+fn triu_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -86,11 +191,12 @@ fn triu_error(message: impl Into<String>) -> RuntimeError {
     keywords = "triu,upper triangular,matrix,diagonal,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),
+    descriptor(crate::builtins::array::shape::triu::TRIU_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::triu"
 )]
 async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(triu_error("triu: too many input arguments"));
+        return Err(triu_error(&TRIU_ERROR_TOO_MANY_INPUTS));
     }
     let offset = parse_diagonal_offset(&rest).await?;
     match value {
@@ -103,35 +209,39 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| triu_error(format!("triu: {e}")))?;
+                .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
             Ok(triu_complex_tensor(tensor, offset).map(complex_tensor_into_value)?)
         }
         Value::Num(n) => {
-            let tensor =
-                tensor::value_into_tensor_for("triu", Value::Num(n)).map_err(|e| triu_error(e))?;
+            let tensor = tensor::value_into_tensor_for("triu", Value::Num(n))
+                .map_err(|e| triu_error_with_message(e, &TRIU_ERROR_INTERNAL))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("triu", Value::Int(i.clone()))
-                .map_err(|e| triu_error(e))?;
+                .map_err(|e| triu_error_with_message(e, &TRIU_ERROR_INTERNAL))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("triu", Value::Bool(flag))
-                .map_err(|e| triu_error(e))?;
+                .map_err(|e| triu_error_with_message(e, &TRIU_ERROR_INTERNAL))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| triu_error(format!("triu: {e}")))?;
+                .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
             Ok(triu_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(triu_gpu(handle, offset).await?),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(triu_error("triu: string arrays are not supported"))
-        }
-        Value::Cell(_) => Err(triu_error("triu: cell arrays are not supported")),
+        Value::String(_) | Value::StringArray(_) => Err(triu_error_with_message(
+            "triu: string arrays are not supported",
+            &TRIU_ERROR_UNSUPPORTED_INPUT,
+        )),
+        Value::Cell(_) => Err(triu_error_with_message(
+            "triu: cell arrays are not supported",
+            &TRIU_ERROR_UNSUPPORTED_INPUT,
+        )),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -143,7 +253,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(triu_error("triu: unsupported input type")),
+        | Value::OutputList(_) => Err(triu_error(&TRIU_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
@@ -153,7 +263,7 @@ async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
     }
     let gathered = crate::dispatcher::gather_if_needed_async(&args[0])
         .await
-        .map_err(|e| triu_error(format!("triu: {e}")))?;
+        .map_err(|e| triu_error_with_message(format!("triu: {e}"), &TRIU_ERROR_INTERNAL))?;
     scalar_to_isize(&gathered, "triu")
 }
 
@@ -162,15 +272,17 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
         Value::Int(i) => Ok(i.to_i64() as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(triu_error(format!(
-                    "{name}: diagonal offset must be finite"
-                )));
+                return Err(triu_error_with_message(
+                    format!("{name}: diagonal offset must be finite"),
+                    &TRIU_ERROR_INVALID_OFFSET,
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(triu_error(format!(
-                    "{name}: diagonal offset must be an integer"
-                )));
+                return Err(triu_error_with_message(
+                    format!("{name}: diagonal offset must be an integer"),
+                    &TRIU_ERROR_INVALID_OFFSET,
+                ));
             }
             Ok(rounded as isize)
         }
@@ -178,9 +290,10 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
             scalar_to_isize(&Value::Num(t.data[0]), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
-        other => Err(triu_error(format!(
-            "{name}: diagonal offset must be a scalar numeric value, got {other:?}"
-        ))),
+        other => Err(triu_error_with_message(
+            format!("{name}: diagonal offset must be a scalar numeric value, got {other:?}"),
+            &TRIU_ERROR_INVALID_OFFSET,
+        )),
     }
 }
 
@@ -227,9 +340,12 @@ async fn triu_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResul
             data: &result.data,
             shape: &result.shape,
         };
-        let uploaded = provider
-            .upload(&view)
-            .map_err(|e| triu_error(format!("triu: failed to upload fallback result: {e}")))?;
+        let uploaded = provider.upload(&view).map_err(|e| {
+            triu_error_with_message(
+                format!("triu: failed to upload fallback result: {e}"),
+                &TRIU_ERROR_INTERNAL,
+            )
+        })?;
         Ok(Value::GpuTensor(uploaded))
     } else {
         let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -260,11 +376,14 @@ where
     if plane == 0 || pages == 0 {
         return Ok(());
     }
-    let expected = plane
-        .checked_mul(pages)
-        .ok_or_else(|| triu_error("triu: dimension product overflow"))?;
+    let expected = plane.checked_mul(pages).ok_or_else(|| {
+        triu_error_with_message("triu: dimension product overflow", &TRIU_ERROR_INTERNAL)
+    })?;
     if expected != data.len() {
-        return Err(triu_error("triu: tensor data length mismatch"));
+        return Err(triu_error_with_message(
+            "triu: tensor data length mismatch",
+            &TRIU_ERROR_INTERNAL,
+        ));
     }
 
     let offset_i128 = offset as i128;
@@ -428,6 +547,7 @@ pub(crate) mod tests {
                 .contains("diagonal offset must be a scalar numeric value"),
             "unexpected error: {err}"
         );
+        assert_eq!(err.identifier(), TRIU_ERROR_INVALID_OFFSET.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -443,6 +563,7 @@ pub(crate) mod tests {
             err.to_string().contains("too many input arguments"),
             "unexpected error: {err}"
         );
+        assert_eq!(err.identifier(), TRIU_ERROR_TOO_MANY_INPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
