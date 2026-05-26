@@ -12,17 +12,278 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{CharArray, IntValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, IntValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-const ERR_NO_PROVIDER: &str = "gpuArray: no acceleration provider registered";
+const BUILTIN_NAME: &str = "gpuArray";
 
-fn gpu_array_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("gpuArray")
-        .build()
+const GPUARRAY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "G",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "GPU-resident handle containing uploaded/converted data.",
+}];
+
+const GPUARRAY_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to upload or recast on GPU.",
+}];
+
+const GPUARRAY_INPUTS_DIMS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to upload or recast on GPU.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reshape dimensions (scalar dims or a single size vector tensor).",
+    },
+];
+
+const GPUARRAY_INPUTS_DTYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to upload or recast on GPU.",
+    },
+    BuiltinParamDescriptor {
+        name: "dtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"double\""),
+        description: "Class tag such as `single`, `int32`, `uint8`, `logical`, or `double`.",
+    },
+];
+
+const GPUARRAY_INPUTS_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to upload or recast on GPU.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal keyword `\"like\"`.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value whose class drives output conversion.",
+    },
+];
+
+const GPUARRAY_INPUTS_DIMS_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to upload or recast on GPU.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reshape dimensions (scalar dims or a single size vector tensor).",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Class tags and/or `\"like\", prototype` qualifiers.",
+    },
+];
+
+const GPUARRAY_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "G = gpuArray(X)",
+        inputs: &GPUARRAY_INPUTS_BASE,
+        outputs: &GPUARRAY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "G = gpuArray(X, dim, ...)",
+        inputs: &GPUARRAY_INPUTS_DIMS,
+        outputs: &GPUARRAY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "G = gpuArray(X, dtype)",
+        inputs: &GPUARRAY_INPUTS_DTYPE,
+        outputs: &GPUARRAY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "G = gpuArray(X, \"like\", prototype)",
+        inputs: &GPUARRAY_INPUTS_LIKE,
+        outputs: &GPUARRAY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "G = gpuArray(X, dim, ..., option, ...)",
+        inputs: &GPUARRAY_INPUTS_DIMS_OPTIONS,
+        outputs: &GPUARRAY_OUTPUT,
+    },
+];
+
+const GPUARRAY_ERROR_NO_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.NO_PROVIDER",
+    identifier: Some("RunMat:gpuArray:NoProvider"),
+    when: "No acceleration provider is registered for host/device transfers.",
+    message: "gpuArray: no acceleration provider registered",
+};
+
+const GPUARRAY_ERROR_OPTION_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.OPTION_ARGUMENT",
+    identifier: Some("RunMat:gpuArray:OptionArgument"),
+    when: "Option tail contains non-text values where class tags/keywords are expected.",
+    message: "gpuArray: invalid option argument",
+};
+
+const GPUARRAY_ERROR_LIKE_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.LIKE_MISSING",
+    identifier: Some("RunMat:gpuArray:LikeMissingPrototype"),
+    when: "Keyword `like` is supplied without a following prototype value.",
+    message: "gpuArray: expected a prototype value after 'like'",
+};
+
+const GPUARRAY_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.LIKE_DUPLICATE",
+    identifier: Some("RunMat:gpuArray:LikeDuplicate"),
+    when: "Keyword `like` appears more than once.",
+    message: "gpuArray: duplicate 'like' qualifier",
+};
+
+const GPUARRAY_ERROR_CODISTRIBUTED_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.CODISTRIBUTED_UNSUPPORTED",
+    identifier: Some("RunMat:gpuArray:CodistributedUnsupported"),
+    when: "Distributed/codistributed qualifiers are requested.",
+    message: "gpuArray: codistributed arrays are not supported yet",
+};
+
+const GPUARRAY_ERROR_CONFLICTING_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.CONFLICTING_TYPE",
+    identifier: Some("RunMat:gpuArray:ConflictingTypeQualifiers"),
+    when: "Multiple incompatible class qualifiers are supplied.",
+    message: "gpuArray: conflicting type qualifiers supplied",
+};
+
+const GPUARRAY_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.UNKNOWN_OPTION",
+    identifier: Some("RunMat:gpuArray:UnknownOption"),
+    when: "Text option is not a recognized class/keyword token.",
+    message: "gpuArray: unrecognised option",
+};
+
+const GPUARRAY_ERROR_SIZE_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.SIZE_ARGUMENT",
+    identifier: Some("RunMat:gpuArray:InvalidSizeArgument"),
+    when: "Size arguments are malformed (not finite integers, negative, or invalid combinations).",
+    message: "gpuArray: invalid size argument",
+};
+
+const GPUARRAY_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.LIKE_PROTOTYPE",
+    identifier: Some("RunMat:gpuArray:InvalidLikePrototype"),
+    when: "`like` prototype is unsupported for type inference.",
+    message: "gpuArray: invalid 'like' prototype",
+};
+
+const GPUARRAY_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.INPUT_TYPE",
+    identifier: Some("RunMat:gpuArray:UnsupportedInputType"),
+    when: "Input value type cannot be uploaded/coerced to supported gpuArray storage.",
+    message: "gpuArray: unsupported input type",
+};
+
+const GPUARRAY_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.CONVERSION",
+    identifier: Some("RunMat:gpuArray:ConversionFailed"),
+    when: "Requested dtype conversion cannot be performed (for example NaN->logical).",
+    message: "gpuArray: conversion failed",
+};
+
+const GPUARRAY_ERROR_RESHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.RESHAPE",
+    identifier: Some("RunMat:gpuArray:ReshapeMismatch"),
+    when: "Requested shape does not preserve the element count.",
+    message: "gpuArray: cannot reshape gpuArray into requested size",
+};
+
+const GPUARRAY_ERROR_PROVIDER_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.PROVIDER_IO",
+    identifier: Some("RunMat:gpuArray:ProviderIO"),
+    when: "Provider upload/download interaction fails.",
+    message: "gpuArray: provider I/O failed",
+};
+
+const GPUARRAY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPUARRAY.INTERNAL",
+    identifier: Some("RunMat:gpuArray:InternalError"),
+    when: "Internal tensor/container conversion fails.",
+    message: "gpuArray: internal error",
+};
+
+const GPUARRAY_ERRORS: [BuiltinErrorDescriptor; 14] = [
+    GPUARRAY_ERROR_NO_PROVIDER,
+    GPUARRAY_ERROR_OPTION_ARGUMENT,
+    GPUARRAY_ERROR_LIKE_MISSING,
+    GPUARRAY_ERROR_LIKE_DUPLICATE,
+    GPUARRAY_ERROR_CODISTRIBUTED_UNSUPPORTED,
+    GPUARRAY_ERROR_CONFLICTING_TYPE,
+    GPUARRAY_ERROR_UNKNOWN_OPTION,
+    GPUARRAY_ERROR_SIZE_ARGUMENT,
+    GPUARRAY_ERROR_LIKE_PROTOTYPE,
+    GPUARRAY_ERROR_INPUT_TYPE,
+    GPUARRAY_ERROR_CONVERSION,
+    GPUARRAY_ERROR_RESHAPE,
+    GPUARRAY_ERROR_PROVIDER_IO,
+    GPUARRAY_ERROR_INTERNAL,
+];
+
+pub const GPUARRAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GPUARRAY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GPUARRAY_ERRORS,
+};
+
+fn gpu_array_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    gpu_array_error_with_message(error.message, error)
+}
+
+fn gpu_array_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuarray")]
@@ -63,6 +324,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     examples = "G = gpuArray([1 2 3], 'single');",
     accel = "array_construct",
     type_resolver(gpuarray_type),
+    descriptor(crate::builtins::acceleration::gpu::gpuarray::GPUARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
 async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -154,45 +416,43 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     let mut idx = index_after_dims;
     while idx < rest.len() {
         let tag = value_to_lower_string(&rest[idx]).ok_or_else(|| {
-            gpu_array_error(format!(
+            gpu_array_error_with_message(
+                format!(
                 "gpuArray: unexpected argument {:?}; expected a class string or the keyword 'like'",
                 rest[idx]
-            ))
+                ),
+                &GPUARRAY_ERROR_OPTION_ARGUMENT,
+            )
         })?;
 
         match tag.as_str() {
             "like" => {
                 idx += 1;
                 if idx >= rest.len() {
-                    return Err(gpu_array_error(
-                        "gpuArray: expected a prototype value after 'like'",
-                    ));
+                    return Err(gpu_array_error(&GPUARRAY_ERROR_LIKE_MISSING));
                 }
                 if options.prototype.is_some() {
-                    return Err(gpu_array_error("gpuArray: duplicate 'like' qualifier"));
+                    return Err(gpu_array_error(&GPUARRAY_ERROR_LIKE_DUPLICATE));
                 }
                 options.prototype = Some(rest[idx].clone());
             }
             "distributed" | "codistributed" => {
-                return Err(gpu_array_error(
-                    "gpuArray: codistributed arrays are not supported yet",
-                ));
+                return Err(gpu_array_error(&GPUARRAY_ERROR_CODISTRIBUTED_UNSUPPORTED));
             }
             tag => {
                 if let Some(class) = DataClass::from_tag(tag) {
                     if let Some(existing) = options.explicit_dtype {
                         if existing != class {
-                            return Err(gpu_array_error(
-                                "gpuArray: conflicting type qualifiers supplied",
-                            ));
+                            return Err(gpu_array_error(&GPUARRAY_ERROR_CONFLICTING_TYPE));
                         }
                     } else {
                         options.explicit_dtype = Some(class);
                     }
                 } else if tag != "gpuarray" {
-                    return Err(gpu_array_error(format!(
-                        "gpuArray: unrecognised option '{tag}'",
-                    )));
+                    return Err(gpu_array_error_with_message(
+                        format!("gpuArray: unrecognised option '{tag}'"),
+                        &GPUARRAY_ERROR_UNKNOWN_OPTION,
+                    ));
                 }
             }
         }
@@ -224,8 +484,9 @@ fn parse_size_arguments(rest: &[Value]) -> BuiltinResult<(usize, Option<Vec<usiz
             }
             Value::Tensor(t) => {
                 if vector_consumed || !dims.is_empty() {
-                    return Err(gpu_array_error(
+                    return Err(gpu_array_error_with_message(
                         "gpuArray: size vectors cannot be combined with scalar dimensions",
+                        &GPUARRAY_ERROR_SIZE_ARGUMENT,
                     ));
                 }
                 dims = tensor_to_dims(t)?;
@@ -247,8 +508,9 @@ fn value_to_lower_string(value: &Value) -> Option<String> {
 fn int_to_dim(value: &IntValue) -> BuiltinResult<usize> {
     let raw = value.to_i64();
     if raw < 0 {
-        return Err(gpu_array_error(
+        return Err(gpu_array_error_with_message(
             "gpuArray: size arguments must be non-negative integers",
+            &GPUARRAY_ERROR_SIZE_ARGUMENT,
         ));
     }
     Ok(raw as usize)
@@ -256,17 +518,22 @@ fn int_to_dim(value: &IntValue) -> BuiltinResult<usize> {
 
 fn float_to_dim(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(gpu_array_error(
+        return Err(gpu_array_error_with_message(
             "gpuArray: size arguments must be finite integers",
+            &GPUARRAY_ERROR_SIZE_ARGUMENT,
         ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(gpu_array_error("gpuArray: size arguments must be integers"));
+        return Err(gpu_array_error_with_message(
+            "gpuArray: size arguments must be integers",
+            &GPUARRAY_ERROR_SIZE_ARGUMENT,
+        ));
     }
     if rounded < 0.0 {
-        return Err(gpu_array_error(
+        return Err(gpu_array_error_with_message(
             "gpuArray: size arguments must be non-negative",
+            &GPUARRAY_ERROR_SIZE_ARGUMENT,
         ));
     }
     Ok(rounded as usize)
@@ -315,18 +582,24 @@ fn infer_dtype_from_prototype(proto: &Value) -> BuiltinResult<DataClass> {
         }),
         Value::Tensor(_) | Value::Num(_) => Ok(DataClass::Double),
         Value::CharArray(_) => Ok(DataClass::Double),
-        Value::String(_) => Err(gpu_array_error(
+        Value::String(_) => Err(gpu_array_error_with_message(
             "gpuArray: 'like' does not accept MATLAB string scalars; convert to char() first",
+            &GPUARRAY_ERROR_LIKE_PROTOTYPE,
         )),
-        Value::StringArray(_) => Err(gpu_array_error(
+        Value::StringArray(_) => Err(gpu_array_error_with_message(
             "gpuArray: 'like' does not accept string arrays; convert to char arrays first",
+            &GPUARRAY_ERROR_LIKE_PROTOTYPE,
         )),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(gpu_array_error(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(gpu_array_error_with_message(
             "gpuArray: complex prototypes are not supported yet; provide real-valued inputs",
+            &GPUARRAY_ERROR_LIKE_PROTOTYPE,
         )),
-        other => Err(gpu_array_error(format!(
-            "gpuArray: unsupported 'like' prototype type {other:?}; expected numeric or logical values"
-        ))),
+        other => Err(gpu_array_error_with_message(
+            format!(
+                "gpuArray: unsupported 'like' prototype type {other:?}; expected numeric or logical values"
+            ),
+            &GPUARRAY_ERROR_LIKE_PROTOTYPE,
+        )),
     }
 }
 
@@ -352,8 +625,8 @@ fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHa
             );
         }
     }
-    let provider =
-        runmat_accelerate_api::provider().ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
 
     let tensor = coerce_host_value(value)?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
@@ -362,9 +635,9 @@ fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHa
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    let new_handle = provider
-        .upload(&view)
-        .map_err(|err| gpu_array_error(format!("gpuArray: {err}")))?;
+    let new_handle = provider.upload(&view).map_err(|err| {
+        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
+    })?;
 
     tensor.data.clear();
 
@@ -397,20 +670,22 @@ async fn convert_device_value(
         _ => {}
     }
 
-    let provider =
-        runmat_accelerate_api::provider().ok_or_else(|| gpu_array_error(ERR_NO_PROVIDER))?;
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
-        .map_err(|err| gpu_array_error(err.to_string()))?;
+        .map_err(|err| {
+            gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
+        })?;
     let (mut tensor, logical) = cast_tensor(tensor, dtype)?;
 
     let view = HostTensorView {
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    let new_handle = provider
-        .upload(&view)
-        .map_err(|err| gpu_array_error(format!("gpuArray: {err}")))?;
+    let new_handle = provider.upload(&view).map_err(|err| {
+        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
+    })?;
 
     provider.free(&handle).ok();
     tensor.data.clear();
@@ -425,27 +700,38 @@ fn coerce_host_value(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| gpu_array_error(format!("gpuArray: {err}"))),
+            .map_err(|err| {
+                gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
+            }),
         Value::Bool(flag) => Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|err| gpu_array_error(format!("gpuArray: {err}"))),
+            .map_err(|err| {
+                gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
+            }),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
-            .map_err(|err| gpu_array_error(format!("gpuArray: {err}"))),
+            .map_err(|err| {
+                gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
+            }),
         Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|err| gpu_array_error(format!("gpuArray: {err}"))),
+            .map_err(|err| {
+                gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
+            }),
         Value::CharArray(ca) => char_array_to_tensor(&ca),
         Value::String(text) => {
             let ca = CharArray::new_row(&text);
             char_array_to_tensor(&ca)
         }
-        Value::StringArray(_) => Err(gpu_array_error(
+        Value::StringArray(_) => Err(gpu_array_error_with_message(
             "gpuArray: string arrays are not supported yet; convert to char arrays with CHAR first",
+            &GPUARRAY_ERROR_INPUT_TYPE,
         )),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(gpu_array_error(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(gpu_array_error_with_message(
             "gpuArray: complex inputs are not supported yet; split real and imaginary parts before uploading",
+            &GPUARRAY_ERROR_INPUT_TYPE,
         )),
-        other => Err(gpu_array_error(format!(
-            "gpuArray: unsupported input type for GPU transfer: {other:?}"
-        ))),
+        other => Err(gpu_array_error_with_message(
+            format!("gpuArray: unsupported input type for GPU transfer: {other:?}"),
+            &GPUARRAY_ERROR_INPUT_TYPE,
+        )),
     }
 }
 
@@ -500,7 +786,10 @@ fn cast_tensor(mut tensor: Tensor, dtype: DataClass) -> BuiltinResult<(Tensor, b
 fn convert_to_logical(data: &mut [f64]) -> BuiltinResult<()> {
     for value in data.iter_mut() {
         if value.is_nan() {
-            return Err(gpu_array_error("gpuArray: cannot convert NaN to logical"));
+            return Err(gpu_array_error_with_message(
+                "gpuArray: cannot convert NaN to logical",
+                &GPUARRAY_ERROR_CONVERSION,
+            ));
         }
         *value = if *value != 0.0 { 1.0 } else { 0.0 };
     }
@@ -536,10 +825,13 @@ fn apply_dims(handle: &mut GpuTensorHandle, dims: &[usize]) -> BuiltinResult<()>
         handle.shape.iter().product()
     };
     if new_elems != current_elems {
-        return Err(gpu_array_error(format!(
-            "gpuArray: cannot reshape gpuArray of {current_elems} elements into size {:?}",
-            dims
-        )));
+        return Err(gpu_array_error_with_message(
+            format!(
+                "gpuArray: cannot reshape gpuArray of {current_elems} elements into size {:?}",
+                dims
+            ),
+            &GPUARRAY_ERROR_RESHAPE,
+        ));
     }
     handle.shape = dims.to_vec();
     Ok(())
@@ -549,8 +841,9 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
     let rows = ca.rows;
     let cols = ca.cols;
     if rows == 0 || cols == 0 {
-        return Tensor::new(Vec::new(), vec![rows, cols])
-            .map_err(|err| gpu_array_error(format!("gpuArray: {err}")));
+        return Tensor::new(Vec::new(), vec![rows, cols]).map_err(|err| {
+            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
+        });
     }
     let mut data = vec![0.0; rows * cols];
     // Store in row-major to preserve the original character order when interpreted with column-major indexing
@@ -561,7 +854,9 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
             data[row * cols + col] = ch as u32 as f64;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|err| gpu_array_error(format!("gpuArray: {err}")))
+    Tensor::new(data, vec![rows, cols]).map_err(|err| {
+        gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
+    })
 }
 
 #[cfg(test)]
@@ -770,10 +1065,9 @@ pub(crate) mod tests {
     fn gpu_array_like_requires_argument() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-            let err = call(Value::Tensor(tensor), vec![Value::from("like")])
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("expected a prototype value"));
+            let err = call(Value::Tensor(tensor), vec![Value::from("like")]).unwrap_err();
+            assert_eq!(err.to_string(), GPUARRAY_ERROR_LIKE_MISSING.message);
+            assert_eq!(err.identifier(), GPUARRAY_ERROR_LIKE_MISSING.identifier);
         });
     }
 
@@ -782,10 +1076,11 @@ pub(crate) mod tests {
     fn gpu_array_unknown_option_errors() {
         test_support::with_test_provider(|_| {
             let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-            let err = call(Value::Tensor(tensor), vec![Value::from("mystery")])
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("unrecognised option"));
+            let err = call(Value::Tensor(tensor), vec![Value::from("mystery")]).unwrap_err();
+            assert!(err
+                .to_string()
+                .contains(GPUARRAY_ERROR_UNKNOWN_OPTION.message));
+            assert_eq!(err.identifier(), GPUARRAY_ERROR_UNKNOWN_OPTION.identifier);
         });
     }
 
@@ -891,9 +1186,9 @@ pub(crate) mod tests {
                 Value::Tensor(tensor),
                 vec![Value::from(2i32), Value::from(2i32)],
             )
-            .unwrap_err()
-            .to_string();
-            assert!(err.contains("cannot reshape"));
+            .unwrap_err();
+            assert!(err.to_string().contains("cannot reshape"));
+            assert_eq!(err.identifier(), GPUARRAY_ERROR_RESHAPE.identifier);
         });
     }
 
