@@ -17,6 +17,8 @@ use crate::{
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, Closure, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -73,36 +75,275 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because the callback can run arbitrary MATLAB code.",
 };
 
-fn arrayfun_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("arrayfun")
-        .build()
+const BUILTIN_NAME: &str = "arrayfun";
+
+const ARRAYFUN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise callback result (uniform array or cell array).",
+}];
+
+const ARRAYFUN_INPUTS_BASE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+];
+
+const ARRAYFUN_INPUTS_UNIFORM: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "UniformOutput",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"UniformOutput\""),
+        description: "Name-value key that toggles uniform output collection.",
+    },
+    BuiltinParamDescriptor {
+        name: "tf",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("true"),
+        description: "Logical true/false value for UniformOutput.",
+    },
+];
+
+const ARRAYFUN_INPUTS_HANDLER: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "ErrorHandler",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ErrorHandler\""),
+        description: "Name-value key that provides fallback callback on per-element failures.",
+    },
+    BuiltinParamDescriptor {
+        name: "handler",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Callback invoked with error struct and original scalar arguments.",
+    },
+];
+
+const ARRAYFUN_INPUTS_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs including UniformOutput and ErrorHandler.",
+    },
+];
+
+const ARRAYFUN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An...)",
+        inputs: &ARRAYFUN_INPUTS_BASE,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An..., \"UniformOutput\", tf)",
+        inputs: &ARRAYFUN_INPUTS_UNIFORM,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An..., \"ErrorHandler\", handler)",
+        inputs: &ARRAYFUN_INPUTS_HANDLER,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An..., nameValue...)",
+        inputs: &ARRAYFUN_INPUTS_OPTIONS,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+];
+
+const ARRAYFUN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.INVALID_INPUT",
+    identifier: Some("RunMat:arrayfun:InvalidInput"),
+    when: "Inputs, callable forms, or option tails violate arrayfun argument requirements.",
+    message: "arrayfun: invalid input arguments",
+};
+
+const ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.UNIFORM_OUTPUT_OPTION",
+    identifier: Some("RunMat:arrayfun:UniformOutputOption"),
+    when: "UniformOutput option value is not interpretable as logical true/false.",
+    message: "arrayfun: UniformOutput must be logical true or false",
+};
+
+const ARRAYFUN_ERROR_CALLBACK_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.CALLBACK_FAILED",
+    identifier: Some("RunMat:arrayfun:CallbackFailed"),
+    when: "Callback invocation fails and no ErrorHandler recovers the element.",
+    message: "arrayfun: callback execution failed",
+};
+
+const ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.UNIFORM_OUTPUT_TYPE",
+    identifier: Some("RunMat:arrayfun:UniformOutputType"),
+    when: "UniformOutput=true callback result is not a supported scalar type.",
+    message: "arrayfun: callback must return scalar values for UniformOutput=true",
+};
+
+const ARRAYFUN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.INTERNAL",
+    identifier: Some("RunMat:arrayfun:InternalError"),
+    when: "Internal shape/index/materialization/upload path fails.",
+    message: "arrayfun: internal error",
+};
+
+const ARRAYFUN_ERROR_UNDEFINED_FUNCTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.UNDEFINED_FUNCTION",
+    identifier: Some("RunMat:UndefinedFunction"),
+    when: "External callable identity cannot be resolved in semantic/runtime boundaries.",
+    message: "arrayfun: undefined function",
+};
+
+const ARRAYFUN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    ARRAYFUN_ERROR_INVALID_INPUT,
+    ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION,
+    ARRAYFUN_ERROR_CALLBACK_FAILED,
+    ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+    ARRAYFUN_ERROR_INTERNAL,
+    ARRAYFUN_ERROR_UNDEFINED_FUNCTION,
+];
+
+pub const ARRAYFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAYFUN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ARRAYFUN_ERRORS,
+};
+
+fn arrayfun_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    arrayfun_error_with_message(error.message, error)
 }
 
-fn arrayfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("arrayfun")
-        .with_identifier(identifier)
-        .build()
+fn arrayfun_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
+fn arrayfun_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    arrayfun_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn arrayfun_error_with_source(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
     let identifier = source.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(message)
-        .with_builtin("arrayfun")
+    let mut builder = build_runtime_error(message.into())
+        .with_builtin(BUILTIN_NAME)
         .with_source(source);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = identifier.as_deref().or(error.identifier) {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
 fn arrayfun_flow(message: impl Into<String>) -> RuntimeError {
-    arrayfun_error(message)
+    arrayfun_error_with_message(message, &ARRAYFUN_ERROR_INVALID_INPUT)
+}
+
+fn arrayfun_internal(message: impl Into<String>) -> RuntimeError {
+    arrayfun_error_with_message(message, &ARRAYFUN_ERROR_INTERNAL)
 }
 
 fn arrayfun_flow_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
-    arrayfun_error_with_source(message, source)
+    arrayfun_error_with_source(message, &ARRAYFUN_ERROR_CALLBACK_FAILED, source)
 }
 
 fn format_handler_error(err: &RuntimeError) -> String {
@@ -125,6 +366,7 @@ fn format_handler_error(err: &RuntimeError) -> String {
     keywords = "arrayfun,gpu,array,map,functional",
     accel = "host",
     type_resolver(arrayfun_type),
+    descriptor(crate::builtins::acceleration::gpu::arrayfun::ARRAYFUN_DESCRIPTOR),
     builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
 async fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -390,16 +632,16 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(iv) => Ok(iv.to_f64() != 0.0),
         Value::String(s) => parse_bool_string(&s)
-            .ok_or_else(|| arrayfun_flow("arrayfun: UniformOutput must be logical true or false")),
+            .ok_or_else(|| arrayfun_error(&ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION)),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
-            parse_bool_string(&text).ok_or_else(|| {
-                arrayfun_flow("arrayfun: UniformOutput must be logical true or false")
-            })
+            parse_bool_string(&text)
+                .ok_or_else(|| arrayfun_error(&ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION))
         }
-        other => Err(arrayfun_flow(format!(
-            "arrayfun: UniformOutput must be logical true or false, got {other:?}"
-        ))),
+        other => Err(arrayfun_error_with_detail(
+            &ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION,
+            format!("got {other:?}"),
+        )),
     }
 }
 
@@ -702,9 +944,9 @@ impl Callable {
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
                 }
-                Err(arrayfun_error_with_identifier(
+                Err(arrayfun_error_with_message(
                     format!("Undefined function for callable identity {identity:?}"),
-                    "RunMat:UndefinedFunction",
+                    &ARRAYFUN_ERROR_UNDEFINED_FUNCTION,
                 ))
             }
             Callable::Closure(c) => {
@@ -718,10 +960,13 @@ impl Callable {
                     {
                         return result;
                     }
-                    return Err(arrayfun_flow(format!(
-                        "arrayfun: semantic closure '{}' ({function}) is unavailable",
-                        c.function_name
-                    )));
+                    return Err(arrayfun_error_with_detail(
+                        &ARRAYFUN_ERROR_CALLBACK_FAILED,
+                        format!(
+                            "semantic closure '{}' ({function}) is unavailable",
+                            c.function_name
+                        ),
+                    ));
                 }
                 if let Some(function) =
                     user_functions::resolve_semantic_function_by_name(&c.function_name)
@@ -949,22 +1194,22 @@ impl UniformCollector {
             UniformCollector::Pending => {
                 let total = shape.iter().product();
                 let tensor = Tensor::new(vec![0.0; total], shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Double(data) => {
                 let tensor = Tensor::new(data, shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Logical(bits) => {
                 let logical = LogicalArray::new(bits, shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::LogicalArray(logical))
             }
             UniformCollector::Complex(entries) => {
                 let tensor = ComplexTensor::new(entries, shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::ComplexTensor(tensor))
             }
             UniformCollector::Char(chars) => {
@@ -975,20 +1220,22 @@ impl UniformCollector {
                 };
 
                 if normalized_shape.len() > 2 {
-                    return Err(arrayfun_flow(
-                        "arrayfun: character outputs with UniformOutput=true must be 2-D",
+                    return Err(arrayfun_error_with_detail(
+                        &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+                        "character outputs with UniformOutput=true must be 2-D",
                     ));
                 }
 
                 let rows = normalized_shape.first().copied().unwrap_or(1);
                 let cols = normalized_shape.get(1).copied().unwrap_or(1);
                 let expected = rows.checked_mul(cols).ok_or_else(|| {
-                    arrayfun_flow("arrayfun: character output size exceeds platform limits")
+                    arrayfun_internal("arrayfun: character output size exceeds platform limits")
                 })?;
 
                 if expected != chars.len() {
-                    return Err(arrayfun_flow(
-                        "arrayfun: callback returned the wrong number of characters",
+                    return Err(arrayfun_error_with_detail(
+                        &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+                        "callback returned the wrong number of characters",
                     ));
                 }
 
@@ -1002,7 +1249,7 @@ impl UniformCollector {
                 }
 
                 let array = CharArray::new(row_major, rows, cols)
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(array))
             }
         }
@@ -1029,9 +1276,12 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
             let ch = ca.data.first().copied().unwrap_or('\0');
             Ok(ClassifiedValue::Char(ch))
         }
-        other => Err(arrayfun_flow(format!(
-            "arrayfun: callback must return scalar numeric, logical, character, or complex values for UniformOutput=true (got {other:?})"
-        ))),
+        other => Err(arrayfun_error_with_detail(
+            &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+            format!(
+                "callback must return scalar numeric, logical, character, or complex values for UniformOutput=true (got {other:?})"
+            ),
+        )),
     }
 }
 
@@ -1104,7 +1354,7 @@ fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
 
 fn dims_to_row_tensor(dims: &[usize]) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = dims.iter().map(|&d| d as f64).collect();
-    Tensor::new(data, vec![1, dims.len()]).map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
+    Tensor::new(data, vec![1, dims.len()]).map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))
 }
 
 #[cfg(test)]
@@ -1470,6 +1720,41 @@ pub(crate) mod tests {
         for (row, value) in expected.iter().enumerate() {
             assert_eq!(cell.get(row, 0).unwrap(), *value);
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn arrayfun_uniform_output_option_identifier() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let err = call(
+            Value::FunctionHandle("sin".to_string()),
+            vec![
+                Value::Tensor(tensor),
+                Value::String("UniformOutput".into()),
+                Value::String("maybe".into()),
+            ],
+        )
+        .expect_err("expected invalid uniform output option");
+        assert_eq!(
+            err.identifier(),
+            ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn arrayfun_unknown_name_value_identifier() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let err = call(
+            Value::FunctionHandle("sin".to_string()),
+            vec![
+                Value::Tensor(tensor),
+                Value::String("MysteryFlag".into()),
+                Value::Bool(true),
+            ],
+        )
+        .expect_err("expected unknown name-value error");
+        assert_eq!(err.identifier(), ARRAYFUN_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

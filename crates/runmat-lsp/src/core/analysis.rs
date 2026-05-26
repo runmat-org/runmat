@@ -2075,6 +2075,7 @@ mod tests {
     #[test]
     fn signature_help_uses_gpu_acceleration_descriptors() {
         let cases = [
+            ("arrayfun(\"sin\", 1);", "B = arrayfun(func, A1, An...)"),
             ("gather(1);", "X = gather(X)"),
             ("gpuArray(1);", "G = gpuArray(X)"),
             ("gpuDevice();", "info = gpuDevice()"),
