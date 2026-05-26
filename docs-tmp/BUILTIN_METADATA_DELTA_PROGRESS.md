@@ -41,9 +41,10 @@
 | Wave 36 (Diagnostics Core) | `assert`, `error`, `warning` | Done | `8bb27013` | `cargo fmt`; `cargo test -p runmat-runtime builtins::diagnostics::assert::tests::`; `cargo test -p runmat-runtime builtins::diagnostics::error::tests::`; `cargo test -p runmat-runtime builtins::diagnostics::warning::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for diagnostics control-flow surface + stable descriptor-backed parser/validation error maps + LSP signature-help coverage for callable diagnostics forms (`assert`/`error`) |
 | Wave 37 (Array Shape Flip) | `flip`, `fliplr`, `flipud` | Done | `335b84a1` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::flip::tests::`; `cargo test -p runmat-runtime builtins::array::shape::fliplr::tests::`; `cargo test -p runmat-runtime builtins::array::shape::flipud::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for flip-family shape transforms + descriptor-backed stable error sets with shared-helper remap boundaries + LSP signature-help coverage |
 | Wave 38 (Array Shape Permute/Reshape) | `permute`, `ipermute`, `reshape`, `squeeze` | Done | `fe87a4c0` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::permute::tests::`; `cargo test -p runmat-runtime builtins::array::shape::ipermute::tests::`; `cargo test -p runmat-runtime builtins::array::shape::reshape::tests::`; `cargo test -p runmat-runtime builtins::array::shape::squeeze::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for dimension reorder/reshape/singleton-removal shape transforms + stable descriptor error sets + LSP signature-help coverage |
+| Wave 39 (Array Shape Concat) | `cat`, `horzcat`, `vertcat` | Done | `078d93d6` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::cat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::horzcat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::vertcat::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core/wrapper concat forms (including `\"like\"` variant for `cat`) + stable descriptor error sets + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `124`
-- Remaining: `444`
+- Migrated with attached descriptor: `127`
+- Remaining: `441`
