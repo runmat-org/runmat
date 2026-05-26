@@ -1,14 +1,18 @@
 //! MATLAB-compatible `contains` builtin for RunMat.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -44,6 +48,190 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "contains";
 
+const CONTAINS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical result indicating whether each text element contains the pattern.",
+}];
+
+const CONTAINS_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+];
+
+const CONTAINS_INPUTS_IGNORE_CASE_POSITIONAL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "ignoreCase",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("false"),
+        description: "Logical flag controlling case-sensitive matching.",
+    },
+];
+
+const CONTAINS_INPUTS_IGNORE_CASE_PAIR: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"IgnoreCase\""),
+        description: "Option name (`\"IgnoreCase\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option value for `\"IgnoreCase\"`.",
+    },
+];
+
+const CONTAINS_INPUTS_OPTION_PAIRS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs (`\"IgnoreCase\"`, value).",
+    },
+];
+
+const CONTAINS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = contains(str, pat)",
+        inputs: &CONTAINS_INPUTS_BASE,
+        outputs: &CONTAINS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = contains(str, pat, ignoreCase)",
+        inputs: &CONTAINS_INPUTS_IGNORE_CASE_POSITIONAL,
+        outputs: &CONTAINS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = contains(str, pat, \"IgnoreCase\", value)",
+        inputs: &CONTAINS_INPUTS_IGNORE_CASE_PAIR,
+        outputs: &CONTAINS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = contains(str, pat, nameValuePairs...)",
+        inputs: &CONTAINS_INPUTS_OPTION_PAIRS,
+        outputs: &CONTAINS_OUTPUT,
+    },
+];
+
+const CONTAINS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINS.INVALID_INPUT",
+    identifier: Some("RunMat:contains:InvalidInput"),
+    when: "Text or pattern input is not a supported text container.",
+    message: "contains: text and pattern inputs must be text values",
+};
+
+const CONTAINS_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINS.INVALID_OPTION",
+    identifier: Some("RunMat:contains:InvalidOption"),
+    when: "IgnoreCase option arguments are invalid or malformed.",
+    message: "contains: invalid option arguments",
+};
+
+const CONTAINS_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINS.SHAPE_MISMATCH",
+    identifier: Some("RunMat:contains:ShapeMismatch"),
+    when: "Text and pattern inputs are not broadcast-compatible.",
+    message: "contains: input sizes are not broadcast-compatible",
+};
+
+const CONTAINS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTAINS.INTERNAL",
+    identifier: Some("RunMat:contains:InternalError"),
+    when: "Internal logical result assembly failed.",
+    message: "contains: internal error",
+};
+
+const CONTAINS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    CONTAINS_ERROR_INVALID_INPUT,
+    CONTAINS_ERROR_INVALID_OPTION,
+    CONTAINS_ERROR_SHAPE_MISMATCH,
+    CONTAINS_ERROR_INTERNAL,
+];
+
+pub const CONTAINS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTAINS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTAINS_ERRORS,
+};
+
+fn contains_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_contains_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
 #[runtime_builtin(
     name = "contains",
     category = "strings/search",
@@ -51,6 +239,7 @@ const BUILTIN_NAME: &str = "contains";
     keywords = "contains,substring,text,ignorecase,search",
     accel = "sink",
     type_resolver(logical_text_match_type),
+    descriptor(crate::builtins::strings::search::contains::CONTAINS_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::search::contains"
 )]
 async fn contains_builtin(
@@ -58,11 +247,21 @@ async fn contains_builtin(
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text).await?;
-    let pattern = gather_if_needed_async(&pattern).await?;
-    let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest)?;
-    let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
-    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
+    let text = gather_if_needed_async(&text)
+        .await
+        .map_err(remap_contains_flow)?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(remap_contains_flow)?;
+    let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest).map_err(|err| {
+        contains_error_with_message(err.message().to_string(), &CONTAINS_ERROR_INVALID_OPTION)
+    })?;
+    let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
+        contains_error_with_message(err.message().to_string(), &CONTAINS_ERROR_INVALID_INPUT)
+    })?;
+    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern).map_err(|err| {
+        contains_error_with_message(err.message().to_string(), &CONTAINS_ERROR_INVALID_INPUT)
+    })?;
     evaluate_contains(&subject, &patterns, ignore_case)
 }
 
@@ -72,10 +271,12 @@ fn evaluate_contains(
     ignore_case: bool,
 ) -> BuiltinResult<Value> {
     let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
-        .map_err(|err| build_runtime_error(err).with_builtin(BUILTIN_NAME).build())?;
+        .map_err(|err| contains_error_with_message(err, &CONTAINS_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&output_shape);
     if total == 0 {
-        return logical_result(BUILTIN_NAME, Vec::new(), output_shape);
+        return logical_result(BUILTIN_NAME, Vec::new(), output_shape).map_err(|err| {
+            contains_error_with_message(err.message().to_string(), &CONTAINS_ERROR_INTERNAL)
+        });
     }
 
     let subject_strides = compute_strides(&subject.shape);
@@ -121,7 +322,9 @@ fn evaluate_contains(
         };
         data.push(if value { 1 } else { 0 });
     }
-    logical_result(BUILTIN_NAME, data, output_shape)
+    logical_result(BUILTIN_NAME, data, output_shape).map_err(|err| {
+        contains_error_with_message(err.message().to_string(), &CONTAINS_ERROR_INTERNAL)
+    })
 }
 
 #[cfg(test)]

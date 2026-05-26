@@ -2133,6 +2133,35 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_strings_search_descriptors() {
+        let cases = [
+            ("contains(\"runmat\", \"mat\");", "tf = contains(str, pat)"),
+            (
+                "startsWith(\"runmat\", \"run\", true);",
+                "tf = startsWith(str, pat, ignoreCase)",
+            ),
+            (
+                "endsWith(\"runmat\", \"mat\", \"IgnoreCase\", true);",
+                "tf = endsWith(str, pat, \"IgnoreCase\", value)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).unwrap_or_else(|| {
+                panic!("expected signature help for strings-search case: {text}")
+            });
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_prefers_descriptor_signature_label() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
