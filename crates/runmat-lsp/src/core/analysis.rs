@@ -1866,6 +1866,7 @@ mod tests {
                 "r = normrnd(mu, sigma, sz1, sz2, ...)",
             ),
             ("unifrnd(0, 1, [3 4]);", "r = unifrnd(a, b, sz)"),
+            ("rng();", "s = rng()"),
         ];
 
         for (text, expected_label) in cases {
