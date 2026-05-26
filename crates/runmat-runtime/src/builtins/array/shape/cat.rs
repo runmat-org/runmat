@@ -12,6 +12,8 @@ use crate::concatenation::char_array_from_f64_with_prefix;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type,
     Value,
 };
@@ -47,6 +49,153 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn cat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cat").build()
 }
+
+const CAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Concatenated output array.",
+}];
+
+const CAT_INPUTS_CORE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Concatenation dimension (1-based).",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "A2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+];
+
+const CAT_INPUTS_LIKE: [BuiltinParamDescriptor; 6] = [
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Concatenation dimension (1-based).",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "A2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Name-value key ('like').",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype that sets output class/device.",
+    },
+];
+
+const CAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = cat(dim, A1, A2, An...)",
+        inputs: &CAT_INPUTS_CORE,
+        outputs: &CAT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = cat(dim, A1, A2, An..., \"like\", prototype)",
+        inputs: &CAT_INPUTS_LIKE,
+        outputs: &CAT_OUTPUT,
+    },
+];
+
+const CAT_ERROR_TOO_FEW_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CAT.TOO_FEW_INPUTS",
+    identifier: Some("RunMat:cat:TooFewInputs"),
+    when: "Fewer than two input arrays are supplied after dim.",
+    message: "cat: at least two input arrays are required",
+};
+
+const CAT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CAT.INVALID_DIMENSION",
+    identifier: Some("RunMat:cat:InvalidDimension"),
+    when: "dim is non-numeric, non-integer, or less than one.",
+    message: "cat: dimension must be numeric and >= 1",
+};
+
+const CAT_ERROR_MIXED_RESIDENCY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CAT.MIXED_RESIDENCY",
+    identifier: Some("RunMat:cat:MixedResidency"),
+    when: "gpuArray and host inputs are mixed in one cat call.",
+    message: "cat: cannot mix gpuArray inputs with host arrays; convert them first",
+};
+
+const CAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CAT.TYPE_MISMATCH",
+    identifier: Some("RunMat:cat:TypeMismatch"),
+    when: "Inputs are from incompatible classes for concatenation.",
+    message: "cat: incompatible input classes for concatenation",
+};
+
+const CAT_ERROR_INVALID_LIKE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CAT.INVALID_LIKE",
+    identifier: Some("RunMat:cat:InvalidLikePrototype"),
+    when: "The 'like' name-value form is malformed or uses an unsupported prototype.",
+    message: "cat: invalid 'like' prototype",
+};
+
+const CAT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    CAT_ERROR_TOO_FEW_INPUTS,
+    CAT_ERROR_INVALID_DIMENSION,
+    CAT_ERROR_MIXED_RESIDENCY,
+    CAT_ERROR_TYPE_MISMATCH,
+    CAT_ERROR_INVALID_LIKE,
+];
+
+pub const CAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CAT_ERRORS,
+};
 
 #[derive(Clone, Copy, Debug)]
 struct ParsedCatTokens {
@@ -320,6 +469,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
     keywords = "cat,concatenate,array,dimension,gpu",
     accel = "array_construct",
     type_resolver(cat_type),
+    descriptor(crate::builtins::array::shape::cat::CAT_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::cat"
 )]
 async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
