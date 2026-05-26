@@ -15,8 +15,10 @@ use crate::{
     object_property_setter_name, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance,
-    StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance, StructValue,
+    Tensor, Value,
 };
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
@@ -50,19 +52,246 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "setfield";
-const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
+const SETFIELD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Updated struct/object/array value.",
+}];
+
+const SETFIELD_INPUTS_SCALAR: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct/object/struct-array target.",
+    },
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Field/property name to assign.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const SETFIELD_INPUTS_NESTED: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct/object/struct-array target.",
+    },
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Alternating field names and optional index-selector cells `{...}` for nested assignment.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const SETFIELD_INPUTS_LEADING_INDEX: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct-array target.",
+    },
+    BuiltinParamDescriptor {
+        name: "index_selector",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Leading index selector in a cell array, e.g. `{2}` or `{end}`.",
+    },
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Alternating field names and optional index-selector cells `{...}` for nested assignment.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const SETFIELD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "S = setfield(S, field, value)",
+        inputs: &SETFIELD_INPUTS_SCALAR,
+        outputs: &SETFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = setfield(S, field_or_index, ..., value)",
+        inputs: &SETFIELD_INPUTS_NESTED,
+        outputs: &SETFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = setfield(S, {idx0}, field_or_index, ..., value)",
+        inputs: &SETFIELD_INPUTS_LEADING_INDEX,
+        outputs: &SETFIELD_OUTPUT,
+    },
+];
+
+const SETFIELD_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:setfield:NotEnoughInputs"),
+    when: "Input does not provide at least one path component plus assigned value.",
+    message: "setfield: expected at least one field name and a value",
+};
+
+const SETFIELD_ERROR_FIELD_EXPECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.FIELD_EXPECTED",
+    identifier: Some("RunMat:setfield:FieldExpected"),
+    when: "Field/path arguments are missing after parsing selectors.",
+    message: "setfield: expected field name arguments",
+};
+
+const SETFIELD_ERROR_INDEX_SELECTOR_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_SELECTOR_TYPE",
+    identifier: Some("RunMat:setfield:IndexSelectorType"),
+    when: "Index selector is not provided as a cell array.",
+    message: "setfield: indices must be provided in a cell array",
+};
+
+const SETFIELD_ERROR_INDEX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_INVALID",
+    identifier: Some("RunMat:setfield:InvalidIndex"),
+    when: "Index component is malformed, empty, unsupported, or not a positive integer.",
+    message: "setfield: invalid index element",
+};
+
+const SETFIELD_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.FIELD_NAME_TYPE",
+    identifier: Some("RunMat:setfield:FieldNameType"),
+    when: "Field name is not a scalar string or 1-by-N char vector.",
+    message: "setfield: expected field name",
+};
+
+const SETFIELD_ERROR_INDEX_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_SHAPE",
+    identifier: Some("RunMat:setfield:IndexShape"),
+    when: "Indexing rank/shape is unsupported for the targeted value.",
+    message: "setfield: unsupported index shape for target value",
+};
+
+const SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.NON_STRUCT_ASSIGNMENT",
+    identifier: Some("RunMat:setfield:NonStructAssignment"),
+    when: "Assignment target does not support struct-like field updates.",
+    message: "Struct contents assignment to a non-struct object is not supported.",
+};
+
+const SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_OUT_OF_BOUNDS",
+    identifier: Some("RunMat:setfield:IndexOutOfBounds"),
+    when: "Resolved index is outside bounds for target value.",
+    message: "Index exceeds the number of array elements.",
+};
+
+const SETFIELD_ERROR_MISSING_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.MISSING_FIELD",
+    identifier: Some("RunMat:setfield:MissingField"),
+    when: "Indexed assignment path references a missing field.",
+    message: "Reference to non-existent field",
+};
+
+const SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.PROPERTY_PRIVATE_ACCESS",
+    identifier: Some("RunMat:PropertyPrivateAccess"),
+    when: "Property exists but get/set access is private.",
+    message: "setfield: private property access denied",
+};
+
+const SETFIELD_ERROR_OBJECT_PROPERTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.OBJECT_PROPERTY",
+    identifier: Some("RunMat:setfield:ObjectProperty"),
+    when: "Object property operation is invalid (static, non-public, or malformed setter result).",
+    message: "setfield: invalid object property operation",
+};
+
+const SETFIELD_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INVALID_HANDLE",
+    identifier: Some("RunMat:setfield:InvalidHandle"),
+    when: "Handle target is invalid/deleted/null.",
+    message: "setfield: invalid or deleted handle object",
+};
+
+const SETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INTERNAL",
+    identifier: Some("RunMat:setfield:InternalError"),
+    when: "Internal conversion/allocation failed while assigning values.",
+    message: "setfield: internal error",
+};
+
+const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 13] = [
+    SETFIELD_ERROR_NOT_ENOUGH_INPUTS,
+    SETFIELD_ERROR_FIELD_EXPECTED,
+    SETFIELD_ERROR_INDEX_SELECTOR_TYPE,
+    SETFIELD_ERROR_INDEX_INVALID,
+    SETFIELD_ERROR_FIELD_NAME_TYPE,
+    SETFIELD_ERROR_INDEX_SHAPE,
+    SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT,
+    SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
+    SETFIELD_ERROR_MISSING_FIELD,
+    SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS,
+    SETFIELD_ERROR_OBJECT_PROPERTY,
+    SETFIELD_ERROR_INVALID_HANDLE,
+    SETFIELD_ERROR_INTERNAL,
+];
+
+pub const SETFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SETFIELD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SETFIELD_ERRORS,
+};
 
 fn setfield_flow(message: impl Into<String>) -> RuntimeError {
+    setfield_error_with_message(
+        format!("{}: {}", SETFIELD_ERROR_INTERNAL.message, message.into()),
+        &SETFIELD_ERROR_INTERNAL,
+    )
+}
+
+fn setfield_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
+        .with_identifier(error.identifier.unwrap_or("RunMat:setfield:InternalError"))
         .build()
 }
 
 fn setfield_private_access(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(IDENT_PROPERTY_PRIVATE_ACCESS)
-        .build()
+    setfield_error_with_message(message, &SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS)
 }
 
 fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError {
@@ -89,6 +318,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
     summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
     keywords = "setfield,struct,assignment,object property",
     type_resolver(setfield_type),
+    descriptor(crate::builtins::structs::core::setfield::SETFIELD_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
 async fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

@@ -2078,6 +2078,10 @@ mod tests {
             ),
             ("isfield(struct('a', 1), 'a');", "tf = isfield(S, name)"),
             ("orderfields(struct('a', 1));", "S = orderfields(S)"),
+            (
+                "setfield(struct(), 'a', 1);",
+                "S = setfield(S, field, value)",
+            ),
             ("struct('a', 1);", "S = struct(field, value, ...)"),
             ("rmfield(struct('a', 1), 'a');", "S = rmfield(S, field)"),
         ];
