@@ -5,7 +5,11 @@ use std::cmp::Ordering;
 use runmat_accelerate_api::{
     GpuTensorHandle, SortComparison as ProviderSortComparison, SortOrder as ProviderSortOrder,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::tensor_output_type;
@@ -45,24 +49,273 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Sorting breaks fusion chains and acts as a residency sink; upstream tensors are gathered to host memory.",
 };
 
-fn sort_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("sort").build()
+const BUILTIN_NAME: &str = "sort";
+
+const SORT_OUTPUT_B: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sorted values.",
+}];
+
+const SORT_OUTPUT_BI: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sorted values.",
+    },
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based index permutation for each sorted slice.",
+    },
+];
+
+const SORT_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const SORT_INPUTS_A_ARG1: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension selector or direction token ('ascend'/'descend').",
+    },
+];
+
+const SORT_INPUTS_A_ARG1_ARG2: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension selector, placeholder, or direction token.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension selector or direction token.",
+    },
+];
+
+const SORT_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional dimension/direction arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ComparisonMethod\""),
+        description: "Name-value option key.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"auto\""),
+        description: "Comparison method: 'auto', 'real', or 'abs'.",
+    },
+];
+
+const SORT_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional dimension/direction arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"MissingPlacement\""),
+        description: "Name-value option key.",
+    },
+    BuiltinParamDescriptor {
+        name: "placement",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"auto\""),
+        description: "Requested NaN placement option (currently unsupported).",
+    },
+];
+
+const SORT_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "B = sort(A)",
+        inputs: &SORT_INPUTS_A,
+        outputs: &SORT_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sort(A, arg1)",
+        inputs: &SORT_INPUTS_A_ARG1,
+        outputs: &SORT_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sort(A, arg1, arg2)",
+        inputs: &SORT_INPUTS_A_ARG1_ARG2,
+        outputs: &SORT_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sort(A, ..., \"ComparisonMethod\", method)",
+        inputs: &SORT_INPUTS_COMPARISON_METHOD,
+        outputs: &SORT_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = sort(A, ..., \"MissingPlacement\", placement)",
+        inputs: &SORT_INPUTS_MISSING_PLACEMENT,
+        outputs: &SORT_OUTPUT_B,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sort(A)",
+        inputs: &SORT_INPUTS_A,
+        outputs: &SORT_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sort(A, arg1)",
+        inputs: &SORT_INPUTS_A_ARG1,
+        outputs: &SORT_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sort(A, arg1, arg2)",
+        inputs: &SORT_INPUTS_A_ARG1_ARG2,
+        outputs: &SORT_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sort(A, ..., \"ComparisonMethod\", method)",
+        inputs: &SORT_INPUTS_COMPARISON_METHOD,
+        outputs: &SORT_OUTPUT_BI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[B, I] = sort(A, ..., \"MissingPlacement\", placement)",
+        inputs: &SORT_INPUTS_MISSING_PLACEMENT,
+        outputs: &SORT_OUTPUT_BI,
+    },
+];
+
+const SORT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORT.INVALID_DIMENSION",
+    identifier: Some("RunMat:sort:InvalidDimension"),
+    when: "Dimension argument is non-positive, non-integer, or otherwise invalid.",
+    message: "sort: invalid dimension argument",
+};
+
+const SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.SORT.COMPARISON_METHOD_REQUIRES_STRING",
+        identifier: Some("RunMat:sort:ComparisonMethodRequiresString"),
+        when: "ComparisonMethod option value is not string-like.",
+        message: "sort: 'ComparisonMethod' requires a string value",
+    };
+
+const SORT_ERROR_COMPARISON_METHOD_UNKNOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORT.COMPARISON_METHOD_UNKNOWN",
+    identifier: Some("RunMat:sort:ComparisonMethodUnknown"),
+    when: "ComparisonMethod option value is not one of 'auto'/'real'/'abs'.",
+    message: "sort: unsupported ComparisonMethod",
+};
+
+const SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORT.MISSINGPLACEMENT_UNSUPPORTED",
+    identifier: Some("RunMat:sort:MissingPlacementUnsupported"),
+    when: "MissingPlacement option is provided but unsupported.",
+    message: "sort: the 'MissingPlacement' option is not supported yet",
+};
+
+const SORT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:sort:InvalidArgument"),
+    when: "Parser encounters invalid or unrecognized option/value arguments.",
+    message: "sort: invalid argument sequence",
+};
+
+const SORT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SORT.INTERNAL",
+    identifier: Some("RunMat:sort:Internal"),
+    when: "Internal conversion, allocation, or provider result construction fails.",
+    message: "sort: internal operation failed",
+};
+
+const SORT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    SORT_ERROR_INVALID_DIMENSION,
+    SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
+    SORT_ERROR_COMPARISON_METHOD_UNKNOWN,
+    SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
+    SORT_ERROR_INVALID_ARGUMENT,
+    SORT_ERROR_INTERNAL,
+];
+
+pub const SORT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SORT_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SORT_ERRORS,
+};
+
+fn sort_error(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-const SORT_ERR_INVALID_DIMENSION: &str = "RunMat:sort:InvalidDimension";
-const SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING: &str =
-    "RunMat:sort:ComparisonMethodRequiresString";
-const SORT_ERR_COMPARISON_METHOD_UNKNOWN: &str = "RunMat:sort:ComparisonMethodUnknown";
-const SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED: &str = "RunMat:sort:MissingPlacementUnsupported";
+fn sort_internal(message: impl Into<String>) -> crate::RuntimeError {
+    sort_error(&SORT_ERROR_INTERNAL, message)
+}
 
-fn sort_error_with_identifier(
-    message: impl Into<String>,
-    identifier: &'static str,
-) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("sort")
-        .with_identifier(identifier)
-        .build()
+fn sort_invalid_argument(message: impl Into<String>) -> crate::RuntimeError {
+    sort_error(&SORT_ERROR_INVALID_ARGUMENT, message)
 }
 
 #[runtime_builtin(
@@ -73,6 +326,7 @@ fn sort_error_with_identifier(
     accel = "sink",
     sink = true,
     type_resolver(tensor_output_type),
+    descriptor(crate::builtins::array::sorting_sets::sort::SORT_DESCRIPTOR),
     builtin_path = "crate::builtins::array::sorting_sets::sort"
 )]
 async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -109,9 +363,9 @@ async fn sort_gpu(
     let shape = handle.shape.clone();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
-        return Err(sort_error_with_identifier(
+        return Err(sort_error(
+            &SORT_ERROR_INVALID_DIMENSION,
             "sort: dimension must be >= 1",
-            SORT_ERR_INVALID_DIMENSION,
         ));
     }
     let dim_len = dimension_length(&shape, dim);
@@ -125,10 +379,10 @@ async fn sort_gpu(
                 .await
             {
                 let sorted_tensor = Tensor::new(result.values.data, result.values.shape)
-                    .map_err(|e| sort_error(format!("sort: {e}")))?;
+                    .map_err(|e| sort_internal(format!("sort: {e}")))?;
                 let sorted_value = tensor::tensor_into_value(sorted_tensor);
                 let indices_tensor = Tensor::new(result.indices.data, result.indices.shape)
-                    .map_err(|e| sort_error(format!("sort: {e}")))?;
+                    .map_err(|e| sort_internal(format!("sort: {e}")))?;
                 return Ok(SortEvaluation {
                     sorted: sorted_value,
                     indices: indices_tensor,
@@ -145,11 +399,12 @@ fn sort_host(value: Value, args: &SortArgs) -> crate::BuiltinResult<SortEvaluati
         Value::ComplexTensor(ct) => sort_complex_tensor(ct, args),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| sort_error(format!("sort: {e}")))?;
+                .map_err(|e| sort_internal(format!("sort: {e}")))?;
             sort_complex_tensor(tensor, args)
         }
         other => {
-            let tensor = tensor::value_into_tensor_for("sort", other).map_err(|e| sort_error(e))?;
+            let tensor =
+                tensor::value_into_tensor_for("sort", other).map_err(sort_invalid_argument)?;
             sort_real_tensor(tensor, args)
         }
     }
@@ -160,9 +415,9 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         .dimension
         .unwrap_or_else(|| default_dimension(&tensor.shape));
     if dim == 0 {
-        return Err(sort_error_with_identifier(
+        return Err(sort_error(
+            &SORT_ERROR_INVALID_DIMENSION,
             "sort: dimension must be >= 1",
-            SORT_ERR_INVALID_DIMENSION,
         ));
     }
 
@@ -170,7 +425,7 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
         let index_tensor = Tensor::new(indices, tensor.shape.clone())
-            .map_err(|e| sort_error(format!("sort: {e}")))?;
+            .map_err(|e| sort_internal(format!("sort: {e}")))?;
         let sorted_value = tensor::tensor_into_value(tensor);
         return Ok(SortEvaluation {
             sorted: sorted_value,
@@ -201,10 +456,10 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         }
     }
 
-    let sorted_tensor =
-        Tensor::new(sorted, tensor.shape.clone()).map_err(|e| sort_error(format!("sort: {e}")))?;
-    let index_tensor =
-        Tensor::new(indices, tensor.shape.clone()).map_err(|e| sort_error(format!("sort: {e}")))?;
+    let sorted_tensor = Tensor::new(sorted, tensor.shape.clone())
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor = Tensor::new(indices, tensor.shape.clone())
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: tensor::tensor_into_value(sorted_tensor),
@@ -220,9 +475,9 @@ fn sort_complex_tensor(
         .dimension
         .unwrap_or_else(|| default_dimension(&tensor.shape));
     if dim == 0 {
-        return Err(sort_error_with_identifier(
+        return Err(sort_error(
+            &SORT_ERROR_INVALID_DIMENSION,
             "sort: dimension must be >= 1",
-            SORT_ERR_INVALID_DIMENSION,
         ));
     }
 
@@ -230,7 +485,7 @@ fn sort_complex_tensor(
     if tensor.data.is_empty() || dim_len <= 1 {
         let indices = vec![1.0; tensor.data.len()];
         let index_tensor = Tensor::new(indices, tensor.shape.clone())
-            .map_err(|e| sort_error(format!("sort: {e}")))?;
+            .map_err(|e| sort_internal(format!("sort: {e}")))?;
         return Ok(SortEvaluation {
             sorted: complex_tensor_into_value(tensor),
             indices: index_tensor,
@@ -261,9 +516,9 @@ fn sort_complex_tensor(
     }
 
     let sorted_tensor = ComplexTensor::new(sorted, tensor.shape.clone())
-        .map_err(|e| sort_error(format!("sort: {e}")))?;
-    let index_tensor =
-        Tensor::new(indices, tensor.shape.clone()).map_err(|e| sort_error(format!("sort: {e}")))?;
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
+    let index_tensor = Tensor::new(indices, tensor.shape.clone())
+        .map_err(|e| sort_internal(format!("sort: {e}")))?;
 
     Ok(SortEvaluation {
         sorted: complex_tensor_into_value(sorted_tensor),
@@ -468,10 +723,7 @@ impl SortArgs {
                     }
                     Err(err) => {
                         if matches!(rest[i], Value::Int(_) | Value::Num(_)) {
-                            return Err(sort_error_with_identifier(
-                                err,
-                                SORT_ERR_INVALID_DIMENSION,
-                            ));
+                            return Err(sort_error(&SORT_ERROR_INVALID_DIMENSION, err));
                         }
                     }
                 }
@@ -491,16 +743,16 @@ impl SortArgs {
                     "comparisonmethod" => {
                         i += 1;
                         if i >= rest.len() {
-                            return Err(sort_error(
+                            return Err(sort_invalid_argument(
                                 "sort: expected a value for 'ComparisonMethod'",
                             ));
                         }
                         let value = match tokens.get(i) {
                             Some(ArgToken::String(value)) => value.as_str(),
                             _ => {
-                                return Err(sort_error_with_identifier(
+                                return Err(sort_error(
+                                    &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
                                     "sort: 'ComparisonMethod' requires a string value",
-                                    SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING,
                                 ))
                             }
                         };
@@ -509,9 +761,9 @@ impl SortArgs {
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(sort_error_with_identifier(
+                                return Err(sort_error(
+                                    &SORT_ERROR_COMPARISON_METHOD_UNKNOWN,
                                     format!("sort: unsupported ComparisonMethod '{other}'"),
-                                    SORT_ERR_COMPARISON_METHOD_UNKNOWN,
                                 )
                                 .into())
                             }
@@ -520,9 +772,9 @@ impl SortArgs {
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(sort_error_with_identifier(
+                        return Err(sort_error(
+                            &SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
                             "sort: the 'MissingPlacement' option is not supported yet",
-                            SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED,
                         )
                         .into());
                     }
@@ -545,7 +797,7 @@ impl SortArgs {
                     "comparisonmethod" => {
                         i += 1;
                         if i >= rest.len() {
-                            return Err(sort_error(
+                            return Err(sort_invalid_argument(
                                 "sort: expected a value for 'ComparisonMethod'",
                             ));
                         }
@@ -557,9 +809,9 @@ impl SortArgs {
                                 ca.data.iter().copied().collect()
                             }
                             _ => {
-                                return Err(sort_error_with_identifier(
+                                return Err(sort_error(
+                                    &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,
                                     "sort: 'ComparisonMethod' requires a string value",
-                                    SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING,
                                 ))
                             }
                         };
@@ -569,9 +821,9 @@ impl SortArgs {
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(sort_error_with_identifier(
+                                return Err(sort_error(
+                                    &SORT_ERROR_COMPARISON_METHOD_UNKNOWN,
                                     format!("sort: unsupported ComparisonMethod '{other}'"),
-                                    SORT_ERR_COMPARISON_METHOD_UNKNOWN,
                                 )
                                 .into())
                             }
@@ -580,16 +832,16 @@ impl SortArgs {
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(sort_error_with_identifier(
+                        return Err(sort_error(
+                            &SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
                             "sort: the 'MissingPlacement' option is not supported yet",
-                            SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED,
                         )
                         .into());
                     }
                     _ => {}
                 }
             }
-            return Err(sort_error(format!(
+            return Err(sort_invalid_argument(format!(
                 "sort: unrecognised argument {:?}",
                 rest[i]
             )));
@@ -936,7 +1188,7 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some(SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED)
+            SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.identifier
         );
     }
 
@@ -948,7 +1200,10 @@ pub(crate) mod tests {
             vec![Value::from("ComparisonMethod"), Value::from("unknown")],
         )
         .unwrap_err();
-        assert_eq!(err.identifier(), Some(SORT_ERR_COMPARISON_METHOD_UNKNOWN));
+        assert_eq!(
+            err.identifier(),
+            SORT_ERROR_COMPARISON_METHOD_UNKNOWN.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -964,7 +1219,7 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some(SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING)
+            SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.identifier
         );
     }
 
@@ -976,7 +1231,7 @@ pub(crate) mod tests {
             vec![Value::Num(0.0)],
         )
         .unwrap_err();
-        assert_eq!(err.identifier(), Some(SORT_ERR_INVALID_DIMENSION));
+        assert_eq!(err.identifier(), SORT_ERROR_INVALID_DIMENSION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

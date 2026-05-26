@@ -2266,6 +2266,39 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_array_sorting_sets_descriptors() {
+        let cases = [
+            ("sort([3 1 2]);", "B = sort(A)"),
+            ("sort([3 1 2], 'descend');", "B = sort(A, arg1)"),
+            ("sort([3 1 2], 1, 'descend');", "B = sort(A, arg1, arg2)"),
+            (
+                "sort([3 1 2], 'ComparisonMethod', 'abs');",
+                "B = sort(A, ..., \"ComparisonMethod\", method)",
+            ),
+            ("argsort([3 1 2]);", "I = argsort(A)"),
+            ("argsort([3 1 2], 'descend');", "I = argsort(A, arg1)"),
+            ("issorted([1 2 3]);", "tf = issorted(A)"),
+            ("issorted([1 2 3], 'ascend');", "tf = issorted(A, arg1)"),
+            (
+                "issorted([1 2 3], 'MissingPlacement', 'last');",
+                "tf = issorted(A, ..., \"MissingPlacement\", placement)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
             ("assert(true);", "out = assert(condition)"),

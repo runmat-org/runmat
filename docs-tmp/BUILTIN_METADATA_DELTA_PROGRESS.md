@@ -45,9 +45,10 @@
 | Wave 40 (Array Shape Diagonal/Triangular) | `diag`, `tril`, `triu` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::diag::tests::`; `cargo test -p runmat-runtime builtins::array::shape::tril::tests::`; `cargo test -p runmat-runtime builtins::array::shape::triu::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for diagonal extraction/construction and triangular masking forms + descriptor-backed stable error identifiers + LSP signature-help coverage |
 | Wave 41 (Array Shape Rotation/Product) | `rot90`, `kron` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::rot90::tests::`; `cargo test -p runmat-runtime builtins::array::shape::kron::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for rotation and Kronecker product forms + stable descriptor-backed error identifiers + LSP signature-help coverage |
 | Wave 42 (Array Shape Replication/Shift) | `repmat`, `repelem`, `circshift` | Done | `0aee549e` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::repmat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::repelem::tests::`; `cargo test -p runmat-runtime builtins::array::shape::circshift::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for replication and circular-shift forms + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
+| Wave 43 (Array Sorting/Sets A) | `sort`, `argsort`, `issorted` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::sorting_sets::sort::tests::`; `cargo test -p runmat-runtime builtins::array::sorting_sets::argsort::tests::`; `cargo test -p runmat-runtime builtins::array::sorting_sets::issorted::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for sorting/ordering options + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `135`
-- Remaining: `433`
+- Migrated with attached descriptor: `138`
+- Remaining: `430`
