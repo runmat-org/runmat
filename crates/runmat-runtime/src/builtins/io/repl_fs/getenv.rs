@@ -9,7 +9,11 @@ use crate::builtins::common::env as runtime_env;
 #[cfg(test)]
 use std::env;
 
-use runmat_builtins::{CharArray, StringArray, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -17,11 +21,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
-
-const ERR_TOO_MANY_INPUTS: &str = "getenv: too many input arguments";
-const ERR_INVALID_TYPE: &str = "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors";
-const ERR_CHAR_MATRIX_CELL: &str =
-    "getenv: cell array elements must be character vectors or string scalars";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::getenv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,10 +51,90 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "getenv";
 
-fn getenv_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const GETENV_OUTPUT_ALL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "env",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Structure containing all visible environment variables.",
+}];
+const GETENV_OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Resolved environment value(s) matching NAME input shape/type.",
+}];
+const GETENV_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const GETENV_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "NAME",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Variable name query: char vector, string scalar/array, or cell array of char/string scalars.",
+}];
+const GETENV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "env = getenv()",
+        inputs: &GETENV_INPUTS_NONE,
+        outputs: &GETENV_OUTPUT_ALL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = getenv(NAME)",
+        inputs: &GETENV_INPUTS_NAME,
+        outputs: &GETENV_OUTPUT_VALUE,
+    },
+];
+const GETENV_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETENV.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than one input argument is supplied.",
+    message: "getenv: too many input arguments",
+};
+const GETENV_ERROR_INVALID_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETENV.INVALID_TYPE",
+    identifier: None,
+    when: "NAME input type is unsupported for getenv queries.",
+    message: "getenv: NAME must be a character vector, string scalar, string array, or cell array of character vectors",
+};
+const GETENV_ERROR_CELL_ELEMENT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETENV.CELL_ELEMENT_TYPE",
+    identifier: None,
+    when: "Cell NAME entries are not character vectors or string scalars.",
+    message: "getenv: cell array elements must be character vectors or string scalars",
+};
+const GETENV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETENV.INTERNAL",
+    identifier: None,
+    when: "Internal conversion of environment query outputs fails.",
+    message: "getenv: internal conversion failure",
+};
+const GETENV_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    GETENV_ERROR_TOO_MANY_INPUTS,
+    GETENV_ERROR_INVALID_TYPE,
+    GETENV_ERROR_CELL_ELEMENT_TYPE,
+    GETENV_ERROR_INTERNAL,
+];
+pub const GETENV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GETENV_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GETENV_ERRORS,
+};
+
+fn getenv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    getenv_error_with_message(error.message, error)
+}
+
+fn getenv_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -76,6 +155,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "getenv,environment variable,env,system variable,process environment",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::getenv_type),
+    descriptor(crate::builtins::io::repl_fs::getenv::GETENV_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::getenv"
 )]
 async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -87,7 +167,7 @@ async fn getenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 .map_err(map_control_flow)?;
             getenv_one(gathered).await
         }
-        _ => Err(getenv_error(ERR_TOO_MANY_INPUTS)),
+        _ => Err(getenv_error(&GETENV_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -106,7 +186,7 @@ async fn getenv_one(value: Value) -> BuiltinResult<Value> {
         Value::String(s) => Ok(Value::String(read_env_string(&s))),
         Value::StringArray(sa) => getenv_from_string_array(sa),
         Value::Cell(ca) => getenv_from_cell_array(ca).await,
-        _ => Err(getenv_error(ERR_INVALID_TYPE)),
+        _ => Err(getenv_error(&GETENV_ERROR_INVALID_TYPE)),
     }
 }
 
@@ -114,9 +194,13 @@ fn getenv_from_char_array(array: CharArray) -> BuiltinResult<Value> {
     if array.rows == 0 {
         return Ok(Value::CharArray(
             CharArray::new(Vec::new(), 0, array.cols).map_err(|e| {
-                getenv_error(format!(
-                    "getenv: unable to construct empty character array ({e})"
-                ))
+                getenv_error_with_message(
+                    format!(
+                        "{}: unable to construct empty character array ({e})",
+                        GETENV_ERROR_INTERNAL.message
+                    ),
+                    &GETENV_ERROR_INTERNAL,
+                )
             })?,
         ));
     }
@@ -131,8 +215,15 @@ fn getenv_from_char_array(array: CharArray) -> BuiltinResult<Value> {
     for row in 0..array.rows {
         rows.push(read_env_string(&char_row_to_string(&array, row)));
     }
-    let result = char_array_from_rows(&rows)
-        .map_err(|err| getenv_error(format!("getenv: unable to build character matrix ({err})")))?;
+    let result = char_array_from_rows(&rows).map_err(|err| {
+        getenv_error_with_message(
+            format!(
+                "{}: unable to build character matrix ({err})",
+                GETENV_ERROR_INTERNAL.message
+            ),
+            &GETENV_ERROR_INTERNAL,
+        )
+    })?;
     Ok(Value::CharArray(result))
 }
 
@@ -141,8 +232,12 @@ fn getenv_from_string_array(array: StringArray) -> BuiltinResult<Value> {
     for name in &array.data {
         resolved.push(read_env_string(name));
     }
-    let result = StringArray::new(resolved, array.shape.clone())
-        .map_err(|err| getenv_error(format!("getenv: {err}")))?;
+    let result = StringArray::new(resolved, array.shape.clone()).map_err(|err| {
+        getenv_error_with_message(
+            format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+            &GETENV_ERROR_INTERNAL,
+        )
+    })?;
     Ok(Value::StringArray(result))
 }
 
@@ -155,18 +250,23 @@ async fn getenv_from_cell_array(array: runmat_builtins::CellArray) -> BuiltinRes
         let resolved = match gathered {
             Value::CharArray(ca) => {
                 if ca.rows != 1 {
-                    return Err(getenv_error(ERR_CHAR_MATRIX_CELL));
+                    return Err(getenv_error(&GETENV_ERROR_CELL_ELEMENT_TYPE));
                 }
                 Value::CharArray(CharArray::new_row(&read_env_string(&char_row_to_string(
                     &ca, 0,
                 ))))
             }
             Value::String(s) => Value::String(read_env_string(&s)),
-            _ => return Err(getenv_error(ERR_CHAR_MATRIX_CELL)),
+            _ => return Err(getenv_error(&GETENV_ERROR_CELL_ELEMENT_TYPE)),
         };
         values.push(resolved);
     }
-    make_cell(values, array.rows, array.cols).map_err(getenv_error)
+    make_cell(values, array.rows, array.cols).map_err(|err| {
+        getenv_error_with_message(
+            format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+            &GETENV_ERROR_INTERNAL,
+        )
+    })
 }
 
 fn read_env_string(name: &str) -> String {
@@ -186,7 +286,12 @@ fn char_row_to_string(array: &CharArray, row: usize) -> String {
 
 fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
     if rows.is_empty() {
-        return CharArray::new(Vec::new(), 0, 0).map_err(getenv_error);
+        return CharArray::new(Vec::new(), 0, 0).map_err(|err| {
+            getenv_error_with_message(
+                format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+                &GETENV_ERROR_INTERNAL,
+            )
+        });
     }
 
     let max_cols = rows
@@ -195,7 +300,12 @@ fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
         .max()
         .unwrap_or(0);
     if max_cols == 0 {
-        return CharArray::new(Vec::new(), rows.len(), 0).map_err(getenv_error);
+        return CharArray::new(Vec::new(), rows.len(), 0).map_err(|err| {
+            getenv_error_with_message(
+                format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+                &GETENV_ERROR_INTERNAL,
+            )
+        });
     }
 
     let mut data = Vec::with_capacity(rows.len() * max_cols);
@@ -209,7 +319,12 @@ fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
             }
         }
     }
-    CharArray::new(data, rows.len(), max_cols).map_err(getenv_error)
+    CharArray::new(data, rows.len(), max_cols).map_err(|err| {
+        getenv_error_with_message(
+            format!("{}: {err}", GETENV_ERROR_INTERNAL.message),
+            &GETENV_ERROR_INTERNAL,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -220,6 +335,18 @@ pub(crate) mod tests {
 
     fn getenv_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::getenv_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn getenv_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = GETENV_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"env = getenv()"));
+        assert!(labels.contains(&"value = getenv(NAME)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

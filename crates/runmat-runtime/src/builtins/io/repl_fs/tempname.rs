@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
@@ -16,12 +20,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const ERR_TOO_MANY_INPUTS: &str = "tempname: too many input arguments";
-const ERR_FOLDER_TYPE: &str = "tempname: folder name must be a character vector or string scalar";
-const ERR_FOLDER_EMPTY: &str = "tempname: folder name must not be empty";
-const ERR_TEMP_DIR_UNAVAILABLE: &str = "tempname: unable to determine temporary directory";
-const ERR_UNABLE_TO_GENERATE: &str = "tempname: unable to generate a unique name";
 
 const MAX_ATTEMPTS: usize = 64;
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -55,10 +53,104 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "tempname";
 
-fn tempname_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const TEMPNAME_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Unique temporary file path that does not currently exist.",
+}];
+const TEMPNAME_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const TEMPNAME_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Base folder used for generated temporary file paths.",
+}];
+const TEMPNAME_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "filename = tempname()",
+        inputs: &TEMPNAME_INPUTS_NONE,
+        outputs: &TEMPNAME_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "filename = tempname(folder)",
+        inputs: &TEMPNAME_INPUTS_FOLDER,
+        outputs: &TEMPNAME_OUTPUT,
+    },
+];
+const TEMPNAME_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than one positional argument is supplied.",
+    message: "tempname: too many input arguments",
+};
+const TEMPNAME_ERROR_FOLDER_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.FOLDER_TYPE",
+    identifier: None,
+    when: "Folder argument is not a character vector, string scalar, or string-array scalar.",
+    message: "tempname: folder name must be a character vector or string scalar",
+};
+const TEMPNAME_ERROR_FOLDER_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.FOLDER_EMPTY",
+    identifier: None,
+    when: "Folder argument (or expanded folder path) is empty.",
+    message: "tempname: folder name must not be empty",
+};
+const TEMPNAME_ERROR_FOLDER_RESOLVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.FOLDER_RESOLVE",
+    identifier: None,
+    when: "Folder argument cannot be resolved during home-directory expansion.",
+    message: "tempname: unable to resolve folder path",
+};
+const TEMPNAME_ERROR_TEMP_DIR_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.TEMP_DIR_UNAVAILABLE",
+    identifier: None,
+    when: "System temporary directory cannot be determined.",
+    message: "tempname: unable to determine temporary directory",
+};
+const TEMPNAME_ERROR_UNABLE_TO_GENERATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TEMPNAME.UNABLE_TO_GENERATE",
+    identifier: None,
+    when: "Unique temp name generation exhausted available attempts.",
+    message: "tempname: unable to generate a unique name",
+};
+const TEMPNAME_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    TEMPNAME_ERROR_FOLDER_RESOLVE,
+    TEMPNAME_ERROR_TOO_MANY_INPUTS,
+    TEMPNAME_ERROR_FOLDER_TYPE,
+    TEMPNAME_ERROR_FOLDER_EMPTY,
+    TEMPNAME_ERROR_TEMP_DIR_UNAVAILABLE,
+    TEMPNAME_ERROR_UNABLE_TO_GENERATE,
+];
+pub const TEMPNAME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TEMPNAME_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TEMPNAME_ERRORS,
+};
+
+fn tempname_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    tempname_error_with_message(error.message, error)
+}
+
+fn tempname_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn tempname_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    tempname_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -79,6 +171,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "tempname,temporary file,unique name,temp directory",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tempname_type),
+    descriptor(crate::builtins::io::repl_fs::tempname::TEMPNAME_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::tempname"
 )]
 async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -92,14 +185,14 @@ async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let folder = parse_folder_argument(&gathered)?;
             Ok(path_to_value(&generate_unique_path_async(&folder).await?))
         }
-        _ => Err(tempname_error(ERR_TOO_MANY_INPUTS)),
+        _ => Err(tempname_error(&TEMPNAME_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
 fn default_temp_directory() -> BuiltinResult<PathBuf> {
     let path = runtime_env::temp_dir();
     if path.as_os_str().is_empty() {
-        Err(tempname_error(ERR_TEMP_DIR_UNAVAILABLE))
+        Err(tempname_error(&TEMPNAME_ERROR_TEMP_DIR_UNAVAILABLE))
     } else {
         Ok(path)
     }
@@ -115,36 +208,37 @@ fn parse_folder_argument(value: &Value) -> BuiltinResult<PathBuf> {
     let text = match value {
         Value::String(s) => {
             if s.is_empty() {
-                return Err(tempname_error(ERR_FOLDER_EMPTY));
+                return Err(tempname_error(&TEMPNAME_ERROR_FOLDER_EMPTY));
             }
             s.clone()
         }
         Value::CharArray(array) => {
             if array.rows != 1 {
-                return Err(tempname_error(ERR_FOLDER_TYPE));
+                return Err(tempname_error(&TEMPNAME_ERROR_FOLDER_TYPE));
             }
             let collected: String = array.data.iter().collect();
             if collected.is_empty() {
-                return Err(tempname_error(ERR_FOLDER_EMPTY));
+                return Err(tempname_error(&TEMPNAME_ERROR_FOLDER_EMPTY));
             }
             collected
         }
         Value::StringArray(array) => {
             if array.data.len() != 1 {
-                return Err(tempname_error(ERR_FOLDER_TYPE));
+                return Err(tempname_error(&TEMPNAME_ERROR_FOLDER_TYPE));
             }
             let collected = array.data[0].clone();
             if collected.is_empty() {
-                return Err(tempname_error(ERR_FOLDER_EMPTY));
+                return Err(tempname_error(&TEMPNAME_ERROR_FOLDER_EMPTY));
             }
             collected
         }
-        _ => return Err(tempname_error(ERR_FOLDER_TYPE)),
+        _ => return Err(tempname_error(&TEMPNAME_ERROR_FOLDER_TYPE)),
     };
 
-    let expanded = expand_user_path(&text, "tempname").map_err(|err| tempname_error(err))?;
+    let expanded = expand_user_path(&text, "tempname")
+        .map_err(|err| tempname_error_with_detail(&TEMPNAME_ERROR_FOLDER_RESOLVE, err))?;
     if expanded.is_empty() {
-        Err(tempname_error(ERR_FOLDER_EMPTY))
+        Err(tempname_error(&TEMPNAME_ERROR_FOLDER_EMPTY))
     } else {
         Ok(PathBuf::from(expanded))
     }
@@ -162,7 +256,7 @@ async fn generate_unique_path_async(base: &Path) -> BuiltinResult<PathBuf> {
             return Ok(candidate);
         }
     }
-    Err(tempname_error(ERR_UNABLE_TO_GENERATE))
+    Err(tempname_error(&TEMPNAME_ERROR_UNABLE_TO_GENERATE))
 }
 
 fn unique_token() -> String {
@@ -213,6 +307,18 @@ pub(crate) mod tests {
 
     fn tempname_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::tempname_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tempname_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TEMPNAME_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"filename = tempname()"));
+        assert!(labels.contains(&"filename = tempname(folder)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -352,13 +458,13 @@ pub(crate) mod tests {
     fn tempname_rejects_too_many_arguments() {
         let err =
             tempname_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).expect_err("expected error");
-        assert_eq!(err.message(), ERR_TOO_MANY_INPUTS);
+        assert_eq!(err.message(), TEMPNAME_ERROR_TOO_MANY_INPUTS.message);
 
         let err = tempname_builtin(vec![Value::Num(1.0)]).expect_err("error");
-        assert_eq!(err.message(), ERR_FOLDER_TYPE);
+        assert_eq!(err.message(), TEMPNAME_ERROR_FOLDER_TYPE.message);
 
         let empty = Value::CharArray(CharArray::new_row(""));
         let err = tempname_builtin(vec![empty]).expect_err("error");
-        assert_eq!(err.message(), ERR_FOLDER_EMPTY);
+        assert_eq!(err.message(), TEMPNAME_ERROR_FOLDER_EMPTY.message);
     }
 }

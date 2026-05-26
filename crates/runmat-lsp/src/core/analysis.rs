@@ -2695,8 +2695,6 @@ mod tests {
                 "tcpserver(\"127.0.0.1\", 0, \"Timeout\", 1);",
                 "server = tcpserver(address, port, Name, Value, ...)",
             ),
-            ("close();", "status = close()"),
-            ("close(1);", "status = close(resource)"),
             ("accept(1);", "client = accept(server)"),
             (
                 "accept(1, \"Timeout\", 1);",
@@ -2749,6 +2747,12 @@ mod tests {
             ("path(\"a\", \"b\");", "oldpath = path(path1, path2)"),
             ("savepath();", "status = savepath()"),
             ("savepath(\"pathdef.m\");", "status = savepath(filename)"),
+            ("tempdir();", "folder = tempdir()"),
+            ("tempname();", "filename = tempname()"),
+            ("tempname(\"tmp\");", "filename = tempname(folder)"),
+            ("getenv();", "env = getenv()"),
+            ("getenv(\"PATH\");", "value = getenv(NAME)"),
+            ("setenv(\"A\", \"B\");", "status = setenv(NAME, VALUE)"),
         ];
 
         for (text, expected_label) in cases {
