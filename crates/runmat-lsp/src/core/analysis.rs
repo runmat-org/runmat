@@ -2759,6 +2759,10 @@ mod tests {
             ),
             ("exist(\"sin\");", "code = exist(name)"),
             ("exist(\"sin\", \"builtin\");", "code = exist(name, type)"),
+            ("dir();", "listing = dir()"),
+            ("dir(\".\");", "listing = dir(name)"),
+            ("ls();", "listing = ls()"),
+            ("ls(\".\");", "listing = ls(name)"),
         ];
 
         for (text, expected_label) in cases {

@@ -8,7 +8,11 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use glob::glob;
-use runmat_builtins::{CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{
@@ -52,6 +56,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "ls";
 
+const LS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "listing",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Character array containing one listed entry per row.",
+}];
+const LS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const LS_INPUTS_NAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder, file path, or wildcard pattern to list.",
+}];
+const LS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "listing = ls()",
+        inputs: &LS_INPUTS_NONE,
+        outputs: &LS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "listing = ls(name)",
+        inputs: &LS_INPUTS_NAME,
+        outputs: &LS_OUTPUT,
+    },
+];
+const LS_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LS.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than one input argument is provided.",
+    message: "ls: too many input arguments",
+};
+const LS_ERROR_NAME_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LS.NAME_ARG",
+    identifier: None,
+    when: "Name argument is not a character vector or string scalar.",
+    message: "ls: name must be a character vector or string scalar",
+};
+const LS_ERRORS: [BuiltinErrorDescriptor; 2] = [LS_ERROR_TOO_MANY_INPUTS, LS_ERROR_NAME_ARG];
+pub const LS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LS_ERRORS,
+};
+
+fn ls_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn ls_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -77,12 +136,13 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::ls_type),
+    descriptor(crate::builtins::io::repl_fs::ls::LS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::ls"
 )]
 async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     if gathered.len() > 1 {
-        return Err(ls_error("ls: too many input arguments"));
+        return Err(ls_error_row(&LS_ERROR_TOO_MANY_INPUTS));
     }
 
     let entries = if let Some(value) = gathered.first() {
@@ -256,16 +316,12 @@ fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
             if data.len() == 1 {
                 Ok(vec![data[0].clone()])
             } else {
-                Err(ls_error(
-                    "ls: name must be a character vector or string scalar",
-                ))
+                Err(ls_error_row(&LS_ERROR_NAME_ARG))
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(ls_error(
-                    "ls: name must be a character vector or string scalar",
-                ));
+                return Err(ls_error_row(&LS_ERROR_NAME_ARG));
             }
             let mut row = String::with_capacity(chars.cols);
             for c in 0..chars.cols {
@@ -273,9 +329,7 @@ fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
             }
             Ok(vec![row.trim_end().to_string()])
         }
-        _ => Err(ls_error(
-            "ls: name must be a character vector or string scalar",
-        )),
+        _ => Err(ls_error_row(&LS_ERROR_NAME_ARG)),
     }
 }
 
@@ -344,6 +398,18 @@ pub(crate) mod tests {
             }
             other => panic!("expected CharArray result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn ls_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"listing = ls()"));
+        assert!(labels.contains(&"listing = ls(name)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -460,9 +526,6 @@ pub(crate) mod tests {
     #[test]
     fn ls_rejects_numeric_argument() {
         let err = ls_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(
-            err.message(),
-            "ls: name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), LS_ERROR_NAME_ARG.message);
     }
 }
