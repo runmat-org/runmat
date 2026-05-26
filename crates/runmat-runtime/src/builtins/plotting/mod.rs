@@ -40,6 +40,8 @@ pub(crate) mod close;
 pub(crate) mod cmds;
 #[path = "ops/contour.rs"]
 pub(crate) mod contour;
+#[path = "ops/contour3.rs"]
+pub(crate) mod contour3;
 #[path = "ops/contourf.rs"]
 pub(crate) mod contourf;
 #[path = "ops/drawnow.rs"]

@@ -9,6 +9,7 @@ use glam::{Vec3, Vec4};
 #[derive(Debug, Clone)]
 pub struct ContourPlot {
     pub base_z: f32,
+    pub force_3d: bool,
     pub label: Option<String>,
     pub visible: bool,
     pub line_width: f32,
@@ -23,6 +24,7 @@ impl ContourPlot {
     pub fn from_vertices(vertices: Vec<Vertex>, base_z: f32, bounds: BoundingBox) -> Self {
         Self {
             base_z,
+            force_3d: false,
             label: None,
             visible: true,
             line_width: 1.0,
@@ -42,6 +44,7 @@ impl ContourPlot {
     ) -> Self {
         Self {
             base_z,
+            force_3d: false,
             label: None,
             visible: true,
             line_width: 1.0,
@@ -55,6 +58,15 @@ impl ContourPlot {
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
         self.label = Some(label.into());
         self
+    }
+
+    pub fn with_force_3d(mut self, force_3d: bool) -> Self {
+        self.force_3d = force_3d;
+        self
+    }
+
+    pub fn is_3d(&self) -> bool {
+        self.force_3d || (self.bounds().max.z - self.bounds().min.z).abs() > f32::EPSILON
     }
 
     pub fn set_visible(&mut self, visible: bool) {
@@ -94,12 +106,21 @@ impl ContourPlot {
             let verts = self.vertices().clone();
             let mut thick = Vec::new();
             for segment in verts.chunks_exact(2) {
-                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
-                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
                 let color = Vec4::from_array(segment[0].color);
-                thick.extend(vertex_utils::create_thick_polyline(
-                    &x, &y, color, width_data,
-                ));
+                if self.is_3d() {
+                    thick.extend(create_thick_segment_3d(
+                        Vec3::from_array(segment[0].position),
+                        Vec3::from_array(segment[1].position),
+                        color,
+                        width_data,
+                    ));
+                } else {
+                    let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
+                    let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
+                    thick.extend(vertex_utils::create_thick_polyline(
+                        &x, &y, color, width_data,
+                    ));
+                }
             }
             let count = thick.len();
             (thick, count, PipelineType::Triangles)
@@ -150,15 +171,24 @@ impl ContourPlot {
             if self.line_width > 1.0 {
                 let mut thick = Vec::new();
                 for segment in verts.chunks_exact(2) {
-                    let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
-                    let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
                     let color = Vec4::from_array(segment[0].color);
-                    thick.extend(vertex_utils::create_thick_polyline(
-                        &x,
-                        &y,
-                        color,
-                        self.line_width,
-                    ));
+                    if self.is_3d() {
+                        thick.extend(create_thick_segment_3d(
+                            Vec3::from_array(segment[0].position),
+                            Vec3::from_array(segment[1].position),
+                            color,
+                            self.line_width.max(0.5) * 0.01,
+                        ));
+                    } else {
+                        let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
+                        let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
+                        thick.extend(vertex_utils::create_thick_polyline(
+                            &x,
+                            &y,
+                            color,
+                            self.line_width,
+                        ));
+                    }
                 }
                 let count = thick.len();
                 (thick, count, None, PipelineType::Triangles)
@@ -207,4 +237,39 @@ pub fn contour_bounds(x_min: f32, x_max: f32, y_min: f32, y_max: f32, base_z: f3
         Vec3::new(x_min, y_min, base_z),
         Vec3::new(x_max, y_max, base_z),
     )
+}
+
+pub fn contour_bounds_3d(
+    x_min: f32,
+    x_max: f32,
+    y_min: f32,
+    y_max: f32,
+    z_min: f32,
+    z_max: f32,
+) -> BoundingBox {
+    BoundingBox::new(
+        Vec3::new(x_min, y_min, z_min),
+        Vec3::new(x_max, y_max, z_max),
+    )
+}
+
+fn create_thick_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32) -> Vec<Vertex> {
+    let dir = (end - start).normalize_or_zero();
+    let mut normal = dir.cross(Vec3::Z);
+    if normal.length_squared() < 1e-6 {
+        normal = dir.cross(Vec3::X);
+    }
+    let normal = normal.normalize_or_zero() * half_width.max(0.0001);
+    let v0 = start + normal;
+    let v1 = end + normal;
+    let v2 = end - normal;
+    let v3 = start - normal;
+    vec![
+        Vertex::new(v0, color),
+        Vertex::new(v1, color),
+        Vertex::new(v2, color),
+        Vertex::new(v0, color),
+        Vertex::new(v2, color),
+        Vertex::new(v3, color),
+    ]
 }

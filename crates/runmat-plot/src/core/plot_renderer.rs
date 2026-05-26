@@ -289,6 +289,7 @@ impl PlotRenderer {
             }
             crate::plots::figure::PlotElement::Line3(_) => true,
             crate::plots::figure::PlotElement::Scatter3(_) => true,
+            crate::plots::figure::PlotElement::Contour(contour) => contour.is_3d(),
             _ => false,
         }
     }

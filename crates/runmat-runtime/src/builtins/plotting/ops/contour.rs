@@ -5,10 +5,10 @@ use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
-use runmat_plot::core::Vertex;
+use runmat_plot::core::{BoundingBox, Vertex};
 use runmat_plot::gpu::contour_fill;
 use runmat_plot::gpu::ScalarType;
-use runmat_plot::plots::contour::contour_bounds;
+use runmat_plot::plots::contour::{contour_bounds, contour_bounds_3d};
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, value_as_f64, SurfaceDataInput};
@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::gpu_helpers::axis_bounds;
+use super::gpu_helpers::{axis_bounds, axis_bounds_async};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
@@ -113,6 +113,12 @@ pub(crate) enum ContourLineColor {
     None,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ContourZMode {
+    Base,
+    Level,
+}
+
 #[derive(Clone)]
 pub(crate) struct ContourArgs {
     pub name: &'static str,
@@ -134,6 +140,13 @@ pub(crate) fn parse_contour_args(
     }
     if is_option_token(&rest[0]) {
         return from_implicit_args(name, first, None, &rest);
+    }
+    if rest
+        .get(1)
+        .and_then(value_as_string)
+        .is_some_and(|s| !s.trim().is_empty())
+    {
+        return from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]);
     }
     match rest.len() {
         1 => from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]),
@@ -488,6 +501,18 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
     if options.is_empty() {
         return Ok(());
     }
+    let mut option_start = 0usize;
+    if let Some(token) = options.first().and_then(value_as_string) {
+        let trimmed = token.trim();
+        if !trimmed.is_empty()
+            && !is_contour_option_name(trimmed)
+            && !super::style::looks_like_option_name(trimmed)
+        {
+            apply_contour_linespec(args, trimmed)?;
+            option_start = 1;
+        }
+    }
+    let options = &options[option_start..];
     if !options.len().is_multiple_of(2) {
         return Err(plotting_error(
             args.name,
@@ -528,6 +553,9 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
             }
             "linecolor" => {
                 args.line_color = parse_line_color_option(&opts, &pair[1])?;
+            }
+            "color" => {
+                args.line_color = ContourLineColor::Color(parse_color_value(&opts, &pair[1])?);
             }
             "linewidth" => {
                 let width = value_as_f64(&pair[1]).ok_or_else(|| {
@@ -592,6 +620,47 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
     Ok(())
 }
 
+fn apply_contour_linespec(args: &mut ContourArgs, token: &str) -> BuiltinResult<()> {
+    let mut saw_supported = false;
+    let mut chars = token.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '-' => {
+                if matches!(chars.peek(), Some('-' | '.')) {
+                    chars.next();
+                }
+                saw_supported = true;
+            }
+            ':' => {
+                saw_supported = true;
+            }
+            'o' | '+' | '*' | '.' | 'x' | '^' | 'v' | '<' | '>' | 's' | 'd' | 'p' | 'h' => {
+                saw_supported = true;
+            }
+            c if super::style::color_from_token(c).is_some() => {
+                args.line_color = ContourLineColor::Color(
+                    super::style::color_from_token(c).expect("checked color token"),
+                );
+                saw_supported = true;
+            }
+            _ => {
+                return Err(plotting_error(
+                    args.name,
+                    format!("{}: unrecognised line specification `{token}`", args.name),
+                ));
+            }
+        }
+    }
+    if saw_supported {
+        Ok(())
+    } else {
+        Err(plotting_error(
+            args.name,
+            format!("{}: unrecognised line specification `{token}`", args.name),
+        ))
+    }
+}
+
 fn parse_line_color_option(
     opts: &LineStyleParseOptions,
     value: &Value,
@@ -620,8 +689,41 @@ fn is_option_token(value: &Value) -> bool {
 fn is_contour_option_name(token: &str) -> bool {
     matches!(
         token.trim().to_ascii_lowercase().as_str(),
-        "levellist" | "levels" | "levelstep" | "linecolor" | "linewidth" | "levellistmode"
+        "levellist"
+            | "levels"
+            | "levelstep"
+            | "linecolor"
+            | "linewidth"
+            | "levellistmode"
+            | "color"
     )
+}
+
+fn host_axis_bounds(values: &[f64]) -> (f32, f32) {
+    let min = values
+        .iter()
+        .fold(f32::INFINITY, |acc, &v| acc.min(v as f32));
+    let max = values
+        .iter()
+        .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32));
+    (min, max)
+}
+
+fn axis_source_bounds(axis: &AxisSource, name: &'static str) -> BuiltinResult<(f32, f32)> {
+    match axis {
+        AxisSource::Host(values) => Ok(host_axis_bounds(values)),
+        AxisSource::Gpu(handle) => axis_bounds(handle, name),
+    }
+}
+
+async fn axis_source_bounds_async(
+    axis: &AxisSource,
+    name: &'static str,
+) -> BuiltinResult<(f32, f32)> {
+    match axis {
+        AxisSource::Host(values) => Ok(host_axis_bounds(values)),
+        AxisSource::Gpu(handle) => axis_bounds_async(handle, name).await,
+    }
 }
 
 pub(crate) fn build_contour_gpu_plot(
@@ -634,7 +736,31 @@ pub(crate) fn build_contour_gpu_plot(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
 ) -> BuiltinResult<ContourPlot> {
-    build_contour_gpu_plot_with_axes(
+    build_contour_gpu_plot_with_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        ContourZMode::Base,
+    )
+}
+
+pub(crate) fn build_contour_gpu_plot_with_z_mode(
+    name: &'static str,
+    x_axis: &[f64],
+    y_axis: &[f64],
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes_and_z_mode(
         name,
         &AxisSource::Host(x_axis.to_vec()),
         &AxisSource::Host(y_axis.to_vec()),
@@ -643,7 +769,33 @@ pub(crate) fn build_contour_gpu_plot(
         base_z,
         level_spec,
         line_color,
+        z_mode,
     )
+}
+
+pub(crate) async fn build_contour_gpu_plot_with_z_mode_async(
+    name: &'static str,
+    x_axis: &[f64],
+    y_axis: &[f64],
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes_and_z_mode_async(
+        name,
+        &AxisSource::Host(x_axis.to_vec()),
+        &AxisSource::Host(y_axis.to_vec()),
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+    )
+    .await
 }
 
 pub(crate) fn build_contour_gpu_plot_with_axes(
@@ -656,11 +808,98 @@ pub(crate) fn build_contour_gpu_plot_with_axes(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
 ) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes_and_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        ContourZMode::Base,
+    )
+}
+
+pub(crate) async fn build_contour_gpu_plot_with_axes_and_z_mode_async(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    let (min_z, max_z) = axis_bounds_async(z, name).await?;
+    let (min_x, max_x) = axis_source_bounds_async(x_axis, name).await?;
+    let (min_y, max_y) = axis_source_bounds_async(y_axis, name).await?;
+    build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+        (min_x, max_x),
+        (min_y, max_y),
+        (min_z, max_z),
+    )
+}
+
+pub(crate) fn build_contour_gpu_plot_with_axes_and_z_mode(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+) -> BuiltinResult<ContourPlot> {
+    let (min_z, max_z) = axis_bounds(z, name)?;
+    let (min_x, max_x) = axis_source_bounds(x_axis, name)?;
+    let (min_y, max_y) = axis_source_bounds(y_axis, name)?;
+    build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        z_mode,
+        (min_x, max_x),
+        (min_y, max_y),
+        (min_z, max_z),
+    )
+}
+
+fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
+    x_bounds: (f32, f32),
+    y_bounds: (f32, f32),
+    z_bounds: (f32, f32),
+) -> BuiltinResult<ContourPlot> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
     let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
 
-    let (min_z, max_z) = axis_bounds(z, name)?;
+    let (min_z, max_z) = z_bounds;
     let levels = level_spec.resolve(name, min_z, max_z)?;
     if levels.is_empty() {
         return Err(plotting_error(
@@ -675,23 +914,9 @@ pub(crate) fn build_contour_gpu_plot_with_axes(
         ContourLineColor::Color(color) => vec![color.to_array()],
         ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
     };
-    let (min_x, max_x) = match x_axis {
-        AxisSource::Host(v) => (
-            v.iter().fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-            v.iter()
-                .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-        ),
-        AxisSource::Gpu(h) => axis_bounds(h, name)?,
-    };
-    let (min_y, max_y) = match y_axis {
-        AxisSource::Host(v) => (
-            v.iter().fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-            v.iter()
-                .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-        ),
-        AxisSource::Gpu(h) => axis_bounds(h, name)?,
-    };
-    let bounds = contour_bounds(min_x, max_x, min_y, max_y, base_z);
+    let (min_x, max_x) = x_bounds;
+    let (min_y, max_y) = y_bounds;
+    let bounds = contour_plot_bounds(min_x, max_x, min_y, max_y, base_z, min_z, max_z, z_mode);
 
     let mut x_f32_storage: Vec<f32> = Vec::new();
     let x_axis_data = match x_axis {
@@ -768,6 +993,7 @@ pub(crate) fn build_contour_gpu_plot_with_axes(
         min_z,
         max_z,
         base_z,
+        level_z: z_mode == ContourZMode::Level,
         level_count: levels.len() as u32,
     };
 
@@ -782,6 +1008,7 @@ pub(crate) fn build_contour_gpu_plot_with_axes(
     let vertex_count = gpu_vertices.vertex_count;
     Ok(
         ContourPlot::from_gpu_buffer(gpu_vertices, vertex_count, base_z, bounds)
+            .with_force_3d(z_mode == ContourZMode::Level)
             .with_label("Contours"),
     )
 }
@@ -795,6 +1022,30 @@ pub(crate) fn build_contour_plot(
     base_z: f32,
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
+) -> BuiltinResult<ContourPlot> {
+    build_contour_plot_with_z_mode(
+        name,
+        x_axis,
+        y_axis,
+        grid,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+        ContourZMode::Base,
+    )
+}
+
+pub(crate) fn build_contour_plot_with_z_mode(
+    name: &'static str,
+    x_axis: &[f64],
+    y_axis: &[f64],
+    grid: &[Vec<f64>],
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+    z_mode: ContourZMode,
 ) -> BuiltinResult<ContourPlot> {
     let (min_z, max_z) = grid_extents(name, grid)?;
     let levels = level_spec.resolve(name, min_z, max_z)?;
@@ -811,10 +1062,19 @@ pub(crate) fn build_contour_plot(
             ContourLineColor::Color(color) => *color,
             ContourLineColor::None => Vec4::new(0.0, 0.0, 0.0, 0.0),
         };
-        march_cells(x_axis, y_axis, grid, *level, color, base_z, &mut vertices);
+        march_cells(
+            x_axis,
+            y_axis,
+            grid,
+            *level,
+            color,
+            base_z,
+            z_mode,
+            &mut vertices,
+        );
     }
 
-    let bounds = contour_bounds(
+    let bounds = contour_plot_bounds(
         x_axis
             .iter()
             .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
@@ -828,9 +1088,14 @@ pub(crate) fn build_contour_plot(
             .iter()
             .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
         base_z,
+        min_z,
+        max_z,
+        z_mode,
     );
 
-    Ok(ContourPlot::from_vertices(vertices, base_z, bounds).with_label("Contours"))
+    Ok(ContourPlot::from_vertices(vertices, base_z, bounds)
+        .with_force_3d(z_mode == ContourZMode::Level)
+        .with_label("Contours"))
 }
 
 pub(crate) fn build_contour_fill_gpu_plot(
@@ -1060,6 +1325,7 @@ fn march_cells(
     level: f32,
     color: Vec4,
     base_z: f32,
+    z_mode: ContourZMode,
     out: &mut Vec<Vertex>,
 ) {
     let nx = x_axis.len();
@@ -1157,7 +1423,7 @@ fn march_cells(
             for idx in 0..segment_count {
                 let start = segments[(idx * 2) as usize];
                 let end = segments[(idx * 2 + 1) as usize];
-                push_segment(start, end, color, base_z, out);
+                push_segment(start, end, color, base_z, level, z_mode, out);
             }
         }
     }
@@ -1229,20 +1495,48 @@ fn interpolate_edge(edge: u32, corners: &[Vec2; 4], values: &[f32; 4], level: f3
     a + (b - a) * t
 }
 
-fn push_segment(start: Vec2, end: Vec2, color: Vec4, base_z: f32, out: &mut Vec<Vertex>) {
+fn push_segment(
+    start: Vec2,
+    end: Vec2,
+    color: Vec4,
+    base_z: f32,
+    level: f32,
+    z_mode: ContourZMode,
+    out: &mut Vec<Vertex>,
+) {
     let z = Vec3::new(0.0, 0.0, 1.0);
+    let z_value = match z_mode {
+        ContourZMode::Base => base_z,
+        ContourZMode::Level => level,
+    };
     out.push(Vertex {
-        position: Vec3::new(start.x, start.y, base_z).to_array(),
+        position: Vec3::new(start.x, start.y, z_value).to_array(),
         color: color.to_array(),
         normal: z.to_array(),
         tex_coords: [0.0, 0.0],
     });
     out.push(Vertex {
-        position: Vec3::new(end.x, end.y, base_z).to_array(),
+        position: Vec3::new(end.x, end.y, z_value).to_array(),
         color: color.to_array(),
         normal: z.to_array(),
         tex_coords: [0.0, 0.0],
     });
+}
+
+fn contour_plot_bounds(
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+    base_z: f32,
+    min_z: f32,
+    max_z: f32,
+    z_mode: ContourZMode,
+) -> BoundingBox {
+    match z_mode {
+        ContourZMode::Base => contour_bounds(min_x, max_x, min_y, max_y, base_z),
+        ContourZMode::Level => contour_bounds_3d(min_x, max_x, min_y, max_y, min_z, max_z),
+    }
 }
 
 fn implicit_axis(len: usize) -> Vec<f64> {

@@ -36,7 +36,7 @@ RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D c
 
 **2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`, `heatmap`
 
-**3D chart types:** `plot3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3`
+**3D chart types:** `plot3`, `contour3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3`
 
 **Log-scale:** `semilogx`, `semilogy`, `loglog`
 

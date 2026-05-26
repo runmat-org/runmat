@@ -23,6 +23,7 @@ pub struct ContourGpuParams {
     pub min_z: f32,
     pub max_z: f32,
     pub base_z: f32,
+    pub level_z: bool,
     pub level_count: u32,
 }
 
@@ -37,6 +38,7 @@ struct ContourUniforms {
     y_len: u32,
     color_table_len: u32,
     cell_count: u32,
+    level_z: u32,
 }
 
 const VERTICES_PER_INVOCATION: u64 = 4;
@@ -120,6 +122,7 @@ pub fn pack_contour_vertices(
         y_len: inputs.y_len,
         color_table_len: inputs.color_table.len() as u32,
         cell_count,
+        level_z: u32::from(params.level_z),
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("contour-pack-uniforms"),
