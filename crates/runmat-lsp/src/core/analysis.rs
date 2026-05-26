@@ -2243,6 +2243,7 @@ mod tests {
             ),
             ("strcat(\"run\", \"mat\");", "out = strcat(str1, str2, ...)"),
             ("join(\"runmat\");", "out = join(str)"),
+            ("pad(\"runmat\");", "out = pad(str)"),
         ];
 
         for (text, expected_label) in cases {

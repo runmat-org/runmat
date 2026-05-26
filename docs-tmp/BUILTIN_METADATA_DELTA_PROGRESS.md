@@ -30,9 +30,10 @@
 | Wave 25 (Strings Transform Replace) | `strrep`, `replace` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::strrep::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::replace::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::lower::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::upper::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::strtrim::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::strip::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for replacement transforms + descriptor-backed stable error maps; normalized migrated string-transform builtins so descriptor rows are canonical error identifier/message source (no duplicated `IDENT_*`/`*_ERROR` constants) + LSP signature-help coverage |
 | Wave 26 (Strings Transform Erase/Concat) | `erase`, `strcat` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::erase::tests::`; `cargo test -p runmat-runtime builtins::strings::transform::strcat::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for erase/concat transforms + descriptor-backed invalid-input/cell-element/size/internal error maps + LSP signature-help coverage |
 | Wave 27 (Strings Transform Join) | `join` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::join::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for join argument permutations (`join(str)`, `join(str, delimiter)`, `join(str, dim)`, `join(str, delimiter, dim)`, `join(str, dim, delimiter)`) + descriptor-backed input/delimiter/dimension/size/internal error maps + LSP signature-help coverage |
+| Wave 28 (Strings Transform Pad) | `pad` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::transform::pad::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for pad argument matrix (`pad(str)`, length/direction/padCharacter permutations) + descriptor-backed length/direction/pad-char/cell-element/arg-config/internal errors + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `101`
-- Remaining: `467`
+- Migrated with attached descriptor: `102`
+- Remaining: `466`
