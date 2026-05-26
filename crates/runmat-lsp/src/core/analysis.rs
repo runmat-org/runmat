@@ -2074,6 +2074,15 @@ mod tests {
             ("subplot(1, 2, 1);", "ax = subplot(rows, cols, position)"),
             ("view(45, 30);", "angles = view(az, el)"),
             ("legend('off');", "h = legend(mode)"),
+            ("grid('on');", "enabled = grid(mode)"),
+            (
+                "axis([0 1 0 1]);",
+                "ok = axis([xmin xmax ymin ymax | ... zmin zmax])",
+            ),
+            ("cla();", "ok = cla()"),
+            ("colormap('parula');", "ok = colormap(name)"),
+            ("shading('flat');", "ok = shading(mode)"),
+            ("colorbar('off');", "enabled = colorbar(mode)"),
         ];
 
         for (text, expected_label) in cases {

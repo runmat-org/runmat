@@ -61,9 +61,10 @@
 | Wave 56 (Plotting Control) | `close`, `clf`, `drawnow`, `hold` | Done | `d0a86c9f` | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::close::tests::`; `cargo test -p runmat-runtime builtins::plotting::clf::tests::`; `cargo test -p runmat-runtime builtins::plotting::drawnow::tests::`; `cargo test -p runmat-runtime builtins::plotting::hold::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for plotting lifecycle controls, added stable descriptor error rows for argument-validating control builtins, runtime descriptor signature tests, and LSP signature-help coverage for descriptor-exposed control calls (`drawnow`, `hold`) |
 | Wave 57 (Plotting View/Layout A) | `subplot`, `view` | Done | `7e19c3ec` | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::subplot::tests::`; `cargo test -p runmat-runtime builtins::plotting::view::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for subplot selection and 3-D view query/set forms (including axes-target variants), added stable descriptor error rows, runtime descriptor signature tests, and LSP signature-help coverage for plotting view/layout builtins |
 | Wave 58 (Plotting Legend) | `legend` | Done | `b515e531` | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::legend::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for legend query/mode/labels/style forms (with optional axes target), added stable descriptor error rows, runtime descriptor signature tests, and LSP signature-help coverage for legend |
+| Wave 59 (Plotting Command Verbs) | `grid`, `box`, `axis`, `cla`, `colormap`, `shading`, `colorbar` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::plotting::cmds::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for plotting command-style verbs with exhaustive core signatures, stable descriptor error rows, runtime descriptor signature tests, and descriptor-driven LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `178`
-- Remaining: `390`
+- Migrated with attached descriptor: `185`
+- Remaining: `383`
