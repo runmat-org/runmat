@@ -2144,6 +2144,7 @@ mod tests {
                 "endsWith(\"runmat\", \"mat\", \"IgnoreCase\", true);",
                 "tf = endsWith(str, pat, \"IgnoreCase\", value)",
             ),
+            ("strfind(\"runmat\", \"mat\");", "idx = strfind(str, pat)"),
         ];
 
         for (text, expected_label) in cases {

@@ -24,9 +24,10 @@
 | Wave 19 (Strings Core Basics) | `strings`, `string.empty`, `strlength`, `str2double` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::strings::tests::`; `cargo test -p runmat-runtime builtins::strings::core::string_empty::tests::`; `cargo test -p runmat-runtime builtins::strings::core::strlength::tests::`; `cargo test -p runmat-runtime builtins::strings::core::str2double::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core string array creation and scalar/array text numeric metadata conversions + descriptor-row stable errors + LSP signature-help coverage |
 | Wave 20 (Strings Core Formatting A) | `char`, `num2str`, `sprintf`, `compose` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::core::char::tests::`; `cargo test -p runmat-runtime builtins::strings::core::num2str::tests::`; `cargo test -p runmat-runtime builtins::strings::core::sprintf::tests::`; `cargo test -p runmat-runtime builtins::strings::core::compose::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for numeric/text formatting conversion surface + stable descriptor error rows + LSP signature-help coverage |
 | Wave 21 (Strings Search Basics) | `contains`, `startsWith`, `endsWith` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::search::contains::tests::`; `cargo test -p runmat-runtime builtins::strings::search::startswith::tests::`; `cargo test -p runmat-runtime builtins::strings::search::endswith::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for string-search surface + descriptor-backed option/input/shape/internal error maps + LSP signature-help coverage |
+| Wave 22 (Strings Search Indices) | `strfind` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::strings::search::strfind::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for index-returning string search + descriptor-backed option/input/shape/internal error maps + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `91`
-- Remaining: `477`
+- Migrated with attached descriptor: `92`
+- Remaining: `476`
