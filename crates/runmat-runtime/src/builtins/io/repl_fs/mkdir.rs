@@ -2,7 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 
@@ -12,15 +16,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const MESSAGE_ID_OS_ERROR: &str = "RunMat:mkdir:OSError";
-const MESSAGE_ID_DIRECTORY_EXISTS: &str = "RunMat:mkdir:DirectoryExists";
-const MESSAGE_ID_INVALID_PARENT: &str = "RunMat:mkdir:ParentDirectoryDoesNotExist";
-const MESSAGE_ID_NOT_A_DIRECTORY: &str = "RunMat:mkdir:ParentIsNotDirectory";
-const MESSAGE_ID_EMPTY_NAME: &str = "RunMat:mkdir:InvalidFolderName";
-
-const ERR_FOLDER_ARG: &str = "mkdir: folder name must be a character vector or string scalar";
-const ERR_PARENT_ARG: &str = "mkdir: parent folder must be a character vector or string scalar";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::mkdir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -52,6 +47,161 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "mkdir";
 
+const MKDIR_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "1 on success, 0 when creation fails.",
+}];
+const MKDIR_OUTPUT_STATUS_MSG_MSGID: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "1 on success, 0 when creation fails.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagnostic message for failures.",
+    },
+    BuiltinParamDescriptor {
+        name: "msgID",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stable diagnostic identifier string.",
+    },
+];
+const MKDIR_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folderName",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder path to create.",
+}];
+const MKDIR_INPUTS_PARENT_CHILD: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "parentFolder",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Parent folder path.",
+    },
+    BuiltinParamDescriptor {
+        name: "folderName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Child folder path under parentFolder.",
+    },
+];
+const MKDIR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "status = mkdir(folderName)",
+        inputs: &MKDIR_INPUTS_FOLDER,
+        outputs: &MKDIR_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = mkdir(parentFolder, folderName)",
+        inputs: &MKDIR_INPUTS_PARENT_CHILD,
+        outputs: &MKDIR_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = mkdir(folderName)",
+        inputs: &MKDIR_INPUTS_FOLDER,
+        outputs: &MKDIR_OUTPUT_STATUS_MSG_MSGID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = mkdir(parentFolder, folderName)",
+        inputs: &MKDIR_INPUTS_PARENT_CHILD,
+        outputs: &MKDIR_OUTPUT_STATUS_MSG_MSGID,
+    },
+];
+const MKDIR_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:mkdir:NotEnoughInputs"),
+    when: "No input arguments are provided.",
+    message: "mkdir: not enough input arguments",
+};
+const MKDIR_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:mkdir:TooManyInputs"),
+    when: "More than two input arguments are provided.",
+    message: "mkdir: too many input arguments",
+};
+const MKDIR_ERROR_FOLDER_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.FOLDER_ARG",
+    identifier: Some("RunMat:mkdir:FolderArgType"),
+    when: "Folder argument is not a character vector or string scalar.",
+    message: "mkdir: folder name must be a character vector or string scalar",
+};
+const MKDIR_ERROR_PARENT_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.PARENT_ARG",
+    identifier: Some("RunMat:mkdir:ParentArgType"),
+    when: "Parent argument is not a character vector or string scalar.",
+    message: "mkdir: parent folder must be a character vector or string scalar",
+};
+const MKDIR_RESULT_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.OS_ERROR",
+    identifier: Some("RunMat:mkdir:OSError"),
+    when: "Directory creation fails due to filesystem error.",
+    message: "mkdir: unable to create folder",
+};
+const MKDIR_RESULT_DIRECTORY_EXISTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.DIRECTORY_EXISTS",
+    identifier: Some("RunMat:mkdir:DirectoryExists"),
+    when: "Target directory already exists.",
+    message: "Directory already exists.",
+};
+const MKDIR_RESULT_INVALID_PARENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.INVALID_PARENT",
+    identifier: Some("RunMat:mkdir:ParentDirectoryDoesNotExist"),
+    when: "Parent folder does not exist.",
+    message: "mkdir: parent folder does not exist",
+};
+const MKDIR_RESULT_NOT_A_DIRECTORY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.NOT_A_DIRECTORY",
+    identifier: Some("RunMat:mkdir:ParentIsNotDirectory"),
+    when: "Parent or target path exists as a non-directory entry.",
+    message: "mkdir: target path is not a directory",
+};
+const MKDIR_RESULT_EMPTY_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MKDIR.EMPTY_NAME",
+    identifier: Some("RunMat:mkdir:InvalidFolderName"),
+    when: "Folder name is empty.",
+    message: "Folder name must not be empty.",
+};
+const MKDIR_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    MKDIR_ERROR_NOT_ENOUGH_INPUTS,
+    MKDIR_ERROR_TOO_MANY_INPUTS,
+    MKDIR_ERROR_FOLDER_ARG,
+    MKDIR_ERROR_PARENT_ARG,
+    MKDIR_RESULT_OS_ERROR,
+    MKDIR_RESULT_DIRECTORY_EXISTS,
+    MKDIR_RESULT_INVALID_PARENT,
+    MKDIR_RESULT_NOT_A_DIRECTORY,
+    MKDIR_RESULT_EMPTY_NAME,
+];
+pub const MKDIR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MKDIR_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MKDIR_ERRORS,
+};
+
+fn mkdir_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn mkdir_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -77,6 +227,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::mkdir_type),
+    descriptor(crate::builtins::io::repl_fs::mkdir::MKDIR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::mkdir"
 )]
 async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -97,10 +248,10 @@ async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 => Err(mkdir_error("mkdir: not enough input arguments")),
+        0 => Err(mkdir_error_row(&MKDIR_ERROR_NOT_ENOUGH_INPUTS)),
         1 => create_from_single(&gathered[0]).await,
         2 => create_from_parent_child(&gathered[0], &gathered[1]).await,
-        _ => Err(mkdir_error("mkdir: too many input arguments")),
+        _ => Err(mkdir_error_row(&MKDIR_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -124,15 +275,15 @@ impl MkdirResult {
         Self {
             status: 1.0,
             message: "Directory already exists.".to_string(),
-            message_id: MESSAGE_ID_DIRECTORY_EXISTS.to_string(),
+            message_id: message_identifier(&MKDIR_RESULT_DIRECTORY_EXISTS).to_string(),
         }
     }
 
-    fn failure(message: String, message_id: &str) -> Self {
+    fn failure(message: String, error: &'static BuiltinErrorDescriptor) -> Self {
         Self {
             status: 0.0,
             message,
-            message_id: message_id.to_string(),
+            message_id: message_identifier(error).to_string(),
         }
     }
 
@@ -165,11 +316,11 @@ impl MkdirResult {
 }
 
 async fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
-    let raw = extract_folder_name(value, ERR_FOLDER_ARG)?;
+    let raw = extract_folder_name(value, &MKDIR_ERROR_FOLDER_ARG)?;
     if raw.is_empty() {
         return Ok(MkdirResult::failure(
             "Folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_NAME,
+            &MKDIR_RESULT_EMPTY_NAME,
         ));
     }
     let expanded = expand_user_path(&raw, "mkdir").map_err(mkdir_error)?;
@@ -178,13 +329,13 @@ async fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
 }
 
 async fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResult<MkdirResult> {
-    let parent_raw = extract_folder_name(parent, ERR_PARENT_ARG)?;
-    let child_raw = extract_folder_name(child, ERR_FOLDER_ARG)?;
+    let parent_raw = extract_folder_name(parent, &MKDIR_ERROR_PARENT_ARG)?;
+    let child_raw = extract_folder_name(child, &MKDIR_ERROR_FOLDER_ARG)?;
 
     if child_raw.is_empty() {
         return Ok(MkdirResult::failure(
             "Folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_NAME,
+            &MKDIR_RESULT_EMPTY_NAME,
         ));
     }
 
@@ -204,11 +355,11 @@ async fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResul
         let parent_path = PathBuf::from(&parent_text);
         if !path_exists_async(&parent_path).await {
             let message = format!("Parent folder \"{}\" does not exist.", parent_text);
-            return Ok(MkdirResult::failure(message, MESSAGE_ID_INVALID_PARENT));
+            return Ok(MkdirResult::failure(message, &MKDIR_RESULT_INVALID_PARENT));
         }
         if !path_is_existing_directory_async(&parent_path).await {
             let message = format!("Parent folder \"{}\" is not a directory.", parent_text);
-            return Ok(MkdirResult::failure(message, MESSAGE_ID_NOT_A_DIRECTORY));
+            return Ok(MkdirResult::failure(message, &MKDIR_RESULT_NOT_A_DIRECTORY));
         }
         let target = parent_path.join(&child_expanded);
         return Ok(create_directory(&target).await);
@@ -228,7 +379,7 @@ async fn create_directory(path: &Path) -> MkdirResult {
                 "Cannot create folder \"{}\". A file or non-directory item with the same name already exists.",
                 display
             ),
-            MESSAGE_ID_NOT_A_DIRECTORY,
+            &MKDIR_RESULT_NOT_A_DIRECTORY,
         );
     }
 
@@ -236,7 +387,7 @@ async fn create_directory(path: &Path) -> MkdirResult {
         Ok(_) => MkdirResult::success(),
         Err(err) => MkdirResult::failure(
             format!("Unable to create folder \"{}\": {}", display, err),
-            MESSAGE_ID_OS_ERROR,
+            &MKDIR_RESULT_OS_ERROR,
         ),
     }
 }
@@ -262,25 +413,32 @@ fn path_exists(path: &Path) -> bool {
     futures::executor::block_on(path_exists_async(path))
 }
 
-fn extract_folder_name(value: &Value, error_message: &str) -> BuiltinResult<String> {
+fn extract_folder_name(
+    value: &Value,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(mkdir_error(error_message))
+                Err(mkdir_error_row(error))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(mkdir_error(error_message))
+                Err(mkdir_error_row(error))
             }
         }
-        _ => Err(mkdir_error(error_message)),
+        _ => Err(mkdir_error_row(error)),
     }
+}
+
+fn message_identifier(error: &'static BuiltinErrorDescriptor) -> &'static str {
+    error.identifier.unwrap_or("")
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -319,6 +477,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn mkdir_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MKDIR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = mkdir(folderName)"));
+        assert!(labels.contains(&"status = mkdir(parentFolder, folderName)"));
+        assert!(labels.contains(&"[status, msg, msgID] = mkdir(folderName)"));
+        assert!(labels.contains(&"[status, msg, msgID] = mkdir(parentFolder, folderName)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn mkdir_creates_directory_with_single_argument() {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
@@ -346,7 +518,10 @@ pub(crate) mod tests {
         let eval = evaluate(&[Value::from(target.to_string_lossy().to_string())]).unwrap();
         assert_eq!(eval.status(), 1.0);
         assert_eq!(eval.message(), "Directory already exists.");
-        assert_eq!(eval.message_id(), MESSAGE_ID_DIRECTORY_EXISTS);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MKDIR_RESULT_DIRECTORY_EXISTS)
+        );
         assert!(path_is_existing_directory(&target));
     }
 
@@ -380,10 +555,10 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let err = mkdir_builtin(vec![Value::Num(42.0)]).expect_err("expected error");
-        assert_eq!(err.message(), ERR_FOLDER_ARG);
+        assert_eq!(err.message(), MKDIR_ERROR_FOLDER_ARG.message);
 
         let err = evaluate(&[Value::from("parent"), Value::Num(7.0)]).expect_err("error");
-        assert_eq!(err.message(), ERR_FOLDER_ARG);
+        assert_eq!(err.message(), MKDIR_ERROR_FOLDER_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -402,7 +577,10 @@ pub(crate) mod tests {
         ])
         .expect("mkdir evaluates");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_INVALID_PARENT);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MKDIR_RESULT_INVALID_PARENT)
+        );
         assert!(eval.message().contains("does not exist"));
         assert!(!path_exists(&expected_target));
     }
@@ -424,7 +602,10 @@ pub(crate) mod tests {
         ])
         .expect("evaluate");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_NOT_A_DIRECTORY);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MKDIR_RESULT_NOT_A_DIRECTORY)
+        );
         assert!(eval.message().contains("not a directory"));
         let child = parent_file.with_file_name("child");
         assert!(!path_exists(&child));
@@ -444,7 +625,10 @@ pub(crate) mod tests {
         let eval =
             evaluate(&[Value::from(file_path.to_string_lossy().to_string())]).expect("evaluate");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_NOT_A_DIRECTORY);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&MKDIR_RESULT_NOT_A_DIRECTORY)
+        );
         assert!(eval.message().contains("non-directory"));
     }
 
@@ -457,13 +641,19 @@ pub(crate) mod tests {
 
         let single = evaluate(&[Value::from(String::new())]).expect("evaluate");
         assert_eq!(single.status(), 0.0);
-        assert_eq!(single.message_id(), MESSAGE_ID_EMPTY_NAME);
+        assert_eq!(
+            single.message_id(),
+            message_identifier(&MKDIR_RESULT_EMPTY_NAME)
+        );
         assert!(single.message().contains("must not be empty"));
 
         let paired =
             evaluate(&[Value::from("parent"), Value::from(String::new())]).expect("evaluate");
         assert_eq!(paired.status(), 0.0);
-        assert_eq!(paired.message_id(), MESSAGE_ID_EMPTY_NAME);
+        assert_eq!(
+            paired.message_id(),
+            message_identifier(&MKDIR_RESULT_EMPTY_NAME)
+        );
         assert!(paired.message().contains("must not be empty"));
     }
 

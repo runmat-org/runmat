@@ -2763,6 +2763,13 @@ mod tests {
             ("dir(\".\");", "listing = dir(name)"),
             ("ls();", "listing = ls()"),
             ("ls(\".\");", "listing = ls(name)"),
+            ("mkdir(\"tmp\");", "status = mkdir(folderName)"),
+            (
+                "mkdir(\"parent\", \"child\");",
+                "status = mkdir(parentFolder, folderName)",
+            ),
+            ("rmdir(\"tmp\");", "status = rmdir(folderName)"),
+            ("rmdir(\"tmp\", \"s\");", "status = rmdir(folderName, flag)"),
         ];
 
         for (text, expected_label) in cases {

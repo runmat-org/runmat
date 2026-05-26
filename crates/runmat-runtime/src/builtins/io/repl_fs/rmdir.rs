@@ -4,7 +4,11 @@ use runmat_filesystem as vfs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::expand_user_path;
@@ -13,16 +17,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const MESSAGE_ID_OS_ERROR: &str = "RunMat:rmdir:OSError";
-const MESSAGE_ID_DIRECTORY_NOT_FOUND: &str = "RunMat:rmdir:DirectoryNotFound";
-const MESSAGE_ID_NOT_A_DIRECTORY: &str = "RunMat:rmdir:NotADirectory";
-const MESSAGE_ID_DIRECTORY_NOT_EMPTY: &str = "RunMat:rmdir:DirectoryNotEmpty";
-const MESSAGE_ID_EMPTY_NAME: &str = "RunMat:rmdir:InvalidFolderName";
-
-const ERR_FOLDER_ARG: &str = "rmdir: folder name must be a character vector or string scalar";
-const ERR_FLAG_ARG: &str =
-    "rmdir: flag must be the character 's' supplied as a char vector or string scalar";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::rmdir")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,6 +48,161 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "rmdir";
 
+const RMDIR_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "1 on success, 0 when removal fails.",
+}];
+const RMDIR_OUTPUT_STATUS_MSG_MSGID: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "1 on success, 0 when removal fails.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagnostic message for failures.",
+    },
+    BuiltinParamDescriptor {
+        name: "msgID",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stable diagnostic identifier string.",
+    },
+];
+const RMDIR_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folderName",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder path to remove.",
+}];
+const RMDIR_INPUTS_FOLDER_FLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "folderName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Folder path to remove.",
+    },
+    BuiltinParamDescriptor {
+        name: "flag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"s\""),
+        description: "Recursive flag; only \"s\" is accepted.",
+    },
+];
+const RMDIR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "status = rmdir(folderName)",
+        inputs: &RMDIR_INPUTS_FOLDER,
+        outputs: &RMDIR_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = rmdir(folderName, flag)",
+        inputs: &RMDIR_INPUTS_FOLDER_FLAG,
+        outputs: &RMDIR_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = rmdir(folderName)",
+        inputs: &RMDIR_INPUTS_FOLDER,
+        outputs: &RMDIR_OUTPUT_STATUS_MSG_MSGID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg, msgID] = rmdir(folderName, flag)",
+        inputs: &RMDIR_INPUTS_FOLDER_FLAG,
+        outputs: &RMDIR_OUTPUT_STATUS_MSG_MSGID,
+    },
+];
+const RMDIR_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:rmdir:NotEnoughInputs"),
+    when: "No input arguments are provided.",
+    message: "rmdir: not enough input arguments",
+};
+const RMDIR_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:rmdir:TooManyInputs"),
+    when: "More than two input arguments are provided.",
+    message: "rmdir: too many input arguments",
+};
+const RMDIR_ERROR_FOLDER_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.FOLDER_ARG",
+    identifier: Some("RunMat:rmdir:FolderArgType"),
+    when: "Folder argument is not a character vector or string scalar.",
+    message: "rmdir: folder name must be a character vector or string scalar",
+};
+const RMDIR_ERROR_FLAG_ARG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.FLAG_ARG",
+    identifier: Some("RunMat:rmdir:FlagArgType"),
+    when: "Flag argument is not the scalar character 's'.",
+    message: "rmdir: flag must be the character 's' supplied as a char vector or string scalar",
+};
+const RMDIR_RESULT_OS_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.OS_ERROR",
+    identifier: Some("RunMat:rmdir:OSError"),
+    when: "Folder removal fails due to filesystem error.",
+    message: "rmdir: unable to remove folder",
+};
+const RMDIR_RESULT_DIRECTORY_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.DIRECTORY_NOT_FOUND",
+    identifier: Some("RunMat:rmdir:DirectoryNotFound"),
+    when: "Target folder does not exist.",
+    message: "rmdir: directory not found",
+};
+const RMDIR_RESULT_NOT_A_DIRECTORY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.NOT_A_DIRECTORY",
+    identifier: Some("RunMat:rmdir:NotADirectory"),
+    when: "Target path exists but is not a directory.",
+    message: "rmdir: target is not a directory",
+};
+const RMDIR_RESULT_DIRECTORY_NOT_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.DIRECTORY_NOT_EMPTY",
+    identifier: Some("RunMat:rmdir:DirectoryNotEmpty"),
+    when: "Non-recursive removal is requested on a non-empty directory.",
+    message: "rmdir: directory is not empty",
+};
+const RMDIR_RESULT_EMPTY_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMDIR.EMPTY_NAME",
+    identifier: Some("RunMat:rmdir:InvalidFolderName"),
+    when: "Folder name is empty.",
+    message: "Folder name must not be empty.",
+};
+const RMDIR_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    RMDIR_ERROR_NOT_ENOUGH_INPUTS,
+    RMDIR_ERROR_TOO_MANY_INPUTS,
+    RMDIR_ERROR_FOLDER_ARG,
+    RMDIR_ERROR_FLAG_ARG,
+    RMDIR_RESULT_OS_ERROR,
+    RMDIR_RESULT_DIRECTORY_NOT_FOUND,
+    RMDIR_RESULT_NOT_A_DIRECTORY,
+    RMDIR_RESULT_DIRECTORY_NOT_EMPTY,
+    RMDIR_RESULT_EMPTY_NAME,
+];
+pub const RMDIR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RMDIR_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RMDIR_ERRORS,
+};
+
+fn rmdir_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn rmdir_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -79,6 +228,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::rmdir_type),
+    descriptor(crate::builtins::io::repl_fs::rmdir::RMDIR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::rmdir"
 )]
 async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -99,13 +249,13 @@ async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 => Err(rmdir_error("rmdir: not enough input arguments")),
+        0 => Err(rmdir_error_row(&RMDIR_ERROR_NOT_ENOUGH_INPUTS)),
         1 => remove_folder(&gathered[0], RemoveMode::NonRecursive).await,
         2 => {
             let mode = parse_remove_mode(&gathered[1])?;
             remove_folder(&gathered[0], mode).await
         }
-        _ => Err(rmdir_error("rmdir: too many input arguments")),
+        _ => Err(rmdir_error_row(&RMDIR_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -131,25 +281,25 @@ impl RmdirResult {
         }
     }
 
-    fn failure(message: String, message_id: &str) -> Self {
+    fn failure(message: String, error: &'static BuiltinErrorDescriptor) -> Self {
         Self {
             status: 0.0,
             message,
-            message_id: message_id.to_string(),
+            message_id: message_identifier(error).to_string(),
         }
     }
 
     fn not_found(display: &str) -> Self {
         Self::failure(
             format!("Folder \"{}\" does not exist.", display),
-            MESSAGE_ID_DIRECTORY_NOT_FOUND,
+            &RMDIR_RESULT_DIRECTORY_NOT_FOUND,
         )
     }
 
     fn not_directory(display: &str) -> Self {
         Self::failure(
             format!("Cannot remove \"{}\": target is not a directory.", display),
-            MESSAGE_ID_NOT_A_DIRECTORY,
+            &RMDIR_RESULT_NOT_A_DIRECTORY,
         )
     }
 
@@ -159,21 +309,21 @@ impl RmdirResult {
                 "Cannot remove folder \"{}\": directory is not empty.",
                 display
             ),
-            MESSAGE_ID_DIRECTORY_NOT_EMPTY,
+            &RMDIR_RESULT_DIRECTORY_NOT_EMPTY,
         )
     }
 
     fn os_error(display: &str, err: &io::Error) -> Self {
         Self::failure(
             format!("Unable to remove folder \"{}\": {}", display, err),
-            MESSAGE_ID_OS_ERROR,
+            &RMDIR_RESULT_OS_ERROR,
         )
     }
 
     fn empty_name() -> Self {
         Self::failure(
             "Folder name must not be empty.".to_string(),
-            MESSAGE_ID_EMPTY_NAME,
+            &RMDIR_RESULT_EMPTY_NAME,
         )
     }
 
@@ -266,23 +416,23 @@ fn parse_remove_mode(value: &Value) -> BuiltinResult<RemoveMode> {
             if array.rows == 1 {
                 array.data.iter().collect()
             } else {
-                return Err(rmdir_error(ERR_FLAG_ARG));
+                return Err(rmdir_error_row(&RMDIR_ERROR_FLAG_ARG));
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 array.data[0].clone()
             } else {
-                return Err(rmdir_error(ERR_FLAG_ARG));
+                return Err(rmdir_error_row(&RMDIR_ERROR_FLAG_ARG));
             }
         }
-        _ => return Err(rmdir_error(ERR_FLAG_ARG)),
+        _ => return Err(rmdir_error_row(&RMDIR_ERROR_FLAG_ARG)),
     };
 
     if text.trim().eq_ignore_ascii_case("s") {
         Ok(RemoveMode::Recursive)
     } else {
-        Err(rmdir_error(ERR_FLAG_ARG))
+        Err(rmdir_error_row(&RMDIR_ERROR_FLAG_ARG))
     }
 }
 
@@ -293,18 +443,22 @@ fn extract_folder_name(value: &Value) -> BuiltinResult<String> {
             if array.rows == 1 {
                 Ok(array.data.iter().collect())
             } else {
-                Err(rmdir_error(ERR_FOLDER_ARG))
+                Err(rmdir_error_row(&RMDIR_ERROR_FOLDER_ARG))
             }
         }
         Value::StringArray(array) => {
             if array.data.len() == 1 {
                 Ok(array.data[0].clone())
             } else {
-                Err(rmdir_error(ERR_FOLDER_ARG))
+                Err(rmdir_error_row(&RMDIR_ERROR_FOLDER_ARG))
             }
         }
-        _ => Err(rmdir_error(ERR_FOLDER_ARG)),
+        _ => Err(rmdir_error_row(&RMDIR_ERROR_FOLDER_ARG)),
     }
+}
+
+fn message_identifier(error: &'static BuiltinErrorDescriptor) -> &'static str {
+    error.identifier.unwrap_or("")
 }
 
 async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
@@ -338,6 +492,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn rmdir_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = RMDIR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = rmdir(folderName)"));
+        assert!(labels.contains(&"status = rmdir(folderName, flag)"));
+        assert!(labels.contains(&"[status, msg, msgID] = rmdir(folderName)"));
+        assert!(labels.contains(&"[status, msg, msgID] = rmdir(folderName, flag)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn rmdir_removes_empty_directory() {
         let _lock = REPL_FS_TEST_LOCK
             .lock()
@@ -361,10 +529,10 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let err = evaluate(&[Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err.message(), ERR_FOLDER_ARG);
+        assert_eq!(err.message(), RMDIR_ERROR_FOLDER_ARG.message);
 
         let err = evaluate(&[Value::from("path"), Value::Num(2.0)]).expect_err("error");
-        assert_eq!(err.message(), ERR_FLAG_ARG);
+        assert_eq!(err.message(), RMDIR_ERROR_FLAG_ARG.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -386,7 +554,10 @@ pub(crate) mod tests {
         ))
         .unwrap();
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DIRECTORY_NOT_EMPTY);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&RMDIR_RESULT_DIRECTORY_NOT_EMPTY)
+        );
         assert!(target.exists());
     }
 
@@ -424,7 +595,10 @@ pub(crate) mod tests {
         let eval =
             evaluate(&[Value::from(target.to_string_lossy().to_string())]).expect("evaluate");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_DIRECTORY_NOT_FOUND);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&RMDIR_RESULT_DIRECTORY_NOT_FOUND)
+        );
         assert!(eval.message().contains("does not exist"));
     }
 
@@ -441,7 +615,10 @@ pub(crate) mod tests {
         let eval =
             evaluate(&[Value::from(target.to_string_lossy().to_string())]).expect("evaluate");
         assert_eq!(eval.status(), 0.0);
-        assert_eq!(eval.message_id(), MESSAGE_ID_NOT_A_DIRECTORY);
+        assert_eq!(
+            eval.message_id(),
+            message_identifier(&RMDIR_RESULT_NOT_A_DIRECTORY)
+        );
         assert!(eval.message().contains("not a directory"));
         assert!(target.exists());
     }
