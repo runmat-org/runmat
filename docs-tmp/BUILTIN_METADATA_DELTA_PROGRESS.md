@@ -10,10 +10,10 @@
 | Wave 5 (Grid + Sequence Constructors) | `colon`, `fill`, `meshgrid`, `peaks` | Done | `e6b2e0a2` | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `colon_`, `fill_`, `meshgrid_`, `peaks_` | Attached descriptors + LSP signature-help coverage for sequence/grid creation forms |
 | Wave 6 (Array Introspection) | `isempty`, `ismatrix`, `isscalar`, `isvector`, `length`, `ndims`, `numel`, `size` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `isempty_`, `ismatrix_`, `isscalar_`, `isvector_`, `length_`, `ndims_`, `numel_`, `builtins::array::introspection::size::tests::` | Attached descriptors + stable error maps + LSP signature-help coverage for introspection family |
 | Wave 7 (Introspection Core) | `class`, `isa`, `ischar`, `isstring`, `clear`, `clearvars` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp`; targeted runtime filters `builtins::introspection::class::tests::`, `builtins::introspection::isa::tests::`, `builtins::introspection::ischar::tests::`, `builtins::introspection::isstring::tests::`, `builtins::introspection::clear::tests::`, `builtins::introspection::clearvars::tests::` | Attached descriptors + option/error parser coverage + LSP signature-help coverage |
-| Wave 8 (Introspection Query, Part 1) | `which` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-lsp`; targeted runtime filter `builtins::introspection::which::tests::` | Attached descriptor for option/name forms + parser error codes + LSP signature-help coverage |
+| Wave 8 (Introspection Query) | `which`, `who`, `whos` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-lsp`; targeted runtime filters `builtins::introspection::which::tests::`, `builtins::introspection::who::tests::`, `builtins::introspection::whos::tests::` | Attached descriptors for option/name/filter forms + parser error codes + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `45`
-- Remaining: `523`
+- Migrated with attached descriptor: `47`
+- Remaining: `521`

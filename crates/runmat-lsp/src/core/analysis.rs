@@ -1951,6 +1951,8 @@ mod tests {
             ("ischar('abc');", "tf = ischar(A)"),
             ("isstring(\"abc\");", "tf = isstring(A)"),
             ("which(\"sin\");", "result = which(name)"),
+            ("who();", "names = who()"),
+            ("whos();", "vars = whos()"),
             ("clear(\"x\");", "clear(name, ...)"),
             (
                 "clearvars(\"x\", \"-except\", \"y\");",
