@@ -44,9 +44,10 @@
 | Wave 39 (Array Shape Concat) | `cat`, `horzcat`, `vertcat` | Done | `078d93d6` | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::cat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::horzcat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::vertcat::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core/wrapper concat forms (including `\"like\"` variant for `cat`) + stable descriptor error sets + LSP signature-help coverage |
 | Wave 40 (Array Shape Diagonal/Triangular) | `diag`, `tril`, `triu` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::diag::tests::`; `cargo test -p runmat-runtime builtins::array::shape::tril::tests::`; `cargo test -p runmat-runtime builtins::array::shape::triu::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for diagonal extraction/construction and triangular masking forms + descriptor-backed stable error identifiers + LSP signature-help coverage |
 | Wave 41 (Array Shape Rotation/Product) | `rot90`, `kron` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::rot90::tests::`; `cargo test -p runmat-runtime builtins::array::shape::kron::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for rotation and Kronecker product forms + stable descriptor-backed error identifiers + LSP signature-help coverage |
+| Wave 42 (Array Shape Replication/Shift) | `repmat`, `repelem`, `circshift` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::array::shape::repmat::tests::`; `cargo test -p runmat-runtime builtins::array::shape::repelem::tests::`; `cargo test -p runmat-runtime builtins::array::shape::circshift::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for replication and circular-shift forms + descriptor-backed stable runtime identifiers/messages + LSP signature-help coverage |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `132`
-- Remaining: `436`
+- Migrated with attached descriptor: `135`
+- Remaining: `433`

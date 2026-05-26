@@ -2241,6 +2241,31 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_array_shape_replication_shift_descriptors() {
+        let cases = [
+            ("repmat([1 2;3 4], [2 3]);", "B = repmat(A, r)"),
+            ("repmat([1 2;3 4], 2, 3);", "B = repmat(A, m, n)"),
+            ("repmat([1], 2, 3, 4);", "B = repmat(A, d1, d2, ...)"),
+            ("repelem([1 2 3], 2);", "B = repelem(A, R)"),
+            ("repelem([1 2;3 4], 2, 3);", "B = repelem(A, R1, R2, ...)"),
+            ("circshift([1 2;3 4], 1);", "B = circshift(A, K)"),
+            ("circshift([1 2;3 4], 1, 2);", "B = circshift(A, K, dim)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_diagnostics_descriptors() {
         let cases = [
             ("assert(true);", "out = assert(condition)"),

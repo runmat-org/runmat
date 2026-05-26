@@ -862,10 +862,7 @@ pub(crate) mod tests {
         )
         .expect_err("expected error");
         assert!(err.to_string().contains("direction"));
-        assert_eq!(
-            err.identifier(),
-            super::FIND_ERROR_INVALID_INPUT.identifier
-        );
+        assert_eq!(err.identifier(), super::FIND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
