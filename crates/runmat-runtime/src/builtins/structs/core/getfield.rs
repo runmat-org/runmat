@@ -260,10 +260,11 @@ fn getfield_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(error.identifier.unwrap_or("RunMat:getfield:InternalError"))
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn getfield_private_access(message: impl Into<String>) -> RuntimeError {

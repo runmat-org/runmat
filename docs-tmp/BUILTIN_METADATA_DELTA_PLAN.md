@@ -205,6 +205,7 @@ Rule:
 2. Fall back to explicit struct only when behavior is uniquely shaped.
 3. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
 4. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
+5. Runtime error builders must not use fallback literal identifiers (for example `unwrap_or("RunMat:...")`) when descriptor rows exist; only attach `error.identifier` directly from the row.
 
 ## Shared Helper Reuse Strategy
 
@@ -246,6 +247,7 @@ Disallowed source:
 3. Do not duplicate stable identifier/message strings in separate ad-hoc constants; descriptor rows are the canonical identifier/message source for migrated builtins.
 4. Do not build runtime errors with hard-coded identifiers/messages when a descriptor row already exists for that branch.
 5. When remapping parser/broadcast/helper failures into builtin error branches, throw via the descriptor row helper (`*_error(&FOO_ERROR_...)`) rather than `format!(...)` message copies.
+6. If a branch needs extra context in the text, wrap the descriptor message (`format!("{base}: {detail}")`) while still anchoring the branch to that descriptor row.
 
 ## Per-Builtin Execution Loop (Exact Procedure)
 
@@ -260,6 +262,7 @@ For each builtin `B`, follow this exact loop:
    - Define per-error descriptor constants (for example `FOO_ERROR_INVALID_INPUT`) and build `FOO_ERRORS` from those constants.
    - Runtime throw helpers must take a descriptor row (or descriptor-derived identifier) rather than re-declaring identifier/message literals.
    - If a shared helper in another module needs error context, pass `&BuiltinErrorDescriptor` into that helper instead of exporting free-floating identifier/message constants.
+   - Do not retain legacy fallback identifier literals in helper builders once descriptor constants exist.
 7. Keep execution traits sourced from `BuiltinFunction` + semantics + GPU spec; descriptor does not duplicate these fields.
 8. Keep JSON narrative unchanged unless it contradicts typed metadata.
 9. Set `output_mode` and `completion_policy` explicitly for `B`.
