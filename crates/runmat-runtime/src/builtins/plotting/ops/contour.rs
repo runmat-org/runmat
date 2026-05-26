@@ -141,7 +141,7 @@ pub(crate) fn parse_contour_args(
     if is_option_token(&rest[0]) {
         return from_implicit_args(name, first, None, &rest);
     }
-    if is_implicit_level_style_value(&rest[0])
+    if is_implicit_level_style_value(&rest[0], name)
         && rest
             .get(1)
             .and_then(value_as_string)
@@ -687,18 +687,11 @@ fn is_option_token(value: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn is_implicit_level_style_value(value: &Value) -> bool {
-    match value {
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
-        Value::Tensor(tensor) => {
-            tensor.data.len() == 1
-                || tensor
-                    .data
-                    .first()
-                    .is_some_and(|first| tensor.data.iter().all(|value| value == first))
-        }
-        _ => false,
-    }
+fn is_implicit_level_style_value(value: &Value, context: &str) -> bool {
+    matches!(
+        value,
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Tensor(_)
+    ) && parse_level_spec(value.clone(), context).is_ok()
 }
 
 fn is_contour_option_name(token: &str) -> bool {
@@ -1801,6 +1794,30 @@ pub(crate) mod tests {
         match args.level_spec {
             ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.5]),
             other => panic!("expected repeated single level, found {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn implicit_distinct_levels_with_style_parse_correctly() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![
+                Value::Tensor(tensor_from(&[0.25, 0.5, 0.75], 1, 3)),
+                Value::String("k".into()),
+            ],
+        )
+        .unwrap();
+        match args.level_spec {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.25, 0.5, 0.75]),
+            other => panic!("expected distinct levels, found {other:?}"),
+        }
+        match args.line_color {
+            ContourLineColor::Color(color) => assert_eq!(color.to_array(), [0.0, 0.0, 0.0, 1.0]),
+            other => panic!("expected black linespec, found {other:?}"),
         }
     }
 
