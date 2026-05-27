@@ -3058,6 +3058,10 @@ mod tests {
             ("sum([1,2,3], \"all\");", "S = sum(A, \"all\")"),
             ("mean([1,2,3]);", "M = mean(A)"),
             ("mean([1,2,3], \"all\");", "M = mean(A, \"all\")"),
+            ("diff([1,2,3]);", "B = diff(X)"),
+            ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
+            ("gradient([1,2,3]);", "G = gradient(F)"),
+            ("gradient([1,2,3], 0.5);", "G = gradient(F, h)"),
             ("cumsum([1,2,3]);", "B = cumsum(A)"),
             ("cumsum([1,2,3], \"reverse\");", "B = cumsum(A, direction)"),
             ("cumprod([1,2,3]);", "B = cumprod(A)"),
@@ -3221,6 +3225,32 @@ mod tests {
                 .any(|detail| detail.contains("mean(")),
             "expected descriptor signature detail for mean completion, got {:?}",
             mean_candidates
+        );
+
+        let diff_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("diff"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            diff_candidates
+                .iter()
+                .any(|detail| detail.contains("diff(")),
+            "expected descriptor signature detail for diff completion, got {:?}",
+            diff_candidates
+        );
+
+        let gradient_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("gradient"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            gradient_candidates
+                .iter()
+                .any(|detail| detail.contains("gradient(")),
+            "expected descriptor signature detail for gradient completion, got {:?}",
+            gradient_candidates
         );
 
         let trapz_candidates: Vec<String> = completions
