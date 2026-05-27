@@ -3219,6 +3219,54 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_runtime_lib_descriptors() {
+        let cases = [
+            ("feval(@sin, 1);", "[varargout] = feval(f, varargin)"),
+            ("str2func('@sin');", "fh = str2func(name)"),
+            ("func2str(@sin);", "name = func2str(fh)"),
+            ("prod([1 2 3], 1);", "p = prod(A, dim)"),
+            ("any([1 0 1], 1);", "tf = any(A, dim)"),
+            ("all([1 1 1], 1);", "tf = all(A, dim)"),
+            ("warning('msg %d', 1);", "status = warning(fmt, varargin)"),
+            ("getmethod(classref('Point'), 'move');", "fh = getmethod(obj_or_class, name)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_runtime_lib_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["feval", "str2func", "func2str", "prod", "any", "all", "warning", "getmethod"] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            let call_head = format!("{builtin}(");
+            assert!(
+                details.iter().any(|detail| detail.contains(&call_head)),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_io_mat_descriptors() {
         let cases = [
             ("load();", "S = load()"),
