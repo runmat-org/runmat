@@ -2148,6 +2148,8 @@ mod tests {
             ),
             ("image([1 2; 3 4]);", "h = image(C)"),
             ("imagesc([1 2; 3 4]);", "h = imagesc(C)"),
+            ("contour([1 2; 3 4]);", "h = contour(Z)"),
+            ("contourf([1 2; 3 4]);", "h = contourf(Z)"),
             ("text(1, 2, 'pt');", "h = text(x, y, label)"),
         ];
 

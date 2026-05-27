@@ -3,7 +3,11 @@
 use glam::{Vec2, Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::Vertex;
 use runmat_plot::gpu::contour_fill;
@@ -23,12 +27,331 @@ use super::gpu_helpers::axis_bounds;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
+use crate::build_runtime_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
-use crate::BuiltinResult;
+use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "contour";
 const DEFAULT_LEVELS: usize = 10;
+
+const CONTOUR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to contour line plot.",
+}];
+
+const CONTOUR_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Contour height grid.",
+}];
+
+const CONTOUR_INPUTS_Z_LEVEL_COUNT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Requested contour level count.",
+    },
+];
+
+const CONTOUR_INPUTS_Z_LEVEL_VALUES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit contour level values.",
+    },
+];
+
+const CONTOUR_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOUR_INPUTS_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z_LEVEL_COUNT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Requested contour level count.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z_LEVEL_VALUES: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Explicit contour level values.",
+    },
+];
+
+const CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOUR_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z)",
+        inputs: &CONTOUR_INPUTS_Z,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, N)",
+        inputs: &CONTOUR_INPUTS_Z_LEVEL_COUNT,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, V)",
+        inputs: &CONTOUR_INPUTS_Z_LEVEL_VALUES,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_Z_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(Z, V, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_Z_LEVEL_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, N)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_COUNT,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, V)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_VALUES,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, V, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contour(X, Y, Z, N, Name, Value, ...)",
+        inputs: &CONTOUR_INPUTS_X_Y_Z_LEVEL_PROPS,
+        outputs: &CONTOUR_OUTPUT_HANDLE,
+    },
+];
+
+pub const CONTOUR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTOUR.INVALID_ARGUMENT",
+    identifier: Some("RunMat:contour:InvalidArgument"),
+    when: "Contour input arrays, level arguments, or name/value options are invalid.",
+    message: "contour: invalid argument",
+};
+
+pub const CONTOUR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTOUR.INTERNAL",
+    identifier: Some("RunMat:contour:Internal"),
+    when: "Internal contour render preparation fails unexpectedly.",
+    message: "contour: internal operation failed",
+};
+
+const CONTOUR_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [CONTOUR_ERROR_INVALID_ARGUMENT, CONTOUR_ERROR_INTERNAL];
+
+pub const CONTOUR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTOUR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTOUR_ERRORS,
+};
+
+pub(crate) fn contour_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+pub(crate) fn map_contour_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    contour_error_with_detail(&CONTOUR_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+pub(crate) fn map_contour_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    contour_error_with_detail(&CONTOUR_ERROR_INTERNAL, err.message)
+}
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ContourLevelSpec {
@@ -305,10 +628,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::contour::CONTOUR_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::contour"
 )]
 pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let mut call = Some(ContourCall::parse(BUILTIN_NAME, first, rest)?);
+    let mut call =
+        Some(ContourCall::parse(BUILTIN_NAME, first, rest).map_err(map_contour_invalid_argument)?);
     let opts = PlotRenderOptions {
         title: "Contour Plot",
         x_label: "X",
@@ -322,7 +647,9 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let current = call.take().expect("contour call consumed once");
         let before = figure.plots().count();
-        current.render(figure, axes)?;
+        current
+            .render(figure, axes)
+            .map_err(map_contour_invalid_argument)?;
         let after = figure.plots().count();
         if after > before {
             *plot_index_slot.borrow_mut() = Some((axes, after - 1));
@@ -339,7 +666,7 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_contour_internal(err));
     }
     Ok(handle)
 }
@@ -1681,6 +2008,26 @@ pub(crate) mod tests {
             handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
             Type::Num
         );
+    }
+
+    #[test]
+    fn contour_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CONTOUR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = contour(Z)"));
+        assert!(labels.contains(&"h = contour(Z, V)"));
+        assert!(labels.contains(&"h = contour(X, Y, Z)"));
+        assert!(labels.contains(&"h = contour(X, Y, Z, V, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn contour_missing_input_uses_stable_identifier() {
+        setup_plot_tests();
+        let err = contour_builtin(Value::Num(0.0), vec![]).expect_err("invalid z");
+        assert_eq!(err.identifier(), CONTOUR_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
