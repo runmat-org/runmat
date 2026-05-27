@@ -3161,6 +3161,41 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_elementwise_special_descriptors() {
+        let cases = [
+            ("complex(1);", "Z = complex(A)"),
+            ("complex(1, 2);", "Z = complex(A, B)"),
+            ("factorial(5);", "Y = factorial(X)"),
+            (
+                "factorial(5, \"like\", 1);",
+                "Y = factorial(X, \"like\", prototype)",
+            ),
+            ("gamma(5);", "Y = gamma(X)"),
+            (
+                "gamma(5, \"like\", 1);",
+                "Y = gamma(X, \"like\", prototype)",
+            ),
+            ("hypot(3, 4);", "R = hypot(X, Y)"),
+            ("nextpow2(9);", "p = nextpow2(X)"),
+            ("pow2(3);", "Y = pow2(X)"),
+            ("pow2(1.5, 2);", "Y = pow2(F, E)"),
+            ("sign(-7);", "Y = sign(X)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),
