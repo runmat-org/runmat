@@ -3434,7 +3434,7 @@ fn any_dim(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
+    name: "B",
     ty: BuiltinParamType::LogicalArray,
     arity: BuiltinParamArity::Required,
     default: None,
@@ -3468,12 +3468,12 @@ const ANY_SIG_INPUTS_2: [BuiltinParamDescriptor; 2] = [
 
 const ANY_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "tf = any(A)",
+        label: "B = any(A)",
         inputs: &ANY_SIG_INPUTS_1,
         outputs: &ANY_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "tf = any(A, dim)",
+        label: "B = any(A, dim)",
         inputs: &ANY_SIG_INPUTS_2,
         outputs: &ANY_OUTPUT,
     },
@@ -3582,7 +3582,7 @@ fn all_dim(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 const ALL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
+    name: "B",
     ty: BuiltinParamType::LogicalArray,
     arity: BuiltinParamArity::Required,
     default: None,
@@ -3616,12 +3616,12 @@ const ALL_SIG_INPUTS_2: [BuiltinParamDescriptor; 2] = [
 
 const ALL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "tf = all(A)",
+        label: "B = all(A)",
         inputs: &ALL_SIG_INPUTS_1,
         outputs: &ALL_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "tf = all(A, dim)",
+        label: "B = all(A, dim)",
         inputs: &ALL_SIG_INPUTS_2,
         outputs: &ALL_OUTPUT,
     },

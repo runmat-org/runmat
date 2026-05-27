@@ -3228,8 +3228,8 @@ mod tests {
             ("str2func('@sin');", "fh = str2func(name)"),
             ("func2str(@sin);", "name = func2str(fh)"),
             ("prod([1 2 3], 1);", "B = prod(A, dim)"),
-            ("any([1 0 1], 1);", "tf = any(A, dim)"),
-            ("all([1 1 1], 1);", "tf = all(A, dim)"),
+            ("any([1 0 1], 1);", "B = any(A, dim)"),
+            ("all([1 1 1], 1);", "B = all(A, dim)"),
             ("warning('msg %d', 1);", "status = warning(fmt, varargin)"),
             (
                 "getmethod(classref('Point'), 'move');",
