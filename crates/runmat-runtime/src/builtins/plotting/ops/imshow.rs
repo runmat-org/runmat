@@ -4,7 +4,11 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use runmat_builtins::{CharArray, NumericDType, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, NumericDType, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 
@@ -16,8 +20,120 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "imshow";
+
+const IMSHOW_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the image object.",
+}];
+
+const IMSHOW_INPUTS_IMAGE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "I",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Image matrix/array or filename.",
+}];
+
+const IMSHOW_INPUTS_IMAGE_RANGE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric grayscale image matrix/array.",
+    },
+    BuiltinParamDescriptor {
+        name: "DisplayRange",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: Some("[]"),
+        description: "Display limits as [] or [low high].",
+    },
+];
+
+const IMSHOW_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "h = imshow(I)",
+        inputs: &IMSHOW_INPUTS_IMAGE,
+        outputs: &IMSHOW_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = imshow(I, [low high])",
+        inputs: &IMSHOW_INPUTS_IMAGE_RANGE,
+        outputs: &IMSHOW_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = imshow(I, [])",
+        inputs: &IMSHOW_INPUTS_IMAGE_RANGE,
+        outputs: &IMSHOW_OUTPUT_HANDLE,
+    },
+];
+
+const IMSHOW_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMSHOW.INVALID_ARGUMENT",
+    identifier: Some("RunMat:imshow:InvalidArgument"),
+    when: "Image input, filename, or display range arguments are malformed or unsupported.",
+    message: "imshow: invalid argument",
+};
+
+const IMSHOW_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMSHOW.INTERNAL",
+    identifier: Some("RunMat:imshow:Internal"),
+    when: "Internal image decoding or render preparation fails unexpectedly.",
+    message: "imshow: internal operation failed",
+};
+
+const IMSHOW_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [IMSHOW_ERROR_INVALID_ARGUMENT, IMSHOW_ERROR_INTERNAL];
+
+pub const IMSHOW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IMSHOW_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IMSHOW_ERRORS,
+};
+
+fn imshow_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let raw = detail.as_ref().trim();
+    let normalized = raw.strip_prefix("imshow:").map(str::trim).unwrap_or(raw);
+    let message = if normalized.is_empty() {
+        error.message.to_string()
+    } else {
+        format!("{}: {}", error.message, normalized)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn imshow_invalid(detail: impl AsRef<str>) -> RuntimeError {
+    imshow_error_with_detail(&IMSHOW_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn map_imshow_invalid(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    imshow_error_with_detail(&IMSHOW_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_imshow_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    imshow_error_with_detail(&IMSHOW_ERROR_INTERNAL, err.message)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::imshow")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,10 +170,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::imshow::IMSHOW_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::imshow"
 )]
 pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (image_value, range) = parse_args(args).await?;
+    let (image_value, range) = parse_args(args).await.map_err(map_imshow_invalid)?;
 
     if let Some(path) = string_like_path(&image_value)? {
         if range != DisplayRange::Default {
@@ -65,22 +182,28 @@ pub async fn imshow_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 "imshow: display ranges are only supported for numeric image data",
             ));
         }
-        let tensor = tensor_from_image_file(&path).await?;
+        let tensor = tensor_from_image_file(&path)
+            .await
+            .map_err(map_imshow_internal)?;
         return render_truecolor_tensor(tensor).await;
     }
 
-    let image_value = normalize_image_value(image_value)?;
+    let image_value = normalize_image_value(image_value).map_err(map_imshow_invalid)?;
     if is_truecolor_value(&image_value) {
         if range != DisplayRange::Default {
             return Err(imshow_error(
                 "imshow: display ranges are only supported for grayscale image data",
             ));
         }
-        let tensor = tensor_from_value(image_value).await?;
+        let tensor = tensor_from_value(image_value)
+            .await
+            .map_err(map_imshow_invalid)?;
         return render_truecolor_tensor(tensor).await;
     }
 
-    render_grayscale_value(image_value, range).await
+    render_grayscale_value(image_value, range)
+        .await
+        .map_err(map_imshow_invalid)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -240,7 +363,7 @@ async fn render_surface(
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_imshow_internal(err));
     }
     Ok(handle)
 }
@@ -599,7 +722,7 @@ fn scalar_char_array(chars: &CharArray) -> crate::BuiltinResult<String> {
 }
 
 fn imshow_error(message: impl Into<String>) -> crate::RuntimeError {
-    crate::builtins::plotting::plotting_error(BUILTIN_NAME, message)
+    imshow_invalid(message.into())
 }
 
 #[cfg(test)]
@@ -820,5 +943,23 @@ mod tests {
         assert_eq!(grid[2][1], glam::Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let _ = test_support::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn imshow_descriptor_includes_core_signatures() {
+        let labels: Vec<&str> = IMSHOW_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = imshow(I)"));
+        assert!(labels.contains(&"h = imshow(I, [low high])"));
+    }
+
+    #[test]
+    fn imshow_missing_input_uses_stable_identifier() {
+        let err = futures::executor::block_on(imshow_builtin(Vec::new()))
+            .expect_err("expected imshow argument validation error");
+        assert_eq!(err.identifier(), IMSHOW_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

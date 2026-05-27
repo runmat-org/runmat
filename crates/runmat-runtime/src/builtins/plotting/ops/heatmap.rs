@@ -1,7 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
@@ -13,8 +17,152 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "heatmap";
+
+const HEATMAP_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the heatmap chart.",
+}];
+
+const HEATMAP_INPUTS_CDATA: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "CData",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "M-by-N numeric matrix of color values.",
+}];
+
+const HEATMAP_INPUTS_XYCDATA: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "XValues",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column labels (length N).",
+    },
+    BuiltinParamDescriptor {
+        name: "YValues",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row labels (length M).",
+    },
+    BuiltinParamDescriptor {
+        name: "CData",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "M-by-N numeric matrix of color values.",
+    },
+];
+
+const HEATMAP_INPUTS_XYCDATA_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "XValues",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column labels (length N).",
+    },
+    BuiltinParamDescriptor {
+        name: "YValues",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row labels (length M).",
+    },
+    BuiltinParamDescriptor {
+        name: "CData",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "M-by-N numeric matrix of color values.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Heatmap property name/value pairs.",
+    },
+];
+
+const HEATMAP_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "h = heatmap(CData)",
+        inputs: &HEATMAP_INPUTS_CDATA,
+        outputs: &HEATMAP_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = heatmap(XValues, YValues, CData)",
+        inputs: &HEATMAP_INPUTS_XYCDATA,
+        outputs: &HEATMAP_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = heatmap(XValues, YValues, CData, Name, Value, ...)",
+        inputs: &HEATMAP_INPUTS_XYCDATA_PROPS,
+        outputs: &HEATMAP_OUTPUT_HANDLE,
+    },
+];
+
+const HEATMAP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HEATMAP.INVALID_ARGUMENT",
+    identifier: Some("RunMat:heatmap:InvalidArgument"),
+    when: "CData/label/property inputs are malformed or incompatible.",
+    message: "heatmap: invalid argument",
+};
+
+const HEATMAP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HEATMAP.INTERNAL",
+    identifier: Some("RunMat:heatmap:Internal"),
+    when: "Internal render/surface construction fails.",
+    message: "heatmap: internal operation failed",
+};
+
+const HEATMAP_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [HEATMAP_ERROR_INVALID_ARGUMENT, HEATMAP_ERROR_INTERNAL];
+
+pub const HEATMAP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HEATMAP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HEATMAP_ERRORS,
+};
+
+fn heatmap_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_heatmap_invalid(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    heatmap_error_with_detail(&HEATMAP_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_heatmap_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    heatmap_error_with_detail(&HEATMAP_ERROR_INTERNAL, err.message)
+}
+
+fn heatmap_invalid(detail: impl AsRef<str>) -> RuntimeError {
+    heatmap_error_with_detail(&HEATMAP_ERROR_INVALID_ARGUMENT, detail)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::heatmap")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,6 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::heatmap::HEATMAP_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::heatmap"
 )]
 pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -59,14 +208,17 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         y_labels,
         color_data,
         rest,
-    } = parse_heatmap_args(args).await?;
+    } = parse_heatmap_args(args)
+        .await
+        .map_err(map_heatmap_invalid)?;
 
     crate::builtins::plotting::properties::validate_heatmap_property_pairs(
         &rest,
         x_labels.len(),
         y_labels.len(),
         BUILTIN_NAME,
-    )?;
+    )
+    .map_err(map_heatmap_invalid)?;
 
     let rows = color_data.rows;
     let cols = color_data.cols;
@@ -81,7 +233,8 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         ColorMap::Parula,
         color_limits,
     )
-    .await?;
+    .await
+    .map_err(map_heatmap_invalid)?;
     surface = surface
         .with_flatten_z(true)
         .with_image_mode(true)
@@ -137,14 +290,15 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             &Value::Num(handle),
             BUILTIN_NAME,
         )?;
-        crate::builtins::plotting::properties::set_properties(plot_handle, &rest, BUILTIN_NAME)?;
+        crate::builtins::plotting::properties::set_properties(plot_handle, &rest, BUILTIN_NAME)
+            .map_err(map_heatmap_invalid)?;
     }
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_heatmap_internal(err));
     }
     Ok(handle)
 }
@@ -158,9 +312,8 @@ struct ParsedHeatmap {
 
 async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeatmap> {
     match args.len() {
-        0 => Err(crate::builtins::plotting::plotting_error(
-            BUILTIN_NAME,
-            "heatmap: expected CData or XValues,YValues,CData input",
+        0 => Err(heatmap_invalid(
+            "expected CData or XValues,YValues,CData input",
         )),
         1 => {
             let color_data = cdata_tensor(args.into_iter().next().expect("one arg")).await?;
@@ -173,9 +326,8 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
                 rest: Vec::new(),
             })
         }
-        2 => Err(crate::builtins::plotting::plotting_error(
-            BUILTIN_NAME,
-            "heatmap: expected CData or XValues,YValues,CData input",
+        2 => Err(heatmap_invalid(
+            "expected CData or XValues,YValues,CData input",
         )),
         _ => {
             let mut it = args.into_iter();
@@ -199,15 +351,10 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
 async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let tensor = match value {
         Value::GpuTensor(handle) => gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?,
-        other => Tensor::try_from(&other).map_err(|e| {
-            crate::builtins::plotting::plotting_error(BUILTIN_NAME, format!("heatmap: {e}"))
-        })?,
+        other => Tensor::try_from(&other).map_err(|e| heatmap_invalid(e.to_string()))?,
     };
     if tensor.rows == 0 || tensor.cols == 0 {
-        return Err(crate::builtins::plotting::plotting_error(
-            BUILTIN_NAME,
-            "heatmap: CData must contain at least a 2-D grid",
-        ));
+        return Err(heatmap_invalid("CData must contain at least a 2-D grid"));
     }
     Ok(tensor)
 }
@@ -221,12 +368,12 @@ fn labels_from_value(
         value,
         BUILTIN_NAME,
         axis_name,
-    )?;
+    )
+    .map_err(map_heatmap_invalid)?;
     if labels.len() != expected_len {
-        return Err(crate::builtins::plotting::plotting_error(
-            BUILTIN_NAME,
-            format!("heatmap: {axis_name} must have {expected_len} labels"),
-        ));
+        return Err(heatmap_invalid(format!(
+            "{axis_name} must have {expected_len} labels"
+        )));
     }
     Ok(labels)
 }
@@ -478,5 +625,23 @@ mod tests {
             .map(|figure| figure.plots().count())
             .unwrap_or(0);
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn heatmap_descriptor_includes_core_signatures() {
+        let labels: Vec<&str> = HEATMAP_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = heatmap(CData)"));
+        assert!(labels.contains(&"h = heatmap(XValues, YValues, CData)"));
+    }
+
+    #[test]
+    fn heatmap_missing_input_uses_stable_identifier() {
+        let err = futures::executor::block_on(heatmap_builtin(Vec::new()))
+            .expect_err("expected heatmap argument validation error");
+        assert_eq!(err.identifier(), HEATMAP_ERROR_INVALID_ARGUMENT.identifier);
     }
 }
