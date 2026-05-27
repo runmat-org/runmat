@@ -438,9 +438,8 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> {
             continue;
         }
 
-        let name = value_to_lowercase_string(&args[idx]).ok_or_else(|| {
-            dlmwrite_error(&DLMWRITE_ERROR_ARG_CONFIG)
-        })?;
+        let name = value_to_lowercase_string(&args[idx])
+            .ok_or_else(|| dlmwrite_error(&DLMWRITE_ERROR_ARG_CONFIG))?;
         idx += 1;
         if idx >= args.len() {
             return Err(dlmwrite_error_with(

@@ -89,12 +89,13 @@
 | Wave 84 (I/O Tabular Modern Core B) | `readmatrix` | Done | `8f3ebc01` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::tabular::readmatrix::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `readmatrix` filename/options/name-value forms, migrated option/range/filename/IO/non-numeric/output/tensor-build branches to descriptor-backed stable errors, added runtime descriptor signature test, and extended io-tabular LSP signature-help coverage with `readmatrix` labels. |
 | Wave 85 (I/O Tabular Legacy Core B) | `dlmread` | Done | `8f3ebc01` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::tabular::dlmread::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `dlmread` delimiter/offset/range call forms, migrated argument/delimiter/index/range/filename/IO/non-numeric/tensor-build branches to descriptor-backed stable errors, added runtime descriptor signature test, and extended io-tabular LSP signature-help coverage with `dlmread` labels. |
 | Wave 86 (I/O Console Core) | `clc`, `disp`, `format`, `input` | Done | `aeede58f` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::clc::tests::`; `cargo test -p runmat-runtime builtins::io::disp::tests::`; `cargo test -p runmat-runtime builtins::io::format::tests::`; `cargo test -p runmat-runtime builtins::io::input::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for console I/O builtins (clear/display/format/prompt), added stable descriptor errors and descriptor-backed input identifier/source mappings, added runtime descriptor signature tests, and added descriptor-driven LSP signature-help coverage for console forms. |
+| Wave 87 (I/O HTTP Core) | `weboptions`, `webread`, `webwrite` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::io::http::weboptions::tests::`; `cargo test -p runmat-runtime builtins::io::http::webread::tests::`; `cargo test -p runmat-runtime builtins::io::http::webwrite::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for HTTP options/read/write call surfaces (including struct/query/name-value forms), added stable descriptor-backed runtime error rows, added runtime descriptor signature tests, and added descriptor-driven LSP signature-help coverage for `io/http`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `246`
-- Remaining: `322`
+- Migrated with attached descriptor: `249`
+- Remaining: `319`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
