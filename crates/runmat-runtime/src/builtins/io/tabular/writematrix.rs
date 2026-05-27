@@ -98,7 +98,7 @@ async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinRes
         .map_err(map_control_flow)?;
     let matrix = MatrixData::from_value(gathered)?;
 
-    let bytes_written = write_matrix(&path, &matrix, &options)?;
+    let bytes_written = write_matrix(&path, &matrix, &options).await?;
 
     Ok(Value::Num(bytes_written as f64))
 }
@@ -445,7 +445,7 @@ fn ensure_matrix_shape(shape: &[usize], context: &str) -> BuiltinResult<()> {
     }
 }
 
-fn write_matrix(
+async fn write_matrix(
     path: &Path,
     matrix: &MatrixData,
     options: &WriteMatrixOptions,
@@ -464,7 +464,7 @@ fn write_matrix(
         }
     }
 
-    let mut file = open_options.open(path).map_err(|err| {
+    let mut file = open_options.open_async(path).await.map_err(|err| {
         writematrix_error_with_source(
             format!(
                 "writematrix: unable to open \"{}\" for writing ({err})",
@@ -480,7 +480,7 @@ fn write_matrix(
 
     if rows == 0 {
         // Nothing else to do; file was truncated or created above.
-        file.flush().map_err(|err| {
+        file.flush_async().await.map_err(|err| {
             writematrix_error_with_source(
                 format!("writematrix: failed to flush output ({err})"),
                 err,
@@ -520,7 +520,7 @@ fn write_matrix(
         bytes_written += line_ending.len();
     }
 
-    file.flush().map_err(|err| {
+    file.flush_async().await.map_err(|err| {
         writematrix_error_with_source(format!("writematrix: failed to flush output ({err})"), err)
     })?;
 

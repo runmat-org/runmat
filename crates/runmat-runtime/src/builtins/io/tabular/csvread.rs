@@ -90,7 +90,7 @@ async fn csvread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         .map_err(map_control_flow)?;
     let options = parse_arguments(&rest).await?;
     let resolved = resolve_path(&gathered_path)?;
-    let (rows, max_cols, skipped_rows) = read_csv_rows(&resolved, &options)?;
+    let (rows, max_cols, skipped_rows) = read_csv_rows(&resolved, &options).await?;
     let start_row = if options.range.is_none() {
         options.start_row.saturating_sub(skipped_rows)
     } else {
@@ -214,11 +214,11 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn read_csv_rows(
+async fn read_csv_rows(
     path: &Path,
     options: &CsvReadOptions,
 ) -> BuiltinResult<(Vec<Vec<f64>>, usize, usize)> {
-    let file = File::open(path).map_err(|err| {
+    let file = File::open_async(path).await.map_err(|err| {
         csvread_error_with_source(
             format!("csvread: unable to open '{}': {err}", path.display()),
             err,

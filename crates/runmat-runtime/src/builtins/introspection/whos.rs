@@ -64,7 +64,7 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut entries = match &request.source {
         WhosSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
-        WhosSource::File(path) => read_mat_file_for_builtin(path, "whos")?,
+        WhosSource::File(path) => read_mat_file_for_builtin(path, "whos").await?,
     };
 
     if matches!(request.source, WhosSource::File(_)) {

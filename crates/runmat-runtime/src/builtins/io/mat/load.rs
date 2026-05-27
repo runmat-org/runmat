@@ -167,7 +167,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
         regex_patterns,
     };
     let path = normalise_path(&path_value)?;
-    let entries = read_mat_file(&path)?;
+    let entries = read_mat_file(&path).await?;
 
     let selected = select_variables(&entries, &request)?;
     Ok(LoadEval {
@@ -307,11 +307,11 @@ fn insert_or_replace(selected: &mut Vec<(String, Value)>, name: &str, value: Val
     }
 }
 
-pub(crate) fn read_mat_file_for_builtin(
+pub(crate) async fn read_mat_file_for_builtin(
     path: &Path,
     builtin: &str,
 ) -> crate::BuiltinResult<Vec<(String, Value)>> {
-    match read_mat_file(path) {
+    match read_mat_file(path).await {
         Ok(entries) => Ok(entries),
         Err(err) => {
             let message = err.message().replacen("load:", &format!("{builtin}:"), 1);
@@ -324,8 +324,8 @@ pub(crate) fn read_mat_file_for_builtin(
     }
 }
 
-pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
-    let file = File::open(path).map_err(|err| {
+pub(crate) async fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
+    let file = File::open_async(path).await.map_err(|err| {
         load_error_with_source(
             format!("load: failed to open '{}': {err}", path.display()),
             err,
