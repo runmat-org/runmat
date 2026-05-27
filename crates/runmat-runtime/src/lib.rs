@@ -3286,7 +3286,7 @@ fn prod_dim(a: Value, dim: f64) -> Result<Value, String> {
 }
 
 const PROD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
+    name: "B",
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
@@ -3320,12 +3320,12 @@ const PROD_SIG_INPUTS_2: [BuiltinParamDescriptor; 2] = [
 
 const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "p = prod(A)",
+        label: "B = prod(A)",
         inputs: &PROD_SIG_INPUTS_1,
         outputs: &PROD_OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "p = prod(A, dim)",
+        label: "B = prod(A, dim)",
         inputs: &PROD_SIG_INPUTS_2,
         outputs: &PROD_OUTPUT,
     },
