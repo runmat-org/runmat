@@ -3024,6 +3024,33 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_rounding_descriptors() {
+        let cases = [
+            ("fix(-3.7);", "Y = fix(X)"),
+            ("round(3.14159, 2);", "Y = round(X, N)"),
+            ("ceil(3.14159, 3, \"decimals\");", "Y = ceil(X, N, mode)"),
+            (
+                "floor(3.14159, \"like\", 1);",
+                "Y = floor(X, \"like\", prototype)",
+            ),
+            ("mod(17, 5);", "R = mod(A, B)"),
+            ("rem(-7, 4);", "R = rem(A, B)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `round` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -48,10 +52,130 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "round";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const ROUND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Rounded output values.",
+}];
+const ROUND_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, or complex input values.",
+}];
+const ROUND_INPUTS_X_N: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric, logical, or complex input values.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Digits for decimal-place rounding.",
+    },
+];
+const ROUND_INPUTS_X_N_MODE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric, logical, or complex input values.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Digits argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "mode",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"decimals\""),
+        description: "Rounding mode ('decimals' or 'significant').",
+    },
+];
+const ROUND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = round(X)",
+        inputs: &ROUND_INPUTS_X,
+        outputs: &ROUND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = round(X, N)",
+        inputs: &ROUND_INPUTS_X_N,
+        outputs: &ROUND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = round(X, N, mode)",
+        inputs: &ROUND_INPUTS_X_N_MODE,
+        outputs: &ROUND_OUTPUT,
+    },
+];
+const ROUND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROUND.INVALID_INPUT",
+    identifier: Some("RunMat:round:InvalidInput"),
+    when: "Input X cannot be interpreted as numeric/logical/complex data.",
+    message: "round: invalid input",
+};
+const ROUND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROUND.INVALID_ARGUMENT",
+    identifier: Some("RunMat:round:InvalidArgument"),
+    when: "Argument count does not match supported call forms.",
+    message: "round: invalid argument",
+};
+const ROUND_ERROR_INVALID_DIGITS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROUND.INVALID_DIGITS",
+    identifier: Some("RunMat:round:InvalidDigits"),
+    when: "N is not an integer scalar or violates mode constraints.",
+    message: "round: invalid digits argument",
+};
+const ROUND_ERROR_INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROUND.INVALID_MODE",
+    identifier: Some("RunMat:round:InvalidMode"),
+    when: "mode is not a supported text token.",
+    message: "round: invalid mode",
+};
+const ROUND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROUND.INTERNAL",
+    identifier: Some("RunMat:round:Internal"),
+    when: "Internal tensor conversion/allocation failed.",
+    message: "round: internal error",
+};
+const ROUND_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    ROUND_ERROR_INVALID_INPUT,
+    ROUND_ERROR_INVALID_ARGUMENT,
+    ROUND_ERROR_INVALID_DIGITS,
+    ROUND_ERROR_INVALID_MODE,
+    ROUND_ERROR_INTERNAL,
+];
+pub const ROUND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ROUND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ROUND_ERRORS,
+};
+
+fn builtin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +198,7 @@ impl RoundStrategy {
     keywords = "round,rounding,significant,decimals,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::rounding::round::ROUND_DESCRIPTOR),
     builtin_path = "crate::builtins::math::rounding::round"
 )]
 async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -87,12 +212,14 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ComplexTensor(ct) => round_complex_tensor(ct, strategy),
         Value::CharArray(ca) => round_char_array(ca, strategy),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| builtin_error(err))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INVALID_INPUT, err))?;
             Ok(round_tensor(tensor, strategy).map(tensor::tensor_into_value)?)
         }
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("round: expected numeric or logical input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_INPUT,
+            "expected numeric or logical input",
+        )),
         other => round_numeric(other, strategy),
     }
 }
@@ -119,8 +246,8 @@ fn round_numeric(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> 
         ))),
         Value::Tensor(t) => round_tensor(t, strategy).map(tensor::tensor_into_value),
         other => {
-            let tensor =
-                tensor::value_into_tensor_for("round", other).map_err(|err| builtin_error(err))?;
+            let tensor = tensor::value_into_tensor_for("round", other)
+                .map_err(|err| builtin_error_with_detail(&ROUND_ERROR_INVALID_INPUT, err))?;
             Ok(round_tensor(tensor, strategy).map(tensor::tensor_into_value)?)
         }
     }
@@ -140,7 +267,7 @@ fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinRe
         .map(|&(re, im)| (round_scalar(re, strategy), round_scalar(im, strategy)))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(data, ct.shape.clone())
-        .map_err(|e| builtin_error(format!("round: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -150,7 +277,7 @@ fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> BuiltinResult<Val
         data.push(round_scalar(ch as u32 as f64, strategy));
     }
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| builtin_error(format!("round: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -205,20 +332,25 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<RoundStrategy> {
                 RoundMode::Decimals => Ok(RoundStrategy::Decimals(digits)),
                 RoundMode::Significant => {
                     if digits <= 0 {
-                        return Err(builtin_error(
-                            "round: N must be a positive integer for 'significant' rounding",
+                        return Err(builtin_error_with_detail(
+                            &ROUND_ERROR_INVALID_DIGITS,
+                            "N must be a positive integer for 'significant' rounding",
                         ));
                     }
                     Ok(RoundStrategy::Significant(digits))
                 }
             }
         }
-        _ => Err(builtin_error("round: too many input arguments")),
+        _ => Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        )),
     }
 }
 
 fn parse_digits(value: &Value) -> BuiltinResult<i32> {
-    let err = || builtin_error("round: N must be an integer scalar");
+    let err =
+        || builtin_error_with_detail(&ROUND_ERROR_INVALID_DIGITS, "N must be an integer scalar");
     let raw = match value {
         Value::Int(i) => i.to_i64(),
         Value::Num(n) => {
@@ -239,14 +371,17 @@ fn parse_digits(value: &Value) -> BuiltinResult<i32> {
             }
         }
         other => {
-            return Err(builtin_error(format!(
-                "round: N must be numeric, got {:?}",
-                other
-            )))
+            return Err(builtin_error_with_detail(
+                &ROUND_ERROR_INVALID_DIGITS,
+                format!("N must be numeric, got {:?}", other),
+            ))
         }
     };
     if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
-        return Err(builtin_error("round: integer overflow in N"));
+        return Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_DIGITS,
+            "integer overflow in N",
+        ));
     }
     Ok(raw as i32)
 }
@@ -259,17 +394,19 @@ enum RoundMode {
 
 fn parse_mode(value: &Value) -> BuiltinResult<RoundMode> {
     let Some(text) = tensor::value_to_string(value) else {
-        return Err(builtin_error(
-            "round: mode must be a character vector or string scalar",
+        return Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_MODE,
+            "mode must be a character vector or string scalar",
         ));
     };
     let lowered = text.trim().to_ascii_lowercase();
     match lowered.as_str() {
         "significant" => Ok(RoundMode::Significant),
         "decimal" | "decimals" => Ok(RoundMode::Decimals),
-        other => Err(builtin_error(format!(
-            "round: unknown rounding mode '{other}'"
-        ))),
+        other => Err(builtin_error_with_detail(
+            &ROUND_ERROR_INVALID_MODE,
+            format!("unknown rounding mode '{other}'"),
+        )),
     }
 }
 
@@ -284,12 +421,24 @@ pub(crate) mod tests {
         block_on(super::round_builtin(value, rest))
     }
 
-    fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
+    fn assert_error_contains(err: &crate::RuntimeError, needle: &str) {
         assert!(
             err.message().contains(needle),
             "unexpected error: {}",
             err.message()
         );
+    }
+
+    #[test]
+    fn round_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ROUND_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = round(X)"));
+        assert!(labels.contains(&"Y = round(X, N)"));
+        assert!(labels.contains(&"Y = round(X, N, mode)"));
     }
 
     #[test]
@@ -406,7 +555,8 @@ pub(crate) mod tests {
             vec![Value::Int(IntValue::I32(2)), Value::from("approx")],
         )
         .unwrap_err();
-        assert_error_contains(err, "unknown rounding mode");
+        assert_error_contains(&err, "unknown rounding mode");
+        assert_eq!(err.identifier(), ROUND_ERROR_INVALID_MODE.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

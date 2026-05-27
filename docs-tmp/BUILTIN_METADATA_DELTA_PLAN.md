@@ -229,6 +229,7 @@ Rule:
 16. Keep the helper split explicit:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches (including the branch's canonical message text).
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
+   - disallowed: fallback helpers that accept only free-form message text (for example `fn foo_error(message: impl Into<String>)`) because they bypass descriptor-row source-of-truth for stable branches.
 17. Canonical in-file source-of-truth:
    - Declare each stable branch as one `const FOO_ERROR_BAR: BuiltinErrorDescriptor = ...`.
    - Build `FOO_ERRORS` from those constants.
