@@ -3323,6 +3323,11 @@ mod tests {
             ("rgb2hsv(ones(2,2,3));", "HSV = rgb2hsv(RGB)"),
             ("hsv2rgb(ones(2,2,3));", "RGB = hsv2rgb(HSV)"),
             ("ind2rgb([1,2;2,1],[1,0,0;0,1,0]);", "RGB = ind2rgb(X, map)"),
+            ("rgb2lab(ones(2,2,3));", "LAB = rgb2lab(RGB)"),
+            ("lab2rgb(ones(2,2,3));", "RGB = lab2rgb(LAB)"),
+            ("im2double(ones(2,2));", "J = im2double(I)"),
+            ("im2uint8(ones(2,2));", "J = im2uint8(I)"),
+            ("im2uint16(ones(2,2));", "J = im2uint16(I)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3626,7 +3631,18 @@ mod tests {
         let position = lsp_types::Position::new(0, 0);
         let completions = completion_at(text, &analysis, &position);
 
-        for builtin in ["gray2rgb", "rgb2gray", "rgb2hsv", "hsv2rgb", "ind2rgb"] {
+        for builtin in [
+            "gray2rgb",
+            "rgb2gray",
+            "rgb2hsv",
+            "hsv2rgb",
+            "ind2rgb",
+            "rgb2lab",
+            "lab2rgb",
+            "im2double",
+            "im2uint8",
+            "im2uint16",
+        ] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))
