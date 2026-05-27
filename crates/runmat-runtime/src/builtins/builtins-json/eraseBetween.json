@@ -10,9 +10,7 @@
     "string array"
   ],
   "summary": "Delete text that lies between boundary markers while matching MATLAB-compatible name-value options.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/string.erasebetween.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

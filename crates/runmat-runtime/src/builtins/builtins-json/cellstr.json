@@ -10,9 +10,7 @@
     "gpu fallback"
   ],
   "summary": "Convert character arrays, string arrays, or cell arrays of text into cell arrays of character vectors with MATLAB-compatible trimming semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/cellstr.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Compute covariance matrices for vectors, matrices, or paired data sets.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/cov.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

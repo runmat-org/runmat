@@ -8,9 +8,7 @@
     "error propagation"
   ],
   "summary": "Propagate a caught exception without handling it locally.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/mexception.rethrow.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

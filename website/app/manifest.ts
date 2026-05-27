@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: 'RunMat - Modern MATLAB Runtime',
     short_name: 'RunMat',
-    description: 'Pre-release MATLAB-style runtime with Jupyter kernel, BLAS/LAPACK, and JIT compilation; current plotting covers simple 2D line/scatter while richer charts are still underway',
+    description: 'Pre-release MATLAB-style runtime with BLAS/LAPACK, JIT compilation, GPU acceleration, and plotting',
     start_url: '/',
     display: 'standalone',
     background_color: '#0b1220',

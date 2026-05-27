@@ -12,9 +12,7 @@
     "gpu"
   ],
   "summary": "Matrix multiplication (A * B) with MATLAB-compatible semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/mtimes.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

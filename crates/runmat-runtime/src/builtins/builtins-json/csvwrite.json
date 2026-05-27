@@ -11,9 +11,7 @@
     "column offset"
   ],
   "summary": "Write numeric matrices to comma-separated text files using MATLAB-compatible offsets.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/csvwrite.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

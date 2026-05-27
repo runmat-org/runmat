@@ -9,9 +9,7 @@
     "builtin exists"
   ],
   "summary": "Determine whether a variable, file, folder, built-in function, or class exists and return MATLAB-compatible identifiers.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/exist.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

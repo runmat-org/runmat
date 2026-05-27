@@ -4,6 +4,25 @@ _What's new across the RunMat runtime, app, and sandbox. For technical runtime d
 
 ---
 
+## [v0.4.9](https://github.com/runmat-org/runmat/compare/v0.4.8...v0.4.9)
+
+_May 22, 2026_
+
+### Runtime
+
+#### Added
+- Add control-system response builtins — `step` and `impulse` now compute or plot SISO `tf` responses, support automatic, scalar-final-time, and explicit time-vector sampling, return response/time column vectors, and validate unsupported model forms with clear diagnostics
+- Add polygon plotting builtins — `patch` and `fill3` now create filled 2-D and 3-D polygon graphics handles with `Faces`/`Vertices`, coordinate, color, axes-handle, and common patch property support, backed by shared triangulation and GPU plotting render paths
+- Add numerical analysis builtins — `integral` now performs finite scalar adaptive quadrature for function handles, and `fminbnd` now performs bounded scalar minimization with Brent-style search, `optimset` options, multi-output diagnostics, and shared Brent helpers with `fzero`
+- Add array, statistics, and signal-processing builtins — `repelem`, `mode`, `sinc`, `sawtooth`, and `square` now cover element replication, MATLAB-compatible modal reductions, normalized sinc evaluation, and periodic waveform generation
+- Add numeric helper builtins — `complex`, `sind`, `cosd`, `tand`, `db`, and `fgetl` now support complex construction, degree-based trigonometry, decibel conversion, and line-oriented text-file reads
+
+#### Fixed
+- Fix `errorbar` parsing for line specs before name-value pairs, y-only calls, explicit `x`/`y`/error inputs, and trailing line specs
+- Fix MATLAB complex-constructor semantics, including unary complex storage, scalar expansion, and two-argument real-input validation
+
+---
+
 ## [v0.4.8](https://github.com/runmat-org/runmat/compare/v0.4.6...v0.4.8)
 
 _May 15, 2026_
@@ -351,7 +370,6 @@ _[Fusion engine](/docs/fusion-guide):_
 _August 25, 2025_
 
 #### Added
-- Add Jupyter kernel support — ZMQ transport so RunMat can serve as a Jupyter kernel
 - Add PowerShell installer for Windows
 
 ---

@@ -140,7 +140,7 @@ To make the CLI, tests, LSP, and browser/WASM host share the same interpreter st
 -   **Purpose**: `runmat-core` packages the lexer, parser, HIR lowering, the VM interpreter, optional Turbine JIT, GC configuration, snapshot loading, and builtin dispatch into a single embeddable `RunMatSession`.
 -   **Feature gating**: The crate exposes a `jit` feature (on by default). Desktop builds keep Turbine enabled, while wasm targets or lightweight embeds can disable it and run interpreter-only without dragging in Cranelift.
 -   **Embedding surface**: `RunMatSession` provides ergonomic helpers (`execute`, `reset_stats`, `show_system_info`, etc.) so consumers can drive the runtime without depending on CLI plumbing or OS-specific services (filesystems, sockets, threads).
--   **Reuse across binaries**: The `runmat` CLI (including REPL mode), the **LSP** (`runmat-lsp`, used by the VS Code/Cursor extension), the Jupyter kernel, integration tests, and **browser/WASM** bindings (`runmat-wasm`) all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
+-   **Reuse across binaries**: The `runmat` CLI (including REPL mode), integration tests, and **browser/WASM** bindings (`runmat-wasm`) all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
 -   **Configuration**: The `runmat-config` crate provides file/env/CLI precedence and is used by the CLI and LSP. See [Configuration](/docs/configuration) for details. The browser sandbox uses built-in defaults and does not read `.runmat` or env vars.
 -   **Filesystem**: The `runmat-filesystem` crate provides pluggable storage backends (native, sandbox, WASM bridge, remote) so the same I/O builtins work across CLI, browser, and desktop. See the [Filesystem Strategy](/docs/filesystem) for the design.
 
@@ -167,7 +167,6 @@ RunMat includes an in-progress GPU-accelerated plotting layer aimed at eventuall
     -   **Plots (`LinePlot`, `SurfacePlot`, etc.)**: High-level, user-facing structs that encapsulate the data and styling for a specific plot type.
     -   **GUI (`PlotWindow`, `PlotOverlay`)**: An interactive window built with `winit` and `egui` that provides camera controls, zooming, panning, and UI overlays like axes, grids, and titles.
 -   **MATLAB-Compatible API**: Provides a familiar API (`plot()`, `scatter()`, `surf()`) for ease of use.
--   **Jupyter Integration**: Can render plots as static images or interactive HTML widgets directly within Jupyter notebooks.
 -   **Modern Theming**: A professional and configurable styling system with beautiful presets like `ModernDark`.
 
 ---

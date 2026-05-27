@@ -9,9 +9,7 @@
     "temp directory"
   ],
   "summary": "Return a unique temporary file path in the system temp folder or a user-specified directory.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/tempname.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

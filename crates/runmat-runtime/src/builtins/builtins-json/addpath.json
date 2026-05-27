@@ -10,9 +10,7 @@
     "-frozen"
   ],
   "summary": "Add folders to the MATLAB search path used by RunMat.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/addpath.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

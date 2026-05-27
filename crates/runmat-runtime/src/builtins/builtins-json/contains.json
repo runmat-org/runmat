@@ -9,9 +9,7 @@
     "string array"
   ],
   "summary": "Determine whether text inputs contain specific patterns with MATLAB-compatible implicit expansion and case handling.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/contains.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

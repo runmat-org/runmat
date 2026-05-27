@@ -8,9 +8,7 @@
     "array"
   ],
   "summary": "Generate an n-by-n magic square.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/magic.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

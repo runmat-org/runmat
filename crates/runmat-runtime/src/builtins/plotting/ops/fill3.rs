@@ -327,18 +327,8 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         },
     );
 
-    let handles = plot_indices_out
-        .borrow()
-        .iter()
-        .map(|(axes, plot_index)| {
-            crate::builtins::plotting::state::register_patch_handle(
-                figure_handle,
-                *axes,
-                *plot_index,
-            )
-        })
-        .collect::<Vec<_>>();
-    if handles.is_empty() {
+    let plot_indices = plot_indices_out.borrow().clone();
+    if plot_indices.is_empty() {
         return render_result.map(|_| Value::Num(f64::NAN));
     }
     if let Err(err) = render_result {
@@ -347,6 +337,12 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             return Err(map_fill3_internal(err));
         }
     }
+    let handles = plot_indices
+        .into_iter()
+        .map(|(axes, plot_index)| {
+            crate::builtins::plotting::state::register_patch_handle(figure_handle, axes, plot_index)
+        })
+        .collect::<Vec<_>>();
     Ok(handles_value(handles))
 }
 

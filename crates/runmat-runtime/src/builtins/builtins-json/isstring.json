@@ -10,9 +10,7 @@
     "gpuArray"
   ],
   "summary": "Return true when a value is a MATLAB string array (including string scalars).",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/isstring.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

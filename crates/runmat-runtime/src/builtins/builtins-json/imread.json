@@ -15,9 +15,7 @@
     "upload"
   ],
   "summary": "Read image data from an uploaded file into MATLAB-compatible arrays.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/imread.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

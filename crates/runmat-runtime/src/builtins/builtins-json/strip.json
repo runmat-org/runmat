@@ -10,9 +10,7 @@
     "character arrays"
   ],
   "summary": "Remove leading and trailing characters from strings, character arrays, and cell arrays.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strip.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

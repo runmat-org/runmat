@@ -9,9 +9,7 @@
     "matrix transpose"
   ],
   "summary": "Swap the first two dimensions of arrays and conjugate complex values.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/ctranspose.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

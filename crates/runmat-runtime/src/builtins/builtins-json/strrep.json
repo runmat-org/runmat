@@ -9,9 +9,7 @@
     "substring replace"
   ],
   "summary": "Replace substring occurrences in strings, character arrays, and cell arrays while mirroring MATLAB semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strrep.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

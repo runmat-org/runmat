@@ -9,9 +9,7 @@
     "summary"
   ],
   "summary": "Return a formatted status string that describes the active GPU provider.",
-  "references": [
-    "https://www.mathworks.com/help/parallel-computing/gpudevice.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

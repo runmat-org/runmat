@@ -8,9 +8,7 @@
     "plotting"
   ],
   "summary": "Return the handle for the current axes, or a struct describing the active axes state.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/gca.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -10,9 +10,7 @@
     "gpu"
   ],
   "summary": "Return values that appear in the first input but not the second, matching MATLAB ordering rules.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/setdiff.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -13,9 +13,7 @@
     "hex"
   ],
   "summary": "Set the numeric display format for console output, controlling how floating-point numbers are shown.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/format.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

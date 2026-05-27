@@ -9,9 +9,7 @@
     "gpuArray single"
   ],
   "summary": "Convert numeric values, character arrays, and gpuArray handles to IEEE single precision.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/single.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Compute the MATLAB remainder a - b .* fix(./b) for scalars, matrices, N-D tensors, and complex values.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/rem.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

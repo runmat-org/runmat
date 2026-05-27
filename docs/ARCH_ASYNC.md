@@ -15,7 +15,7 @@ This doc is paired with `docs/ARCH_ASYNC_PLAN.md`, which tracks an incremental r
   - **Evaluation is a Future**: all RunMat evaluation can be driven via `poll`, returning `Pending`
     at suspension points and `Ready` at completion.
   - **Typed suspension**: no “pending as string” or implicit sentinel error messages.
-  - **Host-neutral**: the core async model works in native CLI, GUI, Jupyter, and WASM.
+  - **Host-neutral**: the core async model works in native CLI, GUI, and WASM.
   - **Deterministic semantics**: suspension is explicit (primarily via `await`), with predictable
     atomic regions between awaits.
   - **Good performance**: “sync-only” code remains fast; async overhead is near-zero when unused.

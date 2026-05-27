@@ -29,6 +29,7 @@ export function TryInBrowserButton({
   source = "try-in-browser",
   exampleId,
   className,
+  children,
   ...props
 }: TryInBrowserButtonProps) {
   const resolvedExampleId = normalizeExampleId(exampleId) ?? (code ? `code-${hashCode(code)}` : undefined);
@@ -62,8 +63,7 @@ export function TryInBrowserButton({
                className="lucide lucide-play w-4 h-4" aria-hidden="true">
               <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"></path>
           </svg>
-          Run in browser
+          {children ?? "Run in browser"}
       </Button>
   );
 }
-

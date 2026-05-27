@@ -10,9 +10,7 @@
     "machine format"
   ],
   "summary": "Open a file and obtain a MATLAB-compatible file identifier.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/fopen.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

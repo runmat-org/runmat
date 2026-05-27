@@ -10,9 +10,7 @@
     "tokens"
   ],
   "summary": "Search text using regular expressions, returning match positions, substrings, tokens, or splits with MATLAB-compatible semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/regexp.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

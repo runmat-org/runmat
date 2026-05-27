@@ -10,9 +10,7 @@
     "gather"
   ],
   "summary": "Prompt the user for input. Return either the typed text or a parsed numeric value.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/input.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

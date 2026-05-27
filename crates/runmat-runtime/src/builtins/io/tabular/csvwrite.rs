@@ -255,7 +255,7 @@ async fn csvwrite_builtin(
     })?;
     ensure_matrix_shape(&tensor)?;
 
-    let bytes = write_csv(&path, &tensor, row_offset, col_offset)?;
+    let bytes = write_csv(&path, &tensor, row_offset, col_offset).await?;
     Ok(Value::Num(bytes as f64))
 }
 
@@ -378,7 +378,7 @@ fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
     ))
 }
 
-fn write_csv(
+async fn write_csv(
     path: &Path,
     tensor: &Tensor,
     row_offset: usize,
@@ -386,7 +386,7 @@ fn write_csv(
 ) -> BuiltinResult<usize> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
-    let mut file = options.open(path).map_err(|err| {
+    let mut file = options.open_async(path).await.map_err(|err| {
         csvwrite_error_with_source(
             &CSVWRITE_ERROR_IO_OPEN,
             format!(
@@ -415,7 +415,7 @@ fn write_csv(
     }
 
     if rows == 0 || cols == 0 {
-        file.flush().map_err(|err| {
+        file.flush_async().await.map_err(|err| {
             csvwrite_error_with_source(
                 &CSVWRITE_ERROR_IO_WRITE,
                 format!("csvwrite: failed to flush output ({err})"),
@@ -456,7 +456,7 @@ fn write_csv(
         bytes_written += line_ending.len();
     }
 
-    file.flush().map_err(|err| {
+    file.flush_async().await.map_err(|err| {
         csvwrite_error_with_source(
             &CSVWRITE_ERROR_IO_WRITE,
             format!("csvwrite: failed to flush output ({err})"),

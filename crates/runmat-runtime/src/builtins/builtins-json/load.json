@@ -10,9 +10,7 @@
     "regex load"
   ],
   "summary": "Load variables from a MATLAB-compatible MAT-file into the workspace or return them as a struct.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/load.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

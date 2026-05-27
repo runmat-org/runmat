@@ -323,7 +323,7 @@ async fn readmatrix_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResu
     let options = parse_options(&rest).await?;
     options.validate()?;
     let resolved = resolve_path(&path_value)?;
-    let tensor = read_numeric_matrix(&resolved, &options)?;
+    let tensor = read_numeric_matrix(&resolved, &options).await?;
     finalize_output(tensor, &options)
 }
 
@@ -1115,8 +1115,8 @@ fn tensor_to_gpu(
     Ok(Value::Tensor(tensor))
 }
 
-fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> BuiltinResult<Tensor> {
-    let file = File::open(path).map_err(|err| {
+async fn read_numeric_matrix(path: &Path, options: &ReadMatrixOptions) -> BuiltinResult<Tensor> {
+    let file = File::open_async(path).await.map_err(|err| {
         readmatrix_error_with_source(
             &READMATRIX_ERROR_IO_OPEN,
             format!("readmatrix: unable to read '{}': {err}", path.display()),

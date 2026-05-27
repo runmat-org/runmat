@@ -14,7 +14,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor;
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_builtins::ResolveContext;
 use runmat_builtins::{
@@ -351,6 +351,16 @@ async fn parse_factor_args(args: &[Value]) -> crate::BuiltinResult<Vec<RepFactor
 }
 
 async fn parse_single_factor(value: &Value, position: usize) -> crate::BuiltinResult<RepFactor> {
+    if matches!(value, Value::GpuTensor(_)) {
+        let gathered = gpu_helpers::gather_value_async(value)
+            .await
+            .map_err(|e| repelem_invalid_factors(format!("repelem: {e}")))?;
+        return parse_host_factor(&gathered, position);
+    }
+    parse_host_factor(value, position)
+}
+
+fn parse_host_factor(value: &Value, position: usize) -> crate::BuiltinResult<RepFactor> {
     match value {
         Value::Num(n) => Ok(RepFactor::Scalar(coerce_count(*n, position)?)),
         Value::Int(i) => Ok(RepFactor::Scalar(coerce_count(i.to_f64(), position)?)),
@@ -375,19 +385,6 @@ async fn parse_single_factor(value: &Value, position: usize) -> crate::BuiltinRe
                 Ok(RepFactor::Vector(
                     la.data.iter().map(|&b| (b != 0) as usize).collect(),
                 ))
-            }
-        }
-        Value::GpuTensor(_) => {
-            // Gather to host before reading dimensions so the planner's
-            // GatherImmediately hint kicks in for repelem inputs too.
-            let raw = tensor::scalar_f64_from_value_async(value)
-                .await
-                .map_err(|e| repelem_invalid_factors(format!("repelem: {e}")))?;
-            match raw {
-                Some(n) => Ok(RepFactor::Scalar(coerce_count(n, position)?)),
-                None => Err(repelem_invalid_factors(format!(
-                    "repelem: replication argument {position} must reside on the host"
-                ))),
             }
         }
         other => Err(repelem_invalid_factors(format!(
@@ -926,6 +923,31 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn gpu_replication_vector_is_gathered_to_host_factor() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let v = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
+            let counts_data = [1.0, 2.0, 3.0];
+            let counts_shape = [1usize, 3];
+            let counts_view = runmat_accelerate_api::HostTensorView {
+                data: &counts_data,
+                shape: &counts_shape,
+            };
+            let counts_handle = provider.upload(&counts_view).expect("upload counts");
+
+            let result = repelem_builtin(Value::Tensor(v), vec![Value::GpuTensor(counts_handle)])
+                .expect("repelem");
+
+            match result {
+                Value::Tensor(t) => {
+                    assert_eq!(t.shape, vec![1, 6]);
+                    assert_eq!(t.data, vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0]);
+                }
+                other => panic!("expected tensor, got {other:?}"),
+            }
+        });
     }
 
     #[test]

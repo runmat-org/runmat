@@ -1,8 +1,8 @@
 # RunMat CLI
 
 RunMat ships with a task-oriented command-line interface for running scripts,
-working interactively, operating Jupyter kernels, and managing remote
-project-backed storage. Use this page as a workflow guide first, then fall back
+working interactively, and managing remote project-backed storage. Use this
+page as a workflow guide first, then fall back
 to `runmat --help` and `runmat <command> --help` for the full generated
 reference.
 
@@ -307,6 +307,16 @@ RunMat uses config files + CLI flags for runtime behavior. Environment variables
 ### Telemetry ingestion (optional)
 
 - `RUNMAT_TELEMETRY_KEY`
+### Plotting and artifacts
+
+- `RUNMAT_PLOT_MODE`
+- `RUNMAT_PLOT_HEADLESS`
+- `RUNMAT_PLOT_BACKEND`
+- `RUNMAT_ARTIFACTS_DIR`
+- `RUNMAT_ARTIFACTS_MANIFEST`
+- `RUNMAT_CAPTURE_FIGURES`
+- `RUNMAT_FIGURE_SIZE`
+- `RUNMAT_MAX_FIGURES`
 
 ## Precedence
 

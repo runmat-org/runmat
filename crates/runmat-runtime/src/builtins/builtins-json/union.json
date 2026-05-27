@@ -10,9 +10,7 @@
     "gpu"
   ],
   "summary": "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/union.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -3,7 +3,9 @@
 use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
 use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
 use crate::plots::line::LineStyle;
-use glam::{Vec3, Vec4};
+use glam::{Vec2, Vec3, Vec4};
+
+const TRIANGULATION_EPSILON: f32 = 1.0e-6;
 
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
 
@@ -227,13 +229,8 @@ impl PatchPlot {
                     for &idx in face {
                         out_vertices.push(Vertex::new(self.vertices[idx], color));
                     }
-                    for tri in 1..(face.len() - 1) {
-                        out_indices.extend_from_slice(&[
-                            base,
-                            base + tri as u32,
-                            base + tri as u32 + 1,
-                        ]);
-                    }
+                    triangulate_face(&self.vertices, face, base, &mut out_indices)
+                        .expect("validated patch face should triangulate");
                 }
             }
             self.face_vertices = Some(out_vertices);
@@ -482,8 +479,164 @@ fn validate_faces(vertices: &[Vec3], faces: &[Vec<usize>]) -> Result<(), String>
                 return Err("patch: Faces index exceeds Vertices row count".to_string());
             }
         }
+        let mut indices = Vec::new();
+        triangulate_face(vertices, face, 0, &mut indices)?;
     }
     Ok(())
+}
+
+fn triangulate_face(
+    vertices: &[Vec3],
+    face: &[usize],
+    base: u32,
+    out_indices: &mut Vec<u32>,
+) -> Result<(), String> {
+    match face.len() {
+        0..=2 => Ok(()),
+        3 => {
+            out_indices.extend_from_slice(&[base, base + 1, base + 2]);
+            Ok(())
+        }
+        _ => {
+            let projected = project_face_to_2d(vertices, face)?;
+            ear_clip_projected_face(&projected, base, out_indices)
+        }
+    }
+}
+
+fn project_face_to_2d(vertices: &[Vec3], face: &[usize]) -> Result<Vec<Vec2>, String> {
+    let mut normal = Vec3::ZERO;
+    for pos in 0..face.len() {
+        let current = vertices[face[pos]];
+        let next = vertices[face[(pos + 1) % face.len()]];
+        normal.x += (current.y - next.y) * (current.z + next.z);
+        normal.y += (current.z - next.z) * (current.x + next.x);
+        normal.z += (current.x - next.x) * (current.y + next.y);
+    }
+
+    let abs = normal.abs();
+    if abs.max_element() <= TRIANGULATION_EPSILON {
+        return Err("patch: Face polygon must have non-zero area".to_string());
+    }
+
+    Ok(face
+        .iter()
+        .map(|&idx| {
+            let vertex = vertices[idx];
+            if abs.x >= abs.y && abs.x >= abs.z {
+                Vec2::new(vertex.y, vertex.z)
+            } else if abs.y >= abs.z {
+                Vec2::new(vertex.x, vertex.z)
+            } else {
+                Vec2::new(vertex.x, vertex.y)
+            }
+        })
+        .collect())
+}
+
+fn ear_clip_projected_face(
+    points: &[Vec2],
+    base: u32,
+    out_indices: &mut Vec<u32>,
+) -> Result<(), String> {
+    let signed_area = polygon_signed_area(points);
+    if signed_area.abs() <= TRIANGULATION_EPSILON {
+        return Err("patch: Face polygon must have non-zero area".to_string());
+    }
+    let ccw = signed_area > 0.0;
+    let mut polygon: Vec<usize> = (0..points.len()).collect();
+    let mut scan_start = 1;
+
+    while polygon.len() > 3 {
+        let len = polygon.len();
+        let mut ear_pos = None;
+        for step in 0..len {
+            let pos = (scan_start + step) % len;
+            if is_ear(points, &polygon, pos, ccw) {
+                ear_pos = Some(pos);
+                break;
+            }
+        }
+
+        let Some(pos) = ear_pos else {
+            return Err(
+                "patch: Face polygon could not be triangulated; faces must be simple polygons"
+                    .to_string(),
+            );
+        };
+        let len = polygon.len();
+        let prev = polygon[(pos + len - 1) % len];
+        let current = polygon[pos];
+        let next = polygon[(pos + 1) % len];
+        out_indices.extend_from_slice(&[
+            base + prev as u32,
+            base + current as u32,
+            base + next as u32,
+        ]);
+        polygon.remove(pos);
+        scan_start = pos.min(polygon.len() - 1);
+    }
+
+    out_indices.extend_from_slice(&[
+        base + polygon[0] as u32,
+        base + polygon[1] as u32,
+        base + polygon[2] as u32,
+    ]);
+    Ok(())
+}
+
+fn is_ear(points: &[Vec2], polygon: &[usize], pos: usize, ccw: bool) -> bool {
+    let len = polygon.len();
+    let prev = polygon[(pos + len - 1) % len];
+    let current = polygon[pos];
+    let next = polygon[(pos + 1) % len];
+    let a = points[prev];
+    let b = points[current];
+    let c = points[next];
+
+    if !is_convex(a, b, c, ccw) {
+        return false;
+    }
+
+    !polygon.iter().any(|&idx| {
+        idx != prev && idx != current && idx != next && point_in_triangle(points[idx], a, b, c, ccw)
+    })
+}
+
+fn is_convex(a: Vec2, b: Vec2, c: Vec2, ccw: bool) -> bool {
+    let cross = cross_2d(a, b, c);
+    if ccw {
+        cross > TRIANGULATION_EPSILON
+    } else {
+        cross < -TRIANGULATION_EPSILON
+    }
+}
+
+fn point_in_triangle(point: Vec2, a: Vec2, b: Vec2, c: Vec2, ccw: bool) -> bool {
+    let ab = cross_2d(a, b, point);
+    let bc = cross_2d(b, c, point);
+    let ca = cross_2d(c, a, point);
+    if ccw {
+        ab >= -TRIANGULATION_EPSILON && bc >= -TRIANGULATION_EPSILON && ca >= -TRIANGULATION_EPSILON
+    } else {
+        ab <= TRIANGULATION_EPSILON && bc <= TRIANGULATION_EPSILON && ca <= TRIANGULATION_EPSILON
+    }
+}
+
+fn cross_2d(a: Vec2, b: Vec2, c: Vec2) -> f32 {
+    let ab = b - a;
+    let ac = c - a;
+    ab.x * ac.y - ab.y * ac.x
+}
+
+fn polygon_signed_area(points: &[Vec2]) -> f32 {
+    let mut area = 0.0;
+    for pos in 0..points.len() {
+        let current = points[pos];
+        let next = points[(pos + 1) % points.len()];
+        area += current.x * next.y - next.x * current.y;
+    }
+    area * 0.5
 }
 
 fn normalize_faces(faces: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
@@ -520,9 +673,34 @@ mod tests {
         )
         .unwrap();
         let face = patch.render_data();
-        assert_eq!(face.indices.as_ref().unwrap().len(), 6);
+        assert_eq!(face.indices.as_ref().unwrap(), &[0, 1, 2, 0, 2, 3]);
         let edge = patch.edge_render_data().unwrap();
         assert_eq!(edge.vertices.len(), 8);
+    }
+
+    #[test]
+    fn patch_triangulates_concave_face_without_triangle_fan() {
+        let mut patch = PatchPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(2.0, 1.0, 0.0),
+                Vec3::new(1.0, 0.4, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![vec![0, 1, 2, 3, 4]],
+        )
+        .unwrap();
+
+        let render = patch.render_data();
+        let indices = render.indices.as_ref().unwrap();
+        assert_eq!(indices.len(), 9);
+        assert_ne!(indices, &[0, 1, 2, 0, 2, 3, 0, 3, 4]);
+        assert_eq!(indices, &[1, 2, 3, 3, 4, 0, 0, 1, 3]);
+        assert!(
+            (triangle_area_sum(&render.vertices, indices) - polygon_area(&render.vertices)).abs()
+                < 1.0e-5
+        );
     }
 
     #[test]
@@ -600,5 +778,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(patch.faces(), &[vec![0, 1, 2]]);
+    }
+
+    fn triangle_area_sum(vertices: &[Vertex], indices: &[u32]) -> f32 {
+        indices
+            .chunks_exact(3)
+            .map(|tri| {
+                let a = Vec2::new(
+                    vertices[tri[0] as usize].position[0],
+                    vertices[tri[0] as usize].position[1],
+                );
+                let b = Vec2::new(
+                    vertices[tri[1] as usize].position[0],
+                    vertices[tri[1] as usize].position[1],
+                );
+                let c = Vec2::new(
+                    vertices[tri[2] as usize].position[0],
+                    vertices[tri[2] as usize].position[1],
+                );
+                cross_2d(a, b, c).abs() * 0.5
+            })
+            .sum()
+    }
+
+    fn polygon_area(vertices: &[Vertex]) -> f32 {
+        let points: Vec<Vec2> = vertices
+            .iter()
+            .map(|vertex| Vec2::new(vertex.position[0], vertex.position[1]))
+            .collect();
+        polygon_signed_area(&points).abs()
     }
 }

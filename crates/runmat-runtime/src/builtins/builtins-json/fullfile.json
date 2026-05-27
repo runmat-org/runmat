@@ -9,9 +9,7 @@
     "filesep"
   ],
   "summary": "Build a platform-correct file path from multiple path segments.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/fullfile.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

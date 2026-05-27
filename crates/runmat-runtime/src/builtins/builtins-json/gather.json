@@ -10,9 +10,7 @@
     "residency"
   ],
   "summary": "Transfer gpuArray data back to host memory, recursively handling cells, structs, and objects.",
-  "references": [
-    "https://www.mathworks.com/help/parallel-computing/gather.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

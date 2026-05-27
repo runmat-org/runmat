@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Format numeric, logical, and text data into MATLAB string arrays using printf-style placeholders.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/compose.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

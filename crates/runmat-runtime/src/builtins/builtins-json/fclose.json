@@ -9,9 +9,7 @@
     "identifier"
   ],
   "summary": "Close one file, multiple files, or all files opened with fopen.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/fclose.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

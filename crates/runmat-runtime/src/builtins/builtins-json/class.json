@@ -9,10 +9,7 @@
     "isa"
   ],
   "summary": "Return the MATLAB class name for scalars, arrays, handles, and objects.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/class.html",
-    "https://www.mathworks.com/help/matlab/ref/isa.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "cell array"
   ],
   "summary": "Return the number of characters in each element of a string array, character array, or cell array of character vectors.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strlength.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

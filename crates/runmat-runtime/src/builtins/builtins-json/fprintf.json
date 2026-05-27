@@ -11,9 +11,7 @@
     "encoding"
   ],
   "summary": "Write formatted text to files or standard output/error using MATLAB-compatible semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/fprintf.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

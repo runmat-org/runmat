@@ -10,9 +10,7 @@
     "gpuArray"
   ],
   "summary": "Test whether a value is a MATLAB character array (char vector or char matrix).",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/ischar.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

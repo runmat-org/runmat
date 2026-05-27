@@ -9,9 +9,7 @@
     "regex"
   ],
   "summary": "Perform MATLAB-compatible regular expression replacements on character vectors, string arrays, or cell arrays.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/regexprep.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

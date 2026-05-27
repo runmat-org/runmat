@@ -9,9 +9,7 @@
     "gpuArray double"
   ],
   "summary": "Convert numeric values, logical masks, characters, and gpuArray handles to double precision.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/double.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

@@ -9,9 +9,7 @@
     "case-sensitive"
   ],
   "summary": "Compare text inputs for equality up to N leading characters with MATLAB-compatible broadcasting.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/strncmp.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "image"
   ],
   "summary": "Convert indexed image data and a colormap to RGB truecolor data.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/ind2rgb.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

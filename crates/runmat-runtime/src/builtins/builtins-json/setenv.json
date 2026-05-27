@@ -9,9 +9,7 @@
     "unset"
   ],
   "summary": "Set or clear environment variables with MATLAB-compatible status outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/setenv.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

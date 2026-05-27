@@ -9,9 +9,7 @@
     "dimension"
   ],
   "summary": "Compute dot products (inner products) of real or complex inputs, optionally along a chosen dimension.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/dot.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

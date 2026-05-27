@@ -1,9 +1,15 @@
 {
   "title": "fzero",
   "category": "math/optim",
-  "keywords": ["fzero", "root finding", "zero", "brent", "optimization"],
+  "keywords": [
+    "fzero",
+    "root finding",
+    "zero",
+    "brent",
+    "optimization"
+  ],
   "summary": "Find a zero of a scalar nonlinear function using bracket expansion and Brent's method.",
-  "references": ["https://www.mathworks.com/help/matlab/ref/fzero.html"],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -47,9 +53,18 @@
     }
   ],
   "links": [
-    { "label": "fsolve", "url": "./fsolve" },
-    { "label": "optimset", "url": "./optimset" },
-    { "label": "roots", "url": "./roots" }
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    },
+    {
+      "label": "roots",
+      "url": "./roots"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/math/optim/fzero.rs`",

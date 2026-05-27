@@ -233,7 +233,7 @@ Between the Accelerate launch in November and now, we also shipped:
 
 RunMat App launches with three tiers:
 
-**Hobby (free)** — 100 MB of storage. Unlimited projects. Sign in and start working.
+**Free** — 100 MB of storage. Unlimited projects. Sign in and start working.
 
 **Pro ($30/month per user)** — 10 GB of storage. Additional storage available from your account. For individuals and small teams doing real work.
 
@@ -257,7 +257,7 @@ One runtime, three ways to use it, all of them fast.
 
 The [full runtime is open source](https://github.com/runmat-org/runmat) and MIT licensed. You can install it from Homebrew (`brew install runmat-org/tap/runmat`), NPM (`npm install runmat`), or crates.io (`cargo install runmat`), and see the source at [github.com/runmat-org/runmat](https://github.com/runmat-org/runmat).
 
-The NPM package ships the complete runtime — execution, GPU acceleration, and plotting — so you can embed RunMat inside your own web tools. There is also a Jupyter kernel if notebooks are your workflow.
+The NPM package ships the complete runtime — execution, GPU acceleration, and plotting — so you can embed RunMat inside your own web tools.
 
 Everything that powers the sandbox and RunMat App starts in this repo.
 

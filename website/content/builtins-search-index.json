@@ -597,6 +597,19 @@
     ]
   },
   {
+    "title": "contour3",
+    "slug": "contour3",
+    "summary": "Create 3-D contour line plots where each contour is drawn at its scalar level height.",
+    "keywords": [
+      "contour3",
+      "3d contour",
+      "contour lines",
+      "iso-lines",
+      "level sets",
+      "matlab contour3"
+    ]
+  },
+  {
     "title": "contourf",
     "slug": "contourf",
     "summary": "Create filled contour plots for level regions, scalar fields, and MATLAB `contourf` workflows.",

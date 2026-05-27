@@ -11,9 +11,7 @@
     "gpu"
   ],
   "summary": "Count observations in numeric arrays using configurable histogram bins.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/histcounts.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": true,

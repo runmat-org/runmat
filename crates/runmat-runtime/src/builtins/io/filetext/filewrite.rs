@@ -328,7 +328,7 @@ async fn filewrite_builtin(
     let options = parse_options(&rest)?;
     let resolved = resolve_path(&path)?;
     let payload = prepare_payload(&data, options.encoding)?;
-    let written = write_bytes(&resolved, &payload, options.write_mode)?;
+    let written = write_bytes(&resolved, &payload, options.write_mode).await?;
     Ok(Value::Num(written as f64))
 }
 
@@ -725,7 +725,7 @@ fn encode_bytes(bytes: Vec<u8>, encoding: FileEncoding) -> BuiltinResult<Vec<u8>
     Ok(bytes)
 }
 
-fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<usize> {
+async fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<usize> {
     let mut options = OpenOptions::new();
     options.create(true);
     match mode {
@@ -737,7 +737,7 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
         }
     }
 
-    let mut file = options.open(path).map_err(|err| {
+    let mut file = options.open_async(path).await.map_err(|err| {
         filewrite_error_with_source(
             format!(
                 "{}: unable to open '{}': {}",
@@ -763,7 +763,7 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
         )
     })?;
 
-    file.flush().map_err(|err| {
+    file.flush_async().await.map_err(|err| {
         filewrite_error_with_source(
             format!(
                 "{}: unable to flush '{}': {}",

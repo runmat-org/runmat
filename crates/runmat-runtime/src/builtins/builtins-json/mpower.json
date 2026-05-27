@@ -8,9 +8,7 @@
     "gpu"
   ],
   "summary": "Raise scalars or square matrices to a scalar power (A^B) following MATLAB's matrix power semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/mpower.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "gpu"
   ],
   "summary": "Convert text, numeric codes, and cell contents into MATLAB-style character arrays.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/char.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

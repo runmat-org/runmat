@@ -9,9 +9,7 @@
     "text"
   ],
   "summary": "Read ASCII text until the terminator from a MATLAB-compatible tcpclient struct.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/tcpclient.readline.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

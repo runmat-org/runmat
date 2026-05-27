@@ -10,9 +10,7 @@
     "dimension join"
   ],
   "summary": "Combine text across a specified dimension inserting delimiters between elements.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/join.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

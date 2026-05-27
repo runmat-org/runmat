@@ -10,9 +10,7 @@
     "gpu"
   ],
   "summary": "Sort scalars, vectors, matrices, or N-D tensors along a dimension, with optional index outputs.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/sort.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

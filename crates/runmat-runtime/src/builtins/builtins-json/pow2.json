@@ -8,9 +8,7 @@
     "gpu"
   ],
   "summary": "Compute 2.^X or scale mantissas by binary exponents with MATLAB-compatible semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/pow2.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

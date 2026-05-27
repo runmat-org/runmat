@@ -9,9 +9,7 @@
     "dir"
   ],
   "summary": "List files and folders in the current directory or matching a wildcard pattern.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/ls.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

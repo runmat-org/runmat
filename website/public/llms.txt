@@ -84,7 +84,7 @@ The agent helps close common compatibility gaps: when a MATLAB script uses a fun
 - [Version Control for Engineers](https://runmat.com/blog/version-control-for-engineers-who-dont-use-git): Automatic file history and snapshots without git
 - [Large Data Persistence](https://runmat.com/blog/ad-hoc-checkpoints-to-large-data-persistence): Chunked, content-addressed storage for large numerical artifacts
 - [Restoring Historical Run State](https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations): Inspect past runs without re-execution
-- [Pricing](https://runmat.com/pricing): Free Hobby tier (100 MB) through Enterprise
+- [Pricing](https://runmat.com/pricing): Free tier (100 MB) through Enterprise
 
 ## Key Comparisons
 

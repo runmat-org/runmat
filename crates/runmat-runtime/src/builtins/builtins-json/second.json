@@ -8,9 +8,7 @@
     "fractional seconds"
   ],
   "summary": "Extract second values from datetime values.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/datetime.second.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

@@ -9,9 +9,7 @@
     "implicit expansion"
   ],
   "summary": "Element-wise subtraction A - B with MATLAB-compatible implicit expansion, complex support, and GPU fallbacks.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/minus.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

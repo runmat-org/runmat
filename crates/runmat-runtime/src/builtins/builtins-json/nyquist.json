@@ -1,0 +1,110 @@
+{
+  "title": "nyquist",
+  "category": "control",
+  "keywords": [
+    "nyquist",
+    "nyquist plot",
+    "frequency response",
+    "control system",
+    "transfer function",
+    "tf"
+  ],
+  "summary": "Compute or plot the Nyquist frequency response of a SISO transfer-function model.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`nyquist` evaluates host-side control-system metadata and returns host-resident response vectors. It registers a GPU residency policy so gpuArray coefficient inputs are gathered before metadata evaluation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`nyquist` materialises frequency-response vectors and terminates numeric fusion chains."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::nyquist::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`nyquist(sys)` plots a Nyquist diagram for a supported SISO `tf` object. `[re, im, w] = nyquist(sys)` returns the real part, imaginary part, and frequency vector. `nyquist(sys, w)` evaluates the response at an explicit vector of frequencies in radians per time unit.",
+  "behaviors": [
+    "Supports SISO `tf` objects created by `tf(num, den)` or `tf(num, den, Ts)`.",
+    "Continuous-time models are evaluated as `H(j*w)`.",
+    "Discrete-time models are evaluated on the unit circle as `H(exp(j*w*Ts))`.",
+    "When `w` is omitted, continuous-time models use a deterministic logarithmic frequency grid based on transfer-function poles and zeros.",
+    "When `w` is omitted, discrete-time models use a deterministic grid from zero to the Nyquist frequency `pi/Ts`.",
+    "`[re, im] = nyquist(sys, w)` returns real and imaginary response column vectors.",
+    "`[re, im, wout] = nyquist(sys, w)` returns three same-length column vectors.",
+    "No-output calls plot the positive-frequency curve and mirror the negative-frequency curve for real-coefficient systems.",
+    "Input/output delays and non-`tf` model classes raise clear diagnostics in this implementation."
+  ],
+  "examples": [
+    {
+      "description": "Compute response data at explicit frequencies",
+      "input": "H = tf(1, [1 1]);\nw = [0 1 2];\n[re, im, wout] = nyquist(H, w);\nfprintf(\"%.1f %.1f %.1f %.1f\\n\", re(1), re(2), im(2), wout(3));",
+      "output": "1.0 0.5 -0.5 2.0"
+    },
+    {
+      "description": "Plot a Nyquist diagram",
+      "input": "H = tf(1, [1 2 1]);\nnyquist(H);\nfprintf(\"ok\\n\");",
+      "output": "ok"
+    },
+    {
+      "description": "Discrete-time frequency response",
+      "input": "H = tf(1, [1 -0.5], 0.1);\n[re, im] = nyquist(H, 0:0.5:5);\nfprintf(\"%.1f %.1f\\n\", re(1), im(1));",
+      "output": "2.0 0.0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `nyquist` support MIMO systems?",
+      "answer": "Not yet. The current implementation supports SISO transfer-function objects."
+    },
+    {
+      "question": "Does `nyquist` support state-space models?",
+      "answer": "Not yet. `ss`, `zpk`, `frd`, model arrays, and identified-system families are outside this first implementation."
+    },
+    {
+      "question": "Does `nyquist` run on the GPU?",
+      "answer": "The frequency-response calculation runs on the host from model metadata. The builtin is registered with GPU/fusion metadata as a residency sink so GPU-backed coefficient inputs are gathered predictably before evaluation."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/nyquist.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/nyquist.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "nyquist(sys)\nnyquist(sys, w)\nre = nyquist(sys, w)\n[re, im] = nyquist(sys, w)\n[re, im, wout] = nyquist(sys)\n[re, im, wout] = nyquist(sys, w)",
+      "output": "Response data is returned when outputs are requested; otherwise a Nyquist plot is rendered."
+    },
+    "points": [
+      "`sys` must currently be a SISO `tf` object.",
+      "`w` must be a real vector of finite non-negative frequencies.",
+      "`re`, `im`, and `wout` are returned as `N x 1` column vectors."
+    ]
+  },
+  "validation": {
+    "summary": "`nyquist` validates object class, coefficient type and shape, delay properties, sample time, denominator singularities, and frequency-vector inputs before evaluating the transfer-function response. Tests cover continuous and discrete responses, multi-output shapes, plotting smoke, complex coefficients, VM dispatch, and representative diagnostics.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/nyquist.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/nyquist.rs"
+    }
+  },
+  "gpu_residency": "`nyquist` returns host-resident response vectors. It does not preserve gpuArray residency."
+}

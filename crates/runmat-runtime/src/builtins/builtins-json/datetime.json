@@ -11,9 +11,7 @@
     "MATLAB compatibility"
   ],
   "summary": "Create MATLAB-compatible datetime arrays from components, text, or serial date numbers.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/datetime.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,

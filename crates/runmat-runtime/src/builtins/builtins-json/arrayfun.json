@@ -9,9 +9,7 @@
     "uniformoutput"
   ],
   "summary": "Apply a function to each element of array inputs, returning either a numeric array or a cell array.",
-  "references": [
-    "https://www.mathworks.com/help/parallel-computing/arrayfun.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": true,
     "reduction": false,

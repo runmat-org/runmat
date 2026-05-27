@@ -8,9 +8,7 @@
     "addpath"
   ],
   "summary": "Generate a MATLAB-style search path string for a folder tree.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/genpath.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
