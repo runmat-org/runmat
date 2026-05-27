@@ -3163,6 +3163,62 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_datetime_duration_descriptors() {
+        let cases = [
+            ("datetime();", "t = datetime()"),
+            (
+                "datetime(2024, 4, 9, 13, 30, 0);",
+                "t = datetime(year, month, day, hour, minute, second)",
+            ),
+            (
+                "datetime(738000, \"ConvertFrom\", \"datenum\");",
+                "t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")",
+            ),
+            ("year(t);", "X = year(t)"),
+            ("datetime.plus(t, 1);", "out = datetime.op(lhs, rhs)"),
+            (
+                "duration(1, 30, 45);",
+                "t = duration(hours, minutes, seconds)",
+            ),
+            ("duration.plus(d1, d2);", "out = duration.op(lhs, rhs)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_datetime_duration_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["datetime", "year", "duration"] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            let call_head = format!("{builtin}(");
+            assert!(
+                details.iter().any(|detail| detail.contains(&call_head)),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_io_mat_descriptors() {
         let cases = [
             ("load();", "S = load()"),

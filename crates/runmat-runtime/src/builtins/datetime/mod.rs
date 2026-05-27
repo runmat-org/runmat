@@ -3,7 +3,9 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike};
 use runmat_builtins::{
-    Access, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -22,6 +24,444 @@ const UNIX_DATENUM: f64 = 719_529.0;
 const SECONDS_PER_DAY: f64 = 86_400.0;
 
 static DATETIME_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+
+const DATETIME_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATETIME.INVALID_ARGUMENT",
+    identifier: Some("RunMat:datetime:InvalidArgument"),
+    when: "Arguments or option grammar do not match supported datetime forms.",
+    message: "datetime: invalid argument",
+};
+const DATETIME_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATETIME.INVALID_INPUT",
+    identifier: Some("RunMat:datetime:InvalidInput"),
+    when: "Input values cannot be parsed/converted/broadcast to a valid datetime result.",
+    message: "datetime: invalid input",
+};
+const DATETIME_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATETIME.INTERNAL",
+    identifier: Some("RunMat:datetime:Internal"),
+    when: "Internal datetime state or indexing/evaluation failed unexpectedly.",
+    message: "datetime: internal operation failed",
+};
+const DATETIME_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DATETIME_ERROR_INVALID_ARGUMENT,
+    DATETIME_ERROR_INVALID_INPUT,
+    DATETIME_ERROR_INTERNAL,
+];
+
+const OUT_DATETIME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "t",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Datetime object result.",
+}];
+const OUT_NUMERIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric scalar/tensor result.",
+}];
+const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Method result.",
+}];
+const DATETIME_ARGS_ONLY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Datetime constructor arguments.",
+}];
+const DATETIME_SINGLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Datetime input.",
+}];
+const DATETIME_BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "lhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left datetime operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "rhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right datetime/numeric/duration operand.",
+    },
+];
+const DATETIME_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Datetime receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing kind token.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Index/member payload.",
+    },
+];
+const DATETIME_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Datetime receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing kind token.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Index/member payload.",
+    },
+    BuiltinParamDescriptor {
+        name: "rhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const DATETIME_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "t = datetime()",
+        inputs: &[],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(textOrArray)",
+        inputs: &[BuiltinParamDescriptor {
+            name: "textOrArray",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "String/char/date text input.",
+        }],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(serialDateNumbers)",
+        inputs: &[BuiltinParamDescriptor {
+            name: "serialDateNumbers",
+            ty: BuiltinParamType::NumericArray,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Numeric serial date input.",
+        }],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(year, month, day)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "year",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Year component.",
+            },
+            BuiltinParamDescriptor {
+                name: "month",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Month component.",
+            },
+            BuiltinParamDescriptor {
+                name: "day",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Day component.",
+            },
+        ],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(year, month, day, hour)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "year",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Year component.",
+            },
+            BuiltinParamDescriptor {
+                name: "month",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Month component.",
+            },
+            BuiltinParamDescriptor {
+                name: "day",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Day component.",
+            },
+            BuiltinParamDescriptor {
+                name: "hour",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Hour component.",
+            },
+        ],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(year, month, day, hour, minute)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "year",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Year component.",
+            },
+            BuiltinParamDescriptor {
+                name: "month",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Month component.",
+            },
+            BuiltinParamDescriptor {
+                name: "day",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Day component.",
+            },
+            BuiltinParamDescriptor {
+                name: "hour",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Hour component.",
+            },
+            BuiltinParamDescriptor {
+                name: "minute",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Minute component.",
+            },
+        ],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(year, month, day, hour, minute, second)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "year",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Year component.",
+            },
+            BuiltinParamDescriptor {
+                name: "month",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Month component.",
+            },
+            BuiltinParamDescriptor {
+                name: "day",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Day component.",
+            },
+            BuiltinParamDescriptor {
+                name: "hour",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Hour component.",
+            },
+            BuiltinParamDescriptor {
+                name: "minute",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Minute component.",
+            },
+            BuiltinParamDescriptor {
+                name: "second",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Second component.",
+            },
+        ],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")",
+        inputs: &[BuiltinParamDescriptor {
+            name: "args",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Variadic,
+            default: None,
+            description: "Numeric serial input with ConvertFrom option.",
+        }],
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(___, \"Format\", format)",
+        inputs: &DATETIME_ARGS_ONLY,
+        outputs: &OUT_DATETIME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = datetime(___, Name, Value, ...)",
+        inputs: &DATETIME_ARGS_ONLY,
+        outputs: &OUT_DATETIME,
+    },
+];
+
+const DATETIME_YEAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = year(t)",
+    inputs: &DATETIME_SINGLE_INPUT,
+    outputs: &OUT_NUMERIC,
+}];
+const DATETIME_MONTH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = month(t)",
+    inputs: &DATETIME_SINGLE_INPUT,
+    outputs: &OUT_NUMERIC,
+}];
+const DATETIME_DAY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = day(t)",
+    inputs: &DATETIME_SINGLE_INPUT,
+    outputs: &OUT_NUMERIC,
+}];
+const DATETIME_HOUR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = hour(t)",
+    inputs: &DATETIME_SINGLE_INPUT,
+    outputs: &OUT_NUMERIC,
+}];
+const DATETIME_MINUTE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = minute(t)",
+    inputs: &DATETIME_SINGLE_INPUT,
+    outputs: &OUT_NUMERIC,
+}];
+const DATETIME_SECOND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = second(t)",
+    inputs: &DATETIME_SINGLE_INPUT,
+    outputs: &OUT_NUMERIC,
+}];
+const DATETIME_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = datetime.subsref(obj, kind, payload)",
+    inputs: &DATETIME_SUBSREF_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const DATETIME_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "out = datetime.subsasgn(obj, kind, payload, rhs)",
+        inputs: &DATETIME_SUBSASGN_INPUTS,
+        outputs: &OUT_ANY,
+    }];
+const DATETIME_BINARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = datetime.op(lhs, rhs)",
+    inputs: &DATETIME_BINARY_INPUTS,
+    outputs: &OUT_ANY,
+}];
+
+pub const DATETIME_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_YEAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_YEAR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_MONTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_MONTH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_DAY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_DAY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_HOUR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_HOUR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_MINUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_MINUTE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_SECOND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_SECOND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_SUBSREF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_SUBSASGN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DATETIME_ERRORS,
+};
+pub const DATETIME_BINARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATETIME_BINARY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DATETIME_ERRORS,
+};
 
 fn datetime_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -674,6 +1114,7 @@ async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "datetime",
+    descriptor(crate::builtins::datetime::DATETIME_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Create MATLAB-compatible datetime arrays from text, components, or serial date numbers.",
@@ -726,6 +1167,7 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "year",
+    descriptor(crate::builtins::datetime::DATETIME_YEAR_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract year numbers from datetime arrays.",
@@ -737,6 +1179,7 @@ async fn year_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "month",
+    descriptor(crate::builtins::datetime::DATETIME_MONTH_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract month numbers from datetime arrays.",
@@ -748,6 +1191,7 @@ async fn month_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "day",
+    descriptor(crate::builtins::datetime::DATETIME_DAY_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract day-of-month numbers from datetime arrays.",
@@ -759,6 +1203,7 @@ async fn day_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "hour",
+    descriptor(crate::builtins::datetime::DATETIME_HOUR_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract hour numbers from datetime arrays.",
@@ -770,6 +1215,7 @@ async fn hour_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "minute",
+    descriptor(crate::builtins::datetime::DATETIME_MINUTE_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract minute numbers from datetime arrays.",
@@ -781,6 +1227,7 @@ async fn minute_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "second",
+    descriptor(crate::builtins::datetime::DATETIME_SECOND_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime",
     category = "datetime",
     summary = "Extract second values from datetime arrays.",
@@ -794,6 +1241,7 @@ async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.subsref",
+    descriptor(crate::builtins::datetime::DATETIME_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime"
 )]
 async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
@@ -821,6 +1269,7 @@ async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.subsasgn",
+    descriptor(crate::builtins::datetime::DATETIME_SUBSASGN_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime"
 )]
 async fn datetime_subsasgn(
@@ -896,38 +1345,63 @@ fn compare_datetime(
     tensor_or_scalar(out, shape)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.eq", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.eq",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "eq", |a, b| (a - b).abs() <= 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.ne", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.ne",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "ne", |a, b| (a - b).abs() > 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.lt", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.lt",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "lt", |a, b| a < b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.le", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.le",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "le", |a, b| a <= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.gt", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.gt",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "gt", |a, b| a > b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.ge", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.ge",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "ge", |a, b| a >= b)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.plus",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime"
 )]
 async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -949,6 +1423,7 @@ async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.minus",
+    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
     builtin_path = "crate::builtins::datetime"
 )]
 async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -1025,6 +1500,28 @@ mod tests {
             Value::Object(object) => object,
             other => panic!("expected datetime object, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn datetime_descriptor_signatures_cover_constructor_and_methods() {
+        let labels: Vec<&str> = DATETIME_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"t = datetime()"));
+        assert!(labels.contains(&"t = datetime(year, month, day, hour, minute, second)"));
+        assert!(labels.contains(&"t = datetime(serialDateNumbers, \"ConvertFrom\", \"datenum\")"));
+
+        assert_eq!(DATETIME_YEAR_DESCRIPTOR.signatures[0].label, "X = year(t)");
+        assert_eq!(
+            DATETIME_SUBSREF_DESCRIPTOR.signatures[0].label,
+            "out = datetime.subsref(obj, kind, payload)"
+        );
+        assert_eq!(
+            DATETIME_BINARY_DESCRIPTOR.signatures[0].label,
+            "out = datetime.op(lhs, rhs)"
+        );
     }
 
     #[test]
