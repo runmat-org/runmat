@@ -3105,6 +3105,31 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_elementwise_transcendental_descriptors() {
+        let cases = [
+            ("exp(1);", "Y = exp(X)"),
+            ("expm1(1);", "Y = expm1(X)"),
+            ("log(2);", "Y = log(X)"),
+            ("log1p(2);", "Y = log1p(X)"),
+            ("log2(8);", "Y = log2(X)"),
+            ("log10(100);", "Y = log10(X)"),
+            ("sqrt(4);", "Y = sqrt(X)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

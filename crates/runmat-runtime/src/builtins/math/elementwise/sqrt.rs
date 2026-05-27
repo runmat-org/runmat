@@ -6,7 +6,11 @@
 //! results are required or the provider lacks the dedicated kernel.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -60,10 +64,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sqrt";
 
+const SQRT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise square-root result.",
+}];
+const SQRT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const SQRT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = sqrt(X)",
+    inputs: &SQRT_INPUTS,
+    outputs: &SQRT_OUTPUT,
+}];
+const SQRT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQRT.INVALID_INPUT",
+    identifier: Some("RunMat:sqrt:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "sqrt: invalid input",
+};
+const SQRT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQRT.INTERNAL",
+    identifier: Some("RunMat:sqrt:Internal"),
+    when: "Internal tensor construction or provider interaction failed.",
+    message: "sqrt: internal error",
+};
+const SQRT_ERRORS: [BuiltinErrorDescriptor; 2] = [SQRT_ERROR_INVALID_INPUT, SQRT_ERROR_INTERNAL];
+pub const SQRT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SQRT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SQRT_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn sqrt_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -73,6 +128,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "sqrt,square root,elementwise,gpu,complex",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::sqrt::SQRT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::sqrt"
 )]
 async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
@@ -81,9 +137,10 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(sqrt_complex_value(re, im)),
         Value::ComplexTensor(ct) => sqrt_complex_tensor(ct),
         Value::CharArray(ca) => sqrt_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("sqrt: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(sqrt_error_with_detail(
+            &SQRT_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => sqrt_real(other),
     }
 }
@@ -266,6 +323,22 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn sqrt_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SQRT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = sqrt(X)"));
+    }
+
+    #[test]
+    fn sqrt_string_rejected_with_stable_identifier() {
+        let err = sqrt_builtin(Value::from("bad")).expect_err("expected input error");
+        assert_eq!(err.identifier(), SQRT_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[test]
     fn sqrt_type_preserves_tensor_shape() {
         let out = numeric_unary_type(
             &[Type::Tensor {
@@ -378,10 +451,8 @@ pub(crate) mod tests {
     #[test]
     fn sqrt_string_input_errors() {
         let err = sqrt_builtin(Value::from("hello")).unwrap_err();
-        assert!(
-            err.message().contains("sqrt: expected numeric input"),
-            "unexpected error message: {err}"
-        );
+        assert_eq!(err.identifier(), SQRT_ERROR_INVALID_INPUT.identifier);
+        assert!(err.message().contains("expected numeric input"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

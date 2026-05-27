@@ -6,7 +6,11 @@
 //! kernel.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::log::{detect_gpu_requires_complex, log_complex_parts};
@@ -70,10 +74,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "log10";
 
+const LOG10_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise base-10 logarithm result.",
+}];
+const LOG10_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const LOG10_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = log10(X)",
+    inputs: &LOG10_INPUTS,
+    outputs: &LOG10_OUTPUT,
+}];
+const LOG10_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG10.INVALID_INPUT",
+    identifier: Some("RunMat:log10:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "log10: invalid input",
+};
+const LOG10_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG10.INTERNAL",
+    identifier: Some("RunMat:log10:Internal"),
+    when: "Internal tensor construction or provider interaction failed.",
+    message: "log10: internal error",
+};
+const LOG10_ERRORS: [BuiltinErrorDescriptor; 2] = [LOG10_ERROR_INVALID_INPUT, LOG10_ERROR_INTERNAL];
+pub const LOG10_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOG10_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOG10_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn log10_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -83,6 +138,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "log10,base-10 logarithm,elementwise,magnitude,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::log10::LOG10_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::log10"
 )]
 async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
@@ -94,9 +150,10 @@ async fn log10_builtin(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(ct) => log10_complex_tensor(ct),
         Value::CharArray(ca) => log10_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("log10: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(log10_error_with_detail(
+            &LOG10_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => log10_real(other),
     }
 }
@@ -221,6 +278,22 @@ pub(crate) mod tests {
 
     fn log10_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log10_builtin(value))
+    }
+
+    #[test]
+    fn log10_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LOG10_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = log10(X)"));
+    }
+
+    #[test]
+    fn log10_string_rejected_with_stable_identifier() {
+        let err = log10_builtin(Value::from("bad")).expect_err("expected input error");
+        assert_eq!(err.identifier(), LOG10_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]
