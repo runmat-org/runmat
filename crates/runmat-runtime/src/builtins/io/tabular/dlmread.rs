@@ -103,7 +103,8 @@ async fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         &options.delimiter,
         parse_start_row,
         parse_start_col,
-    )?;
+    )
+    .await?;
     let subset = if let Some(range) = options.range {
         apply_range(&rows, max_cols, &range, 0.0)
     } else {
@@ -385,13 +386,13 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn read_dlm_rows(
+async fn read_dlm_rows(
     path: &Path,
     delimiter: &DelimiterSpec,
     parse_start_row: usize,
     parse_start_col: usize,
 ) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
-    let file = File::open(path).map_err(|err| {
+    let file = File::open_async(path).await.map_err(|err| {
         dlmread_error_with_source(
             format!("dlmread: unable to open '{}': {err}", path.display()),
             err,

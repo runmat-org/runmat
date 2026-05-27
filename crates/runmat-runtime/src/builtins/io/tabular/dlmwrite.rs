@@ -557,7 +557,7 @@ async fn write_dlm(
         open.write(true).truncate(true);
     }
 
-    let mut file = open.open(path).map_err(|err| {
+    let mut file = open.open_async(path).await.map_err(|err| {
         dlmwrite_error_with_source(
             format!(
                 "dlmwrite: unable to open \"{}\" for writing ({err})",
@@ -590,7 +590,7 @@ async fn write_dlm(
     }
 
     if rows == 0 || cols == 0 {
-        file.flush().map_err(|err| {
+        file.flush_async().await.map_err(|err| {
             dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
         })?;
         return Ok(bytes);
@@ -619,7 +619,7 @@ async fn write_dlm(
         bytes += newline.len();
     }
 
-    file.flush().map_err(|err| {
+    file.flush_async().await.map_err(|err| {
         dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
     })?;
     Ok(bytes)
@@ -672,7 +672,7 @@ async fn file_ends_with_newline(path: &Path) -> io::Result<bool> {
     if len == 0 {
         return Ok(false);
     }
-    let mut file = File::open(path)?;
+    let mut file = File::open_async(path).await?;
     let to_read = len.min(2) as usize;
     file.seek(SeekFrom::End(-(to_read as i64)))?;
     let mut buffer = vec![0u8; to_read];
