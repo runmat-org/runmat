@@ -3265,6 +3265,43 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_signal_convolution_descriptors() {
+        let cases = [
+            ("conv([1,2], [1,1]);", "C = conv(A, B)"),
+            ("conv([1,2], [1,1], \"same\");", "C = conv(A, B, shape)"),
+            ("conv2([1,2;3,4], [1,1;1,1]);", "C = conv2(A, B)"),
+            (
+                "conv2([1,2;3,4], [1,1;1,1], \"valid\");",
+                "C = conv2(A, B, shape)",
+            ),
+            (
+                "conv2([1;2], [1,2], [1,2;3,4]);",
+                "C = conv2(hcol, hrow, A)",
+            ),
+            (
+                "conv2([1;2], [1,2], [1,2;3,4], \"same\");",
+                "C = conv2(hcol, hrow, A, shape)",
+            ),
+            (
+                "deconv([1,3,3,1], [1,1]);",
+                "Q = deconv(numerator, denominator)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

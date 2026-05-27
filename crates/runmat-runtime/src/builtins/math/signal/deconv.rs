@@ -2,7 +2,11 @@
 
 use num_complex::Complex;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -44,10 +48,153 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "deconv";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const DECONV_OUTPUT_Q: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Q",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Quotient polynomial coefficients.",
+}];
+
+const DECONV_OUTPUT_QR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Q",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Quotient polynomial coefficients.",
+    },
+    BuiltinParamDescriptor {
+        name: "R",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Remainder polynomial coefficients.",
+    },
+];
+
+const DECONV_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "numerator",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numerator coefficients.",
+    },
+    BuiltinParamDescriptor {
+        name: "denominator",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Denominator coefficients.",
+    },
+];
+
+const DECONV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Q = deconv(numerator, denominator)",
+        inputs: &DECONV_INPUTS,
+        outputs: &DECONV_OUTPUT_Q,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R] = deconv(numerator, denominator)",
+        inputs: &DECONV_INPUTS,
+        outputs: &DECONV_OUTPUT_QR,
+    },
+];
+
+const DECONV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.INVALID_INPUT",
+    identifier: Some("RunMat:deconv:InvalidInput"),
+    when: "Numerator/denominator input value is not supported for polynomial conversion.",
+    message: "deconv: unsupported input type",
+};
+
+const DECONV_ERROR_VECTOR_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.VECTOR_REQUIRED",
+    identifier: Some("RunMat:deconv:VectorRequired"),
+    when: "Input is not scalar/row/column vector.",
+    message: "deconv: inputs must be scalars, row vectors, or column vectors",
+};
+
+const DECONV_ERROR_DENOMINATOR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.DENOMINATOR_INVALID",
+    identifier: Some("RunMat:deconv:DenominatorInvalid"),
+    when: "Denominator is empty, all zero, or numerically singular at leading term.",
+    message: "deconv: denominator is invalid",
+};
+
+const DECONV_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.GATHER_FAILED",
+    identifier: Some("RunMat:deconv:GatherFailed"),
+    when: "GPU input cannot be gathered for host fallback normalization.",
+    message: "deconv: failed to gather GPU input",
+};
+
+const DECONV_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.BUILD_COMPLEX_OUTPUT",
+    identifier: Some("RunMat:deconv:BuildComplexOutput"),
+    when: "Complex output tensor allocation fails.",
+    message: "deconv: failed to build complex tensor",
+};
+
+const DECONV_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DECONV.BUILD_OUTPUT",
+    identifier: Some("RunMat:deconv:BuildOutput"),
+    when: "Real output tensor allocation fails.",
+    message: "deconv: failed to build tensor",
+};
+
+const DECONV_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    DECONV_ERROR_INVALID_INPUT,
+    DECONV_ERROR_VECTOR_REQUIRED,
+    DECONV_ERROR_DENOMINATOR_INVALID,
+    DECONV_ERROR_GATHER_FAILED,
+    DECONV_ERROR_BUILD_COMPLEX_OUTPUT,
+    DECONV_ERROR_BUILD_OUTPUT,
+];
+
+pub const DECONV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DECONV_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DECONV_ERRORS,
+};
+
+fn deconv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    deconv_error_with_message(error.message, error)
+}
+
+fn deconv_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    deconv_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn deconv_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn deconv_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -57,6 +204,7 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
     keywords = "deconv,deconvolution,polynomial division,signal,gpu",
     accel = "custom",
     type_resolver(deconv_type),
+    descriptor(crate::builtins::math::signal::deconv::DECONV_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::deconv"
 )]
 async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinResult<Value> {
@@ -140,7 +288,13 @@ async fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
                 .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                .map_err(|flow| {
+                    deconv_error_with_source(
+                        &DECONV_ERROR_GATHER_FAILED,
+                        flow.message().to_string(),
+                        map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                    )
+                })?;
             let (input, _) = convert_value(gathered).await?;
             Ok((input, true))
         }
@@ -178,9 +332,10 @@ async fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
             },
             false,
         )),
-        other => Err(runtime_error_for(format!(
-            "deconv: unsupported input type {other:?}"
-        ))),
+        other => Err(deconv_error_with_detail(
+            &DECONV_ERROR_INVALID_INPUT,
+            format!("{other:?}"),
+        )),
     }
 }
 
@@ -226,9 +381,7 @@ fn convert_logical_array(array: LogicalArray) -> BuiltinResult<PolyInput> {
 
 fn ensure_vector(hint: OrientationHint) -> BuiltinResult<()> {
     if matches!(hint, OrientationHint::General) {
-        Err(runtime_error_for(
-            "deconv: inputs must be scalars, row vectors, or column vectors",
-        ))
+        Err(deconv_error(&DECONV_ERROR_VECTOR_REQUIRED))
     } else {
         Ok(())
     }
@@ -263,13 +416,17 @@ fn polynomial_division(
     denominator: &[Complex<f64>],
 ) -> BuiltinResult<PolyDivision> {
     if denominator.is_empty() {
-        return Err(runtime_error_for("denominator must not be empty"));
+        return Err(deconv_error_with_detail(
+            &DECONV_ERROR_DENOMINATOR_INVALID,
+            "must not be empty",
+        ));
     }
 
     let (den_trim, _) = trim_leading_zeros(denominator);
     if den_trim.is_empty() {
-        return Err(runtime_error_for(
-            "denominator must contain at least one non-zero coefficient",
+        return Err(deconv_error_with_detail(
+            &DECONV_ERROR_DENOMINATOR_INVALID,
+            "must contain at least one non-zero coefficient",
         ));
     }
 
@@ -285,8 +442,9 @@ fn polynomial_division(
 
     let divisor_lead = den_trim[0];
     if is_close_zero(&divisor_lead) {
-        return Err(runtime_error_for(
-            "denominator leading coefficient underflowed to zero",
+        return Err(deconv_error_with_detail(
+            &DECONV_ERROR_DENOMINATOR_INVALID,
+            "leading coefficient underflowed to zero",
         ));
     }
 
@@ -380,7 +538,7 @@ fn convert_output(
     } else {
         let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
         let tensor = ComplexTensor::new(complex_data, shape).map_err(|e| {
-            runtime_error_for(format!("deconv: failed to build complex tensor: {e}"))
+            deconv_error_with_detail(&DECONV_ERROR_BUILD_COMPLEX_OUTPUT, e.to_string())
         })?;
         Ok(Value::ComplexTensor(tensor))
     }
@@ -388,7 +546,7 @@ fn convert_output(
 
 fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, shape.clone())
-        .map_err(|e| runtime_error_for(format!("deconv: failed to build tensor: {e}")))?;
+        .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_OUTPUT, e.to_string()))?;
     if prefer_gpu {
         #[cfg(all(test, feature = "wgpu"))]
         {
@@ -417,7 +575,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -446,6 +604,23 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn deconv_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("deconv builtin");
+        let descriptor = builtin.descriptor.expect("deconv descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Q = deconv(numerator, denominator)"));
+        assert!(labels.contains(&"[Q, R] = deconv(numerator, denominator)"));
+        assert_eq!(
+            descriptor.output_mode,
+            BuiltinOutputMode::ByRequestedOutputCount
+        );
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.DECONV.DENOMINATOR_INVALID"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
