@@ -3153,6 +3153,11 @@ mod tests {
         let cases = [
             ("transpose([1,2;3,4]);", "B = transpose(A)"),
             ("ctranspose([1,2;3,4]);", "B = ctranspose(A)"),
+            ("trace([1,2;3,4]);", "t = trace(A)"),
+            ("dot([1,2], [3,4]);", "C = dot(A, B)"),
+            ("dot([1,2], [3,4], 2);", "C = dot(A, B, dim)"),
+            ("cross([1,0,0], [0,1,0]);", "C = cross(A, B)"),
+            ("cross([1,0,0], [0,1,0], 2);", "C = cross(A, B, dim)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3263,6 +3268,43 @@ mod tests {
                 .any(|detail| detail.contains("ctranspose(")),
             "expected descriptor signature detail for ctranspose completion, got {:?}",
             ctranspose_candidates
+        );
+
+        let trace_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("trace"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            trace_candidates
+                .iter()
+                .any(|detail| detail.contains("trace(")),
+            "expected descriptor signature detail for trace completion, got {:?}",
+            trace_candidates
+        );
+
+        let dot_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("dot"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            dot_candidates.iter().any(|detail| detail.contains("dot(")),
+            "expected descriptor signature detail for dot completion, got {:?}",
+            dot_candidates
+        );
+
+        let cross_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("cross"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            cross_candidates
+                .iter()
+                .any(|detail| detail.contains("cross(")),
+            "expected descriptor signature detail for cross completion, got {:?}",
+            cross_candidates
         );
     }
 
