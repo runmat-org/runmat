@@ -3067,6 +3067,12 @@ mod tests {
             ("median([1,2,3]);", "M = median(A)"),
             ("median([1,2,3], 1);", "M = median(A, dim)"),
             ("median([1,2,3], \"omitnan\");", "M = median(A, nanflag)"),
+            ("std([1,2,3]);", "S = std(A)"),
+            ("std([1,2,3], 0, 1);", "S = std(A, w, dim)"),
+            (
+                "std([1,2,3], \"like\", 1);",
+                "S = std(A, \"like\", prototype)",
+            ),
             ("diff([1,2,3]);", "B = diff(X)"),
             ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
             ("gradient([1,2,3]);", "G = gradient(F)"),
@@ -3269,6 +3275,17 @@ mod tests {
                 .any(|detail| detail.contains("median(")),
             "expected descriptor signature detail for median completion, got {:?}",
             median_candidates
+        );
+
+        let std_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("std"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            std_candidates.iter().any(|detail| detail.contains("std(")),
+            "expected descriptor signature detail for std completion, got {:?}",
+            std_candidates
         );
 
         let diff_candidates: Vec<String> = completions
