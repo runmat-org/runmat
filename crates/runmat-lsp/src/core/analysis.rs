@@ -2997,6 +2997,33 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_control_descriptors() {
+        let cases = [
+            ("tf(1, [1, 1]);", "sys = tf(numerator, denominator)"),
+            (
+                "tf(1, [1, 1], 0.1);",
+                "sys = tf(numerator, denominator, Ts)",
+            ),
+            ("step(tf(1, [1, 1]));", "y = step(sys)"),
+            ("impulse(tf(1, [1, 1]));", "y = impulse(sys)"),
+            ("db(10);", "yDb = db(y)"),
+            ("db(10, \"power\");", "yDb = db(y, \"power\")"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

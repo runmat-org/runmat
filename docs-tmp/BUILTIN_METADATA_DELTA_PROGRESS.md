@@ -91,12 +91,13 @@
 | Wave 86 (I/O Console Core) | `clc`, `disp`, `format`, `input` | Done | `aeede58f` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::clc::tests::`; `cargo test -p runmat-runtime builtins::io::disp::tests::`; `cargo test -p runmat-runtime builtins::io::format::tests::`; `cargo test -p runmat-runtime builtins::io::input::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for console I/O builtins (clear/display/format/prompt), added stable descriptor errors and descriptor-backed input identifier/source mappings, added runtime descriptor signature tests, and added descriptor-driven LSP signature-help coverage for console forms. |
 | Wave 87 (I/O HTTP Core) | `weboptions`, `webread`, `webwrite` | Done | `af4b0742` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::io::http::weboptions::tests::`; `cargo test -p runmat-runtime builtins::io::http::webread::tests::`; `cargo test -p runmat-runtime builtins::io::http::webwrite::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for HTTP options/read/write call surfaces (including struct/query/name-value forms), added stable descriptor-backed runtime error rows, added runtime descriptor signature tests, and added descriptor-driven LSP signature-help coverage for `io/http`. |
 | Wave 88 (I/O MAT Core) | `load`, `save` | Done | `03b1f0d5` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::mat::load::tests::`; `cargo test -p runmat-runtime builtins::io::mat::save::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for MAT load/save surfaces (default path, named-variable, struct-export, regexp selection), added stable descriptor-backed runtime error rows, added runtime descriptor signature tests, and added descriptor-driven LSP signature-help coverage for `io/mat`. |
+| Wave 89 (Control Core) | `tf`, `step`, `impulse`, `db` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::control::tf::tests::`; `cargo test -p runmat-runtime builtins::control::step::tests::`; `cargo test -p runmat-runtime builtins::control::impulse::tests::`; `cargo test -p runmat-runtime builtins::control::db::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp signature_help_uses_control_descriptors`; `cargo test -p runmat-lsp` | Attached descriptors for control transfer-function construction and time-domain response/decibel conversion forms, mapped runtime branches to descriptor-backed stable error identifiers/messages/codes (single source of truth), added runtime descriptor signature tests for all four builtins, and added descriptor-driven LSP signature-help coverage for control builtins. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `251`
-- Remaining: `317`
+- Migrated with attached descriptor: `255`
+- Remaining: `313`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -112,6 +113,9 @@ Loop instructions:
    - attach descriptor via `descriptor(crate::...::<NAME>_DESCRIPTOR)` in `runtime_builtin`.
 3. Do not duplicate stable identifier/message/code values:
    - no `const IDENT_*`, no `const *_MESSAGE`, no `const *_CODE`;
+   - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
+   - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
+   - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.
 4. Extend tests:
    - runtime descriptor signature tests for migrated builtins;
@@ -124,6 +128,7 @@ Loop instructions:
    - `cargo test -p runmat-lsp`
 6. Run audit grep before commit:
    - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" <touched_builtin_files...>`
+   - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z0-9_]+\\s*,\\s*$|^\\s*message:\\s*[A-Z0-9_]+\\s*,\\s*$" <touched_builtin_files...>`
    - `rg -n 'with_identifier\\(\"RunMat:' <touched_builtin_files...>`
 7. Update this progress tracker wave row with commit hash and validation set.
 ```
