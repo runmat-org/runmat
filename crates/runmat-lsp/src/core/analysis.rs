@@ -2117,6 +2117,28 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_plotting_chart_descriptors() {
+        let cases = [
+            ("area([1 2 3]);", "h = area(Y)"),
+            ("area([1 2 3], [3 2 1]);", "h = area(X, Y)"),
+            ("bar([1 2 3]);", "h = bar(Y)"),
+            ("bar([1 2 3], [3 2 1]);", "h = bar(X, Y)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_empty_and_magic_descriptors() {
         let cases = [
             ("empty(0, 3);", "A = empty(m, n, ...)"),

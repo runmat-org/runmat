@@ -4,7 +4,11 @@ use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarLayoutMode, BarOrientation};
@@ -18,16 +22,209 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::gather_if_needed_async;
-use crate::{BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::numeric_vector;
 use super::gpu_helpers::axis_bounds;
-use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "bar";
+
+const BAR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the first rendered bar series.",
+}];
+
+const BAR_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Bar heights as a vector or matrix.",
+}];
+
+const BAR_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bar heights as a vector or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "style",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Layout/style token such as 'stacked' or color shorthand.",
+    },
+];
+
+const BAR_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bar heights as a vector or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style arguments.",
+    },
+];
+
+const BAR_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Category positions for bars.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bar heights as a vector or matrix.",
+    },
+];
+
+const BAR_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Category positions for bars.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bar heights as a vector or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "style",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Layout/style token such as 'stacked' or color shorthand.",
+    },
+];
+
+const BAR_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Category positions for bars.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bar heights as a vector or matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style arguments.",
+    },
+];
+
+const BAR_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "h = bar(Y)",
+        inputs: &BAR_INPUTS_Y,
+        outputs: &BAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = bar(Y, style)",
+        inputs: &BAR_INPUTS_Y_STYLE,
+        outputs: &BAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = bar(Y, Name, Value, ...)",
+        inputs: &BAR_INPUTS_Y_PROPS,
+        outputs: &BAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = bar(X, Y)",
+        inputs: &BAR_INPUTS_X_Y,
+        outputs: &BAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = bar(X, Y, style)",
+        inputs: &BAR_INPUTS_X_Y_STYLE,
+        outputs: &BAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = bar(X, Y, Name, Value, ...)",
+        inputs: &BAR_INPUTS_X_Y_PROPS,
+        outputs: &BAR_OUTPUT_HANDLE,
+    },
+];
+
+const BAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BAR.INVALID_ARGUMENT",
+    identifier: Some("RunMat:bar:InvalidArgument"),
+    when: "Bar input arrays, style tokens, or name/value arguments are invalid.",
+    message: "bar: invalid argument",
+};
+
+const BAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BAR.INTERNAL",
+    identifier: Some("RunMat:bar:Internal"),
+    when: "Renderer/GPU conversion fails while building bar geometry.",
+    message: "bar: internal operation failed",
+};
+
+const BAR_ERRORS: [BuiltinErrorDescriptor; 2] = [BAR_ERROR_INVALID_ARGUMENT, BAR_ERROR_INTERNAL];
+
+pub const BAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BAR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &BAR_ERRORS,
+};
+
+fn bar_descriptor_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: Option<impl AsRef<str>>,
+) -> RuntimeError {
+    let message = match detail {
+        Some(detail) => format!("{}: {}", error.message, detail.as_ref()),
+        None => error.message.to_string(),
+    };
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn bar_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    bar_descriptor_error(&BAR_ERROR_INVALID_ARGUMENT, Some(detail))
+}
+
+fn bar_internal(detail: impl AsRef<str>) -> RuntimeError {
+    bar_descriptor_error(&BAR_ERROR_INTERNAL, Some(detail))
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::bar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -65,6 +262,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::bar::BAR_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::bar"
 )]
 pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -136,10 +334,6 @@ pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
 const DEFAULT_BAR_WIDTH: f32 = 0.75;
 
-fn bar_err(message: impl Into<String>) -> RuntimeError {
-    plotting_error(BUILTIN_NAME, message)
-}
-
 const BAR_DEFAULT_LABEL: &str = "Series 1";
 const MATLAB_COLOR_ORDER: [Vec4; 7] = [
     Vec4::new(0.0, 0.447, 0.741, 1.0),
@@ -157,7 +351,7 @@ fn default_bar_color() -> Vec4 {
 
 fn parse_bar_call_args(args: Vec<Value>) -> BuiltinResult<(Option<Value>, Value, Vec<Value>)> {
     if args.is_empty() {
-        return Err(bar_err("bar: expected at least one input"));
+        return Err(bar_invalid_argument("expected at least one input"));
     }
     let mut it = args.into_iter();
     let first = it.next().expect("first");
@@ -175,7 +369,7 @@ fn parse_bar_call_args(args: Vec<Value>) -> BuiltinResult<(Option<Value>, Value,
 
 fn build_bar_chart_with_x(x_tensor: Option<Tensor>, values: Vec<f64>) -> BuiltinResult<BarChart> {
     if values.is_empty() {
-        return Err(bar_err("bar: input cannot be empty"));
+        return Err(bar_invalid_argument("input cannot be empty"));
     }
     let labels: Vec<String> = match x_tensor {
         Some(x) => numeric_vector(x)
@@ -184,7 +378,7 @@ fn build_bar_chart_with_x(x_tensor: Option<Tensor>, values: Vec<f64>) -> Builtin
             .collect(),
         None => (1..=values.len()).map(|idx| format!("{idx}")).collect(),
     };
-    BarChart::new(labels, values).map_err(|err| bar_err(format!("bar: {err}")))
+    BarChart::new(labels, values).map_err(|err| bar_internal(err.to_string()))
 }
 
 fn build_bar_gpu_series(
@@ -193,13 +387,13 @@ fn build_bar_gpu_series(
 ) -> BuiltinResult<Vec<BarChart>> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let exported = runmat_accelerate_api::export_wgpu_buffer(values)
-        .ok_or_else(|| bar_err("bar: unable to export GPU values"))?;
+        .ok_or_else(|| bar_internal("unable to export GPU values"))?;
     let shape = BarMatrixShape::from_handle(values)?;
     if shape.rows == 0 {
-        return Err(bar_err("bar: input cannot be empty"));
+        return Err(bar_invalid_argument("input cannot be empty"));
     }
     if exported.len != shape.rows * shape.cols {
-        return Err(bar_err("bar: gpuArray shape mismatch"));
+        return Err(bar_invalid_argument("gpuArray shape mismatch"));
     }
     let scalar = ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64);
     let inputs = BarGpuInputs {
@@ -224,7 +418,7 @@ fn build_bar_gpu_series(
             &inputs,
             &params,
         )
-        .map_err(|e| bar_err(format!("bar: failed to build GPU vertices: {e}")))?;
+        .map_err(|e| bar_internal(format!("failed to build GPU vertices: {e}")))?;
         let labels: Vec<String> = (1..=shape.rows).map(|idx| format!("{idx}")).collect();
         let bounds = build_bar_gpu_bounds(values, shape.rows, params.bar_width)?;
         let vertex_count = gpu_vertices.vertex_count;
@@ -285,7 +479,7 @@ fn build_bar_gpu_matrix_charts(
             inputs,
             &params,
         )
-        .map_err(|e| bar_err(format!("bar: failed to build GPU vertices: {e}")))?;
+        .map_err(|e| bar_internal(format!("failed to build GPU vertices: {e}")))?;
         let vertex_count = gpu_vertices.vertex_count;
         let mut chart = BarChart::from_gpu_buffer(
             labels.clone(),
@@ -315,7 +509,7 @@ struct BarMatrixShape {
 impl BarMatrixShape {
     fn from_handle(handle: &GpuTensorHandle) -> BuiltinResult<Self> {
         if handle.shape.is_empty() {
-            return Err(bar_err("bar: input cannot be empty"));
+            return Err(bar_invalid_argument("input cannot be empty"));
         }
         if handle.shape.len() == 1 {
             return Ok(Self {
@@ -324,12 +518,12 @@ impl BarMatrixShape {
             });
         }
         if handle.shape.len() != 2 {
-            return Err(bar_err("bar: matrix inputs must be 2-D"));
+            return Err(bar_invalid_argument("matrix inputs must be 2-D"));
         }
         let rows = handle.shape[0];
         let cols = handle.shape[1];
         if rows == 0 || cols == 0 {
-            return Err(bar_err("bar: input cannot be empty"));
+            return Err(bar_invalid_argument("input cannot be empty"));
         }
         Ok(Self { rows, cols })
     }
@@ -359,7 +553,7 @@ fn build_stacked_bar_gpu_bounds(
 ) -> BuiltinResult<BoundingBox> {
     let tensor = gather_tensor_from_gpu(values.clone(), "bar")?;
     if tensor.data.len() != rows * cols {
-        return Err(bar_err("bar: gpuArray shape mismatch"));
+        return Err(bar_invalid_argument("gpuArray shape mismatch"));
     }
     let mut pos = vec![0.0f64; rows];
     let mut neg = vec![0.0f64; rows];
@@ -404,11 +598,13 @@ impl BarInput {
         match (x, value) {
             (None, Value::GpuTensor(handle)) => Ok(Self::Gpu(handle)),
             (x, other) => {
-                let y = Tensor::try_from(&other).map_err(|e| bar_err(format!("bar: {e}")))?;
+                let y =
+                    Tensor::try_from(&other).map_err(|e| bar_invalid_argument(e.to_string()))?;
                 let x = match x {
-                    Some(value) => {
-                        Some(Tensor::try_from(&value).map_err(|e| bar_err(format!("bar: {e}")))?)
-                    }
+                    Some(value) => Some(
+                        Tensor::try_from(&value)
+                            .map_err(|e| bar_invalid_argument(e.to_string()))?,
+                    ),
                     None => None,
                 };
                 Ok(Self::Host { x, y })
@@ -439,7 +635,7 @@ async fn gather_tensor_from_gpu_async(
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, context))?;
-    Tensor::try_from(&gathered).map_err(|e| bar_err(format!("{context}: {e}")))
+    Tensor::try_from(&gathered).map_err(|e| bar_internal(format!("{context}: {e}")))
 }
 
 fn gather_tensor_from_gpu(handle: GpuTensorHandle, context: &'static str) -> BuiltinResult<Tensor> {
@@ -506,21 +702,23 @@ impl BarMatrixData {
 
 fn tensor_to_bar_input(tensor: Tensor) -> BuiltinResult<BarTensorInput> {
     if tensor.shape.is_empty() {
-        return Err(bar_err("bar: input cannot be empty"));
+        return Err(bar_invalid_argument("input cannot be empty"));
     }
     if tensor.shape.len() == 1 || tensor.cols <= 1 {
         return Ok(BarTensorInput::Vector(numeric_vector(tensor)));
     }
     if tensor.shape.len() != 2 {
-        return Err(bar_err("bar: matrix inputs must be 2-D"));
+        return Err(bar_invalid_argument("matrix inputs must be 2-D"));
     }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
     if rows == 0 || cols == 0 {
-        return Err(bar_err("bar: input cannot be empty"));
+        return Err(bar_invalid_argument("input cannot be empty"));
     }
     if rows * cols != tensor.data.len() {
-        return Err(bar_err("bar: matrix inputs must be dense numeric arrays"));
+        return Err(bar_invalid_argument(
+            "matrix inputs must be dense numeric arrays",
+        ));
     }
     Ok(BarTensorInput::Matrix(BarMatrixData {
         rows,
@@ -549,7 +747,7 @@ fn build_bar_series_from_matrix(
     style: &BarStyle,
 ) -> BuiltinResult<Vec<BarChart>> {
     if matrix.cols == 0 {
-        return Err(bar_err("bar: input cannot be empty"));
+        return Err(bar_invalid_argument("input cannot be empty"));
     }
     let labels: Vec<String> = match x_tensor {
         Some(x) => numeric_vector(x)
@@ -567,7 +765,7 @@ fn build_bar_series_from_matrix(
             values.push(matrix.value(row, col));
         }
         let mut chart = BarChart::new(labels.clone(), values.clone())
-            .map_err(|err| bar_err(format!("bar: {err}")))?;
+            .map_err(|err| bar_internal(err.to_string()))?;
         if style.layout == BarLayout::Stacked {
             let offsets = compute_stack_offsets(&values, &mut pos_offsets, &mut neg_offsets);
             chart = chart.with_stack_offsets(offsets).with_group(0, 1);
@@ -643,6 +841,24 @@ pub(crate) mod tests {
             cols,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    #[test]
+    fn bar_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = BAR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = bar(Y)"));
+        assert!(labels.contains(&"h = bar(X, Y)"));
+        assert!(labels.contains(&"h = bar(X, Y, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn bar_invalid_argument_uses_stable_identifier() {
+        let err = block_on(super::bar_builtin(vec![])).expect_err("missing args should fail");
+        assert_eq!(err.identifier(), BAR_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
