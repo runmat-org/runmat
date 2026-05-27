@@ -86,9 +86,41 @@
 | Wave 81 (I/O JSON Core) | `jsonencode`, `jsondecode` | Done | `1470a3bb` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::io::json::jsonencode::tests::`; `cargo test -p runmat-runtime builtins::io::json::jsondecode::tests::`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for JSON encode/decode call forms (value-only, options struct, name/value pairs), migrated parser/option/value-type/parse/numeric-literal/internal branches to descriptor-backed stable error rows, added runtime descriptor signature tests, and added descriptor-driven LSP signature-help coverage for `io/json`. |
 | Wave 82 (I/O Tabular Modern Core A) | `writematrix` | Done | `083b68be` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::tabular::writematrix::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `writematrix` core + name/value option forms, migrated argument/filename/option/data/shape/IO branches to descriptor-backed stable errors, added runtime descriptor signature test, and extended io-tabular LSP signature-help coverage with `writematrix` labels. |
 | Wave 83 (I/O Tabular Legacy Core A) | `dlmwrite` | Done | `191f3ed2` | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::tabular::dlmwrite::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `dlmwrite` core/positional/name-value forms, migrated argument/filename/option/data/shape/format/IO runtime branches to descriptor-backed stable errors, added runtime descriptor signature test, and extended io-tabular LSP signature-help coverage with `dlmwrite` labels. |
+| Wave 84 (I/O Tabular Modern Core B) | `readmatrix` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::tabular::readmatrix::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `readmatrix` filename/options/name-value forms, migrated option/range/filename/IO/non-numeric/output/tensor-build branches to descriptor-backed stable errors, added runtime descriptor signature test, and extended io-tabular LSP signature-help coverage with `readmatrix` labels. |
+| Wave 85 (I/O Tabular Legacy Core B) | `dlmread` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime builtins::io::tabular::dlmread::tests::`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `dlmread` delimiter/offset/range call forms, migrated argument/delimiter/index/range/filename/IO/non-numeric/tensor-build branches to descriptor-backed stable errors, added runtime descriptor signature test, and extended io-tabular LSP signature-help coverage with `dlmread` labels. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `240`
-- Remaining: `328`
+- Migrated with attached descriptor: `242`
+- Remaining: `326`
+
+## `/goal` Loop Command (Use For Each Wave)
+
+```text
+/goal Migrate next builtin wave to attached BuiltinDescriptor metadata with zero hacks and descriptor-row error source-of-truth.
+
+Loop instructions:
+1. Read docs-tmp/BUILTIN_METADATA_DELTA_PLAN.md and follow its canonical descriptor/error rules.
+2. For each builtin in the wave:
+   - add `const <NAME>_DESCRIPTOR: BuiltinDescriptor` with exhaustive signatures from real parser/runtime branches;
+   - add stable `const <NAME>_ERROR_*: BuiltinErrorDescriptor` rows;
+   - route stable throw branches through helpers taking `&'static BuiltinErrorDescriptor`;
+   - attach descriptor via `descriptor(crate::...::<NAME>_DESCRIPTOR)` in `runtime_builtin`.
+3. Do not duplicate stable identifier/message/code values:
+   - no `const IDENT_*`, no `const *_MESSAGE`, no `const *_CODE`;
+   - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.
+4. Extend tests:
+   - runtime descriptor signature tests for migrated builtins;
+   - relevant LSP signature-help coverage for the migrated family.
+5. Run validation:
+   - `cargo fmt`
+   - `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`
+   - targeted runtime builtin tests for the wave
+   - `cargo test -p runmat-builtins`
+   - `cargo test -p runmat-lsp`
+6. Run audit grep before commit:
+   - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" <touched_builtin_files...>`
+   - `rg -n 'with_identifier\\(\"RunMat:' <touched_builtin_files...>`
+7. Update this progress tracker wave row with commit hash and validation set.
+```

@@ -262,6 +262,22 @@ const FOO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 return Err(foo_error(&FOO_ERROR_INVALID_INPUT));
 ```
 
+### Canonical Error Source-Of-Truth (Required)
+
+For every migrated builtin file, `BuiltinErrorDescriptor` rows are the only place stable error identity is authored.
+
+Required:
+
+1. Put literal `code` / `identifier` / `message` directly on each `const FOO_ERROR_*: BuiltinErrorDescriptor`.
+2. Build `FOO_ERRORS` from those rows.
+3. Throw stable branches exclusively through helper functions that accept `&'static BuiltinErrorDescriptor` (for example `foo_error(&FOO_ERROR_INVALID_INPUT)`).
+
+Disallowed:
+
+1. `const IDENT_*`, `const *_CODE`, `const *_MESSAGE` mirrors for stable branches.
+2. `with_identifier("RunMat:...")` direct stable-branch throws in migrated builtin files.
+3. Repeating the same stable message text at throw sites when that message already exists in a descriptor row.
+
 Audit command (must stay clean):
 
 1. `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`

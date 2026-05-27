@@ -2834,6 +2834,11 @@ mod tests {
                 "writematrix([1 2; 3 4], \"out.csv\", \"Delimiter\", \";\");",
                 "bytesWritten = writematrix(data, filename, name, optionValue)",
             ),
+            ("readmatrix(\"data.csv\");", "M = readmatrix(filename)"),
+            (
+                "readmatrix(\"data.csv\", \"Range\", \"B2:C4\");",
+                "M = readmatrix(filename, name, optionValue)",
+            ),
             (
                 "dlmwrite(\"out.csv\", [1 2; 3 4]);",
                 "bytesWritten = dlmwrite(filename, M)",
@@ -2841,6 +2846,11 @@ mod tests {
             (
                 "dlmwrite(\"out.csv\", [1 2; 3 4], \";\", 1, 2);",
                 "bytesWritten = dlmwrite(filename, M, delimiter, row, col)",
+            ),
+            ("dlmread(\"data.csv\");", "M = dlmread(filename)"),
+            (
+                "dlmread(\"data.csv\", \",\", 1, 2);",
+                "M = dlmread(filename, delimiter, row, col)",
             ),
         ];
 
