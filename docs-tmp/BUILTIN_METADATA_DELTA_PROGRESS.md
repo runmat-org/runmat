@@ -134,12 +134,13 @@
 | Wave 129 (Math Linalg Ops Core C) | `mldivide`, `mrdivide`, `mtimes`, `mpower` | Done | `63d4abe1` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mldivide::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mrdivide::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mtimes::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mpower::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core matrix division/multiplication/power operators, migrated stable argument/input/internal runtime branches to descriptor-backed errors with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for each builtin, and extended descriptor-driven LSP signature-help/completion coverage for these linalg-ops callsites and completion entries. |
 | Wave 130 (Math Linalg Solve Core A) | `det`, `inv`, `rank`, `rcond`, `pinv` | Done | `d2dbc14f` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::det::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::inv::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::rank::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::rcond::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::pinv::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for determinant/inverse/rank/reciprocal-condition/pseudoinverse forms (including tolerance variants for `rank`/`pinv`), added stable descriptor-backed error rows and identifier assertions for invalid-input/invalid-argument branches, and extended descriptor-driven LSP signature-help/completion coverage for `math/linalg/solve` builtins. |
 | Wave 131 (Math Linalg Solve Core B) | `cond`, `norm`, `linsolve` | Done | `9054bbfa` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::cond::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::norm::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::linsolve::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for condition-number/norm/linsolve forms (including optional norm-order and options-struct variants plus by-requested-output `[X,R]` for `linsolve`), routed argument-grammar branches to descriptor-backed invalid-argument rows and shape/solve branches to invalid-input rows with stable identifiers, added runtime descriptor signature/code + identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for the full linalg-solve family. |
+| Wave 132 (Math Linalg Structure Core) | `bandwidth`, `issymmetric`, `ishermitian`, `symrcm` | Done | `ed375cce` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::structure:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for linalg structure-analysis forms (selector/tolerance/flag permutations and `symrcm` permutation output), migrated stable runtime branches to descriptor-backed invalid-argument/invalid-input/internal rows with identifier assertions, added descriptor signature+stable-code runtime coverage, and extended descriptor-driven LSP signature-help/completion coverage for the structure family. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `368`
-- Remaining: `200`
+- Migrated with attached descriptor: `372`
+- Remaining: `196`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -173,6 +174,11 @@ Loop instructions:
    - tests should prefer descriptor constants for stable identifier/message/code assertions when practical;
    - do not introduce temporary `IDENT_*` / `*_MESSAGE` / `*_CODE` constants even in intermediate commits; descriptor rows are the only canonical authoring point from the first commit in a wave;
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.
+   - for each stable branch, treat the `BuiltinErrorDescriptor` row as the only authored source:
+     - author `identifier` + `code` + canonical `message` exactly once on that row;
+     - include that row in `<NAME>_ERRORS`;
+     - throw using that same row (`foo_error(&FOO_ERROR_...)` or `foo_error_with_detail(&FOO_ERROR_..., ...)`).
+   - disallow duplicated stable branch literals even when wrapped in helper constants (for example `const IDENT_*`, `const *_CODE`, `const *_MESSAGE`) or retyped throw strings.
 4. Extend tests:
    - runtime descriptor signature tests for migrated builtins;
    - relevant LSP signature-help coverage for the migrated family.
