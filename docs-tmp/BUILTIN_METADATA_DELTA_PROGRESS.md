@@ -125,12 +125,13 @@
 | Wave 120 (Math Reduction Core D) | `std` | Done | `4c8723c2` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::std::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for std reduction forms (normalization `w`, dim/vecdim/`all`, nanflag permutations, outtype, and `"like"` prototype), migrated stable argument/input/complex-unsupported/internal runtime branches to descriptor-backed errors without semantic drift, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `std`. |
 | Wave 121 (Math Reduction Core E) | `var` | Done | `cbdd12d4` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::var::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for variance reduction forms (`w` normalization, dim/vecdim/`all`, nanflag permutations), migrated stable argument/input/complex-unsupported/internal runtime branches to descriptor-backed errors without semantic drift, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `var`. |
 | Wave 122 (Math Linalg Factor Core A) | `qr` | Done | `4a95746d` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::factor::qr::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for QR factorization forms (single-output `R`, multi-output `[Q,R]`/`[Q,R,P]`, and one/two-option permutations), migrated stable argument/input/internal runtime branches to descriptor-backed errors, added runtime descriptor signature + stable identifier assertions, and added descriptor-driven LSP signature-help/completion coverage for `qr`. |
+| Wave 123 (Math Linalg Ops Transpose) | `transpose`, `ctranspose` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::transpose::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::ctranspose::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for transpose and conjugate-transpose core forms, migrated stable argument/input/internal runtime branches to descriptor-backed errors, added runtime descriptor signature + identifier assertions, and added descriptor-driven LSP signature-help/completion coverage for both builtins. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `347`
-- Remaining: `221`
+- Migrated with attached descriptor: `349`
+- Remaining: `219`
 
 ## `/goal` Loop Command (Use For Each Wave)
 

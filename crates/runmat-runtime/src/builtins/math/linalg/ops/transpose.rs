@@ -17,11 +17,69 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use log::warn;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
 const NAME: &str = "transpose";
+
+const TRANSPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value with first two dimensions swapped.",
+}];
+
+const TRANSPOSE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar/array value.",
+}];
+
+const TRANSPOSE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = transpose(A)",
+    inputs: &TRANSPOSE_INPUTS,
+    outputs: &TRANSPOSE_OUTPUT,
+}];
+
+const TRANSPOSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRANSPOSE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:transpose:InvalidArgument"),
+    when: "Call does not provide exactly one input argument.",
+    message: "transpose: invalid argument",
+};
+
+const TRANSPOSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRANSPOSE.INVALID_INPUT",
+    identifier: Some("RunMat:transpose:InvalidInput"),
+    when: "Input type is unsupported for transpose.",
+    message: "transpose: unsupported input type",
+};
+
+const TRANSPOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRANSPOSE.INTERNAL",
+    identifier: Some("RunMat:transpose:Internal"),
+    when: "Runtime cannot materialize transpose output.",
+    message: "transpose: internal runtime failure",
+};
+
+const TRANSPOSE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    TRANSPOSE_ERROR_INVALID_ARGUMENT,
+    TRANSPOSE_ERROR_INVALID_INPUT,
+    TRANSPOSE_ERROR_INTERNAL,
+];
+
+pub const TRANSPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TRANSPOSE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRANSPOSE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::transpose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,8 +98,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses the provider transpose hook when available; otherwise gathers, transposes on the host, and uploads the result back to the GPU.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn builtin_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    builtin_error_with_message(error.message, error)
+}
+
+fn builtin_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn invalid_argument(message: impl Into<String>) -> RuntimeError {
+    builtin_error_with_message(message, &TRANSPOSE_ERROR_INVALID_ARGUMENT)
+}
+
+fn invalid_input(message: impl Into<String>) -> RuntimeError {
+    builtin_error_with_message(message, &TRANSPOSE_ERROR_INVALID_INPUT)
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeError {
+    builtin_error_with_message(message, &TRANSPOSE_ERROR_INTERNAL)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -82,13 +163,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "transpose,swap rows and columns,non-conjugate",
     accel = "transpose",
     type_resolver(transpose_type),
+    descriptor(crate::builtins::math::linalg::ops::transpose::TRANSPOSE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
 async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     let value = match args.len() {
-        0 => return Err(builtin_error("transpose: missing input argument")),
+        0 => return Err(builtin_error(&TRANSPOSE_ERROR_INVALID_ARGUMENT)),
         1 => args.remove(0),
-        _ => return Err(builtin_error("transpose: too many input arguments")),
+        _ => return Err(invalid_argument("transpose: too many input arguments")),
     };
     match value {
         Value::GpuTensor(handle) => transpose_gpu(handle).await,
@@ -103,7 +185,7 @@ async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Int(i)),
         Value::Bool(b) => Ok(Value::Bool(b)),
         Value::String(s) => Ok(Value::String(s)),
-        other => Err(builtin_error(format!(
+        other => Err(invalid_input(format!(
             "transpose: unsupported input type {other:?}"
         ))),
     }
@@ -126,7 +208,7 @@ fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {
     }
     if rank <= 2 {
         ComplexTensor::new(transpose_complex_matrix(&ct), vec![ct.cols, ct.rows])
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+            .map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
         permute_complex_tensor(NAME, ct, &order)
@@ -156,7 +238,7 @@ fn transpose_logical_array(la: LogicalArray) -> BuiltinResult<LogicalArray> {
             }
         }
         let new_shape = vec![cols, rows];
-        LogicalArray::new(out, new_shape).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        LogicalArray::new(out, new_shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
         permute_logical_array(NAME, la, &order)
@@ -168,7 +250,7 @@ fn transpose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
     let cols = ca.cols;
     if ca.data.is_empty() {
         return CharArray::new(Vec::new(), cols, rows)
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
+            .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
     let mut out = vec!['\0'; ca.data.len()];
     for r in 0..rows {
@@ -180,7 +262,7 @@ fn transpose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
             }
         }
     }
-    CharArray::new(out, cols, rows).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    CharArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
@@ -212,7 +294,7 @@ fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
         } else {
             vec![cols, rows]
         };
-        StringArray::new(out, new_shape).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        StringArray::new(out, new_shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = transpose_order(rank);
         permute_string_array(NAME, sa, &order)
@@ -229,7 +311,7 @@ fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
             out.push(ca.data[idx].clone());
         }
     }
-    CellArray::new_handles(out, cols, rows).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    CellArray::new_handles(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 async fn transpose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -287,7 +369,7 @@ fn transpose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
     let cols = tensor.cols();
     if tensor.data.is_empty() {
         return Tensor::new(Vec::new(), vec![cols, rows])
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
+            .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
     let mut out = vec![0.0; tensor.data.len()];
     for r in 0..rows {
@@ -299,7 +381,7 @@ fn transpose_tensor_matrix(tensor: &Tensor) -> BuiltinResult<Tensor> {
             }
         }
     }
-    Tensor::new(out, vec![cols, rows]).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    Tensor::new(out, vec![cols, rows]).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn transpose_complex_matrix(ct: &ComplexTensor) -> Vec<(f64, f64)> {
@@ -335,6 +417,10 @@ pub(crate) mod tests {
         block_on(super::transpose_builtin(vec![value]))
     }
 
+    fn call_transpose_args(args: Vec<Value>) -> BuiltinResult<Value> {
+        block_on(super::transpose_builtin(args))
+    }
+
     fn tensor(data: &[f64], shape: &[usize]) -> Tensor {
         Tensor::new(data.to_vec(), shape.to_vec()).unwrap()
     }
@@ -367,6 +453,39 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(4), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn transpose_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = TRANSPOSE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"B = transpose(A)"));
+    }
+
+    #[test]
+    fn transpose_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = TRANSPOSE_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.TRANSPOSE.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.TRANSPOSE.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.TRANSPOSE.INTERNAL"));
+    }
+
+    #[test]
+    fn transpose_invalid_argument_identifier_is_stable() {
+        match call_transpose_args(Vec::new()) {
+            Err(err) => assert_eq!(
+                err.identifier(),
+                TRANSPOSE_ERROR_INVALID_ARGUMENT.identifier
+            ),
+            Ok(_) => panic!("expected invalid argument error"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

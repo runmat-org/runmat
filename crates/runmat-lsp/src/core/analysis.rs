@@ -3141,6 +3141,26 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_linalg_ops_descriptors() {
+        let cases = [
+            ("transpose([1,2;3,4]);", "B = transpose(A)"),
+            ("ctranspose([1,2;3,4]);", "B = ctranspose(A)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_uses_math_linalg_factor_descriptors() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
@@ -3155,6 +3175,40 @@ mod tests {
             qr_candidates.iter().any(|detail| detail.contains("qr(")),
             "expected descriptor signature detail for qr completion, got {:?}",
             qr_candidates
+        );
+    }
+
+    #[test]
+    fn completion_detail_uses_math_linalg_ops_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        let transpose_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("transpose"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            transpose_candidates
+                .iter()
+                .any(|detail| detail.contains("transpose(")),
+            "expected descriptor signature detail for transpose completion, got {:?}",
+            transpose_candidates
+        );
+
+        let ctranspose_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("ctranspose"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            ctranspose_candidates
+                .iter()
+                .any(|detail| detail.contains("ctranspose(")),
+            "expected descriptor signature detail for ctranspose completion, got {:?}",
+            ctranspose_candidates
         );
     }
 
