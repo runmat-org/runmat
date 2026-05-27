@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import LazyVideo from "@/components/LazyVideo";
+import { TryInBrowserLink } from "@/components/TryInBrowserButton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +41,14 @@ interface HeroProps {
     image?: string;
     poster?: string;
     video?: string;
+    link?: {
+      href?: string;
+      ariaLabel: string;
+      code?: string;
+      agentPrompt?: string;
+      source?: string;
+      exampleId?: string;
+    };
   };
 }
 
@@ -51,6 +60,39 @@ export default function Hero({
   supportingLinks,
   media,
 }: HeroProps) {
+  const mediaBlock = (
+    <div
+      role="img"
+      aria-label={media.label}
+      className={cn(
+        "relative aspect-video w-full overflow-hidden rounded-3xl border",
+        mediaToneClasses[media.tone ?? "muted"],
+        mediaToneBorderClasses[media.tone ?? "muted"],
+      )}
+    >
+      {media.video ? (
+        <LazyVideo
+          className="absolute inset-0 h-full w-full object-cover"
+          muted
+          loop
+          playsInline
+          initialPosterVariant="poster"
+          poster={media.poster}
+          aria-label={media.label}
+        >
+          <source src={media.video} type="video/mp4" />
+        </LazyVideo>
+      ) : media.image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={media.image}
+          alt={media.label}
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+      ) : null}
+    </div>
+  );
+
   return (
     <section
       className="relative isolate -mt-px overflow-hidden bg-background pt-24 text-foreground md:pt-32"
@@ -97,36 +139,13 @@ export default function Hero({
         </div>
 
         <div className="mx-auto mt-24 max-w-5xl pb-20 md:mt-32">
-          <div
-            role="img"
-            aria-label={media.label}
-            className={cn(
-              "relative aspect-video w-full overflow-hidden rounded-3xl border",
-              mediaToneClasses[media.tone ?? "muted"],
-              mediaToneBorderClasses[media.tone ?? "muted"],
-            )}
-          >
-            {media.video ? (
-              <LazyVideo
-                className="absolute inset-0 h-full w-full object-cover"
-                muted
-                loop
-                playsInline
-                initialPosterVariant="poster"
-                poster={media.poster}
-                aria-label={media.label}
-              >
-                <source src={media.video} type="video/mp4" />
-              </LazyVideo>
-            ) : media.image ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={media.image}
-                alt={media.label}
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-            ) : null}
-          </div>
+          {media.link ? (
+            <TryInBrowserLink {...media.link} className="rounded-3xl">
+              {mediaBlock}
+            </TryInBrowserLink>
+          ) : (
+            mediaBlock
+          )}
         </div>
       </div>
     </section>

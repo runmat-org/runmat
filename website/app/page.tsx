@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import Hero, { mediaToneClasses } from "@/components/Hero";
 import LazyVideo from "@/components/LazyVideo";
+import { TryInBrowserLink } from "@/components/TryInBrowserButton";
 import { Button } from "@/components/ui/button";
 import { DetectedDownloadLabel } from "@/components/DetectedDownloadLabel";
 import { CARD_PATTERNS } from "@/components/card-patterns";
@@ -12,6 +13,54 @@ const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surfac
 const heroVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.mp4";
 const pageDescription =
   "GPU-accelerated MATLAB-syntax math with real-time feedback and a runtime-aware agent. Open source across desktop, browser, and CLI. No license required.";
+
+const waveSurfaceExample = `% Wave surface demo
+n = 120;
+x = linspace(-6, 6, n);
+y = linspace(-6, 6, n);
+[X, Y] = meshgrid(x, y);
+R = sqrt(X.^2 + Y.^2);
+
+Z = sin(2.5 * R) .* exp(-0.08 * R.^2);
+surf(X, Y, Z);
+shading('interp');
+colormap('turbo');
+title('RunMat wave surface');`;
+
+const fastArrayExample = `% Fast array math example
+n = 400;
+t = linspace(0, 10, n);
+signal = sin(5 * t) .* exp(-t / 8);
+basis = [sin(t); cos(t); exp(-t / 5)];
+
+weights = basis * signal';
+bar(weights);
+title('Projected signal weights');`;
+
+const rippleSimulationExample = `% Ripple simulation example
+n = 120;
+x = linspace(-4, 4, n);
+y = linspace(-4, 4, n);
+[X, Y] = meshgrid(x, y);
+
+r1 = sqrt((X + 1.2).^2 + Y.^2);
+r2 = sqrt((X - 1.2).^2 + Y.^2);
+Z = sin(8 * r1) ./ (1 + 5 * r1) + sin(8 * r2) ./ (1 + 5 * r2);
+
+surf(X, Y, Z);
+shading('interp');
+title('Interfering ripples');`;
+
+const agentDiffStarter = `% Starter simulation for the RunMat agent
+n = 100;
+x = linspace(-5, 5, n);
+y = linspace(-5, 5, n);
+[X, Y] = meshgrid(x, y);
+R = sqrt(X.^2 + Y.^2);
+
+Z = sin(2 * R) .* exp(-0.05 * R.^2);
+surf(X, Y, Z);
+title('Baseline wave field');`;
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -216,6 +265,13 @@ const hero = {
     tone: "surface" as const,
     poster: heroPosterSrc,
     video: heroVideoSrc,
+    link: {
+      href: "/sandbox",
+      ariaLabel: "Open the wave surface demo in the RunMat sandbox",
+      code: waveSurfaceExample,
+      source: "homepage-hero-media",
+      exampleId: "homepage-wave-surface",
+    },
   },
 };
 
@@ -233,6 +289,13 @@ const features = [
     mediaLabel: "Runtime code media",
     mediaNote: "MATLAB code snippet with a matrix math error underline. Put logos for Apple, NVIDIA and ARM GPU under.",
     mediaImage: "https://web.runmatstatic.com/gpu-mistmatch.webp",
+    mediaLink: {
+      href: "/sandbox",
+      ariaLabel: "Open a fast array math example in the RunMat sandbox",
+      code: fastArrayExample,
+      source: "homepage-runtime-media",
+      exampleId: "homepage-fast-array-math",
+    },
     tone: "muted" as const,
   },
   {
@@ -252,6 +315,13 @@ const features = [
     mediaNote: "Showing a 3d simulation of raindrops on a surface of water.",
     mediaPoster: "https://web.runmatstatic.com/video/posters/runmat-wave-simulation-homepage.webp",
     mediaVideo: "https://web.runmatstatic.com/video/runmat-wave-simulation-homepage.mp4",
+    mediaLink: {
+      href: "/sandbox",
+      ariaLabel: "Open a ripple simulation example in the RunMat sandbox",
+      code: rippleSimulationExample,
+      source: "homepage-simulation-media",
+      exampleId: "homepage-ripple-simulation",
+    },
     tone: "brand" as const,
   },
   {
@@ -270,6 +340,15 @@ const features = [
     mediaLabel: "Agent workflow media",
     mediaNote: "Agent working with code, plots, and runtime state.",
     mediaImage: "https://web.runmatstatic.com/runmat-agent-diff-rain.webp",
+    mediaLink: {
+      href: "/sandbox",
+      ariaLabel: "Open the RunMat agent with a simulation editing prompt",
+      code: agentDiffStarter,
+      agentPrompt:
+        "Modify this wave simulation, run it, inspect the plot, and explain the change as a reviewable diff.",
+      source: "homepage-agent-media",
+      exampleId: "homepage-agent-diff",
+    },
     tone: "muted" as const,
   },
   {
@@ -287,6 +366,12 @@ const features = [
     mediaNote: "Run history, variable history, and collaboration.",
     mediaPoster: "https://web.runmatstatic.com/video/posters/fft-run-versions.webp",
     mediaVideo: "https://web.runmatstatic.com/video/fft-run-versions.mp4",
+    mediaLink: {
+      href: "/sandbox",
+      ariaLabel: "Open the RunMat sandbox",
+      source: "homepage-history-media",
+      exampleId: "homepage-history",
+    },
     tone: "brand" as const,
   },
 ] as const;
@@ -399,38 +484,40 @@ export default function HomePage() {
                       : "2xl:col-span-8 2xl:col-start-1 2xl:row-start-1"
                   }
                 >
-                  <div
-                    role="img"
-                    aria-label={feature.mediaLabel}
-                    className={cn(
-                      "relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border 2xl:aspect-auto 2xl:min-h-[430px]",
-                      mediaToneClasses[feature.tone],
-                    )}
-                  >
-                    {"mediaVideo" in feature ? (
-                      <LazyVideo
-                        className="absolute inset-0 h-full w-full object-cover"
-                        muted
-                        loop
-                        playsInline
-                        deferPosterUntilVisible
-                        initialPosterVariant="poster"
-                        poster={feature.mediaPoster}
-                        aria-label={feature.mediaLabel}
-                      >
-                        <source src={feature.mediaVideo} type="video/mp4" />
-                      </LazyVideo>
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={feature.mediaImage}
-                        alt={feature.mediaLabel}
-                        loading="lazy"
-                        decoding="async"
-                        className="absolute inset-0 h-full w-full object-cover"
-                      />
-                    )}
-                  </div>
+                  <TryInBrowserLink {...feature.mediaLink} className="rounded-2xl">
+                    <div
+                      role="img"
+                      aria-label={feature.mediaLabel}
+                      className={cn(
+                        "relative aspect-[16/9] w-full overflow-hidden rounded-2xl border border-border 2xl:aspect-auto 2xl:min-h-[430px]",
+                        mediaToneClasses[feature.tone],
+                      )}
+                    >
+                      {"mediaVideo" in feature ? (
+                        <LazyVideo
+                          className="absolute inset-0 h-full w-full object-cover"
+                          muted
+                          loop
+                          playsInline
+                          deferPosterUntilVisible
+                          initialPosterVariant="poster"
+                          poster={feature.mediaPoster}
+                          aria-label={feature.mediaLabel}
+                        >
+                          <source src={feature.mediaVideo} type="video/mp4" />
+                        </LazyVideo>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={feature.mediaImage}
+                          alt={feature.mediaLabel}
+                          loading="lazy"
+                          decoding="async"
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      )}
+                    </div>
+                  </TryInBrowserLink>
                 </div>
               </div>
             ))}
