@@ -32,9 +32,38 @@ const heroVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.
 const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surface-runmat.webp";
 const agentDiffImageSrc = "https://web.runmatstatic.com/runmat-agent-diff-rain.webp";
 
-// Open question per plan: /sandbox does not yet handle a `?prompt=` query.
-// Cards link to plain /sandbox and display the prompt so users can copy it.
-// When the query handler ships, switch href to `/sandbox?prompt=encodeURIComponent(prompt)`.
+const dampedOscillatorCode = `% Damped oscillator: single run
+m = 1.0;
+k = 25.0;
+c = 0.8;
+
+t = linspace(0, 6, 400);
+omega0 = sqrt(k / m);
+zeta = c / (2 * sqrt(k * m));
+omegaD = omega0 * sqrt(1 - zeta^2);
+
+x = exp(-zeta * omega0 * t) .* cos(omegaD * t);
+
+plot(t, x);
+xlabel('Time (s)');
+ylabel('Displacement (m)');
+title('Damped oscillator');
+grid on;`;
+
+const brokenFilteringCode = `% This script has a dimension mismatch for the agent to debug.
+t = linspace(0, 2*pi, 200);
+signal = sin(t);
+window = [0.25 0.5 0.75];
+
+filtered = signal .* window;
+
+plot(t, filtered);
+xlabel('Time (s)');
+ylabel('Filtered signal');
+title('Broken filtering script');`;
+
+// These prompts launch through the existing workspace payload flow rather than
+// direct query params so the sandbox can hydrate both starter code and prompt text.
 const tryPrompts: { id: string; title: string; prompt: string }[] = [
   {
     id: "sweep",
@@ -71,6 +100,90 @@ const tryPrompts: { id: string; title: string; prompt: string }[] = [
     title: "Tune a PID controller",
     prompt:
       "Design a PID controller for a 1 kg mass on a spring. Plot the step response and find gains that settle in under 0.5 seconds without overshoot.",
+  },
+];
+
+type StartCard = {
+  title: string;
+  body: string;
+  icon: React.ComponentType<{ className?: string }>;
+  source: string;
+  cta: string;
+  exampleId: string;
+  code: string;
+  agentPrompt: string;
+};
+
+const startCards: StartCard[] = [
+  {
+    title: "An existing MATLAB script",
+    body: "Open a script you already use. Ask the agent to explain it, debug a run, add a plot, or turn a single run into a parameter sweep.",
+    icon: FileCode2,
+    source: "agent-page-start-matlab",
+    cta: "try-from-matlab",
+    exampleId: "existing-script",
+    code: dampedOscillatorCode,
+    agentPrompt:
+      "Explain this script, then turn it into a parameter sweep over damping values and overlay the results.",
+  },
+  {
+    title: "Raw data",
+    body: "Add a CSV or table. Ask the agent to clean it, plot it, fit a model, or compare residuals.",
+    icon: LineChart,
+    source: "agent-page-start-csv",
+    cta: "try-from-csv",
+    exampleId: "raw-data",
+    code: `% Lab measurements copied from a table
+time = [0 1 2 3 4 5 6 7 8 9 10];
+response = [2.1 2.8 3.6 4.3 5.1 6.4 7.2 8.1 9.0 10.6 11.1];
+
+plot(time, response, 'o');
+xlabel('Time (s)');
+ylabel('Response');
+title('Raw lab measurements');
+grid on;`,
+    agentPrompt:
+      "Treat these measurements like imported lab data. Clean obvious issues, fit linear and exponential models, plot residuals, and tell me which fit is better.",
+  },
+  {
+    title: "A script that's broken",
+    body: "Run it in the workspace and ask the agent to debug it. It can use the error, variables, and output to propose a fix.",
+    icon: Bug,
+    source: "agent-page-start-broken",
+    cta: "try-from-broken",
+    exampleId: "broken-script",
+    code: brokenFilteringCode,
+    agentPrompt:
+      "Run this script, use the error and workspace state to debug it, then propose a minimal fix.",
+  },
+  {
+    title: "An engineering problem",
+    body: "Describe the system, constraints, and result you need. The agent can help write the first script.",
+    icon: Lightbulb,
+    source: "agent-page-start-idea",
+    cta: "try-from-idea",
+    exampleId: "engineering-problem",
+    code: `% Thermal resistance scaffold for a three-layer wall
+thickness = [0.10 0.05 0.012];
+conductivity = [0.72 0.04 0.16];
+insideTemp = 20;
+outsideTemp = -5;
+area = 1.0;
+
+resistance = thickness ./ (conductivity * area);
+totalResistance = sum(resistance);
+heatFlux = (insideTemp - outsideTemp) / totalResistance;
+
+positions = cumsum([0 thickness]);
+interfaceTemps = insideTemp - heatFlux * cumsum([0 resistance]);
+
+plot(positions, interfaceTemps, '-o');
+xlabel('Position through wall (m)');
+ylabel('Temperature (C)');
+title('Temperature gradient through layered wall');
+grid on;`,
+    agentPrompt:
+      "Complete this engineering model, run it, plot the result, and explain the tradeoff.",
   },
 ];
 
@@ -394,17 +507,17 @@ export default function AgentPage() {
                 </Button>
               </div>
             </div>
-            <div className="rounded-xl border border-border bg-card p-2 elevated-panel">
+            <div className="overflow-hidden rounded-xl">
               <Link
                 href="/sandbox"
-                className="block rounded-lg overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="block overflow-hidden rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 data-ph-capture-attribute-destination="sandbox"
                 data-ph-capture-attribute-source="agent-page-hero-video"
                 data-ph-capture-attribute-cta="try-runmat-agent"
                 aria-label="Open the RunMat sandbox"
               >
                 <LazyVideo
-                  className="w-full h-auto rounded-lg"
+                  className="w-full h-auto"
                   muted
                   loop
                   playsInline
@@ -615,78 +728,31 @@ export default function AgentPage() {
             </h2>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="rounded-lg border border-border bg-card p-6 flex flex-col">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
-                <FileCode2 className="h-5 w-5" />
-              </span>
-              <h3 className="text-lg font-semibold text-foreground">An existing MATLAB script</h3>
-              <p className="text-[0.938rem] text-foreground mt-1 flex-1">
-                Open a script you already use. Ask the agent to explain it, debug a run, add a plot, or turn a single run into a parameter sweep.
-              </p>
-              <Link
-                href="/sandbox"
-                className="text-sm text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 mt-4 inline-flex items-center gap-1"
-                data-ph-capture-attribute-destination="sandbox"
-                data-ph-capture-attribute-source="agent-page-start-matlab"
-                data-ph-capture-attribute-cta="try-from-matlab"
-              >
-                Try it <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-            <div className="rounded-lg border border-border bg-card p-6 flex flex-col">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
-                <LineChart className="h-5 w-5" />
-              </span>
-              <h3 className="text-lg font-semibold text-foreground">Raw data</h3>
-              <p className="text-[0.938rem] text-foreground mt-1 flex-1">
-                Add a CSV or table. Ask the agent to clean it, plot it, fit a model, or compare residuals.
-              </p>
-              <Link
-                href="/sandbox"
-                className="text-sm text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 mt-4 inline-flex items-center gap-1"
-                data-ph-capture-attribute-destination="sandbox"
-                data-ph-capture-attribute-source="agent-page-start-csv"
-                data-ph-capture-attribute-cta="try-from-csv"
-              >
-                Try it <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-            <div className="rounded-lg border border-border bg-card p-6 flex flex-col">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
-                <Bug className="h-5 w-5" />
-              </span>
-              <h3 className="text-lg font-semibold text-foreground">A script that&apos;s broken</h3>
-              <p className="text-[0.938rem] text-foreground mt-1 flex-1">
-                Run it in the workspace and ask the agent to debug it. It can use the error, variables, and output to propose a fix.
-              </p>
-              <Link
-                href="/sandbox"
-                className="text-sm text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 mt-4 inline-flex items-center gap-1"
-                data-ph-capture-attribute-destination="sandbox"
-                data-ph-capture-attribute-source="agent-page-start-broken"
-                data-ph-capture-attribute-cta="try-from-broken"
-              >
-                Try it <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-            <div className="rounded-lg border border-border bg-card p-6 flex flex-col">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
-                <Lightbulb className="h-5 w-5" />
-              </span>
-              <h3 className="text-lg font-semibold text-foreground">An engineering problem</h3>
-              <p className="text-[0.938rem] text-foreground mt-1 flex-1">
-                Describe the system, constraints, and result you need. The agent can help write the first script.
-              </p>
-              <Link
-                href="/sandbox"
-                className="text-sm text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 mt-4 inline-flex items-center gap-1"
-                data-ph-capture-attribute-destination="sandbox"
-                data-ph-capture-attribute-source="agent-page-start-idea"
-                data-ph-capture-attribute-cta="try-from-idea"
-              >
-                Try it <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
+            {startCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <div key={card.exampleId} className="rounded-lg border border-border bg-card p-6 flex flex-col">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <h3 className="text-lg font-semibold text-foreground">{card.title}</h3>
+                  <p className="text-[0.938rem] text-foreground mt-1 flex-1">
+                    {card.body}
+                  </p>
+                  <TryInBrowserButton
+                    code={card.code}
+                    agentPrompt={card.agentPrompt}
+                    source={card.source}
+                    exampleId={card.exampleId}
+                    size="sm"
+                    data-ph-capture-attribute-cta={card.cta}
+                    className="mt-4 h-auto! w-fit border-0! bg-transparent! p-0! text-[hsl(var(--brand))]! shadow-none! hover:bg-transparent! hover:text-[hsl(var(--brand))]/80! [&>svg:first-child]:hidden"
+                  >
+                    Try it <ArrowRight className="h-3.5 w-3.5" />
+                  </TryInBrowserButton>
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

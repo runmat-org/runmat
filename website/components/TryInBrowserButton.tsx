@@ -3,12 +3,25 @@
 import { Button } from "@/components/ui/button";
 import { openWorkspace } from "@/lib/desktop";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
+import type { ReactNode } from "react";
 
 interface TryInBrowserButtonProps extends React.ComponentProps<typeof Button> {
   code?: string;
   agentPrompt?: string;
   source?: string;
   exampleId?: string;
+}
+
+interface TryInBrowserLinkProps {
+  href?: string;
+  ariaLabel: string;
+  code?: string;
+  agentPrompt?: string;
+  source?: string;
+  exampleId?: string;
+  className?: string;
+  children: ReactNode;
 }
 
 const normalizeExampleId = (value?: string) => value?.trim() || undefined;
@@ -65,5 +78,91 @@ export function TryInBrowserButton({
           </svg>
           {children ?? "Run in browser"}
       </Button>
+  );
+}
+
+export function TryInBrowserLink({
+  href = "/sandbox",
+  ariaLabel,
+  code,
+  agentPrompt,
+  source = "try-in-browser-link",
+  exampleId,
+  className,
+  children,
+}: TryInBrowserLinkProps) {
+  const linkClassName = cn(
+    "block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    className,
+  );
+
+  if (!code && !agentPrompt) {
+    return (
+      <Link
+        href={href}
+        aria-label={ariaLabel}
+        className={linkClassName}
+        data-ph-capture-attribute-destination="sandbox"
+        data-ph-capture-attribute-source={source}
+        data-ph-capture-attribute-cta="open-product-media"
+        data-ph-capture-attribute-example-id={exampleId}
+      >
+        {children}
+      </Link>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      aria-label={ariaLabel}
+      className={linkClassName}
+      data-ph-capture-attribute-destination="sandbox"
+      data-ph-capture-attribute-source={source}
+      data-ph-capture-attribute-cta="open-product-media"
+      data-ph-capture-attribute-example-id={exampleId}
+      onClick={(event) => {
+        const isNormalLeftClick =
+          event.button === 0 &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey;
+
+        if (!isNormalLeftClick) {
+          return;
+        }
+
+        event.preventDefault();
+
+        try {
+          const url = openWorkspace(
+            [
+              {
+                path: "/example.m",
+                content: code ?? `% ${agentPrompt}`,
+              },
+            ],
+            {
+              targetPath: href,
+              agentPrompt,
+              newTab: false,
+              metadata: {
+                source,
+                ...(exampleId ? { exampleId } : {}),
+              },
+            },
+          );
+
+          if (!url) {
+            window.location.assign(href);
+          }
+        } catch {
+          window.location.assign(href);
+        }
+      }}
+    >
+      {children}
+    </a>
   );
 }

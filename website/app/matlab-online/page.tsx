@@ -2,15 +2,13 @@ import type { Metadata } from "next";
 import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { DetectedDownloadLabel } from "@/components/DetectedDownloadLabel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SandboxCta } from "@/components/SandboxCta";
 import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
+import { TryInBrowserButton } from "@/components/TryInBrowserButton";
 import LazyVideo from "@/components/LazyVideo";
 import dynamic from "next/dynamic";
-
-const MatlabInlineCodeBlock = dynamic(() => import("@/components/MatlabInlineCodeBlock"), {
-  loading: () => <div className="w-full h-[60px] rounded-md bg-muted/40 animate-pulse" />,
-});
 
 const BenchmarkShowcaseBlock = dynamic(
   () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
@@ -33,12 +31,109 @@ import {
   Wand2,
   FlaskConical,
   FileDiff,
+  Sparkles,
 } from "lucide-react";
 
+const pageTitle = "Run MATLAB-Syntax Math Online - GPU Browser Sandbox";
+const pageDescription =
+  "Run MATLAB-syntax math in your browser with local execution, GPU acceleration when available, and a runtime-aware agent. No account or license required.";
+const pageDates = {
+  publishedAt: new Date("2026-02-03T00:00:00Z"),
+  lastModified: new Date("2026-05-27T00:00:00Z"),
+} as const;
+
+const heroVideoSrc = "https://web.runmatstatic.com/video/runmat-wave-simulation-homepage.mp4";
+const heroPosterSrc = "https://web.runmatstatic.com/video/posters/runmat-wave-simulation-homepage.webp";
+const heroVideoMetadata = {
+  uploadedAt: new Date("2026-05-26T00:00:00Z"),
+} as const;
+
+const agentVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.mp4";
+const agentPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surface-runmat.webp";
+
+const howItWorksVideoSrc = "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4";
+const howItWorksPosterSrc = "https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp";
+
+const dampedOscillatorCode = `% Damped oscillator: single run
+m = 1.0;
+k = 25.0;
+c = 0.8;
+
+t = linspace(0, 6, 400);
+omega0 = sqrt(k / m);
+zeta = c / (2 * sqrt(k * m));
+omegaD = omega0 * sqrt(1 - zeta^2);
+
+x = exp(-zeta * omega0 * t) .* cos(omegaD * t);
+
+plot(t, x);
+xlabel('Time (s)');
+ylabel('Displacement (m)');
+title('Damped oscillator');
+grid on;`;
+
+const brokenFilteringCode = `% This script has a dimension mismatch for the agent to debug.
+t = linspace(0, 2*pi, 200);
+signal = sin(t);
+window = [0.25 0.5 0.75];
+
+filtered = signal .* window;
+
+plot(t, filtered);
+xlabel('Time (s)');
+ylabel('Filtered signal');
+title('Broken filtering script');`;
+
+const matlabOnlineLimits = {
+  hoursPerMonth: "20 hours per month",
+  continuousLimit: "15-minute continuous compute",
+  idleLimit: "15-minute idle-time",
+  licenseNote: "Basic access is free; full access depends on a linked license",
+  productAccessNote:
+    "Basic MATLAB Online includes a limited set of commonly used products. Full product access depends on your license",
+  lastVerified: "May 2026",
+} as const;
+
+const onlinePrompts: { id: string; title: string; prompt: string; code: string }[] = [
+  {
+    id: "wave-surface",
+    title: "Animate a wave surface",
+    prompt: "Visualize two interfering waves on a square membrane and animate the surface.",
+    code: `% Visualize two interfering waves on a square membrane and animate the surface.
+n = 80;
+x = linspace(-2, 2, n);
+y = linspace(-2, 2, n);
+[X, Y] = meshgrid(x, y);
+
+r1 = sqrt((X + 0.7).^2 + Y.^2);
+r2 = sqrt((X - 0.7).^2 + Y.^2);
+t = 0;
+Z = sin(8 * r1 - 4 * t) + sin(8 * r2 - 4 * t);
+
+surf(X, Y, Z);
+shading interp;
+title('Interfering wave surface');
+`,
+  },
+  {
+    id: "oscillator-sweep",
+    title: "Sweep an oscillator",
+    prompt: "Turn this damped oscillator into a parameter sweep and overlay the results.",
+    code: dampedOscillatorCode,
+  },
+  {
+    id: "dimension-debug",
+    title: "Debug a shape error",
+    prompt: "Debug a matrix dimension mismatch, explain the fix, and return corrected code.",
+    code: brokenFilteringCode,
+  },
+];
+
+const toJsonLdDate = (date: Date) => date.toISOString();
+
 export const metadata: Metadata = {
-  title: "Run MATLAB Code Online - Instant GPU Sandbox",
-  description:
-    "Run MATLAB-syntax code in your browser with a built-in coding agent and automatic GPU acceleration. Open-source runtime. No license required.",
+  title: pageTitle,
+  description: pageDescription,
   alternates: { canonical: "https://runmat.com/matlab-online" },
   keywords: [
     "matlab online", "matlab online free", "run matlab online",
@@ -50,18 +145,31 @@ export const metadata: Metadata = {
     "matlab agentic toolkit", "matlab mcp",
   ],
   openGraph: {
-    title: "Run MATLAB Code Online - Instant GPU Sandbox",
-    description:
-      "Run MATLAB-syntax code in your browser with a built-in coding agent and automatic GPU acceleration. Open-source runtime. No license required.",
+    title: pageTitle,
+    description: pageDescription,
     url: "/matlab-online",
     siteName: "RunMat",
     type: "website",
+    images: [
+      {
+        url: heroPosterSrc,
+        width: 3840,
+        height: 2160,
+        alt: "RunMat wave simulation running in the browser",
+      },
+    ],
+    videos: [
+      {
+        url: heroVideoSrc,
+        type: "video/mp4",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Run MATLAB Code Online - Instant GPU Sandbox",
-    description:
-      "Run MATLAB-syntax code in your browser with a built-in coding agent and automatic GPU acceleration. Open-source runtime. No license required.",
+    title: pageTitle,
+    description: pageDescription,
+    images: [heroPosterSrc],
   },
   robots: {
     index: true,
@@ -75,12 +183,6 @@ export const metadata: Metadata = {
     },
   },
 };
-
-const heroVideoSrc = "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4";
-const heroPosterSrc = "https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp";
-
-const agentVideoSrc = "https://web.runmatstatic.com/video/runmat-agent-demo-speaker.mp4";
-const agentPosterSrc = "https://web.runmatstatic.com/video/posters/runmat-agent-demo-speaker.webp";
 
 const faqItems: FAQItem[] = [
   {
@@ -223,12 +325,11 @@ const jsonLd = {
       "@type": "WebPage",
       "@id": "https://runmat.com/matlab-online#webpage",
       url: "https://runmat.com/matlab-online",
-      name: "Run MATLAB Code Online - Instant GPU Sandbox",
-      description:
-        "Run MATLAB-syntax code in your browser with a built-in coding agent and automatic GPU acceleration. Open-source runtime. No license required.",
+      name: pageTitle,
+      description: pageDescription,
       inLanguage: "en",
-      datePublished: "2026-02-03T00:00:00Z",
-      dateModified: "2026-04-21T00:00:00Z",
+      datePublished: toJsonLdDate(pageDates.publishedAt),
+      dateModified: toJsonLdDate(pageDates.lastModified),
       isPartOf: { "@id": "https://runmat.com/#website" },
       breadcrumb: { "@id": "https://runmat.com/matlab-online#breadcrumb" },
       author: { "@id": "https://runmat.com/#organization" },
@@ -243,13 +344,12 @@ const jsonLd = {
     {
       "@type": "VideoObject",
       "@id": "https://runmat.com/matlab-online#hero-video",
-      name: "RunMat agent extending a clamped plate vibration simulation",
+      name: "RunMat wave simulation in the browser",
       description:
-        "RunMat's built-in agent adds a second strike to a clamped-plate vibration simulation and renders the combined interference pattern in the browser.",
+        "RunMat runs a GPU-accelerated wave simulation with MATLAB-syntax code directly in the browser.",
       thumbnailUrl: heroPosterSrc,
       contentUrl: heroVideoSrc,
-      uploadDate: "2026-05-14T00:00:00Z",
-      duration: "PT47S",
+      uploadDate: toJsonLdDate(heroVideoMetadata.uploadedAt),
     },
     {
       "@type": "BreadcrumbList",
@@ -268,8 +368,7 @@ const jsonLd = {
       "@type": "SoftwareApplication",
       "@id": "https://runmat.com/matlab-online#software",
       name: "RunMat",
-      description:
-        "RunMat is a high-performance, open-source runtime for math with a built-in coding agent that runs MATLAB-syntax code in the browser with GPU acceleration and no license required.",
+      description: pageDescription,
       applicationCategory: "ScientificApplication",
       applicationSubCategory: "EngineeringApplication",
       operatingSystem: ["Browser", "Windows", "macOS", "Linux"],
@@ -325,7 +424,7 @@ const jsonLd = {
           "@type": "HowToStep",
           position: 3,
           name: "Run on GPU and iterate",
-          text: "Execute on the GPU-accelerated runtime. Inspect plots and variables, then iterate.",
+          text: "Execute on the RunMat runtime with GPU acceleration when available. Inspect plots and variables, then iterate.",
         },
       ],
     },
@@ -358,11 +457,11 @@ export default function MatlabOnlinePage() {
                 MATLAB online alternative
               </div>
               <h1 className="font-bold text-left leading-tight tracking-tight text-3xl sm:text-4xl md:text-5xl">
-                Run MATLAB code in the browser blazing fast
+                Run MATLAB-syntax math in your browser
               </h1>
               <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem]">
-                RunMat executes MATLAB-syntax code in your browser with auto GPU acceleration. No account or licence
-                needed.
+                RunMat executes MATLAB-syntax code locally in your browser with GPU acceleration when available.
+                No account, no license server, no install.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
                 <Button
@@ -376,7 +475,7 @@ export default function MatlabOnlinePage() {
                     data-ph-capture-attribute-source="matlab-online-hero"
                     data-ph-capture-attribute-cta="try-runmat-browser"
                   >
-                    Try RunMat in your browser
+                    Open Browser Sandbox
                   </Link>
                 </Button>
                 <Button
@@ -385,9 +484,23 @@ export default function MatlabOnlinePage() {
                   asChild
                   className="h-12 px-8 text-base rounded-none bg-card border-border text-foreground"
                 >
-                  <Link href="/docs/desktop-browser-guide">View getting started</Link>
+                  <Link
+                    href="/download/latest"
+                    data-ph-capture-attribute-destination="download-latest"
+                    data-ph-capture-attribute-source="matlab-online-hero"
+                    data-ph-capture-attribute-cta="download-runmat"
+                  >
+                    <DetectedDownloadLabel />
+                  </Link>
                 </Button>
               </div>
+              <p className="text-sm text-muted-foreground">
+                Need another installer?{" "}
+                <Link href="/download" className="underline hover:text-foreground">
+                  View all download options
+                </Link>
+                .
+              </p>
             </div>
             <div className="rounded-xl border border-border bg-card p-2">
               <Link
@@ -405,7 +518,7 @@ export default function MatlabOnlinePage() {
                   playsInline
                   initialPosterVariant="poster"
                   poster={heroPosterSrc}
-                  aria-label="RunMat agent extending a clamped plate vibration simulation"
+                  aria-label="RunMat wave simulation running in the browser"
                 >
                   <source src={heroVideoSrc} type="video/mp4" />
                 </LazyVideo>
@@ -424,9 +537,12 @@ export default function MatlabOnlinePage() {
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="mt-1 h-5 w-5 text-amber-600 dark:text-amber-400" />
                   <div>
-                    <h3 className="text-lg font-semibold text-foreground">MATLAB Online has friction</h3>
+                    <h3 className="text-lg font-semibold text-foreground">Why people look beyond MATLAB Online</h3>
                     <p className="text-[0.938rem] text-foreground mt-2">
-                      MATLAB Online runs your code on MathWorks&apos; servers, requires an account, and caps free usage at 20 hours/month with 15-minute idle timeouts. Engineers and students hit these limits regularly:
+                      MATLAB Online runs through MathWorks-hosted compute in the browser. {matlabOnlineLimits.licenseNote}.
+                      Basic access includes {matlabOnlineLimits.hoursPerMonth} with {matlabOnlineLimits.continuousLimit} and{" "}
+                      {matlabOnlineLimits.idleLimit} limits. As of {matlabOnlineLimits.lastVerified}.
+                      That is convenient for some work, but engineers and students still hit friction:
                     </p>
                   </div>
                 </div>
@@ -440,7 +556,8 @@ export default function MatlabOnlinePage() {
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
                     <p className="text-sm font-semibold text-foreground">Idle timeouts &amp; hour caps</p>
                     <p className="text-sm text-foreground mt-1">
-                      Sessions timeout after 15 minutes of inactivity. Free tier is capped at 20 hours/month.
+                      Basic access includes {matlabOnlineLimits.hoursPerMonth} with {matlabOnlineLimits.continuousLimit} and{" "}
+                      {matlabOnlineLimits.idleLimit} limits. As of {matlabOnlineLimits.lastVerified}.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
@@ -452,19 +569,19 @@ export default function MatlabOnlinePage() {
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
                     <p className="text-sm font-semibold text-foreground">No local GPU access</p>
                     <p className="text-sm text-foreground mt-1">
-                      Code runs on MathWorks&apos; servers, so you cannot use your own GPU for acceleration.
+                      Computation runs on MathWorks-hosted resources, so your laptop or workstation GPU is not the execution target.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
-                    <p className="text-sm font-semibold text-foreground">Specialty toolboxes cost extra</p>
+                    <p className="text-sm font-semibold text-foreground">Toolbox access depends on license</p>
                     <p className="text-sm text-foreground mt-1">
-                      Specialty toolboxes (Image Processing, Signal Processing, Optimization, etc.) are paid add-ons on top of base MATLAB.
+                      {matlabOnlineLimits.productAccessNote}. As of {matlabOnlineLimits.lastVerified}.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
                     <p className="text-sm font-semibold text-foreground">No built-in agent</p>
                     <p className="text-sm text-foreground mt-1">
-                      MathWorks&apos; <Link href="https://github.com/matlab/matlab-agentic-toolkit" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground/80">Agentic Toolkit</Link> is a separate product for local MATLAB installs (Claude Code, Copilot, Codex, Gemini, or Amp). Its MCP returns command-window text — no plot or workspace introspection.
+                      MathWorks&apos; <Link href="https://github.com/matlab/matlab-agentic-toolkit" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground/80">Agentic Toolkit</Link> connects supported AI coding agents to local MATLAB installs through MCP. RunMat puts the agent inside the same browser runtime as your workspace and plots.
                     </p>
                   </div>
                 </div>
@@ -482,9 +599,8 @@ export default function MatlabOnlinePage() {
               Meet RunMat: no license required
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              RunMat is an open-source runtime that understands MATLAB syntax and runs it directly in your browser.
-              Your code executes on your own device via WebAssembly, with GPU acceleration in browsers that support
-              WebGPU.
+              RunMat is an open-source runtime for MATLAB-syntax math. In the browser, your code runs on your own
+              device through WebAssembly, with GPU acceleration in browsers that support WebGPU.
             </p>
           </div>
           <div className="mx-auto mt-12 max-w-5xl">
@@ -551,7 +667,7 @@ export default function MatlabOnlinePage() {
                   data-ph-capture-attribute-source="matlab-online-features"
                   data-ph-capture-attribute-cta="try-runmat-browser"
                 >
-                  Try RunMat in your browser
+                  Open Browser Sandbox
                 </Link>
               </Button>
             </div>
@@ -567,7 +683,8 @@ export default function MatlabOnlinePage() {
               An engineering team, working alongside you
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              The agent runs your scenarios, reviews the code, and searches the project for what you need. You explore problems that used to take a team.
+              RunMat&apos;s agent writes MATLAB-syntax code, runs it in the same runtime, inspects workspace and plot state,
+              and returns each change as a reviewable diff.
             </p>
           </div>
           <div className="mx-auto max-w-3xl mb-8">
@@ -585,7 +702,7 @@ export default function MatlabOnlinePage() {
                   loop
                   playsInline
                   poster={agentPosterSrc}
-                  aria-label="RunMat agent exploring a speaker interference pattern in 3D — opens the sandbox"
+                  aria-label="RunMat 3D wave surface simulation - opens the sandbox"
                 >
                   <source src={agentVideoSrc} type="video/mp4" />
                 </LazyVideo>
@@ -622,6 +739,43 @@ export default function MatlabOnlinePage() {
         </div>
       </section>
 
+      {/* Runnable prompts */}
+      <section className="w-full py-16 md:py-24">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-6 text-center mb-12">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
+              Try a prompt in the browser
+            </h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
+              Open a runnable sandbox session with starter code and an agent prompt already loaded.
+            </p>
+          </div>
+          <div className="mx-auto grid max-w-5xl grid-cols-1 gap-5 md:grid-cols-3">
+            {onlinePrompts.map(prompt => (
+              <div key={prompt.id} className="rounded-lg border border-border bg-card p-6 flex flex-col">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <h3 className="text-lg font-semibold text-foreground">{prompt.title}</h3>
+                <p className="mt-2 flex-1 font-mono text-[0.875rem] leading-relaxed text-foreground">
+                  {prompt.prompt}
+                </p>
+                <TryInBrowserButton
+                  code={prompt.code}
+                  agentPrompt={prompt.prompt}
+                  source={`matlab-online-prompt-${prompt.id}`}
+                  exampleId={prompt.id}
+                  size="sm"
+                  className="mt-5 w-fit"
+                >
+                  Run prompt
+                </TryInBrowserButton>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* How it works */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
@@ -654,8 +808,8 @@ export default function MatlabOnlinePage() {
                   3
                 </span>
                 <div>
-                  <h3 className="text-lg font-semibold text-foreground">Run on GPU and iterate</h3>
-                  <p className="text-[0.938rem] text-foreground mt-1">Execute on the same GPU-accelerated runtime. Inspect plots and variables, then iterate until the math is right.</p>
+                  <h3 className="text-lg font-semibold text-foreground">Run and iterate</h3>
+                  <p className="text-[0.938rem] text-foreground mt-1">Execute on the RunMat runtime with GPU acceleration when available. Inspect plots and variables, then iterate until the math is right.</p>
                 </div>
               </div>
             </div>
@@ -667,10 +821,10 @@ export default function MatlabOnlinePage() {
                 loop
                 playsInline
                 preload="metadata"
-                poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
+                poster={howItWorksPosterSrc}
                 aria-label="RunMat wave simulation demo"
               >
-                <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
+                <source src={howItWorksVideoSrc} type="video/mp4" />
               </video>
             </div>
           </div>
@@ -753,7 +907,11 @@ export default function MatlabOnlinePage() {
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">RunMat vs. MATLAB Online</h2>
-            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">RunMat runs in your browser with a built-in agent and GPU acceleration, no account needed. MATLAB Online runs on MathWorks&apos; servers behind a paid license and caps free usage.</p>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
+              RunMat runs MATLAB-syntax code in your browser or desktop app with a built-in agent and local GPU acceleration
+              when available. MATLAB Online runs through MathWorks-hosted compute. {matlabOnlineLimits.licenseNote}.
+              Basic access includes {matlabOnlineLimits.hoursPerMonth}. As of {matlabOnlineLimits.lastVerified}.
+            </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
             <Card className="border border-border bg-card shadow-sm">
@@ -829,9 +987,9 @@ export default function MatlabOnlinePage() {
                   <p className="text-[0.938rem] text-foreground">MathWorks&apos; cloud-hosted MATLAB IDE</p>
                 </div>
                 <ul className="space-y-2 text-sm">
-                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
-                    Requires paid MATLAB license
+                  <li className="flex items-start gap-3 text-foreground">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-foreground">–</span>
+                    {matlabOnlineLimits.licenseNote}. As of {matlabOnlineLimits.lastVerified}.
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
@@ -843,15 +1001,16 @@ export default function MatlabOnlinePage() {
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
-                    Free tier capped at 20 hours/month, 15-min idle timeout
+                    Basic access includes {matlabOnlineLimits.hoursPerMonth} with {matlabOnlineLimits.continuousLimit} and{" "}
+                    {matlabOnlineLimits.idleLimit} limits. As of {matlabOnlineLimits.lastVerified}.
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
                     Cloud-based execution
                   </li>
-                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">✓</span>
-                    GPU support available
+                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
+                    No local GPU access; computation runs on MathWorks-hosted resources
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
