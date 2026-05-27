@@ -47,13 +47,13 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
         let runtime_source = pre_test_source(&source);
 
         assert!(
-            !runtime_source.contains("const IDENT_"),
+            !source.contains("const IDENT_"),
             "{} defines IDENT_* constant despite descriptor-backed errors; keep identifier/message/code in BuiltinErrorDescriptor rows only",
             file.display()
         );
 
         let mut in_error_descriptor = false;
-        for line in runtime_source.lines() {
+        for line in source.lines() {
             let trimmed = line.trim();
             let is_error_const = trimmed.starts_with("const ")
                 && trimmed.contains(": &str")

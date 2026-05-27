@@ -277,6 +277,7 @@ Disallowed:
 1. `const IDENT_*`, `const *_CODE`, `const *_MESSAGE` mirrors for stable branches.
 2. `with_identifier("RunMat:...")` direct stable-branch throws in migrated builtin files.
 3. Repeating the same stable message text at throw sites when that message already exists in a descriptor row.
+4. Duplicating stable error identifier/code/message constants in `#[cfg(test)]` sections of migrated builtin files; tests should reference descriptor rows directly as well.
 
 Audit command (must stay clean):
 
