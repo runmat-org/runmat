@@ -2959,6 +2959,44 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_io_mat_descriptors() {
+        let cases = [
+            ("load();", "S = load()"),
+            ("load(\"vars.mat\");", "S = load(filename)"),
+            (
+                "load(\"vars.mat\", \"A\", \"B\");",
+                "S = load(filename, varName1, varName2, ...)",
+            ),
+            (
+                "load(\"vars.mat\", \"-regexp\", \"^A\");",
+                "S = load(filename, \"-regexp\", pattern1, ...)",
+            ),
+            ("save();", "status = save()"),
+            ("save(\"vars.mat\");", "status = save(filename)"),
+            (
+                "save(\"vars.mat\", \"A\", \"B\");",
+                "status = save(filename, varName1, varName2, ...)",
+            ),
+            (
+                "save(\"vars.mat\", \"-struct\", \"opts\", \"alpha\");",
+                "status = save(filename, \"-struct\", structVar, field1, ...)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),
