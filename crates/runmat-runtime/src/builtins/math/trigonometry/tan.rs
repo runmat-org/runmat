@@ -1,7 +1,11 @@
 //! MATLAB-compatible `tan` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -10,11 +14,122 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tan";
+
+const TAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise tangent result.",
+}];
+
+const TAN_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const TAN_INPUTS_X_LIKE_P: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, array, char array, complex value, or gpuArray.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Output template selector keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "P",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype determining host vs gpuArray output residency.",
+    },
+];
+
+const TAN_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = tan(X)",
+        inputs: &TAN_INPUTS_X,
+        outputs: &TAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = tan(X, \"like\", P)",
+        inputs: &TAN_INPUTS_X_LIKE_P,
+        outputs: &TAN_OUTPUT,
+    },
+];
+
+const TAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.INVALID_INPUT",
+    identifier: Some("RunMat:tan:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/logical/char/complex data.",
+    message: "tan: invalid input",
+};
+
+const TAN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.INVALID_OPTION",
+    identifier: Some("RunMat:tan:InvalidOption"),
+    when: "Optional arguments after X are malformed or unsupported.",
+    message: "tan: invalid option",
+};
+
+const TAN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.ARG_COUNT",
+    identifier: Some("RunMat:tan:ArgCount"),
+    when: "Too many input arguments were supplied.",
+    message: "tan: too many input arguments",
+};
+
+const TAN_ERROR_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.LIKE_PROTOTYPE",
+    identifier: Some("RunMat:tan:LikePrototype"),
+    when: "The \"like\" prototype is unsupported for this output conversion path.",
+    message: "tan: invalid \"like\" prototype",
+};
+
+const TAN_ERROR_GPU_UNAVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.GPU_UNAVAILABLE",
+    identifier: Some("RunMat:tan:GpuUnavailable"),
+    when: "GPU output was requested via \"like\" but no active provider is available.",
+    message: "tan: GPU provider unavailable",
+};
+
+const TAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAN.INTERNAL",
+    identifier: Some("RunMat:tan:Internal"),
+    when: "Internal tensor conversion/allocation/provider flow failed.",
+    message: "tan: internal error",
+};
+
+const TAN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    TAN_ERROR_INVALID_INPUT,
+    TAN_ERROR_INVALID_OPTION,
+    TAN_ERROR_ARG_COUNT,
+    TAN_ERROR_LIKE_PROTOTYPE,
+    TAN_ERROR_GPU_UNAVAILABLE,
+    TAN_ERROR_INTERNAL,
+];
+
+pub const TAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TAN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TAN_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,10 +147,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute tan in place via unary_tan; runtimes gather to host when the hook is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn tan_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn tan_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tan")]
@@ -63,6 +192,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "tan,tangent,trigonometry,radians,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::tan::TAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::tan"
 )]
 async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -76,7 +206,10 @@ async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::ComplexTensor(ct) => tan_complex_tensor(ct)?,
         Value::CharArray(ca) => tan_char_array(ca)?,
         Value::String(_) | Value::StringArray(_) => {
-            return Err(runtime_error_for("tan: expected numeric input"))
+            return Err(tan_error_with_detail(
+                &TAN_ERROR_INVALID_INPUT,
+                "expected numeric input, got string",
+            ))
         }
         other => tan_real(other)?,
     };
@@ -89,18 +222,22 @@ async fn tan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return Ok(Value::GpuTensor(out));
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     tan_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn tan_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("tan", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("tan", value)
+        .map_err(|e| tan_error_with_detail(&TAN_ERROR_INVALID_INPUT, e))?;
     tan_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn tan_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.tan()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("tan: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))
 }
 
 fn tan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -110,7 +247,7 @@ fn tan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| tan_complex_components(re, im))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| runtime_error_for(format!("tan: {e}")))?;
+        .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -121,7 +258,7 @@ fn tan_char_array(array: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).tan())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![array.rows, array.cols])
-        .map_err(|e| runtime_error_for(format!("tan: {e}")))?;
+        .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -146,21 +283,28 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err(runtime_error_for("tan: expected prototype after 'like'"))
+                Err(tan_error_with_detail(
+                    &TAN_ERROR_INVALID_OPTION,
+                    "expected prototype after 'like'",
+                ))
             } else {
-                Err(runtime_error_for("tan: unrecognised argument for tan"))
+                Err(tan_error_with_detail(
+                    &TAN_ERROR_INVALID_OPTION,
+                    "unrecognised argument for tan",
+                ))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(runtime_error_for(
-                    "tan: unsupported option; only 'like' is accepted",
+                Err(tan_error_with_detail(
+                    &TAN_ERROR_INVALID_OPTION,
+                    "unsupported option; only 'like' is accepted",
                 ))
             }
         }
-        _ => Err(runtime_error_for("tan: too many input arguments")),
+        _ => Err(tan_error(&TAN_ERROR_ARG_COUNT)),
     }
 }
 
@@ -174,11 +318,13 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
             | Value::Int(_)
             | Value::Bool(_)
             | Value::LogicalArray(_) => convert_to_host_like(value).await,
-            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
-                "tan: complex prototypes for 'like' are not supported yet",
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(tan_error_with_detail(
+                &TAN_ERROR_LIKE_PROTOTYPE,
+                "complex prototypes for 'like' are not supported yet",
             )),
-            _ => Err(runtime_error_for(
-                "tan: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            _ => Err(tan_error_with_detail(
+                &TAN_ERROR_LIKE_PROTOTYPE,
+                "unsupported prototype; provide a numeric or gpuArray prototype",
             )),
         },
     }
@@ -186,8 +332,9 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        runtime_error_for(
-            "tan: GPU output requested via 'like' but no acceleration provider is active",
+        tan_error_with_detail(
+            &TAN_ERROR_GPU_UNAVAILABLE,
+            "GPU output requested via 'like' but no acceleration provider is active",
         )
     })?;
     match value {
@@ -199,26 +346,29 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| runtime_error_for(format!("tan: {e}")))?;
+                .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| runtime_error_for(format!("tan: {e}")))?;
+                .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
         Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(runtime_error_for)?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(runtime_error_for(
-            "tan: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(tan_error_with_detail(
+            &TAN_ERROR_LIKE_PROTOTYPE,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        other => Err(runtime_error_for(format!(
-            "tan: unsupported result type for GPU output via 'like' ({other:?})"
-        ))),
+        other => Err(tan_error_with_detail(
+            &TAN_ERROR_INTERNAL,
+            format!("unsupported result type for GPU output via 'like' ({other:?})"),
+        )),
     }
 }
 
@@ -242,6 +392,17 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn tan_descriptor_signatures_cover_like_overload() {
+        let labels: Vec<&str> = TAN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = tan(X)"));
+        assert!(labels.contains(&"Y = tan(X, \"like\", P)"));
     }
 
     fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -389,6 +550,7 @@ pub(crate) mod tests {
     fn tan_like_missing_prototype_errors() {
         let err =
             tan_builtin(Value::Num(1.0), vec![Value::from("like")]).expect_err("expected error");
+        assert_eq!(err.identifier(), TAN_ERROR_INVALID_OPTION.identifier);
         let message = error_message(err);
         assert!(message.contains("prototype"));
     }

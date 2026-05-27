@@ -3196,6 +3196,31 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_trigonometry_descriptors() {
+        let cases = [
+            ("sin(1);", "Y = sin(X)"),
+            ("sin(1, \"like\", 1);", "Y = sin(X, \"like\", P)"),
+            ("cos(1);", "Y = cos(X)"),
+            ("cos(1, \"like\", 1);", "Y = cos(X, \"like\", P)"),
+            ("tan(1);", "Y = tan(X)"),
+            ("tan(1, \"like\", 1);", "Y = tan(X, \"like\", P)"),
+            ("atan2(1, 1);", "Z = atan2(Y, X)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),
