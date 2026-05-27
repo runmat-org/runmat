@@ -2,7 +2,11 @@
 
 use log::trace;
 use num_complex::Complex64;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -17,6 +21,108 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyder";
+
+const POLYDER_OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "d",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Derivative coefficient vector.",
+}];
+
+const POLYDER_OUTPUT_NUM_DEN: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "num",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Quotient-rule numerator coefficients.",
+    },
+    BuiltinParamDescriptor {
+        name: "den",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Quotient-rule denominator coefficients.",
+    },
+];
+
+const POLYDER_INPUTS_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Polynomial coefficient vector.",
+}];
+
+const POLYDER_INPUTS_BINARY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First polynomial coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second polynomial coefficient vector.",
+    },
+];
+
+const POLYDER_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "d = polyder(p)",
+        inputs: &POLYDER_INPUTS_SINGLE,
+        outputs: &POLYDER_OUTPUT_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = polyder(a, b)",
+        inputs: &POLYDER_INPUTS_BINARY,
+        outputs: &POLYDER_OUTPUT_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[num, den] = polyder(u, v)",
+        inputs: &POLYDER_INPUTS_BINARY,
+        outputs: &POLYDER_OUTPUT_NUM_DEN,
+    },
+];
+
+const POLYDER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYDER.INVALID_ARGUMENT",
+    identifier: Some("RunMat:polyder:InvalidArgument"),
+    when: "Input arity/output mode combination is invalid.",
+    message: "polyder: invalid argument",
+};
+
+const POLYDER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYDER.INVALID_INPUT",
+    identifier: Some("RunMat:polyder:InvalidInput"),
+    when: "Inputs cannot be interpreted as numeric coefficient vectors.",
+    message: "polyder: invalid input",
+};
+
+const POLYDER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYDER.INTERNAL",
+    identifier: Some("RunMat:polyder:Internal"),
+    when: "Runtime fails while building derivative outputs or provider fallback paths.",
+    message: "polyder: internal runtime failure",
+};
+
+const POLYDER_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    POLYDER_ERROR_INVALID_ARGUMENT,
+    POLYDER_ERROR_INVALID_INPUT,
+    POLYDER_ERROR_INTERNAL,
+];
+
+pub const POLYDER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &POLYDER_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &POLYDER_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyder")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,9 +145,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn polyder_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    polyder_error_with(message, &POLYDER_ERROR_INVALID_INPUT)
+}
+
+fn polyder_argument_error(message: impl Into<String>) -> RuntimeError {
+    polyder_error_with(message, &POLYDER_ERROR_INVALID_ARGUMENT)
+}
+
+fn polyder_error_with(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyder")]
@@ -61,6 +180,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Differentiate polynomials, products, and ratios with MATLAB-compatible coefficient vectors.",
     keywords = "polyder,polynomial,derivative,product,quotient",
     type_resolver(polyder_type),
+    descriptor(crate::builtins::math::poly::polyder::POLYDER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
 async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -69,7 +189,7 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
             let result = match rest.len() {
                 0 => derivative_single(first).await,
                 1 => derivative_product(first, rest.into_iter().next().unwrap()).await,
-                _ => Err(polyder_error("polyder: too many input arguments")),
+                _ => Err(polyder_argument_error("polyder: too many input arguments")),
             }?;
             if out_count == 0 {
                 return Ok(Value::OutputList(Vec::new()));
@@ -77,7 +197,7 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
             return Ok(Value::OutputList(vec![result]));
         }
         if rest.len() != 1 {
-            return Err(polyder_error(
+            return Err(polyder_argument_error(
                 "Not enough input arguments for quotient form.",
             ));
         }
@@ -90,7 +210,7 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
     match rest.len() {
         0 => derivative_single(first).await,
         1 => derivative_product(first, rest.into_iter().next().unwrap()).await,
-        _ => Err(polyder_error("polyder: too many input arguments")),
+        _ => Err(polyder_argument_error("polyder: too many input arguments")),
     }
 }
 
@@ -449,6 +569,30 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn polyder_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = POLYDER_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"d = polyder(p)"));
+        assert!(labels.contains(&"d = polyder(a, b)"));
+        assert!(labels.contains(&"[num, den] = polyder(u, v)"));
+    }
+
+    #[test]
+    fn polyder_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = POLYDER_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.POLYDER.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.POLYDER.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.POLYDER.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn derivative_of_cubic_polynomial_is_correct() {
@@ -620,6 +764,7 @@ pub(crate) mod tests {
             vec![Value::Num(2.0), Value::Num(3.0)],
         ))
         .unwrap_err();
+        assert_eq!(err.identifier(), POLYDER_ERROR_INVALID_ARGUMENT.identifier);
         assert_error_contains(err, "too many input arguments");
     }
 

@@ -7,7 +7,11 @@
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -21,6 +25,51 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const LEADING_ZERO_TOL: f64 = 1.0e-12;
 const RESULT_ZERO_TOL: f64 = 1.0e-10;
 const BUILTIN_NAME: &str = "roots";
+
+const ROOTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "r",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Roots of the polynomial as a column vector.",
+}];
+
+const ROOTS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "c",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Polynomial coefficient vector in descending power order.",
+}];
+
+const ROOTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "r = roots(c)",
+    inputs: &ROOTS_INPUTS,
+    outputs: &ROOTS_OUTPUT,
+}];
+
+const ROOTS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROOTS.INVALID_INPUT",
+    identifier: Some("RunMat:roots:InvalidInput"),
+    when: "Input cannot be interpreted as a numeric coefficient vector.",
+    message: "roots: invalid input",
+};
+
+const ROOTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROOTS.INTERNAL",
+    identifier: Some("RunMat:roots:Internal"),
+    when: "Runtime fails while building companion matrix outputs or solving eigenvalues.",
+    message: "roots: internal runtime failure",
+};
+
+const ROOTS_ERRORS: [BuiltinErrorDescriptor; 2] = [ROOTS_ERROR_INVALID_INPUT, ROOTS_ERROR_INTERNAL];
+
+pub const ROOTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ROOTS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ROOTS_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::roots")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,9 +88,18 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn roots_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    roots_error_with(message, &ROOTS_ERROR_INVALID_INPUT)
+}
+
+fn roots_error_with(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::roots")]
@@ -62,6 +120,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "roots,polynomial,eigenvalues,companion",
     accel = "sink",
     type_resolver(roots_type),
+    descriptor(crate::builtins::math::poly::roots::ROOTS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::poly::roots"
 )]
 async fn roots_builtin(coefficients: Value) -> crate::BuiltinResult<Value> {
@@ -198,7 +257,10 @@ fn solve_roots(coeffs: &[Complex64]) -> BuiltinResult<Vec<Complex64>> {
     }
 
     let eigenvalues = companion.clone().eigenvalues().ok_or_else(|| {
-        roots_error("roots: failed to compute eigenvalues of the companion matrix")
+        roots_error_with(
+            "roots: failed to compute eigenvalues of the companion matrix",
+            &ROOTS_ERROR_INTERNAL,
+        )
     })?;
     Ok(eigenvalues.iter().map(|&z| canonicalize_root(z)).collect())
 }
@@ -256,19 +318,19 @@ fn roots_to_value(roots: &[Complex64]) -> BuiltinResult<Value> {
             data.push(root.re);
         }
         let tensor = Tensor::new(data, vec![roots.len(), 1])
-            .map_err(|e| roots_error(format!("roots: {e}")))?;
+            .map_err(|e| roots_error_with(format!("roots: {e}"), &ROOTS_ERROR_INTERNAL))?;
         Ok(Value::Tensor(tensor))
     } else {
         let data: Vec<(f64, f64)> = roots.iter().map(|z| (z.re, z.im)).collect();
         let tensor = ComplexTensor::new(data, vec![roots.len(), 1])
-            .map_err(|e| roots_error(format!("roots: {e}")))?;
+            .map_err(|e| roots_error_with(format!("roots: {e}"), &ROOTS_ERROR_INTERNAL))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
 fn empty_column() -> BuiltinResult<Value> {
-    let tensor =
-        Tensor::new(Vec::new(), vec![0, 1]).map_err(|e| roots_error(format!("roots: {e}")))?;
+    let tensor = Tensor::new(Vec::new(), vec![0, 1])
+        .map_err(|e| roots_error_with(format!("roots: {e}"), &ROOTS_ERROR_INTERNAL))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -286,6 +348,27 @@ pub(crate) mod tests {
             "expected error containing '{needle}', got '{}'",
             err.message()
         );
+    }
+
+    #[test]
+    fn roots_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ROOTS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"r = roots(c)"));
+    }
+
+    #[test]
+    fn roots_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = ROOTS_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.ROOTS.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.ROOTS.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -414,6 +497,7 @@ pub(crate) mod tests {
     fn roots_rejects_non_vector_input() {
         let coeffs = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let err = roots_builtin(Value::Tensor(coeffs)).expect_err("expected vector-shape error");
+        assert_eq!(err.identifier(), ROOTS_ERROR_INVALID_INPUT.identifier);
         assert_error_contains(err, "vector");
     }
 

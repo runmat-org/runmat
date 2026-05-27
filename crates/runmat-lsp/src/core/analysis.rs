@@ -3254,6 +3254,40 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_poly_descriptors() {
+        let cases = [
+            ("polyfit([0,1],[1,2],1);", "p = polyfit(X, Y, n)"),
+            (
+                "polyfit([0,1],[1,2],1,[1,1]);",
+                "p = polyfit(X, Y, n, weights)",
+            ),
+            ("polyval([1,0,-1],[0,1]);", "y = polyval(p, x)"),
+            ("polyval([1,0,-1],[0,1],struct());", "y = polyval(p, x, S)"),
+            (
+                "polyval([1,0,-1],[0,1],[],[0,1]);",
+                "y = polyval(p, x, S, mu)",
+            ),
+            ("roots([1,0,-1]);", "r = roots(c)"),
+            ("polyint([1,2,3]);", "q = polyint(p)"),
+            ("polyint([1,2,3], 4);", "q = polyint(p, k)"),
+            ("polyder([1,2,3]);", "d = polyder(p)"),
+            ("polyder([1,2,3], [1,1]);", "d = polyder(a, b)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_uses_math_linalg_factor_descriptors() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
@@ -3473,6 +3507,29 @@ mod tests {
         let completions = completion_at(text, &analysis, &position);
 
         for builtin in ["bandwidth", "issymmetric", "ishermitian", "symrcm"] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            assert!(
+                details
+                    .iter()
+                    .any(|detail| detail.contains(&format!("{builtin}("))),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_math_poly_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["polyfit", "polyval", "roots", "polyint", "polyder"] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))
