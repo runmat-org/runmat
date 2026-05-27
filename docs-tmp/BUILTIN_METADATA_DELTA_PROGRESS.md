@@ -155,12 +155,23 @@
 | Wave 150 (Plotting Vector/Patch Core) | `quiver`, `fill3` | Done | `b84ff105` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::quiver::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::fill3::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for quiver and fill3 call forms (including axes-target variants, quiver U/V shorthand and X/Y/U/V forms, and fill3 multi-group positional + trailing property pairs), migrated stable argument/internal runtime branches to descriptor-backed invalid-argument/internal rows with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for both builtins, and extended descriptor-driven LSP plotting chart signature-help coverage to include `quiver` and `fill3`. |
 | Wave 151 (Plotting Surface Core B) | `surf`, `surfc` | Done | `684eb2d7` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::surf::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::surfc::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for surface and surface+contour call forms (`h=surf(Z)`, `h=surf(X,Y,Z)`, style/name-value variants; `h=surfc(Z)`, `h=surfc(X,Y,Z)`, style/name-value variants), migrated stable invalid-argument/internal runtime branches to descriptor-backed rows with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for both builtins, and extended descriptor-driven LSP plotting chart signature-help coverage to include `surf` and `surfc`. |
 | Wave 152 (Plotting Contour Core) | `contour`, `contourf` | Done | `19525a1f` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::contour::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::contourf::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for contour and filled-contour call forms (implicit `Z`, explicit `X,Y,Z`, level selectors, and name/value options aligned to parser branch behavior), migrated stable invalid-argument/internal runtime branches to descriptor-backed rows with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for both builtins, and extended descriptor-driven LSP plotting chart signature-help coverage to include `contour` and `contourf`. |
+| Wave 153 (Plotting Histogram Core) | `hist`, `histogram` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::hist::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::histogram::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for histogram legacy and handle-returning call forms (`N = hist(...)`, `h = histogram(...)` with bins/name-value/axes-target variants aligned to parser behavior), migrated stable invalid-argument/internal runtime branches to descriptor-backed rows with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for both builtins, and extended descriptor-driven LSP plotting chart signature-help coverage to include `hist` and `histogram`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `426`
-- Remaining: `142`
+- Migrated with attached descriptor: `428`
+- Remaining: `140`
+
+## Source-Of-Truth Audit Status
+
+- Date: `2026-05-27`
+- Scope: `crates/runmat-runtime/src/builtins/**/*.rs` (migrated descriptor-backed files)
+- Result: clean
+  - `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`
+  - `rg -n "^const IDENT_" crates/runmat-runtime/src/builtins`
+  - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" crates/runmat-runtime/src/builtins`
+- Policy reminder: stable branch identity/message/code (for example `RunMat:lt:ComplexNotSupported`) must be authored once on descriptor rows and consumed from those rows at throw sites.
 
 ## `/goal` Loop Command (Use For Each Wave)
 

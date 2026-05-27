@@ -720,6 +720,16 @@ Gate E: Error-code stability.
 1. Every `BuiltinErrorDescriptor` has a stable `code`.
 2. Codes are unique per builtin and deterministic across native/wasm.
 
+Gate F: Descriptor-row source-of-truth stability.
+
+1. Stable branch `code`/`identifier`/`message` must be authored once on `BuiltinErrorDescriptor` rows only.
+2. Runtime stable throws must consume descriptor rows (`foo_error(&FOO_ERROR_...)`), not duplicated throw literals/constants.
+3. `cargo test -p runmat-runtime --test descriptor_error_source_of_truth` must pass for every wave before commit.
+4. Audit grep must remain clean for touched files and full-tree checks:
+   - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`
+   - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" crates/runmat-runtime/src/builtins`
+5. Example contract: `RunMat:lt:ComplexNotSupported` and `lt: complex numbers are not supported` are authored once on `LT_ERROR_COMPLEX_UNSUPPORTED` and reused via `lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED)`.
+
 ## Validator Tooling
 
 Add a machine-checked validator test/command that fails CI when:
