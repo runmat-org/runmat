@@ -288,6 +288,7 @@ No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
    - For fixed-message stable branches, use `foo_error(&FOO_ERROR_X)` so the canonical message is owned by the descriptor row.
    - Do not restate exact stable message/code/identifier literals outside descriptor rows in runtime source.
    - If extra context is required, use descriptor-aware detail helpers (for example `foo_error_with_detail(&FOO_ERROR_X, "...")`) so stable identifier/message/code still come from the descriptor row.
+   - If a branch has a distinct stable message (for example `"foo: too many input arguments"`), declare a dedicated descriptor row (for example `FOO_ERROR_TOO_MANY_INPUTS`) and throw `foo_error(&FOO_ERROR_TOO_MANY_INPUTS)`; do not pass the branch text via `_error_with_message("...", &FOO_ERROR_INVALID_ARGUMENT)`.
 
 ### Canonical Error Source-Of-Truth (Required)
 
