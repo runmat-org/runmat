@@ -3339,6 +3339,8 @@ mod tests {
             ("fft2([1,2;3,4], 8, 8);", "Y = fft2(X, M, N)"),
             ("fftn(reshape(1:8, [2,2,2]));", "Y = fftn(X)"),
             ("fftn(reshape(1:8, [2,2,2]), [4,4,4]);", "Y = fftn(X, SIZE)"),
+            ("fftshift([1,2,3,4]);", "Y = fftshift(X)"),
+            ("fftshift([1,2,3,4], 1);", "Y = fftshift(X, DIM)"),
             ("ifft([1,2,3]);", "Y = ifft(X)"),
             ("ifft([1,2,3], 8);", "Y = ifft(X, N)"),
             ("ifft([1,2,3], \"symmetric\");", "Y = ifft(X, symflag)"),
@@ -3376,6 +3378,8 @@ mod tests {
                 "ifftn(reshape(1:8, [2,2,2]), [4,4,4], \"nonsymmetric\");",
                 "Y = ifftn(X, SIZE, symflag)",
             ),
+            ("ifftshift([1,2,3,4]);", "Y = ifftshift(X)"),
+            ("ifftshift([1,2,3,4], 1);", "Y = ifftshift(X, DIM)"),
         ];
 
         for (text, expected_label) in cases {
