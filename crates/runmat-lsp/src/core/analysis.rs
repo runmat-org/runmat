@@ -637,10 +637,8 @@ pub fn signature_help_at(
     _analysis: &DocumentAnalysis,
     _position: &Position,
 ) -> Option<SignatureHelp> {
-    let semantic = _analysis.semantic.as_ref()?;
     let offset = position_to_offset(_text, _position);
-    let token = token_at_offset(&_analysis.tokens, offset)?;
-    let name = token.lexeme.clone();
+    let name = qualified_call_name_at_offset(&_analysis.tokens, offset)?;
     if let Some(func) = runmat_builtins::builtin_functions()
         .into_iter()
         .find(|builtin| builtin.name.eq_ignore_ascii_case(&name))
@@ -663,6 +661,7 @@ pub fn signature_help_at(
         }
     }
 
+    let semantic = _analysis.semantic.as_ref()?;
     let funcs = semantic.function_lookup.get(&name)?;
 
     let mut sigs = Vec::new();
@@ -874,6 +873,69 @@ fn token_at_offset(tokens: &[SpannedToken], offset: usize) -> Option<&SpannedTok
         }
     }
     None
+}
+
+fn token_index_at_offset(tokens: &[SpannedToken], offset: usize) -> Option<usize> {
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut left = 0usize;
+    let mut right = tokens.len();
+    while left < right {
+        let mid = (left + right) / 2;
+        let token = &tokens[mid];
+        if offset < token.start {
+            right = mid;
+        } else if offset >= token.end {
+            left = mid + 1;
+        } else {
+            return Some(mid);
+        }
+    }
+    None
+}
+
+fn is_identifier_lexeme(lexeme: &str) -> bool {
+    let mut chars = lexeme.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn qualified_call_name_at_offset(tokens: &[SpannedToken], offset: usize) -> Option<String> {
+    let mut idx = token_index_at_offset(tokens, offset)?;
+    if tokens.get(idx)?.lexeme == "(" {
+        idx = idx.checked_sub(1)?;
+    }
+    if !is_identifier_lexeme(&tokens.get(idx)?.lexeme) {
+        return None;
+    }
+
+    let mut start = idx;
+    while start >= 2
+        && tokens.get(start - 1)?.lexeme == "."
+        && is_identifier_lexeme(&tokens.get(start - 2)?.lexeme)
+    {
+        start -= 2;
+    }
+
+    let mut end = idx;
+    while end + 2 < tokens.len()
+        && tokens.get(end + 1)?.lexeme == "."
+        && is_identifier_lexeme(&tokens.get(end + 2)?.lexeme)
+    {
+        end += 2;
+    }
+
+    let mut name = String::new();
+    for token in &tokens[start..=end] {
+        name.push_str(&token.lexeme);
+    }
+    Some(name)
 }
 
 #[derive(Clone, Debug)]
@@ -4581,6 +4643,73 @@ mod tests {
                 labels.contains(&expected_label),
                 "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
                 labels
+            );
+        }
+    }
+
+    #[test]
+    fn signature_help_uses_containers_map_descriptors() {
+        let cases = [
+            ("containers.Map();", "M = containers.Map()"),
+            ("containers.Map.keys(m);", "K = containers.Map.keys(M)"),
+            ("containers.Map.values(m);", "V = containers.Map.values(M)"),
+            (
+                "containers.Map.isKey(m, \"a\");",
+                "tf = containers.Map.isKey(M, keySet)",
+            ),
+            (
+                "containers.Map.remove(m, \"a\");",
+                "M = containers.Map.remove(M, keySet)",
+            ),
+            (
+                "containers.Map.subsref(m, \"()\", {\"a\"});",
+                "value = containers.Map.subsref(M, kind, payload)",
+            ),
+            (
+                "containers.Map.subsasgn(m, \"()\", {\"a\"}, 1);",
+                "M = containers.Map.subsasgn(M, kind, payload, rhs)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_containers_map_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in [
+            "containers.Map",
+            "containers.Map.keys",
+            "containers.Map.values",
+            "containers.Map.isKey",
+            "containers.Map.remove",
+            "containers.Map.subsref",
+            "containers.Map.subsasgn",
+        ] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            let call_head = format!("{builtin}(");
+            assert!(
+                details.iter().any(|detail| detail.contains(&call_head)),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
             );
         }
     }
