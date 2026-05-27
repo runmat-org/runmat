@@ -2826,6 +2826,14 @@ mod tests {
                 "csvwrite(\"out.csv\", [1 2; 3 4], 1, 2);",
                 "bytesWritten = csvwrite(filename, M, row, col)",
             ),
+            (
+                "writematrix([1 2; 3 4], \"out.csv\");",
+                "bytesWritten = writematrix(data, filename)",
+            ),
+            (
+                "writematrix([1 2; 3 4], \"out.csv\", \"Delimiter\", \";\");",
+                "bytesWritten = writematrix(data, filename, name, optionValue)",
+            ),
         ];
 
         for (text, expected_label) in cases {
