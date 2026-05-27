@@ -148,12 +148,13 @@
 | Wave 143 (Plotting Handle Props Core) | `get`, `set` | Done | `5970aa12` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::get::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::set::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for handle property query/update surfaces (`get(h)`, `get(h, property)`, `set(h, property, value, ...)`), migrated stable argument/property failure branches to descriptor-backed identifiers via wrapper-level error mapping, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help coverage for plotting handle-core ops. |
 | Wave 144 (Plotting Surface Core A) | `mesh`, `meshc` | Done | `f352ed44` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::mesh::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::meshc::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for surface/mesh forms (`Z`, `X,Y,Z`, plus name/value variants), migrated wrapper-level validation/render branches to descriptor-backed stable identifiers, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP plotting chart signature-help coverage for `mesh`/`meshc`. |
 | Wave 145 (Plotting Annotation Core) | `text` | Done | `353e4fc3` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::text::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for text annotation forms (`x,y,label`, `x,y,z,label`, axes-target variants, and name/value options), migrated stable argument/internal branches to descriptor-backed identifiers via wrapper-level mapping, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP plotting chart signature-help coverage for `text`. |
+| Wave 146 (Plotting Image Surface Core) | `image`, `imagesc` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime --lib builtins::plotting::image::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::plotting::imagesc::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for indexed/truecolor image surface call forms (`h=image(C)`, `h=image(X,Y,C)` and style variants; `h=imagesc(C)`, `h=imagesc(X,Y,C)` and style variants), migrated wrapper-level validation/render branches to descriptor-backed invalid-argument/internal rows with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for both builtins, and extended descriptor-driven LSP plotting chart signature-help coverage to include `image` and `imagesc`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `412`
-- Remaining: `156`
+- Migrated with attached descriptor: `414`
+- Remaining: `154`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -165,6 +166,7 @@ Loop instructions:
    - no `IDENT_*`, `*_CODE`, `*_MESSAGE` mirrors;
    - no stable-branch `with_identifier("RunMat:...")` literals in migrated runtime paths;
    - stable throws must route through descriptor-aware helpers (`foo_error(&FOO_ERROR_...)`).
+   - each stable branch is authored once as a `const <NAME>_ERROR_*: BuiltinErrorDescriptor`; throw-sites consume that row directly instead of re-authoring identifier/message/code fragments.
    - per stable branch, author `RunMat:...` identifier and canonical message exactly once on the descriptor row, then reuse that exact row in both `<NAME>_ERRORS` and throw-sites.
    - if any duplicated stable literals are found in previously migrated files, repair those files before starting the next wave.
 1. Read docs-tmp/BUILTIN_METADATA_DELTA_PLAN.md and follow its canonical descriptor/error rules.

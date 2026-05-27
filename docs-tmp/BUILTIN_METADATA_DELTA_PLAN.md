@@ -294,6 +294,11 @@ No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
    - If extra context is required, use descriptor-aware detail helpers (for example `foo_error_with_detail(&FOO_ERROR_X, "...")`) so stable identifier/message/code still come from the descriptor row.
    - If a branch has a distinct stable message (for example `"foo: too many input arguments"`), declare a dedicated descriptor row (for example `FOO_ERROR_TOO_MANY_INPUTS`) and throw `foo_error(&FOO_ERROR_TOO_MANY_INPUTS)`; do not pass the branch text via `_error_with_message("...", &FOO_ERROR_INVALID_ARGUMENT)`.
 
+22. Canonical ownership rule (no exceptions):
+   - Treat each `const FOO_ERROR_*: BuiltinErrorDescriptor` as the single authored record for that stable branch identity.
+   - `code`, `identifier`, and canonical `message` are authored exactly once on that row.
+   - Runtime throws must consume that row (`foo_error(&FOO_ERROR_...)` / `foo_error_with_detail(&FOO_ERROR_..., ...)`), never re-author those stable fields in parallel constants or throw literals.
+
 ### Canonical Error Source-Of-Truth (Required)
 
 For every migrated builtin file, `BuiltinErrorDescriptor` rows are the only place stable error identity is authored.
