@@ -2128,6 +2128,8 @@ mod tests {
             ("area([1 2 3], [3 2 1]);", "h = area(X, Y)"),
             ("bar([1 2 3]);", "h = bar(Y)"),
             ("bar([1 2 3], [3 2 1]);", "h = bar(X, Y)"),
+            ("mesh([1 2; 3 4]);", "h = mesh(Z)"),
+            ("meshc([1 2; 3 4]);", "h = meshc(Z)"),
         ];
 
         for (text, expected_label) in cases {
