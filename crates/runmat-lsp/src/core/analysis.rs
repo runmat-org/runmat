@@ -3090,6 +3090,19 @@ mod tests {
             "expected descriptor signature detail for nnz completion, got {:?}",
             nnz_candidates
         );
+
+        let prod_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("prod"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            prod_candidates
+                .iter()
+                .any(|detail| detail.contains("prod(")),
+            "expected descriptor signature detail for prod completion, got {:?}",
+            prod_candidates
+        );
     }
 
     #[test]
