@@ -3061,6 +3061,16 @@ mod tests {
                 "cumprod([1,2,3], \"omitnan\", \"reverse\");",
                 "B = cumprod(A, nanflag, direction)",
             ),
+            ("cummax([1,2,3]);", "M = cummax(A)"),
+            ("cummin([1,2,3]);", "M = cummin(A)"),
+            (
+                "cummax([1,2,3], \"omitnan\", \"reverse\");",
+                "M = cummax(A, nanflag, direction)",
+            ),
+            (
+                "cummin([1,2,3], \"omitnan\", \"reverse\");",
+                "M = cummin(A, nanflag, direction)",
+            ),
         ];
 
         for (text, expected_label) in cases {
@@ -3153,6 +3163,32 @@ mod tests {
                 .any(|detail| detail.contains("cumprod(")),
             "expected descriptor signature detail for cumprod completion, got {:?}",
             cumprod_candidates
+        );
+
+        let cummax_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("cummax"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            cummax_candidates
+                .iter()
+                .any(|detail| detail.contains("cummax(")),
+            "expected descriptor signature detail for cummax completion, got {:?}",
+            cummax_candidates
+        );
+
+        let cummin_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("cummin"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            cummin_candidates
+                .iter()
+                .any(|detail| detail.contains("cummin(")),
+            "expected descriptor signature detail for cummin completion, got {:?}",
+            cummin_candidates
         );
     }
 
