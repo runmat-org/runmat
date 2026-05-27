@@ -3187,6 +3187,15 @@ mod tests {
             ("rcond([1,2;3,4]);", "c = rcond(A)"),
             ("pinv([1,2;3,4]);", "X = pinv(A)"),
             ("pinv([1,2;3,4], 1e-6);", "X = pinv(A, tol)"),
+            ("cond([1,2;3,4]);", "c = cond(A)"),
+            ("cond([1,2;3,4], \"fro\");", "c = cond(A, p)"),
+            ("norm([1,2;3,4]);", "n = norm(A)"),
+            ("norm([1,2;3,4], \"fro\");", "n = norm(A, p)"),
+            ("linsolve([1,2;3,4], [5;6]);", "X = linsolve(A, B)"),
+            (
+                "linsolve([1,2;3,4], [5;6], struct(\"LT\", true));",
+                "X = linsolve(A, B, opts)",
+            ),
         ];
 
         for (text, expected_label) in cases {
@@ -3396,7 +3405,9 @@ mod tests {
         let position = lsp_types::Position::new(0, 0);
         let completions = completion_at(text, &analysis, &position);
 
-        for builtin in ["det", "inv", "rank", "rcond", "pinv"] {
+        for builtin in [
+            "det", "inv", "rank", "rcond", "pinv", "cond", "norm", "linsolve",
+        ] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))
