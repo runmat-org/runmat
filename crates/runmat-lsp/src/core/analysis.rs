@@ -2130,6 +2130,11 @@ mod tests {
             ("bar([1 2 3], [3 2 1]);", "h = bar(X, Y)"),
             ("plot([1 2 3], [3 2 1]);", "h = plot(X, Y)"),
             ("plot3([1 2], [2 3], [3 4]);", "h = plot3(X, Y, Z)"),
+            ("quiver([1 2], [2 1]);", "h = quiver(U, V)"),
+            (
+                "fill3([0 1 0], [0 0 1], [0 1 0], 'r');",
+                "h = fill3(X, Y, Z, C)",
+            ),
             ("mesh([1 2; 3 4]);", "h = mesh(Z)"),
             ("meshc([1 2; 3 4]);", "h = meshc(Z)"),
             ("stairs([1 2 3]);", "h = stairs(Y)"),
