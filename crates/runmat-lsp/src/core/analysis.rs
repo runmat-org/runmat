@@ -3127,6 +3127,8 @@ mod tests {
             ),
             ("chol([2,0;0,3]);", "R = chol(A)"),
             ("chol([2,0;0,3], \"lower\");", "R = chol(A, triangle)"),
+            ("lu([1,2;3,4]);", "LU = lu(A)"),
+            ("lu([1,2;3,4], \"vector\");", "LU = lu(A, pivotMode)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3190,6 +3192,17 @@ mod tests {
                 .any(|detail| detail.contains("chol(")),
             "expected descriptor signature detail for chol completion, got {:?}",
             chol_candidates
+        );
+
+        let lu_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("lu"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            lu_candidates.iter().any(|detail| detail.contains("lu(")),
+            "expected descriptor signature detail for lu completion, got {:?}",
+            lu_candidates
         );
     }
 
