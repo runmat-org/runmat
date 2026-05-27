@@ -4,7 +4,11 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -15,8 +19,331 @@ fn max_type(args: &[Type], ctx: &ResolveContext) -> Type {
     min_max_type(args, ctx)
 }
 
-fn max_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+const MAX_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Maximum values.",
+}];
+
+const MAX_OUTPUT_MI: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum values.",
+    },
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based maximum indices/origins.",
+    },
+];
+
+const MAX_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar or array.",
+};
+
+const MAX_PARAM_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Second operand for element-wise maximum.",
+};
+
+const MAX_PARAM_EMPTY: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "placeholder",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("[]"),
+    description: "Empty placeholder selecting reduction-argument grammar.",
+};
+
+const MAX_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "dim",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("[]"),
+    description: "Reduction dimension selector (scalar or dimension vector).",
+};
+
+const MAX_PARAM_REDUCTION_FLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "flag",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"all\""),
+    description: "Reduction mode flag: \"all\" or \"linear\".",
+};
+
+const MAX_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nanflag",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"includenan\""),
+    description: "Missing-value mode: \"includenan\" or \"omitnan\".",
+};
+
+const MAX_PARAM_COMPARISON_NAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "optionName",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"ComparisonMethod\""),
+    description: "Option name (currently \"ComparisonMethod\").",
+};
+
+const MAX_PARAM_COMPARISON_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "method",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"auto\""),
+    description: "Comparison method: \"auto\", \"abs\"/\"magnitude\", or \"real\".",
+};
+
+const MAX_PARAM_OPTION_NAME: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "optionName",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Name-value option name.",
+};
+
+const MAX_PARAM_OPTION_VALUE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "optionValue",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Name-value option value.",
+};
+
+const MAX_INPUTS_A: [BuiltinParamDescriptor; 1] = [MAX_PARAM_A];
+const MAX_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [MAX_PARAM_A, MAX_PARAM_B];
+const MAX_INPUTS_A_EMPTY_DIM: [BuiltinParamDescriptor; 3] =
+    [MAX_PARAM_A, MAX_PARAM_EMPTY, MAX_PARAM_DIM];
+const MAX_INPUTS_A_EMPTY_FLAG: [BuiltinParamDescriptor; 3] =
+    [MAX_PARAM_A, MAX_PARAM_EMPTY, MAX_PARAM_REDUCTION_FLAG];
+const MAX_INPUTS_A_EMPTY_NANFLAG: [BuiltinParamDescriptor; 3] =
+    [MAX_PARAM_A, MAX_PARAM_EMPTY, MAX_PARAM_NANFLAG];
+const MAX_INPUTS_A_EMPTY_COMPARISON: [BuiltinParamDescriptor; 4] = [
+    MAX_PARAM_A,
+    MAX_PARAM_EMPTY,
+    MAX_PARAM_COMPARISON_NAME,
+    MAX_PARAM_COMPARISON_VALUE,
+];
+const MAX_INPUTS_A_B_COMPARISON: [BuiltinParamDescriptor; 4] = [
+    MAX_PARAM_A,
+    MAX_PARAM_B,
+    MAX_PARAM_COMPARISON_NAME,
+    MAX_PARAM_COMPARISON_VALUE,
+];
+const MAX_INPUTS_A_EMPTY_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    MAX_PARAM_A,
+    MAX_PARAM_EMPTY,
+    MAX_PARAM_OPTION_NAME,
+    MAX_PARAM_OPTION_VALUE,
+];
+const MAX_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    MAX_PARAM_A,
+    MAX_PARAM_B,
+    MAX_PARAM_OPTION_NAME,
+    MAX_PARAM_OPTION_VALUE,
+];
+
+const MAX_SIGNATURES: [BuiltinSignatureDescriptor; 22] = [
+    BuiltinSignatureDescriptor {
+        label: "M = max(A)",
+        inputs: &MAX_INPUTS_A,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A)",
+        inputs: &MAX_INPUTS_A,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, B)",
+        inputs: &MAX_INPUTS_A_B,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, B)",
+        inputs: &MAX_INPUTS_A_B,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], dim)",
+        inputs: &MAX_INPUTS_A_EMPTY_DIM,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], dim)",
+        inputs: &MAX_INPUTS_A_EMPTY_DIM,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], vecdim)",
+        inputs: &MAX_INPUTS_A_EMPTY_DIM,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], vecdim)",
+        inputs: &MAX_INPUTS_A_EMPTY_DIM,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], \"all\")",
+        inputs: &MAX_INPUTS_A_EMPTY_FLAG,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], \"all\")",
+        inputs: &MAX_INPUTS_A_EMPTY_FLAG,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], \"linear\")",
+        inputs: &MAX_INPUTS_A_EMPTY_FLAG,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], \"linear\")",
+        inputs: &MAX_INPUTS_A_EMPTY_FLAG,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], nanflag)",
+        inputs: &MAX_INPUTS_A_EMPTY_NANFLAG,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], nanflag)",
+        inputs: &MAX_INPUTS_A_EMPTY_NANFLAG,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], \"ComparisonMethod\", method)",
+        inputs: &MAX_INPUTS_A_EMPTY_COMPARISON,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], \"ComparisonMethod\", method)",
+        inputs: &MAX_INPUTS_A_EMPTY_COMPARISON,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, B, \"ComparisonMethod\", method)",
+        inputs: &MAX_INPUTS_A_B_COMPARISON,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, B, \"ComparisonMethod\", method)",
+        inputs: &MAX_INPUTS_A_B_COMPARISON,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, [], optionName, optionValue, ...)",
+        inputs: &MAX_INPUTS_A_EMPTY_OPTIONS,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, [], optionName, optionValue, ...)",
+        inputs: &MAX_INPUTS_A_EMPTY_OPTIONS,
+        outputs: &MAX_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = max(A, B, optionName, optionValue, ...)",
+        inputs: &MAX_INPUTS_A_B_OPTIONS,
+        outputs: &MAX_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = max(A, B, optionName, optionValue, ...)",
+        inputs: &MAX_INPUTS_A_B_OPTIONS,
+        outputs: &MAX_OUTPUT_MI,
+    },
+];
+
+const MAX_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAX.INVALID_ARGUMENT",
+    identifier: Some("RunMat:max:InvalidArgument"),
+    when: "Argument grammar, dimensions, or option names/values are invalid.",
+    message: "max: invalid argument",
+};
+
+const MAX_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAX.INVALID_INPUT",
+    identifier: Some("RunMat:max:InvalidInput"),
+    when: "Input values cannot be converted to supported max domains.",
+    message: "max: invalid input",
+};
+
+const MAX_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAX.SIZE_MISMATCH",
+    identifier: Some("RunMat:max:SizeMismatch"),
+    when: "Element-wise operands are not broadcast-compatible.",
+    message: "max: size mismatch",
+};
+
+const MAX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAX.INTERNAL",
+    identifier: Some("RunMat:max:Internal"),
+    when: "Execution fails due to gather, provider, allocation, or conversion internals.",
+    message: "max: internal failure",
+};
+
+const MAX_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    MAX_ERROR_INVALID_ARGUMENT,
+    MAX_ERROR_INVALID_INPUT,
+    MAX_ERROR_SIZE_MISMATCH,
+    MAX_ERROR_INTERNAL,
+];
+
+pub const MAX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MAX_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MAX_ERRORS,
+};
+
+fn max_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn max_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    max_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn max_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    max_descriptor_error_with_detail(&MAX_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn max_invalid_input(detail: impl AsRef<str>) -> RuntimeError {
+    max_descriptor_error_with_detail(&MAX_ERROR_INVALID_INPUT, detail)
+}
+
+fn max_size_mismatch(detail: impl AsRef<str>) -> RuntimeError {
+    max_descriptor_error_with_detail(&MAX_ERROR_SIZE_MISMATCH, detail)
+}
+
+fn max_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    max_descriptor_error_with_detail(&MAX_ERROR_INTERNAL, detail)
 }
 
 use crate::builtins::common::arg_tokens::tokens_from_values;
@@ -106,6 +433,7 @@ impl MaxEvaluation {
     keywords = "max,maximum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(max_type),
+    descriptor(crate::builtins::math::reduction::max::MAX_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::max"
 )]
 async fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -285,7 +613,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                 }
                 "all" => {
                     if selection_set {
-                        return Err(max_error(
+                        return Err(max_invalid_argument(
                             "max: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -311,7 +639,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                 }
                 "all" => {
                     if selection_set {
-                        return Err(max_error(
+                        return Err(max_invalid_argument(
                             "max: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -322,7 +650,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                 }
                 "linear" => {
                     if selection_set {
-                        return Err(max_error(
+                        return Err(max_invalid_argument(
                             "max: 'linear' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -334,7 +662,9 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
                 }
                 "comparisonmethod" => {
                     let Some(value) = rest.get(idx + 1) else {
-                        return Err(max_error("max: expected a value after 'ComparisonMethod'"));
+                        return Err(max_invalid_argument(
+                            "max: expected a value after 'ComparisonMethod'",
+                        ));
                     };
                     args.comparison = parse_comparison_method(value)?;
                     comparison_set = true;
@@ -354,7 +684,7 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
             }
         }
 
-        return Err(max_error(format!(
+        return Err(max_invalid_argument(format!(
             "max: unrecognised argument {:?}",
             rest[idx]
         )));
@@ -376,7 +706,9 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
             match keyword.as_str() {
                 "comparisonmethod" => {
                     let Some(value) = rest.get(idx + 1) else {
-                        return Err(max_error("max: expected a value after 'ComparisonMethod'"));
+                        return Err(max_invalid_argument(
+                            "max: expected a value after 'ComparisonMethod'",
+                        ));
                     };
                     comparison = parse_comparison_method(value)?;
                     comparison_set = true;
@@ -384,7 +716,7 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
                     continue;
                 }
                 "omitnan" | "includenan" | "all" | "linear" => {
-                    return Err(max_error(format!(
+                    return Err(max_invalid_argument(format!(
                         "max: '{}' is only supported for reduction calls",
                         keyword
                     )));
@@ -392,7 +724,7 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
                 _ => {}
             }
         }
-        return Err(max_error(format!(
+        return Err(max_invalid_argument(format!(
             "max: unrecognised argument {:?}",
             rest[idx]
         )));
@@ -405,13 +737,15 @@ fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> 
 
 fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
     let Some(keyword) = keyword_of(value) else {
-        return Err(max_error("max: 'ComparisonMethod' expects a string value"));
+        return Err(max_invalid_argument(
+            "max: 'ComparisonMethod' expects a string value",
+        ));
     };
     match keyword.as_str() {
         "auto" => Ok(ComparisonMethod::Auto),
         "abs" | "magnitude" => Ok(ComparisonMethod::Abs),
         "real" => Ok(ComparisonMethod::Real),
-        other => Err(max_error(format!(
+        other => Err(max_invalid_argument(format!(
             "max: unsupported ComparisonMethod '{other}'"
         ))),
     }
@@ -425,7 +759,7 @@ async fn parse_dimension_value(value: &Value) -> BuiltinResult<Option<DimSelecti
             .map(|dim| dim.map(DimSelection::Dim)),
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
-        Value::GpuTensor(_) => Err(max_error(
+        Value::GpuTensor(_) => Err(max_invalid_argument(
             "max: dimension arguments must reside on the host",
         )),
         _ => Ok(None),
@@ -443,7 +777,7 @@ async fn parse_dimension_tensor(
         || shape.get(0).copied().unwrap_or(1) == 1
         || shape.get(1).copied().unwrap_or(1) == 1;
     if !is_vector {
-        return Err(max_error(
+        return Err(max_invalid_argument(
             "max: dimension vector must be a row or column vector",
         ));
     }
@@ -460,7 +794,7 @@ async fn parse_dimension_tensor(
     let mut uniq = Vec::with_capacity(dims.len());
     for dim in dims {
         if dim < 1 {
-            return Err(max_error("max: dimension indices must be >= 1"));
+            return Err(max_invalid_argument("max: dimension indices must be >= 1"));
         }
         if seen.insert(dim) {
             uniq.push(dim);
@@ -471,22 +805,22 @@ async fn parse_dimension_tensor(
 
 fn map_scalar_dim_error(message: String) -> RuntimeError {
     if message.contains("integer") {
-        return max_error("max: dimension must be integral");
+        return max_invalid_argument("max: dimension must be integral");
     }
-    max_error(message)
+    max_invalid_argument(message)
 }
 
 fn map_vector_dim_error(message: String) -> RuntimeError {
     if message.contains("non-negative") {
-        return max_error("max: dimension indices must be >= 1");
+        return max_invalid_argument("max: dimension indices must be >= 1");
     }
     if message.contains("finite") {
-        return max_error("max: dimension entries must be finite");
+        return max_invalid_argument("max: dimension entries must be finite");
     }
     if message.contains("integer") {
-        return max_error("max: dimension entries must be integers");
+        return max_invalid_argument("max: dimension entries must be integers");
     }
-    max_error(message)
+    max_invalid_argument(message)
 }
 
 async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEvaluation> {
@@ -496,7 +830,9 @@ async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEv
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+            let tensor = gpu_helpers::gather_tensor_async(&handle)
+                .await
+                .map_err(|e| max_internal_error(format!("max: {e}")))?;
             reduction_max_host(Value::Tensor(tensor), &args)
         }
         other => reduction_max_host(other, &args),
@@ -594,40 +930,40 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
     match value {
         Value::Tensor(t) => Ok(InputData::Real(t)),
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(|err| max_error(err))?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(max_invalid_input)?;
             Ok(InputData::Real(tensor))
         }
         Value::Num(n) => {
-            let tensor =
-                Tensor::new(vec![n], vec![1, 1]).map_err(|e| max_error(format!("{name}: {e}")))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| max_internal_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Int(i) => {
             let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| max_error(format!("{name}: {e}")))?;
+                .map_err(|e| max_internal_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| max_error(format!("{name}: {e}")))?;
+                .map_err(|e| max_internal_error(format!("{name}: {e}")))?;
             Ok(InputData::Real(tensor))
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| max_error(format!("{name}: {e}")))?;
+                .map_err(|e| max_internal_error(format!("{name}: {e}")))?;
             Ok(InputData::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(InputData::Complex(ct)),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            Err(max_error(format!(
+            Err(max_invalid_input(format!(
                 "{name}: expected numeric or logical input, received non-numeric value"
             )))
         }
-        Value::GpuTensor(_) => Err(max_error(format!(
+        Value::GpuTensor(_) => Err(max_internal_error(format!(
             "{name}: internal error – GPU tensors must be gathered before host execution"
         ))),
         Value::Object(_) | Value::HandleObject(_) | Value::Struct(_) | Value::Listener(_) => {
-            Err(max_error(format!("{name}: unsupported input type")))
+            Err(max_invalid_input(format!("{name}: unsupported input type")))
         }
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
@@ -636,7 +972,7 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(max_error(format!("{name}: unsupported input type"))),
+        | Value::OutputList(_) => Err(max_invalid_input(format!("{name}: unsupported input type"))),
     }
 }
 
@@ -645,9 +981,9 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Max
     if tensor.data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
         let values = Tensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| max_error(format!("max: {e}")))?;
-        let indices =
-            Tensor::new(Vec::new(), output_shape).map_err(|e| max_error(format!("max: {e}")))?;
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape)
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
         return Ok(MaxEvaluation {
             values: tensor::tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -659,9 +995,9 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Max
 
     if output_len == 0 {
         let values = Tensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| max_error(format!("max: {e}")))?;
-        let indices =
-            Tensor::new(Vec::new(), output_shape).map_err(|e| max_error(format!("max: {e}")))?;
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape)
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
         return Ok(MaxEvaluation {
             values: tensor::tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -726,10 +1062,10 @@ fn reduce_real_tensor(tensor: Tensor, args: &ReductionArgs) -> BuiltinResult<Max
         };
     }
 
-    let value_tensor =
-        Tensor::new(values, output_shape.clone()).map_err(|e| max_error(format!("max: {e}")))?;
+    let value_tensor = Tensor::new(values, output_shape.clone())
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
     let index_tensor =
-        Tensor::new(indices, output_shape).map_err(|e| max_error(format!("max: {e}")))?;
+        Tensor::new(indices, output_shape).map_err(|e| max_internal_error(format!("max: {e}")))?;
 
     Ok(MaxEvaluation {
         values: tensor::tensor_into_value(value_tensor),
@@ -745,9 +1081,9 @@ fn reduce_complex_tensor(
     if tensor.data.is_empty() {
         let output_shape = resolve_output_shape(&shape, &args.selection, &[])?;
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| max_error(format!("max: {e}")))?;
-        let indices =
-            Tensor::new(Vec::new(), output_shape).map_err(|e| max_error(format!("max: {e}")))?;
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape)
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
         return Ok(MaxEvaluation {
             values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -760,9 +1096,9 @@ fn reduce_complex_tensor(
 
     if output_len == 0 {
         let values = ComplexTensor::new(Vec::new(), output_shape.clone())
-            .map_err(|e| max_error(format!("max: {e}")))?;
-        let indices =
-            Tensor::new(Vec::new(), output_shape).map_err(|e| max_error(format!("max: {e}")))?;
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
+        let indices = Tensor::new(Vec::new(), output_shape)
+            .map_err(|e| max_internal_error(format!("max: {e}")))?;
         return Ok(MaxEvaluation {
             values: complex_tensor_into_value(values),
             indices: tensor::tensor_into_value(indices),
@@ -828,9 +1164,9 @@ fn reduce_complex_tensor(
     }
 
     let value_tensor = ComplexTensor::new(values, output_shape.clone())
-        .map_err(|e| max_error(format!("max: {e}")))?;
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
     let index_tensor =
-        Tensor::new(indices, output_shape).map_err(|e| max_error(format!("max: {e}")))?;
+        Tensor::new(indices, output_shape).map_err(|e| max_internal_error(format!("max: {e}")))?;
     Ok(MaxEvaluation {
         values: complex_tensor_into_value(value_tensor),
         indices: tensor::tensor_into_value(index_tensor),
@@ -938,7 +1274,7 @@ fn resolve_reduction_dims(
         }
         DimSelection::Dim(dim) => {
             if *dim == 0 {
-                return Err(max_error("max: dimension must be >= 1"));
+                return Err(max_invalid_argument("max: dimension must be >= 1"));
             }
             let index = dim.saturating_sub(1);
             if index >= shape.len() {
@@ -1284,7 +1620,9 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                             return Ok(eval);
                         }
                     }
-                    return Err(max_error("max: elementwise GPU scalar path failed"));
+                    return Err(max_internal_error(
+                        "max: elementwise GPU scalar path failed",
+                    ));
                 }
             }
             if gpu_tensor_is_scalar(&handle_a) {
@@ -1304,7 +1642,9 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                             return Ok(eval);
                         }
                     }
-                    return Err(max_error("max: elementwise GPU scalar path failed"));
+                    return Err(max_internal_error(
+                        "max: elementwise GPU scalar path failed",
+                    ));
                 }
             }
             if let Some(eval) = elementwise_max_gpu_pair(&handle_a, &handle_b, comparison).await {
@@ -1320,7 +1660,7 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
                     return Ok(eval);
                 }
             }
-            Err(max_error("max: elementwise GPU path failed"))
+            Err(max_internal_error("max: elementwise GPU path failed"))
         }
         (Value::GpuTensor(handle), other) => {
             if let Some(eval) = elementwise_max_gpu_scalar_left(&handle, &other, comparison).await {
@@ -1328,7 +1668,7 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
             }
             let t = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|_| max_error("max: elementwise GPU scalar path failed"))?;
+                .map_err(|_| max_internal_error("max: elementwise GPU scalar path failed"))?;
             elementwise_real_or_complex(Value::Tensor(t), other, comparison)
         }
         (other, Value::GpuTensor(handle)) => {
@@ -1338,7 +1678,7 @@ async fn elementwise_max(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
             }
             let t = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|_| max_error("max: elementwise GPU scalar path failed"))?;
+                .map_err(|_| max_internal_error("max: elementwise GPU scalar path failed"))?;
             elementwise_real_or_complex(other, Value::Tensor(t), comparison)
         }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
@@ -1662,7 +2002,8 @@ fn elementwise_real_max(
     rhs: Tensor,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MaxEvaluation> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("max: {}", err))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| max_size_mismatch(format!("max: {err}")))?;
     let mut values = vec![0.0f64; plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
 
@@ -1675,9 +2016,9 @@ fn elementwise_real_max(
     }
 
     let value_tensor = Tensor::new(values, plan.output_shape().to_vec())
-        .map_err(|e| max_error(format!("max: {e}")))?;
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
     let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
-        .map_err(|e| max_error(format!("max: {e}")))?;
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
 
     Ok(MaxEvaluation {
         values: tensor::tensor_into_value(value_tensor),
@@ -1690,7 +2031,8 @@ fn elementwise_complex_max(
     rhs: ComplexTensor,
     comparison: ComparisonMethod,
 ) -> BuiltinResult<MaxEvaluation> {
-    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape).map_err(|err| format!("max: {}", err))?;
+    let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
+        .map_err(|err| max_size_mismatch(format!("max: {err}")))?;
     let mut values = vec![(0.0f64, 0.0f64); plan.len()];
     let mut indices = vec![0.0f64; plan.len()];
 
@@ -1711,9 +2053,9 @@ fn elementwise_complex_max(
     }
 
     let value_tensor = ComplexTensor::new(values, plan.output_shape().to_vec())
-        .map_err(|e| max_error(format!("max: {e}")))?;
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
     let index_tensor = Tensor::new(indices, plan.output_shape().to_vec())
-        .map_err(|e| max_error(format!("max: {e}")))?;
+        .map_err(|e| max_internal_error(format!("max: {e}")))?;
 
     Ok(MaxEvaluation {
         values: complex_tensor_into_value(value_tensor),
@@ -1793,6 +2135,43 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::tensor());
+    }
+
+    #[test]
+    fn max_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MAX_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"M = max(A)"));
+        assert!(labels.contains(&"[M, I] = max(A)"));
+        assert!(labels.contains(&"M = max(A, B)"));
+        assert!(labels.contains(&"[M, I] = max(A, B)"));
+        assert!(labels.contains(&"M = max(A, [], dim)"));
+        assert!(labels.contains(&"M = max(A, [], \"all\")"));
+        assert!(labels.contains(&"M = max(A, [], \"ComparisonMethod\", method)"));
+        assert!(labels.contains(&"M = max(A, B, \"ComparisonMethod\", method)"));
+    }
+
+    #[test]
+    fn max_descriptor_errors_have_stable_codes() {
+        assert!(MAX_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MAX_ERROR_INVALID_ARGUMENT.code));
+        assert!(MAX_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MAX_ERROR_INVALID_INPUT.code));
+        assert!(MAX_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MAX_ERROR_SIZE_MISMATCH.code));
+        assert!(MAX_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MAX_ERROR_INTERNAL.code));
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
@@ -2002,6 +2381,7 @@ pub(crate) mod tests {
             &[Value::Tensor(rhs), Value::from("omitnan")],
         )
         .expect_err("expected error");
+        assert_eq!(err.identifier(), MAX_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("only supported for reduction"));
     }
 
@@ -2056,6 +2436,7 @@ pub(crate) mod tests {
         });
         let err = evaluate(Value::Tensor(tensor), &[placeholder(), dim_handle])
             .expect_err("expected error");
+        assert_eq!(err.identifier(), MAX_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err
             .message()
             .contains("dimension arguments must reside on the host"));
@@ -2071,6 +2452,7 @@ pub(crate) mod tests {
             Value::from("chebyshev"),
         ];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
+        assert_eq!(err.identifier(), MAX_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("unsupported ComparisonMethod"));
     }
 
@@ -2159,6 +2541,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let args = vec![placeholder(), Value::Int(IntValue::I32(0))];
         let err = evaluate(Value::Tensor(tensor), &args).expect_err("expected error");
+        assert_eq!(err.identifier(), MAX_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("dimension must be >= 1"));
     }
 }
