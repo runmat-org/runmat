@@ -288,6 +288,7 @@ No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
 `"RunMat:lt:ComplexNotSupported"` or `"lt: complex numbers are not supported"` at throw sites.
 
 21. Literal reuse policy for stable throws:
+   - `BuiltinErrorDescriptor` rows are the source-of-truth for stable `code` + `identifier` + canonical `message`; throw sites must consume the row, not re-author those values.
    - Stable branches must pass the descriptor row itself to the throw helper (for example `foo_error(&FOO_ERROR_X)`), not only `FOO_ERROR_X.message`.
    - For fixed-message stable branches, use `foo_error(&FOO_ERROR_X)` so the canonical message is owned by the descriptor row.
    - Do not restate exact stable message/code/identifier literals outside descriptor rows in runtime source.

@@ -5,7 +5,10 @@ use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 #[cfg(test)]
 use runmat_builtins::Tensor;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
@@ -24,13 +27,174 @@ use super::perf::compute_surface_lod;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
+use crate::build_runtime_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use crate::BuiltinResult;
+use crate::{BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "surf";
+
+const SURF_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the rendered surface plot.",
+}];
+
+const SURF_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Surface height grid.",
+}];
+
+const SURF_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Surface height grid.",
+    },
+];
+
+const SURF_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Surface height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value surface style options.",
+    },
+];
+
+const SURF_INPUTS_X_Y_Z_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Surface height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value surface style options.",
+    },
+];
+
+const SURF_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = surf(Z)",
+        inputs: &SURF_INPUTS_Z,
+        outputs: &SURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = surf(X, Y, Z)",
+        inputs: &SURF_INPUTS_X_Y_Z,
+        outputs: &SURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = surf(Z, Name, Value, ...)",
+        inputs: &SURF_INPUTS_Z_PROPS,
+        outputs: &SURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = surf(X, Y, Z, Name, Value, ...)",
+        inputs: &SURF_INPUTS_X_Y_Z_PROPS,
+        outputs: &SURF_OUTPUT_HANDLE,
+    },
+];
+
+pub const SURF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SURF.INVALID_ARGUMENT",
+    identifier: Some("RunMat:surf:InvalidArgument"),
+    when: "Surface/grid/axis inputs or style name/value arguments are invalid.",
+    message: "surf: invalid argument",
+};
+
+pub const SURF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SURF.INTERNAL",
+    identifier: Some("RunMat:surf:Internal"),
+    when: "Internal surface construction or render preparation fails unexpectedly.",
+    message: "surf: internal operation failed",
+};
+
+const SURF_ERRORS: [BuiltinErrorDescriptor; 2] = [SURF_ERROR_INVALID_ARGUMENT, SURF_ERROR_INTERNAL];
+
+pub const SURF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SURF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SURF_ERRORS,
+};
+
+fn surf_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_surf_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    surf_error_with_detail(&SURF_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_surf_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    surf_error_with_detail(&SURF_ERROR_INTERNAL, err.message)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::surf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -70,31 +234,39 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::surf::SURF_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::surf"
 )]
 pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)?;
-    let z_input = SurfaceDataInput::from_value(z, "surf")?;
-    let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
+    let (x, y, z, rest) =
+        parse_surface_call_args_matlab_xy(args, BUILTIN_NAME).map_err(map_surf_invalid_argument)?;
+    let z_input = SurfaceDataInput::from_value(z, "surf").map_err(map_surf_invalid_argument)?;
+    let (rows, cols) = z_input
+        .grid_shape(BUILTIN_NAME)
+        .map_err(map_surf_invalid_argument)?;
 
     // Prefer a no-download path for vector-like gpuArray axes: keep X/Y on-device and pass
     // their buffers through to the GPU vertex packer. If X/Y are meshgrid matrices, we still
     // need to validate and extract axes on the host.
-    let (x_axis, y_axis) =
-        surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) = surface_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME)
+        .await
+        .map_err(map_surf_invalid_argument)?;
 
-    let style = Arc::new(parse_surface_style_args(
-        "surf",
-        &rest,
-        SurfaceStyleDefaults::new(
-            ColorMap::Parula,
-            ShadingMode::Smooth,
-            false,
-            1.0,
-            false,
-            true,
-        ),
-    )?);
+    let style = Arc::new(
+        parse_surface_style_args(
+            "surf",
+            &rest,
+            SurfaceStyleDefaults::new(
+                ColorMap::Parula,
+                ShadingMode::Smooth,
+                false,
+                1.0,
+                false,
+                true,
+            ),
+        )
+        .map_err(map_surf_invalid_argument)?,
+    );
     let opts = PlotRenderOptions {
         title: "Surface Plot",
         x_label: "X",
@@ -121,20 +293,31 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 Ok(surface) => surface,
                 Err(err) => {
                     warn!("surf GPU path unavailable: {err}");
-                    let (x_host, y_host) =
-                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                    build_surface_cpu(&z_input, x_host, y_host, rows, cols).await?
+                    let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
+                        .await
+                        .map_err(map_surf_invalid_argument)?;
+                    build_surface_cpu(&z_input, x_host, y_host, rows, cols)
+                        .await
+                        .map_err(map_surf_invalid_argument)?
                 }
             },
             Err(err) => {
                 warn!("surf GPU bounds unavailable: {err}");
-                let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                build_surface_cpu(&z_input, x_host, y_host, rows, cols).await?
+                let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
+                    .await
+                    .map_err(map_surf_invalid_argument)?;
+                build_surface_cpu(&z_input, x_host, y_host, rows, cols)
+                    .await
+                    .map_err(map_surf_invalid_argument)?
             }
         }
     } else {
-        let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-        build_surface_cpu(&z_input, x_host, y_host, rows, cols).await?
+        let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
+            .await
+            .map_err(map_surf_invalid_argument)?;
+        build_surface_cpu(&z_input, x_host, y_host, rows, cols)
+            .await
+            .map_err(map_surf_invalid_argument)?
     };
 
     style.apply_to_plot(&mut surface);
@@ -158,7 +341,7 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_surf_internal(err));
     }
     Ok(handle)
 }
@@ -445,6 +628,25 @@ pub(crate) mod tests {
             ),
             Type::Num
         );
+    }
+
+    #[test]
+    fn surf_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SURF_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = surf(Z)"));
+        assert!(labels.contains(&"h = surf(X, Y, Z)"));
+        assert!(labels.contains(&"h = surf(X, Y, Z, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn surf_missing_input_uses_stable_identifier() {
+        setup_plot_tests();
+        let err = futures::executor::block_on(surf_builtin(vec![])).expect_err("missing input");
+        assert_eq!(err.identifier(), SURF_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

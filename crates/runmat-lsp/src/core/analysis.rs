@@ -2137,6 +2137,8 @@ mod tests {
             ),
             ("mesh([1 2; 3 4]);", "h = mesh(Z)"),
             ("meshc([1 2; 3 4]);", "h = meshc(Z)"),
+            ("surf([1 2; 3 4]);", "h = surf(Z)"),
+            ("surfc([1 2; 3 4]);", "h = surfc(Z)"),
             ("stairs([1 2 3]);", "h = stairs(Y)"),
             ("stem([1 2 3]);", "h = stem(Y)"),
             ("scatter([1 2 3], [3 2 1]);", "h = scatter(X, Y)"),
