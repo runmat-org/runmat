@@ -3074,6 +3074,37 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_elementwise_binary_descriptors() {
+        let cases = [
+            ("plus(1, 2);", "C = plus(A, B)"),
+            (
+                "plus(1, 2, \"like\", 1);",
+                "C = plus(A, B, \"like\", prototype)",
+            ),
+            ("minus(5, 3);", "C = minus(A, B)"),
+            (
+                "times(2, 4, \"like\", 1);",
+                "C = times(A, B, \"like\", prototype)",
+            ),
+            ("rdivide(8, 2);", "C = rdivide(A, B)"),
+            ("ldivide(2, 8);", "C = ldivide(A, B)"),
+            ("power(2, 8);", "C = power(A, B)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

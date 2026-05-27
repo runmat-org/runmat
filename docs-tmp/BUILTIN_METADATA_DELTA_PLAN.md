@@ -272,6 +272,7 @@ Required:
 1. Put literal `code` / `identifier` / `message` directly on each `const FOO_ERROR_*: BuiltinErrorDescriptor`.
 2. Build `FOO_ERRORS` from those rows.
 3. Throw stable branches exclusively through helper functions that accept `&'static BuiltinErrorDescriptor` (for example `foo_error(&FOO_ERROR_INVALID_INPUT)`).
+4. Stable branch identifiers/messages such as `RunMat:lt:ComplexNotSupported` must be authored once on the descriptor row and consumed by throw helpers; do not keep parallel per-branch identifier/message constants.
 
 Disallowed:
 

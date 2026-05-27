@@ -95,12 +95,13 @@
 | Wave 90 (Math Rounding Unary) | `fix`, `round`, `ceil`, `floor` | Done | `154b54b0` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::rounding:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for unary rounding family including optional digits/mode and `"like"` forms, migrated stable runtime branches to descriptor-row source-of-truth (no duplicated `IDENT_*`/stable message constants), and added descriptor-driven LSP signature-help coverage for rounding unary forms. |
 | Wave 91 (Math Rounding Binary) | `mod`, `rem` | Done | `154b54b0` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::rounding:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for binary rounding forms (`mod`/`rem`), migrated broadcast/input/internal runtime branches to descriptor-backed stable codes/messages/identifiers, added runtime descriptor signature + identifier coverage tests, and extended descriptor-driven LSP signature-help coverage to include `mod` and `rem`. |
 | Wave 92 (Math Elementwise Complex Introspection) | `abs`, `angle`, `conj`, `real`, `imag` | Done | `1845c145` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::elementwise:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core unary complex-inspection elementwise forms, migrated invalid-input/internal runtime branches to descriptor-backed stable codes/messages/identifiers (single source of truth), added runtime descriptor-signature + identifier assertions, and extended descriptor-driven LSP signature-help coverage for the family. |
+| Wave 93 (Math Elementwise Binary Core A) | `plus`, `minus`, `times`, `rdivide`, `ldivide`, `power` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::elementwise:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for elementwise binary arithmetic forms (core + `"like"` prototype variants), mapped parser/input/shape/internal branches to descriptor-backed stable error codes/identifiers/messages, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help coverage for the binary family. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `266`
-- Remaining: `302`
+- Migrated with attached descriptor: `272`
+- Remaining: `296`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -117,6 +118,7 @@ Loop instructions:
 3. Do not duplicate stable identifier/message/code values:
    - no `const IDENT_*`, no `const *_MESSAGE`, no `const *_CODE`;
    - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
+   - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
    - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.

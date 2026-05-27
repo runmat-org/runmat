@@ -1,7 +1,11 @@
 //! MATLAB-compatible `plus` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -59,10 +63,141 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "plus";
 
+const PLUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise sum result.",
+}];
+
+const PLUS_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical operand.",
+    },
+];
+
+const PLUS_INPUTS_A_B_LIKE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const PLUS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = plus(A, B)",
+        inputs: &PLUS_INPUTS_A_B,
+        outputs: &PLUS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = plus(A, B, \"like\", prototype)",
+        inputs: &PLUS_INPUTS_A_B_LIKE,
+        outputs: &PLUS_OUTPUT,
+    },
+];
+
+const PLUS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:plus:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "plus: invalid argument",
+};
+
+const PLUS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.INVALID_INPUT",
+    identifier: Some("RunMat:plus:InvalidInput"),
+    when: "Operands or prototypes cannot be converted into supported numeric/logical forms.",
+    message: "plus: invalid input",
+};
+
+const PLUS_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.SIZE_MISMATCH",
+    identifier: Some("RunMat:plus:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "plus: array sizes are not compatible for broadcasting",
+};
+
+const PLUS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.INTERNAL",
+    identifier: Some("RunMat:plus:Internal"),
+    when: "Provider interaction, gather/upload, or internal tensor construction failed.",
+    message: "plus: internal error",
+};
+
+const PLUS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    PLUS_ERROR_INVALID_ARGUMENT,
+    PLUS_ERROR_INVALID_INPUT,
+    PLUS_ERROR_SIZE_MISMATCH,
+    PLUS_ERROR_INTERNAL,
+];
+
+pub const PLUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PLUS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PLUS_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn plus_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn plus_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -72,6 +207,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "plus,element-wise addition,gpu,+",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::plus::PLUS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::plus"
 )]
 async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -97,21 +233,29 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err(builtin_error("plus: expected prototype after 'like'"));
+            return Err(plus_error_with_detail(
+                &PLUS_ERROR_INVALID_ARGUMENT,
+                "expected prototype after 'like'",
+            ));
         }
-        return Err(builtin_error(
-            "plus: unsupported option; only 'like' is accepted",
+        return Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err(builtin_error(
-            "plus: unsupported option; only 'like' is accepted",
+        return Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
-    Err(builtin_error("plus: too many input arguments"))
+    Err(plus_error_with_detail(
+        &PLUS_ERROR_INVALID_ARGUMENT,
+        "too many input arguments",
+    ))
 }
 
 async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
@@ -172,8 +316,9 @@ async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(builtin_error(
-            "plus: GPU output requested via 'like' but no acceleration provider is active",
+        return Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_ARGUMENT,
+            "GPU output requested via 'like' but no acceleration provider is active",
         ));
     };
     match value {
@@ -204,12 +349,16 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "plus: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_ARGUMENT,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
-            builtin_error("plus: unsupported prototype conversion to GPU output"),
-        ),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
+            Err(plus_error_with_detail(
+                &PLUS_ERROR_INVALID_ARGUMENT,
+                "unsupported prototype conversion to GPU output",
+            ))
+        }
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -220,8 +369,9 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(builtin_error(
-            "plus: unsupported prototype conversion to GPU output",
+        | Value::OutputList(_) => Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
         )),
     }
 }
@@ -266,9 +416,10 @@ async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(builtin_error(format!(
-            "plus: unsupported prototype for 'like' ({value:?})"
-        ))),
+        _ => Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_ARGUMENT,
+            format!("unsupported prototype for 'like' ({value:?})"),
+        )),
     }
 }
 
@@ -298,9 +449,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             real_to_complex(gathered).await
         }
-        other => Err(builtin_error(format!(
-            "plus: cannot convert value {other:?} to complex output"
-        ))),
+        other => Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_INPUT,
+            format!("cannot convert value {other:?} to complex output"),
+        )),
     }
 }
 
@@ -476,7 +628,7 @@ fn plus_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn plus_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("plus: {err}")))?;
+        .map_err(|err| plus_error_with_detail(&PLUS_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("plus: {e}")))?;
@@ -493,7 +645,7 @@ fn plus_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("plus: {err}")))?;
+        .map_err(|err| plus_error_with_detail(&PLUS_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("plus: {e}")))?;
@@ -512,7 +664,7 @@ fn plus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResu
 
 fn plus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("plus: {err}")))?;
+        .map_err(|err| plus_error_with_detail(&PLUS_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("plus: {e}")))?;
@@ -531,7 +683,7 @@ fn plus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> 
 
 fn plus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("plus: {err}")))?;
+        .map_err(|err| plus_error_with_detail(&PLUS_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("plus: {e}")))?;
@@ -576,11 +728,14 @@ fn classify_operand(value: Value) -> BuiltinResult<PlusOperand> {
                 .map_err(|e| builtin_error(format!("plus: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(PlusOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error("plus: internal error converting GPU value")),
-        other => Err(builtin_error(format!(
-            "plus: unsupported operand type {:?}; expected numeric or logical data",
-            other
-        ))),
+        Value::GpuTensor(_) => Err(plus_error(&PLUS_ERROR_INTERNAL)),
+        other => Err(plus_error_with_detail(
+            &PLUS_ERROR_INVALID_INPUT,
+            format!(
+                "unsupported operand type {:?}; expected numeric or logical data",
+                other
+            ),
+        )),
     }
 }
 
@@ -631,6 +786,24 @@ pub(crate) mod tests {
 
     fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::plus_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn plus_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = PLUS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = plus(A, B)"));
+        assert!(labels.contains(&"C = plus(A, B, \"like\", prototype)"));
+    }
+
+    #[test]
+    fn plus_parser_error_has_stable_identifier() {
+        let err = plus_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
+            .expect_err("expected parser error");
+        assert_eq!(err.identifier(), PLUS_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

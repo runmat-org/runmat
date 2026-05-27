@@ -3,7 +3,11 @@
 use async_recursion::async_recursion;
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -63,10 +67,141 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "rdivide";
 
+const RDIVIDE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise quotient result.",
+}];
+
+const RDIVIDE_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dividend operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Divisor operand.",
+    },
+];
+
+const RDIVIDE_INPUTS_A_B_LIKE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dividend operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Divisor operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const RDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = rdivide(A, B)",
+        inputs: &RDIVIDE_INPUTS_A_B,
+        outputs: &RDIVIDE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = rdivide(A, B, \"like\", prototype)",
+        inputs: &RDIVIDE_INPUTS_A_B_LIKE,
+        outputs: &RDIVIDE_OUTPUT,
+    },
+];
+
+const RDIVIDE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RDIVIDE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:rdivide:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "rdivide: invalid argument",
+};
+
+const RDIVIDE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RDIVIDE.INVALID_INPUT",
+    identifier: Some("RunMat:rdivide:InvalidInput"),
+    when: "Operands or prototypes cannot be converted into supported numeric/logical forms.",
+    message: "rdivide: invalid input",
+};
+
+const RDIVIDE_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RDIVIDE.SIZE_MISMATCH",
+    identifier: Some("RunMat:rdivide:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "rdivide: array sizes are not compatible for broadcasting",
+};
+
+const RDIVIDE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RDIVIDE.INTERNAL",
+    identifier: Some("RunMat:rdivide:Internal"),
+    when: "Provider interaction, gather/upload, or internal tensor construction failed.",
+    message: "rdivide: internal error",
+};
+
+const RDIVIDE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    RDIVIDE_ERROR_INVALID_ARGUMENT,
+    RDIVIDE_ERROR_INVALID_INPUT,
+    RDIVIDE_ERROR_SIZE_MISMATCH,
+    RDIVIDE_ERROR_INTERNAL,
+];
+
+pub const RDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RDIVIDE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RDIVIDE_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn rdivide_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn rdivide_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -76,6 +211,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "rdivide,element-wise division,gpu,./",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::rdivide::RDIVIDE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::rdivide"
 )]
 async fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -101,21 +237,29 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err(builtin_error("rdivide: expected prototype after 'like'"));
+            return Err(rdivide_error_with_detail(
+                &RDIVIDE_ERROR_INVALID_ARGUMENT,
+                "expected prototype after 'like'",
+            ));
         }
-        return Err(builtin_error(
-            "rdivide: unsupported option; only 'like' is accepted",
+        return Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err(builtin_error(
-            "rdivide: unsupported option; only 'like' is accepted",
+        return Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
-    Err(builtin_error("rdivide: too many input arguments"))
+    Err(rdivide_error_with_detail(
+        &RDIVIDE_ERROR_INVALID_ARGUMENT,
+        "too many input arguments",
+    ))
 }
 
 async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
@@ -177,8 +321,9 @@ async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(builtin_error(
-            "rdivide: GPU output requested via 'like' but no acceleration provider is active",
+        return Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            "GPU output requested via 'like' but no acceleration provider is active",
         ));
     };
     match value {
@@ -209,12 +354,16 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "rdivide: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
-            builtin_error("rdivide: unsupported prototype conversion to GPU output"),
-        ),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
+            Err(rdivide_error_with_detail(
+                &RDIVIDE_ERROR_INVALID_ARGUMENT,
+                "unsupported prototype conversion to GPU output",
+            ))
+        }
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
@@ -225,8 +374,9 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(builtin_error(
-            "rdivide: unsupported prototype conversion to GPU output",
+        | Value::OutputList(_) => Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
         )),
     }
 }
@@ -272,9 +422,10 @@ async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(builtin_error(format!(
-            "rdivide: unsupported prototype for 'like' ({value:?})"
-        ))),
+        _ => Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            format!("unsupported prototype for 'like' ({value:?})"),
+        )),
     }
 }
 
@@ -304,9 +455,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             real_to_complex(gathered).await
         }
-        other => Err(builtin_error(format!(
-            "rdivide: cannot convert value {other:?} to complex output"
-        ))),
+        other => Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_INPUT,
+            format!("cannot convert value {other:?} to complex output"),
+        )),
     }
 }
 
@@ -449,7 +601,7 @@ fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -466,7 +618,7 @@ fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn rdivide_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -486,7 +638,7 @@ fn rdivide_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinR
 
 fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -506,7 +658,7 @@ fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Valu
 
 fn rdivide_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("rdivide: {err}")))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -553,13 +705,14 @@ fn classify_operand(value: Value) -> BuiltinResult<RdivideOperand> {
                 .map_err(|e| builtin_error(format!("rdivide: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(RdivideOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error(
-            "rdivide: internal error converting GPU value",
+        Value::GpuTensor(_) => Err(rdivide_error(&RDIVIDE_ERROR_INTERNAL)),
+        other => Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_INPUT,
+            format!(
+                "unsupported operand type {:?}; expected numeric or logical data",
+                other
+            ),
         )),
-        other => Err(builtin_error(format!(
-            "rdivide: unsupported operand type {:?}; expected numeric or logical data",
-            other
-        ))),
     }
 }
 
@@ -647,6 +800,24 @@ pub(crate) mod tests {
 
     fn rdivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::rdivide_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn rdivide_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = RDIVIDE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = rdivide(A, B)"));
+        assert!(labels.contains(&"C = rdivide(A, B, \"like\", prototype)"));
+    }
+
+    #[test]
+    fn rdivide_parser_error_has_stable_identifier() {
+        let err = rdivide_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
+            .expect_err("expected parser error");
+        assert_eq!(err.identifier(), RDIVIDE_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `power` builtin (element-wise exponentiation) with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -59,8 +63,140 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "power";
 
+const POWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise power result.",
+}];
+
+const POWER_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Base operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Exponent operand.",
+    },
+];
+
+const POWER_INPUTS_A_B_LIKE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Base operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Exponent operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const POWER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = power(A, B)",
+        inputs: &POWER_INPUTS_A_B,
+        outputs: &POWER_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = power(A, B, \"like\", prototype)",
+        inputs: &POWER_INPUTS_A_B_LIKE,
+        outputs: &POWER_OUTPUT,
+    },
+];
+
+const POWER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POWER.INVALID_ARGUMENT",
+    identifier: Some("RunMat:power:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "power: invalid argument",
+};
+
+const POWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POWER.INVALID_INPUT",
+    identifier: Some("RunMat:power:InvalidInput"),
+    when:
+        "Operands or prototypes cannot be converted into supported numeric/logical/complex forms.",
+    message: "power: invalid input",
+};
+
+const POWER_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POWER.SIZE_MISMATCH",
+    identifier: Some("RunMat:power:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "power: array sizes are not compatible for broadcasting",
+};
+
+const POWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POWER.INTERNAL",
+    identifier: Some("RunMat:power:Internal"),
+    when: "Provider interaction, gather/upload, or internal tensor construction failed.",
+    message: "power: internal error",
+};
+
+const POWER_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    POWER_ERROR_INVALID_ARGUMENT,
+    POWER_ERROR_INVALID_INPUT,
+    POWER_ERROR_SIZE_MISMATCH,
+    POWER_ERROR_INTERNAL,
+];
+
+pub const POWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &POWER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &POWER_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("power").build()
+}
+
+fn power_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn power_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -70,6 +206,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "power,element-wise,.^,gpu,broadcast",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::power::POWER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::power"
 )]
 async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -94,10 +231,14 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err(builtin_error("power: expected prototype after 'like'"))
+                Err(power_error_with_detail(
+                    &POWER_ERROR_INVALID_ARGUMENT,
+                    "expected prototype after 'like'",
+                ))
             } else {
-                Err(builtin_error(
-                    "power: unsupported option; only 'like' is accepted",
+                Err(power_error_with_detail(
+                    &POWER_ERROR_INVALID_ARGUMENT,
+                    "unsupported option; only 'like' is accepted",
                 ))
             }
         }
@@ -105,12 +246,16 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(builtin_error(
-                    "power: unsupported option; only 'like' is accepted",
+                Err(power_error_with_detail(
+                    &POWER_ERROR_INVALID_ARGUMENT,
+                    "unsupported option; only 'like' is accepted",
                 ))
             }
         }
-        _ => Err(builtin_error("power: too many input arguments")),
+        _ => Err(power_error_with_detail(
+            &POWER_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        )),
     }
 }
 
@@ -177,7 +322,7 @@ fn power_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("power: {err}")))?;
+        .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -213,7 +358,7 @@ fn power_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("power: {err}")))?;
+        .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -232,7 +377,7 @@ fn power_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 
 fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("power: {err}")))?;
+        .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -251,7 +396,7 @@ fn power_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
 
 fn power_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("power: {err}")))?;
+        .map_err(|err| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, err.to_string()))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("power: {e}")))?;
@@ -297,11 +442,14 @@ fn classify_operand(value: Value) -> BuiltinResult<PowerOperand> {
                 .map_err(|e| builtin_error(format!("power: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(PowerOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error("power: internal GPU operand escape")),
-        other => Err(builtin_error(format!(
-            "power: unsupported operand type {:?}; expected numeric, logical, or char data",
-            other
-        ))),
+        Value::GpuTensor(_) => Err(power_error(&POWER_ERROR_INTERNAL)),
+        other => Err(power_error_with_detail(
+            &POWER_ERROR_INVALID_INPUT,
+            format!(
+                "unsupported operand type {:?}; expected numeric, logical, or char data",
+                other
+            ),
+        )),
     }
 }
 
@@ -614,18 +762,19 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
                     .map_err(|e| builtin_error(format!("power: {e}")))?;
                 upload_tensor(tensor)
             }
-            other => Err(builtin_error(format!(
-                "power: cannot place result {:?} on the GPU via 'like'",
-                other
-            ))),
+            other => Err(power_error_with_detail(
+                &POWER_ERROR_INVALID_ARGUMENT,
+                format!("cannot place result {:?} on the GPU via 'like'", other),
+            )),
         },
     }
 }
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(builtin_error(
-            "power: no acceleration provider available to honour GPU output",
+        return Err(power_error_with_detail(
+            &POWER_ERROR_INVALID_ARGUMENT,
+            "no acceleration provider available to honour GPU output",
         ));
     };
     let view = HostTensorView {
@@ -634,7 +783,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| builtin_error(format!("power: failed to upload GPU result: {e}")))?;
+        .map_err(|e| power_error_with_detail(&POWER_ERROR_INTERNAL, e.to_string()))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -655,10 +804,13 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         }
         Value::Bool(b) => real_to_complex(Value::Num(if b { 1.0 } else { 0.0 })),
         Value::Int(i) => real_to_complex(Value::Num(i.to_f64())),
-        other => Err(builtin_error(format!(
-            "power: cannot convert value {:?} to a complex result via 'like'",
-            other
-        ))),
+        other => Err(power_error_with_detail(
+            &POWER_ERROR_INVALID_INPUT,
+            format!(
+                "cannot convert value {:?} to a complex result via 'like'",
+                other
+            ),
+        )),
     }
 }
 
@@ -717,6 +869,24 @@ pub(crate) mod tests {
 
     fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::power_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn power_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = POWER_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = power(A, B)"));
+        assert!(labels.contains(&"C = power(A, B, \"like\", prototype)"));
+    }
+
+    #[test]
+    fn power_parser_error_has_stable_identifier() {
+        let err = power_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
+            .expect_err("expected parser error");
+        assert_eq!(err.identifier(), POWER_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
