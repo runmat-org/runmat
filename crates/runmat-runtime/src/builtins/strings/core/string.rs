@@ -1,6 +1,8 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -14,6 +16,90 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::strings::type_resolvers::string_array_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+
+const STRING_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String scalar/array result.",
+}];
+
+const STRING_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to convert to string array.",
+}];
+
+const STRING_INPUTS_VALUE_ENCODING: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to convert to string array.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"UTF-8\""),
+        description: "Character encoding (UTF-8 aliases supported).",
+    },
+];
+
+const STRING_INPUTS_FORMAT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format specification text/cell/string array.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Formatting data arguments.",
+    },
+];
+
+const STRING_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "S = string(X)",
+        inputs: &STRING_INPUTS_VALUE,
+        outputs: &STRING_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string(X, encoding)",
+        inputs: &STRING_INPUTS_VALUE_ENCODING,
+        outputs: &STRING_OUTPUT_S,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = string(formatSpec, A...)",
+        inputs: &STRING_INPUTS_FORMAT,
+        outputs: &STRING_OUTPUT_S,
+    },
+];
+
+const STRING_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRING.INVALID_INPUT",
+    identifier: Some("RunMat:string:InvalidInput"),
+    when: "Input conversion/formatting/encoding constraints are violated.",
+    message: "string: invalid input",
+};
+
+const STRING_ERRORS: [BuiltinErrorDescriptor; 1] = [STRING_ERROR_INVALID_INPUT];
+
+pub const STRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRING_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRING_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::string")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,6 +136,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "string,convert,text,char,gpu",
     accel = "sink",
     type_resolver(string_array_type),
+    descriptor(crate::builtins::strings::core::string::STRING_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::string"
 )]
 async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -211,7 +298,24 @@ struct ArgumentData {
 }
 
 fn string_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("string").build()
+    string_error_with_detail(&STRING_ERROR_INVALID_INPUT, message)
+}
+
+fn string_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl Into<String>,
+) -> RuntimeError {
+    let detail = detail.into();
+    let message = if detail.starts_with("string:") {
+        detail
+    } else {
+        format!("{}: {detail}", error.message)
+    };
+    let mut builder = build_runtime_error(message).with_builtin("string");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_string_flow(err: RuntimeError) -> RuntimeError {
@@ -982,6 +1086,36 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn string_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = STRING_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "S = string(X)",
+                "S = string(X, encoding)",
+                "S = string(formatSpec, A...)",
+            ]
+        );
+
+        let codes: Vec<&str> = STRING_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(codes, vec!["RM.STRING.INVALID_INPUT"]);
+    }
+
+    #[test]
+    fn string_struct_input_uses_stable_identifier() {
+        let err = string_builtin(Value::Struct(StructValue::new()), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:string:InvalidInput"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -4542,6 +4542,8 @@ mod tests {
             ("num2str(42);", "txt = num2str(A)"),
             ("sprintf(\"%d\", 1);", "txt = sprintf(formatSpec, A...)"),
             ("compose(\"v=%d\", 1);", "S = compose(formatSpec, A...)"),
+            ("string(42);", "S = string(X)"),
+            ("string(\"%d\", 1);", "S = string(formatSpec, A...)"),
         ];
 
         for (text, expected_label) in cases {
@@ -4554,6 +4556,41 @@ mod tests {
                 labels.contains(&expected_label),
                 "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
                 labels
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_strings_core_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in [
+            "strcmp",
+            "strcmpi",
+            "strncmp",
+            "strings",
+            "strlength",
+            "str2double",
+            "char",
+            "num2str",
+            "sprintf",
+            "compose",
+            "string",
+        ] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            assert!(
+                details
+                    .iter()
+                    .any(|detail| detail.contains(&format!("{builtin}("))),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
             );
         }
     }
