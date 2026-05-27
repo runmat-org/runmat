@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as FmtWrite;
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, ObjectInstance, StringArray,
     StructValue, Tensor, Value,
 };
@@ -15,11 +17,171 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const OPTION_NAME_ERROR: &str = "jsonencode: option names must be character vectors or strings";
-const OPTION_VALUE_ERROR: &str = "jsonencode: option value must be scalar logical or numeric";
-const INF_NAN_ERROR: &str = "jsonencode: ConvertInfAndNaN must be true to encode NaN or Inf values";
-const UNSUPPORTED_TYPE_ERROR: &str =
-    "jsonencode: unsupported input type; expected numeric, logical, string, struct, cell, or object data";
+const BUILTIN_NAME: &str = "jsonencode";
+
+const JSONENCODE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "jsonText",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "JSON text encoded as a character row vector.",
+}];
+const JSONENCODE_INPUTS_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Value to encode as JSON.",
+}];
+const JSONENCODE_INPUTS_VALUE_OPTIONS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Value to encode as JSON.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Options struct with fields such as PrettyPrint and ConvertInfAndNaN.",
+    },
+];
+const JSONENCODE_INPUTS_VALUE_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Value to encode as JSON.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option name (for example \"PrettyPrint\" or \"ConvertInfAndNaN\").",
+    },
+    BuiltinParamDescriptor {
+        name: "optionValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option value for the preceding option name.",
+    },
+];
+const JSONENCODE_INPUTS_VALUE_NAME_VALUE_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Value to encode as JSON.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs.",
+    },
+];
+const JSONENCODE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "jsonText = jsonencode(value)",
+        inputs: &JSONENCODE_INPUTS_VALUE,
+        outputs: &JSONENCODE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "jsonText = jsonencode(value, options)",
+        inputs: &JSONENCODE_INPUTS_VALUE_OPTIONS,
+        outputs: &JSONENCODE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "jsonText = jsonencode(value, name, optionValue)",
+        inputs: &JSONENCODE_INPUTS_VALUE_NAME_VALUE,
+        outputs: &JSONENCODE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "jsonText = jsonencode(value, nameValuePairs...)",
+        inputs: &JSONENCODE_INPUTS_VALUE_NAME_VALUE_VARIADIC,
+        outputs: &JSONENCODE_OUTPUT,
+    },
+];
+const JSONENCODE_ERROR_OPTIONS_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.OPTIONS_CONFIG",
+    identifier: None,
+    when: "Single options argument is provided but is not a struct.",
+    message: "jsonencode: expected name/value pairs or options struct",
+};
+const JSONENCODE_ERROR_NAME_VALUE_PAIRS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.NAME_VALUE_PAIRS",
+    identifier: None,
+    when: "Name-value options do not come in pairs.",
+    message: "jsonencode: name/value pairs must come in pairs",
+};
+const JSONENCODE_ERROR_OPTION_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.OPTION_NAME",
+    identifier: None,
+    when: "Option name is not a character vector or string scalar.",
+    message: "jsonencode: option names must be character vectors or strings",
+};
+const JSONENCODE_ERROR_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.OPTION_VALUE",
+    identifier: None,
+    when: "Option value is not a scalar logical/numeric or boolean-like text.",
+    message: "jsonencode: option value must be scalar logical or numeric",
+};
+const JSONENCODE_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.UNKNOWN_OPTION",
+    identifier: None,
+    when: "Option name is not recognized.",
+    message: "jsonencode: unknown option name",
+};
+const JSONENCODE_ERROR_INF_NAN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.INF_NAN",
+    identifier: None,
+    when: "Input contains NaN/Inf while ConvertInfAndNaN is false.",
+    message: "jsonencode: ConvertInfAndNaN must be true to encode NaN or Inf values",
+};
+const JSONENCODE_ERROR_UNSUPPORTED_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.UNSUPPORTED_TYPE",
+    identifier: None,
+    when: "Input value type is not supported for JSON encoding.",
+    message:
+        "jsonencode: unsupported input type; expected numeric, logical, string, struct, cell, or object data",
+};
+const JSONENCODE_ERROR_UNEXPECTED_GPU: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.UNEXPECTED_GPU",
+    identifier: None,
+    when: "A GPU tensor handle reaches encoding after gather pass.",
+    message: "jsonencode: unexpected gpuArray handle after gather pass",
+};
+const JSONENCODE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.JSONENCODE.INTERNAL",
+    identifier: None,
+    when: "Internal JSON conversion or container materialization fails.",
+    message: "jsonencode: internal conversion failed",
+};
+const JSONENCODE_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    JSONENCODE_ERROR_OPTIONS_CONFIG,
+    JSONENCODE_ERROR_NAME_VALUE_PAIRS,
+    JSONENCODE_ERROR_OPTION_NAME,
+    JSONENCODE_ERROR_OPTION_VALUE,
+    JSONENCODE_ERROR_UNKNOWN_OPTION,
+    JSONENCODE_ERROR_INF_NAN,
+    JSONENCODE_ERROR_UNSUPPORTED_TYPE,
+    JSONENCODE_ERROR_UNEXPECTED_GPU,
+    JSONENCODE_ERROR_INTERNAL,
+];
+pub const JSONENCODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &JSONENCODE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &JSONENCODE_ERRORS,
+};
 
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::json::jsonencode")]
@@ -39,14 +201,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Serialization sink that gathers GPU data to host memory before emitting UTF-8 JSON text.",
 };
 
-fn jsonencode_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("jsonencode")
-        .build()
+fn jsonencode_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    jsonencode_error_with(error, error.message)
+}
+
+fn jsonencode_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn jsonencode_flow_with_context(err: RuntimeError) -> RuntimeError {
-    let mut builder = build_runtime_error(err.message().to_string()).with_builtin("jsonencode");
+    let mut builder = build_runtime_error(err.message().to_string()).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = err.identifier() {
         builder = builder.with_identifier(identifier.to_string());
     }
@@ -103,6 +274,7 @@ enum JsonNumber {
     keywords = "jsonencode,json,serialization,struct,gpu",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::jsonencode_type),
+    descriptor(crate::builtins::io::json::jsonencode::JSONENCODE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
 async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -136,15 +308,11 @@ fn parse_options(args: &[Value]) -> BuiltinResult<JsonEncodeOptions> {
             apply_struct_options(struct_value, &mut options)?;
             return Ok(options);
         }
-        return Err(jsonencode_error(
-            "jsonencode: expected name/value pairs or options struct",
-        ));
+        return Err(jsonencode_error(&JSONENCODE_ERROR_OPTIONS_CONFIG));
     }
 
     if !args.len().is_multiple_of(2) {
-        return Err(jsonencode_error(
-            "jsonencode: name/value pairs must come in pairs",
-        ));
+        return Err(jsonencode_error(&JSONENCODE_ERROR_NAME_VALUE_PAIRS));
     }
 
     let mut idx = 0usize;
@@ -173,7 +341,7 @@ fn option_name(value: &Value) -> BuiltinResult<String> {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(jsonencode_error(OPTION_NAME_ERROR)),
+        _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_NAME)),
     }
 }
 
@@ -192,10 +360,10 @@ fn apply_option(
             options.convert_inf_and_nan = coerce_bool(value)?;
             Ok(())
         }
-        other => Err(jsonencode_error(format!(
-            "jsonencode: unknown option '{}'",
-            other
-        ))),
+        other => Err(jsonencode_error_with(
+            &JSONENCODE_ERROR_UNKNOWN_OPTION,
+            format!("{} ('{}')", JSONENCODE_ERROR_UNKNOWN_OPTION.message, other),
+        )),
     }
 }
 
@@ -208,19 +376,19 @@ fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
             if t.data.len() == 1 {
                 bool_from_f64(t.data[0])
             } else {
-                Err(jsonencode_error(OPTION_VALUE_ERROR))
+                Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE))
             }
         }
         Value::LogicalArray(la) => match la.data.len() {
             1 => Ok(la.data[0] != 0),
-            _ => Err(jsonencode_error(OPTION_VALUE_ERROR)),
+            _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)),
         },
         Value::CharArray(ca) if ca.rows == 1 => {
             parse_bool_string(&ca.data.iter().collect::<String>())
         }
         Value::String(s) => parse_bool_string(s),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
-        _ => Err(jsonencode_error(OPTION_VALUE_ERROR)),
+        _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)),
     }
 }
 
@@ -228,7 +396,7 @@ fn bool_from_f64(value: f64) -> BuiltinResult<bool> {
     if value.is_finite() {
         Ok(value != 0.0)
     } else {
-        Err(jsonencode_error(OPTION_VALUE_ERROR))
+        Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE))
     }
 }
 
@@ -236,7 +404,7 @@ fn parse_bool_string(text: &str) -> BuiltinResult<bool> {
     match text.trim().to_ascii_lowercase().as_str() {
         "true" | "on" | "yes" | "1" => Ok(true),
         "false" | "off" | "no" | "0" => Ok(false),
-        _ => Err(jsonencode_error(OPTION_VALUE_ERROR)),
+        _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)),
     }
 }
 
@@ -255,9 +423,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::Struct(sv) => struct_to_json(sv, options),
         Value::Cell(ca) => cell_array_to_json(ca, options),
         Value::Object(obj) => object_to_json(obj, options),
-        Value::GpuTensor(_) => Err(jsonencode_error(
-            "jsonencode: unexpected gpuArray handle after gather pass",
-        )),
+        Value::GpuTensor(_) => Err(jsonencode_error(&JSONENCODE_ERROR_UNEXPECTED_GPU)),
         Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
@@ -267,7 +433,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(jsonencode_error(UNSUPPORTED_TYPE_ERROR)),
+        | Value::OutputList(_) => Err(jsonencode_error(&JSONENCODE_ERROR_UNSUPPORTED_TYPE)),
     }
 }
 
@@ -289,7 +455,7 @@ fn number_to_json(value: f64, options: &JsonEncodeOptions) -> BuiltinResult<Json
         if options.convert_inf_and_nan {
             return Ok(JsonValue::Null);
         }
-        return Err(jsonencode_error(INF_NAN_ERROR));
+        return Err(jsonencode_error(&JSONENCODE_ERROR_INF_NAN));
     }
     Ok(JsonValue::Number(JsonNumber::Float(value)))
 }
@@ -427,18 +593,24 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinRes
     }
 
     if ca.rows == 1 && ca.cols == 1 {
-        let value = ca
-            .get(0, 0)
-            .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+        let value = ca.get(0, 0).map_err(|e| {
+            jsonencode_error_with(
+                &JSONENCODE_ERROR_INTERNAL,
+                format!("{} ({e})", JSONENCODE_ERROR_INTERNAL.message),
+            )
+        })?;
         return Ok(JsonValue::Array(vec![value_to_json(&value, options)?]));
     }
 
     if ca.rows == 1 {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            let element = ca
-                .get(0, c)
-                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+            let element = ca.get(0, c).map_err(|e| {
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    format!("{} ({e})", JSONENCODE_ERROR_INTERNAL.message),
+                )
+            })?;
             row.push(value_to_json(&element, options)?);
         }
         return Ok(JsonValue::Array(row));
@@ -447,9 +619,12 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinRes
     if ca.cols == 1 {
         let mut column = Vec::with_capacity(ca.rows);
         for r in 0..ca.rows {
-            let element = ca
-                .get(r, 0)
-                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+            let element = ca.get(r, 0).map_err(|e| {
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    format!("{} ({e})", JSONENCODE_ERROR_INTERNAL.message),
+                )
+            })?;
             column.push(value_to_json(&element, options)?);
         }
         return Ok(JsonValue::Array(column));
@@ -459,9 +634,12 @@ fn cell_array_to_json(ca: &CellArray, options: &JsonEncodeOptions) -> BuiltinRes
     for r in 0..ca.rows {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            let element = ca
-                .get(r, c)
-                .map_err(|e| jsonencode_error(format!("jsonencode: {e}")))?;
+            let element = ca.get(r, c).map_err(|e| {
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    format!("{} ({e})", JSONENCODE_ERROR_INTERNAL.message),
+                )
+            })?;
             row.push(value_to_json(&element, options)?);
         }
         rows.push(JsonValue::Array(row));
@@ -775,6 +953,20 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn jsonencode_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = JSONENCODE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"jsonText = jsonencode(value)"));
+        assert!(labels.contains(&"jsonText = jsonencode(value, options)"));
+        assert!(labels.contains(&"jsonText = jsonencode(value, name, optionValue)"));
+        assert!(labels.contains(&"jsonText = jsonencode(value, nameValuePairs...)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn jsonencode_scalar_double() {
         let encoded =
             block_on(jsonencode_builtin(Value::Num(5.0), Vec::new())).expect("jsonencode");
@@ -841,7 +1033,7 @@ pub(crate) mod tests {
             vec![Value::from("PrettyPrint"), Value::Tensor(tensor)],
         ))
         .expect_err("expected failure");
-        assert_eq!(error_message(err), OPTION_VALUE_ERROR);
+        assert_eq!(error_message(err), JSONENCODE_ERROR_OPTION_VALUE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -869,7 +1061,7 @@ pub(crate) mod tests {
             vec![Value::from("ConvertInfAndNaN"), Value::Bool(false)],
         ))
         .expect_err("expected failure");
-        assert_eq!(error_message(err), INF_NAN_ERROR);
+        assert_eq!(error_message(err), JSONENCODE_ERROR_INF_NAN.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
