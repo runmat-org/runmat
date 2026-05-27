@@ -743,6 +743,38 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Value as V;
 
+    const FMINBND_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "fx",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Objective scalar value.",
+    }];
+
+    const FMINBND_HELPER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar objective input.",
+    }];
+
+    const FMINBND_HELPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "fx = __fminbnd_helper(x)",
+            inputs: &FMINBND_HELPER_INPUTS,
+            outputs: &FMINBND_HELPER_OUTPUT,
+        }];
+
+    const FMINBND_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+    pub const FMINBND_TEST_HELPER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &FMINBND_HELPER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &FMINBND_HELPER_ERRORS,
+    };
+
     fn run_default(handle: &str, lo: f64, hi: f64) -> Value {
         block_on(fminbnd_builtin(
             V::FunctionHandle(handle.into()),
@@ -763,9 +795,18 @@ mod tests {
         .expect("fminbnd")
     }
 
+    #[test]
+    fn fminbnd_test_helper_descriptor_is_attached_shape() {
+        assert_eq!(
+            FMINBND_TEST_HELPER_DESCRIPTOR.signatures[0].label,
+            "fx = __fminbnd_helper(x)"
+        );
+    }
+
     #[runtime_builtin(
         name = "__fminbnd_quad_minus_two",
         type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+        descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::fminbnd::tests"
     )]
     async fn quad_minus_two(x: Value) -> crate::BuiltinResult<Value> {
@@ -777,6 +818,7 @@ mod tests {
     #[runtime_builtin(
         name = "__fminbnd_quad_minus_three",
         type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+        descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::fminbnd::tests"
     )]
     async fn quad_minus_three(x: Value) -> crate::BuiltinResult<Value> {
@@ -788,6 +830,7 @@ mod tests {
     #[runtime_builtin(
         name = "__fminbnd_multi_modal",
         type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+        descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::fminbnd::tests"
     )]
     async fn multi_modal(x: Value) -> crate::BuiltinResult<Value> {

@@ -633,9 +633,42 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
+    const INTEGRAL_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "fx",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integrand scalar value.",
+    }];
+
+    const INTEGRAL_HELPER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integrand sample location.",
+    }];
+
+    const INTEGRAL_HELPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "fx = __integral_helper(x)",
+            inputs: &INTEGRAL_HELPER_INPUTS,
+            outputs: &INTEGRAL_HELPER_OUTPUT,
+        }];
+
+    const INTEGRAL_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+    pub const INTEGRAL_TEST_HELPER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &INTEGRAL_HELPER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &INTEGRAL_HELPER_ERRORS,
+    };
+
     #[runtime_builtin(
         name = "__integral_square",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn square_helper(x: Value) -> crate::BuiltinResult<Value> {
@@ -646,6 +679,7 @@ mod tests {
     #[runtime_builtin(
         name = "__integral_vector",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn vector_helper(_x: Value) -> crate::BuiltinResult<Value> {
@@ -657,6 +691,7 @@ mod tests {
     #[runtime_builtin(
         name = "__integral_nan",
         type_resolver(crate::builtins::math::optim::type_resolvers::numerical_integral_type),
+        descriptor(crate::builtins::math::optim::integral::tests::INTEGRAL_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::integral::tests"
     )]
     async fn nan_helper(_x: Value) -> crate::BuiltinResult<Value> {
@@ -670,6 +705,14 @@ mod tests {
             Value::Num(b),
             Vec::new(),
         ))
+    }
+
+    #[test]
+    fn integral_test_helper_descriptor_is_attached_shape() {
+        assert_eq!(
+            INTEGRAL_TEST_HELPER_DESCRIPTOR.signatures[0].label,
+            "fx = __integral_helper(x)"
+        );
     }
 
     #[test]

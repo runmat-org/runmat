@@ -494,6 +494,30 @@ pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    const TIMEIT_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Helper scalar return value.",
+    }];
+
+    const TIMEIT_HELPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "y = __timeit_helper()",
+            inputs: &[],
+            outputs: &TIMEIT_HELPER_OUTPUT,
+        }];
+
+    const TIMEIT_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+    pub const TIMEIT_TEST_HELPER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &TIMEIT_HELPER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &TIMEIT_HELPER_ERRORS,
+    };
+
     static COUNTER_DEFAULT: AtomicUsize = AtomicUsize::new(0);
     static COUNTER_NUM_OUTPUTS: AtomicUsize = AtomicUsize::new(0);
     static COUNTER_INVALID: AtomicUsize = AtomicUsize::new(0);
@@ -502,6 +526,7 @@ pub(crate) mod tests {
     #[runtime_builtin(
         name = "__timeit_helper_counter_default",
         type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
+        descriptor(crate::builtins::timing::timeit::tests::TIMEIT_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_default() -> crate::BuiltinResult<Value> {
@@ -512,6 +537,7 @@ pub(crate) mod tests {
     #[runtime_builtin(
         name = "__timeit_helper_counter_outputs",
         type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
+        descriptor(crate::builtins::timing::timeit::tests::TIMEIT_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_outputs() -> crate::BuiltinResult<Value> {
@@ -522,6 +548,7 @@ pub(crate) mod tests {
     #[runtime_builtin(
         name = "__timeit_helper_counter_invalid",
         type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
+        descriptor(crate::builtins::timing::timeit::tests::TIMEIT_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_invalid() -> crate::BuiltinResult<Value> {
@@ -532,6 +559,7 @@ pub(crate) mod tests {
     #[runtime_builtin(
         name = "__timeit_helper_zero_outputs",
         type_resolver(crate::builtins::timing::type_resolvers::timeit_type),
+        descriptor(crate::builtins::timing::timeit::tests::TIMEIT_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::timing::timeit::tests"
     )]
     async fn helper_counter_zero_outputs() -> crate::BuiltinResult<Value> {
@@ -566,6 +594,14 @@ pub(crate) mod tests {
 
     fn zero_outputs_handle() -> Value {
         Value::String("@__timeit_helper_zero_outputs".to_string())
+    }
+
+    #[test]
+    fn timeit_test_helper_descriptor_is_attached_shape() {
+        assert_eq!(
+            TIMEIT_TEST_HELPER_DESCRIPTOR.signatures[0].label,
+            "y = __timeit_helper()"
+        );
     }
 
     #[test]
