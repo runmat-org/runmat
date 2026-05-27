@@ -3125,6 +3125,8 @@ mod tests {
                 "qr([1,2;3,4], \"econ\", \"vector\");",
                 "R = qr(A, option1, option2)",
             ),
+            ("chol([2,0;0,3]);", "R = chol(A)"),
+            ("chol([2,0;0,3], \"lower\");", "R = chol(A, triangle)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3175,6 +3177,19 @@ mod tests {
             qr_candidates.iter().any(|detail| detail.contains("qr(")),
             "expected descriptor signature detail for qr completion, got {:?}",
             qr_candidates
+        );
+
+        let chol_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("chol"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            chol_candidates
+                .iter()
+                .any(|detail| detail.contains("chol(")),
+            "expected descriptor signature detail for chol completion, got {:?}",
+            chol_candidates
         );
     }
 
