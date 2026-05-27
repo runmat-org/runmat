@@ -270,6 +270,8 @@ pub enum ScenePlot {
         axes_index: u32,
         label: Option<String>,
         visible: bool,
+        #[serde(default)]
+        force_3d: bool,
     },
     ContourFill {
         vertices: Vec<SerializedVertex>,
@@ -982,6 +984,7 @@ impl ScenePlot {
                 axes_index,
                 label: contour.label.clone(),
                 visible: contour.visible,
+                force_3d: contour.force_3d,
             },
             PlotElement::ContourFill(fill) => Self::ContourFill {
                 vertices: fill
@@ -1364,13 +1367,15 @@ impl ScenePlot {
                 axes_index,
                 label,
                 visible,
+                force_3d,
             } => {
                 let mut contour = ContourPlot::from_vertices(
                     vertices.into_iter().map(Into::into).collect(),
                     base_z,
                     serialized_bounds(bounds_min, bounds_max),
                 )
-                .with_line_width(line_width);
+                .with_line_width(line_width)
+                .with_force_3d(force_3d);
                 contour.label = label;
                 contour.set_visible(visible);
                 figure.add_contour_plot_on_axes(contour, axes_index as usize);

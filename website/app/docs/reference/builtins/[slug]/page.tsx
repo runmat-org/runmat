@@ -552,7 +552,7 @@ const PLOTTING_SUBGROUPS: Record<string, string> = {
   area: '2D Charts', errorbar: '2D Charts', loglog: '2D Charts',
   semilogx: '2D Charts', semilogy: '2D Charts', heatmap: '2D Charts',
   surf: '3D & Surface', surfc: '3D & Surface', mesh: '3D & Surface',
-  meshc: '3D & Surface', plot3: '3D & Surface', scatter3: '3D & Surface',
+  meshc: '3D & Surface', plot3: '3D & Surface', contour3: '3D & Surface', scatter3: '3D & Surface',
   contour: '3D & Surface', contourf: '3D & Surface', quiver: '3D & Surface',
   image: 'Images', imagesc: 'Images', imshow: 'Images',
   title: 'Axes & Layout', axis: 'Axes & Layout', subplot: 'Axes & Layout', grid: 'Axes & Layout',
