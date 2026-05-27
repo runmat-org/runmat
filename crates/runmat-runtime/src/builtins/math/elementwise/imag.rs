@@ -1,7 +1,11 @@
 //! MATLAB-compatible `imag` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -9,7 +13,7 @@ use crate::builtins::common::spec::{
     FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
+use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -52,10 +56,55 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "imag";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const IMAG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Imaginary component of X.",
+}];
+const IMAG_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const IMAG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = imag(X)",
+    inputs: &IMAG_INPUTS,
+    outputs: &IMAG_OUTPUT,
+}];
+const IMAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMAG.INVALID_INPUT",
+    identifier: Some("RunMat:imag:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "imag: invalid input",
+};
+const IMAG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMAG.INTERNAL",
+    identifier: Some("RunMat:imag:Internal"),
+    when: "Internal tensor conversion/allocation/provider interaction failed.",
+    message: "imag: internal error",
+};
+const IMAG_ERRORS: [BuiltinErrorDescriptor; 2] = [IMAG_ERROR_INVALID_INPUT, IMAG_ERROR_INTERNAL];
+pub const IMAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IMAG_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IMAG_ERRORS,
+};
+
+fn builtin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -65,6 +114,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "imag,imaginary,complex,elementwise,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::imag::IMAG_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::imag"
 )]
 async fn imag_builtin(value: Value) -> BuiltinResult<Value> {
@@ -73,18 +123,22 @@ async fn imag_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(_, im) => Ok(Value::Num(im)),
         Value::ComplexTensor(ct) => imag_complex_tensor(ct),
         Value::CharArray(ca) => imag_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("imag: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(builtin_error_with_detail(
+            &IMAG_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         x @ (Value::Tensor(_)
         | Value::LogicalArray(_)
         | Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)) => imag_real(x),
-        other => Err(builtin_error(format!(
-            "imag: unsupported input type {:?}; expected numeric, logical, or char input",
-            other
-        ))),
+        other => Err(builtin_error_with_detail(
+            &IMAG_ERROR_INVALID_INPUT,
+            format!(
+                "unsupported input type {:?}; expected numeric, logical, or char input",
+                other
+            ),
+        )),
     }
 }
 
@@ -96,32 +150,32 @@ async fn imag_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+        .map_err(|err| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, err.to_string()))?;
     Ok(tensor::tensor_into_value(imag_tensor(tensor)?))
 }
 
 fn imag_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("imag", value)
-        .map_err(|e| builtin_error(format!("imag: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INVALID_INPUT, e))?;
     Ok(tensor::tensor_into_value(imag_tensor(tensor)?))
 }
 
 fn imag_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     Tensor::new(vec![0.0; tensor.data.len()], tensor.shape.clone())
-        .map_err(|e| builtin_error(format!("imag: {e}")))
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))
 }
 
 fn imag_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
     let data = ct.data.iter().map(|&(_, im)| im).collect::<Vec<_>>();
-    let tensor =
-        Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("imag: {e}")))?;
+    let tensor = Tensor::new(data, ct.shape.clone())
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn imag_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let zeros = vec![0.0; ca.rows * ca.cols];
     let tensor = Tensor::new(zeros, vec![ca.rows, ca.cols])
-        .map_err(|e| builtin_error(format!("imag: {e}")))?;
+        .map_err(|e| builtin_error_with_detail(&IMAG_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -134,6 +188,16 @@ pub(crate) mod tests {
 
     fn imag_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::imag_builtin(value))
+    }
+
+    #[test]
+    fn imag_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = IMAG_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = imag(X)"));
     }
 
     #[test]
@@ -278,7 +342,9 @@ pub(crate) mod tests {
     #[test]
     fn imag_string_error() {
         let err = imag_builtin(Value::from("hello")).expect_err("imag should error");
+        let identifier = err.identifier().map(str::to_string);
         assert!(err.message().contains("expected numeric"));
+        assert_eq!(identifier.as_deref(), IMAG_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
