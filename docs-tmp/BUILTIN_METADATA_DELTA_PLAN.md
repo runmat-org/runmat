@@ -210,6 +210,7 @@ Rule:
    - the same descriptor row constant must be reused in both places:
      1. included in `<NAME>_ERRORS` for `BuiltinDescriptor.errors`;
      2. referenced at runtime throw sites (`foo_error(&FOO_ERROR_...)` / `foo_error_with_detail(&FOO_ERROR_..., ...)`).
+   - do not split a branch across parallel constants (for example `const IDENT_COMPLEX_UNSUPPORTED` + descriptor row): author the identifier/message/code only in `FOO_ERROR_*` and reuse that row everywhere.
 4. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
 5. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable constants or repeated literal throw strings.
 6. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.
