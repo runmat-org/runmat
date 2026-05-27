@@ -37,12 +37,62 @@ import {
 const pageTitle = "Run MATLAB-Syntax Math Online - GPU Browser Sandbox";
 const pageDescription =
   "Run MATLAB-syntax math in your browser with local execution, GPU acceleration when available, and a runtime-aware agent. No account or license required.";
+const pageDates = {
+  publishedAt: new Date("2026-02-03T00:00:00Z"),
+  lastModified: new Date("2026-05-27T00:00:00Z"),
+} as const;
 
 const heroVideoSrc = "https://web.runmatstatic.com/video/runmat-wave-simulation-homepage.mp4";
 const heroPosterSrc = "https://web.runmatstatic.com/video/posters/runmat-wave-simulation-homepage.webp";
+const heroVideoMetadata = {
+  uploadedAt: new Date("2026-05-26T00:00:00Z"),
+} as const;
 
 const agentVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.mp4";
 const agentPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surface-runmat.webp";
+
+const howItWorksVideoSrc = "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4";
+const howItWorksPosterSrc = "https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp";
+
+const dampedOscillatorCode = `% Damped oscillator: single run
+m = 1.0;
+k = 25.0;
+c = 0.8;
+
+t = linspace(0, 6, 400);
+omega0 = sqrt(k / m);
+zeta = c / (2 * sqrt(k * m));
+omegaD = omega0 * sqrt(1 - zeta^2);
+
+x = exp(-zeta * omega0 * t) .* cos(omegaD * t);
+
+plot(t, x);
+xlabel('Time (s)');
+ylabel('Displacement (m)');
+title('Damped oscillator');
+grid on;`;
+
+const brokenFilteringCode = `% This script has a dimension mismatch for the agent to debug.
+t = linspace(0, 2*pi, 200);
+signal = sin(t);
+window = [0.25 0.5 0.75];
+
+filtered = signal .* window;
+
+plot(t, filtered);
+xlabel('Time (s)');
+ylabel('Filtered signal');
+title('Broken filtering script');`;
+
+const matlabOnlineLimits = {
+  hoursPerMonth: "20 hours per month",
+  continuousLimit: "15-minute continuous compute",
+  idleLimit: "15-minute idle-time",
+  licenseNote: "Basic access is free; full access depends on a linked license",
+  productAccessNote:
+    "Basic MATLAB Online includes a limited set of commonly used products. Full product access depends on your license",
+  lastVerified: "May 2026",
+} as const;
 
 const onlinePrompts: { id: string; title: string; prompt: string; code: string }[] = [
   {
@@ -69,43 +119,17 @@ title('Interfering wave surface');
     id: "oscillator-sweep",
     title: "Sweep an oscillator",
     prompt: "Turn this damped oscillator into a parameter sweep and overlay the results.",
-    code: `% Damped oscillator: single run
-m = 1.0;
-k = 25.0;
-c = 0.8;
-
-t = linspace(0, 6, 400);
-omega0 = sqrt(k / m);
-zeta = c / (2 * sqrt(k * m));
-omegaD = omega0 * sqrt(1 - zeta^2);
-
-x = exp(-zeta * omega0 * t) .* cos(omegaD * t);
-
-plot(t, x);
-xlabel('Time (s)');
-ylabel('Displacement (m)');
-title('Damped oscillator');
-grid on;
-`,
+    code: dampedOscillatorCode,
   },
   {
     id: "dimension-debug",
     title: "Debug a shape error",
     prompt: "Debug a matrix dimension mismatch, explain the fix, and return corrected code.",
-    code: `% This script has a dimension mismatch for the agent to debug.
-t = linspace(0, 2*pi, 200);
-signal = sin(t);
-window = [0.25 0.5 0.75];
-
-filtered = signal .* window;
-
-plot(t, filtered);
-xlabel('Time (s)');
-ylabel('Filtered signal');
-title('Broken filtering script');
-`,
+    code: brokenFilteringCode,
   },
 ];
+
+const toJsonLdDate = (date: Date) => date.toISOString();
 
 export const metadata: Metadata = {
   title: pageTitle,
@@ -304,8 +328,8 @@ const jsonLd = {
       name: pageTitle,
       description: pageDescription,
       inLanguage: "en",
-      datePublished: "2026-02-03T00:00:00Z",
-      dateModified: "2026-05-27T00:00:00Z",
+      datePublished: toJsonLdDate(pageDates.publishedAt),
+      dateModified: toJsonLdDate(pageDates.lastModified),
       isPartOf: { "@id": "https://runmat.com/#website" },
       breadcrumb: { "@id": "https://runmat.com/matlab-online#breadcrumb" },
       author: { "@id": "https://runmat.com/#organization" },
@@ -325,7 +349,7 @@ const jsonLd = {
         "RunMat runs a GPU-accelerated wave simulation with MATLAB-syntax code directly in the browser.",
       thumbnailUrl: heroPosterSrc,
       contentUrl: heroVideoSrc,
-      uploadDate: "2026-05-26T00:00:00Z",
+      uploadDate: toJsonLdDate(heroVideoMetadata.uploadedAt),
     },
     {
       "@type": "BreadcrumbList",
@@ -515,8 +539,9 @@ export default function MatlabOnlinePage() {
                   <div>
                     <h3 className="text-lg font-semibold text-foreground">Why people look beyond MATLAB Online</h3>
                     <p className="text-[0.938rem] text-foreground mt-2">
-                      MATLAB Online runs through MathWorks-hosted compute in the browser. Basic access includes 20 hours
-                      per month with 15-minute continuous compute and idle-time limits; full access depends on a linked license.
+                      MATLAB Online runs through MathWorks-hosted compute in the browser. {matlabOnlineLimits.licenseNote}.
+                      Basic access includes {matlabOnlineLimits.hoursPerMonth} with {matlabOnlineLimits.continuousLimit} and{" "}
+                      {matlabOnlineLimits.idleLimit} limits. As of {matlabOnlineLimits.lastVerified}.
                       That is convenient for some work, but engineers and students still hit friction:
                     </p>
                   </div>
@@ -531,7 +556,8 @@ export default function MatlabOnlinePage() {
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
                     <p className="text-sm font-semibold text-foreground">Idle timeouts &amp; hour caps</p>
                     <p className="text-sm text-foreground mt-1">
-                      Basic sessions have 15-minute continuous compute and idle-time limits. Basic use is capped at 20 hours/month.
+                      Basic access includes {matlabOnlineLimits.hoursPerMonth} with {matlabOnlineLimits.continuousLimit} and{" "}
+                      {matlabOnlineLimits.idleLimit} limits. As of {matlabOnlineLimits.lastVerified}.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
@@ -549,7 +575,7 @@ export default function MatlabOnlinePage() {
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
                     <p className="text-sm font-semibold text-foreground">Toolbox access depends on license</p>
                     <p className="text-sm text-foreground mt-1">
-                      Basic MATLAB Online includes a limited set of commonly used products. Full product access depends on your license.
+                      {matlabOnlineLimits.productAccessNote}. As of {matlabOnlineLimits.lastVerified}.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
@@ -795,10 +821,10 @@ export default function MatlabOnlinePage() {
                 loop
                 playsInline
                 preload="metadata"
-                poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation-homepage.webp"
+                poster={howItWorksPosterSrc}
                 aria-label="RunMat wave simulation demo"
               >
-                <source src="https://web.runmatstatic.com/video/runmat-wave-simulation-homepage.mp4" type="video/mp4" />
+                <source src={howItWorksVideoSrc} type="video/mp4" />
               </video>
             </div>
           </div>
@@ -883,7 +909,8 @@ export default function MatlabOnlinePage() {
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">RunMat vs. MATLAB Online</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               RunMat runs MATLAB-syntax code in your browser or desktop app with a built-in agent and local GPU acceleration
-              when available. MATLAB Online runs through MathWorks-hosted compute, with basic usage limits and license-linked full access.
+              when available. MATLAB Online runs through MathWorks-hosted compute. {matlabOnlineLimits.licenseNote}.
+              Basic access includes {matlabOnlineLimits.hoursPerMonth}. As of {matlabOnlineLimits.lastVerified}.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
@@ -962,7 +989,7 @@ export default function MatlabOnlinePage() {
                 <ul className="space-y-2 text-sm">
                   <li className="flex items-start gap-3 text-foreground">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-foreground">–</span>
-                    Basic access is free; full access depends on a linked license
+                    {matlabOnlineLimits.licenseNote}. As of {matlabOnlineLimits.lastVerified}.
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
@@ -974,7 +1001,8 @@ export default function MatlabOnlinePage() {
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>
-                    Basic access capped at 20 hours/month with 15-min compute and idle limits
+                    Basic access includes {matlabOnlineLimits.hoursPerMonth} with {matlabOnlineLimits.continuousLimit} and{" "}
+                    {matlabOnlineLimits.idleLimit} limits. As of {matlabOnlineLimits.lastVerified}.
                   </li>
                   <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">✕</span>

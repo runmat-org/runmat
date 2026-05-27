@@ -32,6 +32,36 @@ const heroVideoSrc = "https://web.runmatstatic.com/video/3D-wave-surface-runmat.
 const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3D-wave-surface-runmat.webp";
 const agentDiffImageSrc = "https://web.runmatstatic.com/runmat-agent-diff-rain.webp";
 
+const dampedOscillatorCode = `% Damped oscillator: single run
+m = 1.0;
+k = 25.0;
+c = 0.8;
+
+t = linspace(0, 6, 400);
+omega0 = sqrt(k / m);
+zeta = c / (2 * sqrt(k * m));
+omegaD = omega0 * sqrt(1 - zeta^2);
+
+x = exp(-zeta * omega0 * t) .* cos(omegaD * t);
+
+plot(t, x);
+xlabel('Time (s)');
+ylabel('Displacement (m)');
+title('Damped oscillator');
+grid on;`;
+
+const brokenFilteringCode = `% This script has a dimension mismatch for the agent to debug.
+t = linspace(0, 2*pi, 200);
+signal = sin(t);
+window = [0.25 0.5 0.75];
+
+filtered = signal .* window;
+
+plot(t, filtered);
+xlabel('Time (s)');
+ylabel('Filtered signal');
+title('Broken filtering script');`;
+
 // These prompts launch through the existing workspace payload flow rather than
 // direct query params so the sandbox can hydrate both starter code and prompt text.
 const tryPrompts: { id: string; title: string; prompt: string }[] = [
@@ -92,23 +122,7 @@ const startCards: StartCard[] = [
     source: "agent-page-start-matlab",
     cta: "try-from-matlab",
     exampleId: "existing-script",
-    code: `% Damped oscillator: single run
-m = 1.0;
-k = 25.0;
-c = 0.8;
-
-t = linspace(0, 6, 400);
-omega0 = sqrt(k / m);
-zeta = c / (2 * sqrt(k * m));
-omegaD = omega0 * sqrt(1 - zeta^2);
-
-x = exp(-zeta * omega0 * t) .* cos(omegaD * t);
-
-plot(t, x);
-xlabel('Time (s)');
-ylabel('Displacement (m)');
-title('Damped oscillator');
-grid on;`,
+    code: dampedOscillatorCode,
     agentPrompt:
       "Explain this script, then turn it into a parameter sweep over damping values and overlay the results.",
   },
@@ -138,17 +152,7 @@ grid on;`,
     source: "agent-page-start-broken",
     cta: "try-from-broken",
     exampleId: "broken-script",
-    code: `% This script has a dimension mismatch for the agent to debug
-t = linspace(0, 2*pi, 200);
-signal = sin(t);
-window = [0.25 0.5 0.75];
-
-filtered = signal .* window;
-
-plot(t, filtered);
-xlabel('Time (s)');
-ylabel('Filtered signal');
-title('Broken filtering script');`,
+    code: brokenFilteringCode,
     agentPrompt:
       "Run this script, use the error and workspace state to debug it, then propose a minimal fix.",
   },
@@ -742,7 +746,7 @@ export default function AgentPage() {
                     exampleId={card.exampleId}
                     size="sm"
                     data-ph-capture-attribute-cta={card.cta}
-                    className="mt-4 !h-auto w-fit !border-0 !bg-transparent !p-0 !text-[hsl(var(--brand))] !shadow-none hover:!bg-transparent hover:!text-[hsl(var(--brand))]/80 [&>svg:first-child]:hidden"
+                    className="mt-4 h-auto! w-fit border-0! bg-transparent! p-0! text-[hsl(var(--brand))]! shadow-none! hover:bg-transparent! hover:text-[hsl(var(--brand))]/80! [&>svg:first-child]:hidden"
                   >
                     Try it <ArrowRight className="h-3.5 w-3.5" />
                   </TryInBrowserButton>

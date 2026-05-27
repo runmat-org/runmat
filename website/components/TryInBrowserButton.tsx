@@ -122,24 +122,44 @@ export function TryInBrowserLink({
       data-ph-capture-attribute-cta="open-product-media"
       data-ph-capture-attribute-example-id={exampleId}
       onClick={(event) => {
+        const isNormalLeftClick =
+          event.button === 0 &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey;
+
+        if (!isNormalLeftClick) {
+          return;
+        }
+
         event.preventDefault();
-        openWorkspace(
-          [
+
+        try {
+          const url = openWorkspace(
+            [
+              {
+                path: "/example.m",
+                content: code ?? `% ${agentPrompt}`,
+              },
+            ],
             {
-              path: "/example.m",
-              content: code ?? `% ${agentPrompt}`,
+              targetPath: href,
+              agentPrompt,
+              newTab: false,
+              metadata: {
+                source,
+                ...(exampleId ? { exampleId } : {}),
+              },
             },
-          ],
-          {
-            targetPath: href,
-            agentPrompt,
-            newTab: false,
-            metadata: {
-              source,
-              ...(exampleId ? { exampleId } : {}),
-            },
-          },
-        );
+          );
+
+          if (!url) {
+            window.location.assign(href);
+          }
+        } catch {
+          window.location.assign(href);
+        }
       }}
     >
       {children}
