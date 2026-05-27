@@ -1,8 +1,8 @@
-use runmat_config::{LanguageCompatMode, PlotMode, RunMatConfig};
+use runmat_config::runtime::{LanguageCompatMode, PlotMode, RunMatRuntimeConfig};
 
 #[test]
 fn config_defaults() {
-    let config = RunMatConfig::default();
+    let config = RunMatRuntimeConfig::default();
     assert_eq!(config.runtime.callstack_limit, 200);
     assert!(config.jit.enabled);
     assert_eq!(config.jit.threshold, 10);

@@ -262,7 +262,7 @@ fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
         .map(|&value| sawtooth_scalar(value, xmax))
         .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
-        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, err.to_string()))
+        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))
 }
 
 #[cfg(test)]

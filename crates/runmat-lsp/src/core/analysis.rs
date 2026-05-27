@@ -226,7 +226,10 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
     #[cfg(not(target_arch = "wasm32"))]
     {
         futures::executor::block_on(
-            runmat_config::discover_known_project_symbols_from_source_name_async(source_name, &cwd),
+            runmat_config::project::discover_known_project_symbols_from_source_name_async(
+                source_name,
+                &cwd,
+            ),
         )
     }
     #[cfg(target_arch = "wasm32")]
@@ -253,7 +256,8 @@ async fn discover_known_project_symbols_async(source_name: Option<&str>) -> Hash
     let Some(cwd) = cwd else {
         return HashSet::new();
     };
-    runmat_config::discover_known_project_symbols_from_source_name_async(source_name, &cwd).await
+    runmat_config::project::discover_known_project_symbols_from_source_name_async(source_name, &cwd)
+        .await
 }
 
 fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {
@@ -1108,10 +1112,9 @@ fn read_file_text(path: &std::path::Path) -> Option<String> {
 fn uri_file_source_name(uri: &Url) -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return uri
-            .to_file_path()
+        uri.to_file_path()
             .ok()
-            .and_then(|path| path.to_str().map(str::to_owned));
+            .and_then(|path| path.to_str().map(str::to_owned))
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -1145,7 +1148,7 @@ fn dedupe_locations(locations: &mut Vec<Location>) {
 fn file_path_to_url(path: &std::path::Path) -> Option<Url> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return Url::from_file_path(path).ok();
+        Url::from_file_path(path).ok()
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -1431,7 +1434,7 @@ fn build_semantic_model(
     let mut function_lookup: HashMap<String, Vec<usize>> = HashMap::new();
     let mut globals = HashMap::new();
 
-    let binding_shapes = runmat_static_analysis::infer_binding_shapes(&lowering);
+    let binding_shapes = runmat_static_analysis::infer_binding_shapes(lowering);
 
     for binding in &lowering.assembly.bindings {
         if matches!(
@@ -1583,8 +1586,8 @@ fn build_semantic_model(
             .push(idx);
     }
 
-    let mut diagnostics = runmat_static_analysis::lint_shapes(&lowering);
-    diagnostics.extend(runmat_static_analysis::lint_mir_analysis(&lowering));
+    let mut diagnostics = runmat_static_analysis::lint_shapes(lowering);
+    diagnostics.extend(runmat_static_analysis::lint_mir_analysis(lowering));
     let token_hints = build_semantic_hints(lowering, tokens, &functions);
     let exported_symbols = build_exported_symbol_set(&functions);
     let referenced_symbols = build_referenced_symbol_set(lowering);
@@ -3226,9 +3229,12 @@ mod tests {
             ("func2str(@sin);", "name = func2str(fh)"),
             ("prod([1 2 3], 1);", "p = prod(A, dim)"),
             ("any([1 0 1], 1);", "tf = any(A, dim)"),
-            ("all([1 1 1], 1);", "tf = all(A, dim)"),
+            ("all([1 1 1], 1);", "B = all(A, dim)"),
             ("warning('msg %d', 1);", "status = warning(fmt, varargin)"),
-            ("getmethod(classref('Point'), 'move');", "fh = getmethod(obj_or_class, name)"),
+            (
+                "getmethod(classref('Point'), 'move');",
+                "fh = getmethod(obj_or_class, name)",
+            ),
         ];
 
         for (text, expected_label) in cases {
@@ -3251,7 +3257,16 @@ mod tests {
         let position = lsp_types::Position::new(0, 0);
         let completions = completion_at(text, &analysis, &position);
 
-        for builtin in ["feval", "str2func", "func2str", "prod", "any", "all", "warning", "getmethod"] {
+        for builtin in [
+            "feval",
+            "str2func",
+            "func2str",
+            "prod",
+            "any",
+            "all",
+            "warning",
+            "getmethod",
+        ] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))

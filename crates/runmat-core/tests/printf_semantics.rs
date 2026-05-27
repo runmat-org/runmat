@@ -135,19 +135,29 @@ fn fprintf_encoding_alias_smoke_utf8_underscore() {
 #[test]
 fn fprintf_format_error_propagates_to_session_boundary() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = runmat_core::execute_text_request_for_testing(&mut engine, "fprintf('%q', 1);");
-    match result {
-        Ok(exec) => {
-            let identifier = exec.error.as_ref().and_then(|err| err.identifier());
-            assert_eq!(
-                identifier,
-                Some("RunMat:format:UnsupportedSpecifier"),
-                "expected stable unsupported-format identifier in execution error"
+    let request = runmat_core::abi::ExecutionRequest::for_source(
+        runmat_core::abi::SourceInput::Text {
+            name: "<test>".to_string(),
+            text: "fprintf('%q', 1);".to_string(),
+        },
+        engine.compat_mode(),
+        runmat_core::abi::HostExecutionPolicy::default(),
+        engine.workspace_handle(),
+    );
+
+    match futures::executor::block_on(engine.execute_request(request)) {
+        Ok(outcome) => {
+            assert!(
+                outcome.diagnostics.iter().any(|d| d.severity
+                    == runmat_core::abi::DiagnosticSeverity::Error
+                    && d.code == "RunMat:fprintf:InvalidFormat"),
+                "expected stable unsupported-format identifier in diagnostics: {:?}",
+                outcome.diagnostics
             );
         }
         Err(RunError::Runtime(err)) => assert_eq!(
             err.identifier(),
-            Some("RunMat:format:UnsupportedSpecifier"),
+            Some("RunMat:fprintf:InvalidFormat"),
             "expected stable unsupported-format identifier in runtime error"
         ),
         Err(other) => panic!("expected runtime formatting error, got {other:?}"),

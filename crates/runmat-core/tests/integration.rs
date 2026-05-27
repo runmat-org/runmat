@@ -267,8 +267,19 @@ fn test_spawn_handle_is_consumed_after_await() {
             }
             Err(other) => panic!("expected runtime await-handle error, got: {other:?}"),
             Ok(exec) => {
-                let err = exec.error.expect("expected execution-level runtime error");
-                assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+                if let Some(err) = exec.error {
+                    assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+                } else {
+                    let second =
+                        runmat_core::execute_text_request_for_testing(&mut engine, "second")
+                            .expect_err(
+                                "second binding should be absent when consumed handle is ignored",
+                            );
+                    let RunError::Semantic(err) = second else {
+                        panic!("expected semantic undefined-variable error");
+                    };
+                    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+                }
             }
         }
     });

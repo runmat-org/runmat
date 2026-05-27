@@ -685,25 +685,21 @@ impl PageInput {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Tensor(t) => Self::from_tensor(t),
-            Value::Num(n) => {
-                Self::from_tensor(Tensor::new(vec![n], vec![1, 1]).map_err(|e| {
-                    pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, e.to_string())
-                })?)
-            }
-            Value::Int(i) => {
-                Self::from_tensor(Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|e| {
-                    pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, e.to_string())
-                })?)
-            }
+            Value::Num(n) => Self::from_tensor(
+                Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
+            ),
+            Value::Int(i) => Self::from_tensor(
+                Tensor::new(vec![i.to_f64()], vec![1, 1])
+                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
+            ),
             Value::Bool(flag) => Self::from_tensor(
-                Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]).map_err(|e| {
-                    pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, e.to_string())
-                })?,
+                Tensor::new(vec![if flag { 1.0 } else { 0.0 }], vec![1, 1])
+                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?,
             ),
             Value::Complex(re, im) => {
-                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
-                    pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, e.to_string())
-                })?;
+                let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
+                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?;
                 Self::from_complex_tensor(tensor)
             }
             Value::ComplexTensor(t) => Self::from_complex_tensor(t),
@@ -822,9 +818,7 @@ impl PreparedInput {
                     .get(offset..end)
                     .ok_or_else(|| pagefun_internal_error("page slice out of bounds"))?;
                 let tensor = Tensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
-                    .map_err(|e| {
-                        pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, e.to_string())
-                    })?;
+                    .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?;
                 Ok(Value::Tensor(tensor))
             }
             PageData::Complex(buffer) => {
@@ -834,9 +828,7 @@ impl PreparedInput {
                     .ok_or_else(|| pagefun_internal_error("page slice out of bounds"))?;
                 let tensor =
                     ComplexTensor::new(slice.to_vec(), vec![self.data.rows, self.data.cols])
-                        .map_err(|e| {
-                            pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, e.to_string())
-                        })?;
+                        .map_err(|e| pagefun_error_with_detail(&PAGEFUN_ERROR_INTERNAL, &e))?;
                 Ok(Value::ComplexTensor(tensor))
             }
         }

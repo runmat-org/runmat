@@ -536,8 +536,8 @@ fn is_option_arg(value: &Value) -> bool {
 
 async fn z_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
-    let z = tensor::value_into_tensor_for(NAME, gathered)
-        .map_err(|err| interp2_invalid_input(err.to_string()))?;
+    let z =
+        tensor::value_into_tensor_for(NAME, gathered).map_err(|err| interp2_invalid_input(&err))?;
     if z.shape.len() > 2 {
         return Err(interp2_invalid_argument("Z must be a 2-D matrix"));
     }

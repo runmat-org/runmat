@@ -351,7 +351,7 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
 async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let tensor = match value {
         Value::GpuTensor(handle) => gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?,
-        other => Tensor::try_from(&other).map_err(|e| heatmap_invalid(e.to_string()))?,
+        other => Tensor::try_from(&other).map_err(|e| heatmap_invalid(&e))?,
     };
     if tensor.rows == 0 || tensor.cols == 0 {
         return Err(heatmap_invalid("CData must contain at least a 2-D grid"));

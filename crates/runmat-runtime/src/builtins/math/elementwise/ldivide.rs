@@ -651,7 +651,7 @@ fn ldivide_host(divisor: Value, numerator: Value) -> BuiltinResult<Value> {
 
 fn ldivide_real_real(divisor: &Tensor, numerator: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
@@ -671,7 +671,7 @@ fn ldivide_complex_complex(
     numerator: &ComplexTensor,
 ) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
@@ -691,7 +691,7 @@ fn ldivide_complex_complex(
 
 fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;
@@ -711,7 +711,7 @@ fn ldivide_complex_real(divisor: &ComplexTensor, numerator: &Tensor) -> BuiltinR
 
 fn ldivide_real_complex(divisor: &Tensor, numerator: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&numerator.shape, &divisor.shape)
-        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| ldivide_error_with_detail(&LDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("ldivide: {e}")))?;

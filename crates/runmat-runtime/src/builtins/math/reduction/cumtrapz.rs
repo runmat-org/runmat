@@ -361,7 +361,7 @@ fn cumtrapz_tensor(tensor: &Tensor, spacing: &SpacingSpec, dim: usize) -> Builti
         }
     }
 
-    Tensor::new(output, shape).map_err(|err| cumtrapz_internal_error(err.to_string()))
+    Tensor::new(output, shape).map_err(|err| cumtrapz_internal_error(&err))
 }
 
 fn cumtrapz_complex_tensor(
@@ -405,7 +405,7 @@ fn cumtrapz_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, shape).map_err(|err| cumtrapz_internal_error(err.to_string()))
+    ComplexTensor::new(output, shape).map_err(|err| cumtrapz_internal_error(&err))
 }
 
 #[cfg(test)]

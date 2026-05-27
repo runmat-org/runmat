@@ -264,7 +264,7 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
                         })?;
                         let _ = p.free(&result);
                         let tensor = Tensor::new(host.data, host.shape).map_err(|e| {
-                            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string())
+                            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e)
                         })?;
                         return Ok(tensor::tensor_into_value(tensor));
                     }
@@ -439,12 +439,12 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
         let out_len = out_shape.iter().copied().product::<usize>();
         let zeros = vec![0.0; out_len];
         return Tensor::new(zeros, out_shape)
-            .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string()));
+            .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e));
     }
     if is_scalar_shape(&mask.shape) {
         let data = vec![mask.bits[0] as f64];
         return Tensor::new(data, canonical_scalar_shape())
-            .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string()));
+            .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e));
     }
     if dim > mask.shape.len() {
         return mask_to_tensor(mask);
@@ -486,13 +486,13 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
         }
     }
     Tensor::new(output, out_shape)
-        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string()))
+        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
 }
 
 fn mask_to_tensor(mask: &Mask) -> BuiltinResult<Tensor> {
     let data = mask.bits.iter().map(|&b| b as f64).collect::<Vec<_>>();
     Tensor::new(data, canonical_shape(&mask.shape, mask.bits.len()))
-        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, e.to_string()))
+        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
 }
 
 fn canonical_shape(shape: &[usize], len: usize) -> Vec<usize> {

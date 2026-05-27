@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_gc::gc_stats;
 
 pub fn show_version(detailed: bool) {
@@ -25,7 +25,7 @@ pub fn show_version(detailed: bool) {
     }
 }
 
-pub async fn show_system_info(config: &RunMatConfig) -> Result<()> {
+pub async fn show_system_info(config: &RunMatRuntimeConfig) -> Result<()> {
     println!("RunMat System Information");
     println!("==========================");
     println!();

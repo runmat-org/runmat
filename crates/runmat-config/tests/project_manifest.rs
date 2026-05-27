@@ -1,4 +1,4 @@
-use runmat_config::{
+use runmat_config::project::{
     build_project_composition_graph, build_project_source_index,
     discover_known_project_symbols_from_source_name, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
@@ -916,7 +916,7 @@ function = "main"
 
     let err = resolve_named_entrypoint_from(tmp.path(), "server")
         .expect_err("missing module file should return explicit resolve error");
-    let runmat_config::DiscoverProjectEntrypointError::Resolve {
+    let runmat_config::project::DiscoverProjectEntrypointError::Resolve {
         entrypoint, source, ..
     } = err
     else {

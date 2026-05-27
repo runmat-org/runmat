@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use log::{error, info};
-use runmat_config::{
-    resolve_project_source_input_from, ResolveProjectSourceInputError, RunMatConfig,
-};
+use runmat_config::project::{resolve_project_source_input_from, ResolveProjectSourceInputError};
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionRequest, HostExecutionPolicy, SourceInput},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
@@ -22,7 +21,7 @@ pub async fn execute_benchmark(
     iterations: u32,
     jit: bool,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let file = resolve_benchmark_input(file)?;
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");

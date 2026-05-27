@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
-use runmat_config::{
-    resolve_project_source_input_from, ResolveProjectSourceInputError, RunMatConfig,
-};
+use runmat_config::project::{resolve_project_source_input_from, ResolveProjectSourceInputError};
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_core::{
     abi::{
         DiagnosticSeverity, ExecutionOutcome, ExecutionRequest, HostExecutionPolicy, RuntimeFlow,
@@ -28,7 +27,7 @@ pub async fn execute_script(
     script: PathBuf,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
 }
@@ -38,7 +37,7 @@ pub async fn execute_script_with_args(
     _args: Vec<String>,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
@@ -73,7 +72,7 @@ pub(crate) async fn execute_script_contents(
     content: String,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     info!("Executing script source: {script:?}");
 
@@ -98,7 +97,11 @@ pub(crate) async fn execute_script_contents(
     .await
 }
 
-async fn execute_script_path(script: PathBuf, cli: &Cli, config: &RunMatConfig) -> Result<()> {
+async fn execute_script_path(
+    script: PathBuf,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+) -> Result<()> {
     let source_name = script.to_string_lossy().to_string();
     execute_script_request(script, SourceInput::Path(source_name), None, cli, config).await
 }
@@ -108,7 +111,7 @@ async fn execute_script_request(
     request_source: SourceInput,
     diagnostic_source_text: Option<String>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let enable_jit = config.jit.enabled;
     let mut engine = create_session(

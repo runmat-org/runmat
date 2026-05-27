@@ -378,7 +378,7 @@ fn build_bar_chart_with_x(x_tensor: Option<Tensor>, values: Vec<f64>) -> Builtin
             .collect(),
         None => (1..=values.len()).map(|idx| format!("{idx}")).collect(),
     };
-    BarChart::new(labels, values).map_err(|err| bar_internal(err.to_string()))
+    BarChart::new(labels, values).map_err(|err| bar_internal(&err))
 }
 
 fn build_bar_gpu_series(
@@ -598,13 +598,11 @@ impl BarInput {
         match (x, value) {
             (None, Value::GpuTensor(handle)) => Ok(Self::Gpu(handle)),
             (x, other) => {
-                let y =
-                    Tensor::try_from(&other).map_err(|e| bar_invalid_argument(e.to_string()))?;
+                let y = Tensor::try_from(&other).map_err(|e| bar_invalid_argument(&e))?;
                 let x = match x {
-                    Some(value) => Some(
-                        Tensor::try_from(&value)
-                            .map_err(|e| bar_invalid_argument(e.to_string()))?,
-                    ),
+                    Some(value) => {
+                        Some(Tensor::try_from(&value).map_err(|e| bar_invalid_argument(&e))?)
+                    }
                     None => None,
                 };
                 Ok(Self::Host { x, y })
@@ -764,8 +762,8 @@ fn build_bar_series_from_matrix(
         for row in 0..matrix.rows {
             values.push(matrix.value(row, col));
         }
-        let mut chart = BarChart::new(labels.clone(), values.clone())
-            .map_err(|err| bar_internal(err.to_string()))?;
+        let mut chart =
+            BarChart::new(labels.clone(), values.clone()).map_err(|err| bar_internal(&err))?;
         if style.layout == BarLayout::Stacked {
             let offsets = compute_stack_offsets(&values, &mut pos_offsets, &mut neg_offsets);
             chart = chart.with_stack_offsets(offsets).with_group(0, 1);

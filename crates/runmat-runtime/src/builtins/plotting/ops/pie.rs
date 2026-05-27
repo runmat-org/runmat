@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, args) = parse_axes_target(args).map_err(map_pie_invalid)?;
     let (values, explode, labels) = parse_pie_args(args).await.map_err(map_pie_invalid)?;
-    let mut chart = PieChart::new(values, None).map_err(|e| pie_invalid(e.to_string()))?;
+    let mut chart = PieChart::new(values, None).map_err(|e| pie_invalid(&e))?;
     if let Some(explode) = explode {
         chart = chart.with_explode(explode);
     }
@@ -332,7 +332,7 @@ fn parse_axes_target(args: Vec<Value>) -> crate::BuiltinResult<(Option<usize>, V
 async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await,
-        other => Tensor::try_from(&other).map_err(|e| pie_invalid(e.to_string())),
+        other => Tensor::try_from(&other).map_err(|e| pie_invalid(&e)),
     }
 }
 
@@ -343,7 +343,7 @@ fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabel
             let mut labels = Vec::new();
             for row in 0..cell.rows {
                 for col in 0..cell.cols {
-                    let v = cell.get(row, col).map_err(|e| pie_invalid(e.to_string()))?;
+                    let v = cell.get(row, col).map_err(|e| pie_invalid(&e))?;
                     labels.push(
                         value_as_text_string(&v)
                             .ok_or_else(|| pie_invalid("labels must be strings"))?,

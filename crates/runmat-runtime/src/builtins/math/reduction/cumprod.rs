@@ -338,7 +338,7 @@ async fn cumprod_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         Value::GpuTensor(handle) => cumprod_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cumprod_internal_error(e.to_string()))?;
+                .map_err(|e| cumprod_internal_error(&e))?;
             let target_dim = dim.unwrap_or(1);
             let result = cumprod_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
@@ -632,7 +632,7 @@ fn cumprod_tensor(
         }
     }
 
-    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(e.to_string()))
+    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(&e))
 }
 
 fn cumprod_complex_tensor(
@@ -730,8 +730,7 @@ fn cumprod_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone())
-        .map_err(|e| cumprod_internal_error(e.to_string()))
+    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumprod_internal_error(&e))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {

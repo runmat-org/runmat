@@ -631,7 +631,7 @@ fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     let dtype = real_result_dtype(lhs, rhs);
     if plan.is_empty() {
         let mut tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
@@ -651,7 +651,7 @@ fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -672,7 +672,7 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 
 fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -716,7 +716,7 @@ fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
 
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;

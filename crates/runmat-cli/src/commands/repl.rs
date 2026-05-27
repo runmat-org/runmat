@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use log::info;
 use owo_colors::OwoColorize;
-use runmat_config::{GcPreset, JitOptLevel, RunMatConfig};
+use runmat_config::runtime::{GcPreset, JitOptLevel, RunMatRuntimeConfig};
 use runmat_core::{
     abi::{ExecutionRequest, HostExecutionPolicy, RuntimeFlow, SourceInput},
     RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
@@ -16,7 +16,7 @@ use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::format_frontend_error;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 
-pub async fn execute_repl(config: &RunMatConfig) -> Result<()> {
+pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
     info!("Starting RunMat REPL");
     if config.runtime.verbose {
         info!("Verbose mode enabled");
@@ -110,7 +110,7 @@ enum BannerTone {
     Muted,
 }
 
-fn print_repl_banner(config: &RunMatConfig, engine: &RunMatSession) {
+fn print_repl_banner(config: &RunMatRuntimeConfig, engine: &RunMatSession) {
     let caps = detect_banner_capabilities();
 
     println!(
@@ -157,7 +157,7 @@ fn detect_banner_capabilities() -> BannerCapabilities {
     }
 }
 
-fn format_gpu_line(config: &RunMatConfig, caps: &BannerCapabilities) -> String {
+fn format_gpu_line(config: &RunMatRuntimeConfig, caps: &BannerCapabilities) -> String {
     let label = style_text("GPU:", caps, BannerTone::Label);
 
     if !config.accelerate.enabled {
@@ -219,7 +219,7 @@ fn format_gpu_line(config: &RunMatConfig, caps: &BannerCapabilities) -> String {
 }
 
 fn format_runtime_line(
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
     engine: &RunMatSession,
     caps: &BannerCapabilities,
 ) -> String {
@@ -331,7 +331,7 @@ fn style_text(text: &str, caps: &BannerCapabilities, tone: BannerTone) -> String
 async fn process_repl_line(
     line: &str,
     engine: &mut RunMatSession,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<bool> {
     if line == "exit" || line == "quit" {
         return Ok(false);

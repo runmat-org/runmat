@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{
+use crate::runtime::{
     AccelerateConfig, GcConfig, JitConfig, LanguageConfig, LoggingConfig, PlottingConfig,
-    RunMatConfig, TelemetryConfig,
+    RunMatRuntimeConfig, TelemetryConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +38,7 @@ struct RuntimeFileSection {
 }
 
 impl RuntimeFileSection {
-    fn apply_to(self, config: &mut RunMatConfig) {
+    fn apply_to(self, config: &mut RunMatRuntimeConfig) {
         if let Some(callstack_limit) = self.callstack_limit {
             config.runtime.callstack_limit = callstack_limit;
         }
@@ -75,8 +75,8 @@ impl RuntimeFileSection {
     }
 }
 
-impl From<&RunMatConfig> for RuntimeFileDocument {
-    fn from(value: &RunMatConfig) -> Self {
+impl From<&RunMatRuntimeConfig> for RuntimeFileDocument {
+    fn from(value: &RunMatRuntimeConfig) -> Self {
         Self {
             runtime: RuntimeFileSection {
                 callstack_limit: Some(value.runtime.callstack_limit),
@@ -96,20 +96,20 @@ impl From<&RunMatConfig> for RuntimeFileDocument {
 }
 
 /// Load runtime configuration from a canonical runmat.toml/runmat.json file.
-pub(crate) fn load_from_file(path: &Path) -> Result<RunMatConfig> {
+pub(crate) fn load_from_file(path: &Path) -> Result<RunMatRuntimeConfig> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
     let format = format_from_path(path)?;
     let parsed: RuntimeFileDocument = parse_document(&content, format, path)?;
 
-    let mut config = RunMatConfig::default();
+    let mut config = RunMatRuntimeConfig::default();
     parsed.runtime.apply_to(&mut config);
     Ok(config)
 }
 
 /// Save runtime configuration to a canonical runmat.toml/runmat.json file.
-pub(crate) fn save_to_file(config: &RunMatConfig, path: &Path) -> Result<()> {
+pub(crate) fn save_to_file(config: &RunMatRuntimeConfig, path: &Path) -> Result<()> {
     let format = format_from_path(path)?;
     let content = render_runtime_config(config, format)?;
 
@@ -153,7 +153,10 @@ plotting = { mode = "auto", force_headless = false, backend = "auto", scatter_ta
     sample.to_string()
 }
 
-pub(crate) fn render_runtime_config(config: &RunMatConfig, format: ConfigFormat) -> Result<String> {
+pub(crate) fn render_runtime_config(
+    config: &RunMatRuntimeConfig,
+    format: ConfigFormat,
+) -> Result<String> {
     let doc = RuntimeFileDocument::from(config);
     match format {
         ConfigFormat::Toml => {

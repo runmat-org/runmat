@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::PROJECT_MANIFEST_FILENAMES;
+use crate::project::PROJECT_MANIFEST_FILENAMES;
 
 pub(crate) const USER_CONFIG_FILENAMES: &[&str] = &["config.toml", "config.json"];
 

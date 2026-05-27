@@ -1,4 +1,4 @@
-use runmat_config::{ConfigLoader, RunMatConfig};
+use runmat_config::runtime::{ConfigLoader, RunMatRuntimeConfig};
 use tempfile::TempDir;
 
 #[test]
@@ -6,7 +6,7 @@ fn file_loading() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("runmat.toml");
 
-    let mut config = RunMatConfig::default();
+    let mut config = RunMatRuntimeConfig::default();
     config.runtime.callstack_limit = 333;
     config.jit.threshold = 20;
 

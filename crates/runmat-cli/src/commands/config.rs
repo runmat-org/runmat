@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use log::error;
-use runmat_config::{ConfigLoader, RunMatConfig};
+use runmat_config::runtime::{ConfigLoader, RunMatRuntimeConfig};
 use std::path::Path;
 
 use crate::cli::{ConfigCommand, ConfigFormat};
 
 pub async fn execute_config_command(
     config_command: ConfigCommand,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     match config_command {
         ConfigCommand::Show { format } => {
@@ -66,7 +66,7 @@ fn infer_format_from_path(path: &Path) -> ConfigFormat {
     }
 }
 
-fn render_runtime_config(config: &RunMatConfig, format: ConfigFormat) -> Result<String> {
+fn render_runtime_config(config: &RunMatRuntimeConfig, format: ConfigFormat) -> Result<String> {
     let virtual_path = match format {
         ConfigFormat::Toml => Path::new("resolved.runmat.toml"),
         ConfigFormat::Json => Path::new("resolved.runmat.json"),

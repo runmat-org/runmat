@@ -251,7 +251,7 @@ async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult
     let chars = decode_bytes(bytes, encoding)?;
     let cols = chars.len();
     let char_array = CharArray::new(chars, 1, cols)
-        .map_err(|e| fileread_error_with_detail(&FILEREAD_ERROR_INTERNAL, e.to_string()))?;
+        .map_err(|e| fileread_error_with_detail(&FILEREAD_ERROR_INTERNAL, &e))?;
     Ok(Value::CharArray(char_array))
 }
 

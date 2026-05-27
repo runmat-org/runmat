@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_core::RunMatSession;
 use std::path::PathBuf;
 
@@ -10,7 +10,7 @@ pub(crate) fn create_session(
     enable_jit: bool,
     verbose: bool,
     snapshot_path: Option<&PathBuf>,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
     create_error_context: &'static str,
 ) -> Result<RunMatSession> {
     let mut engine = RunMatSession::with_snapshot(enable_jit, verbose, snapshot_path)

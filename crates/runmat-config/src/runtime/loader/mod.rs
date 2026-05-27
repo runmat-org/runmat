@@ -6,21 +6,21 @@ use anyhow::Result;
 use log::{debug, info};
 use std::path::{Path, PathBuf};
 
-use crate::RunMatConfig;
+use crate::runtime::RunMatRuntimeConfig;
 
 /// Configuration loader with multiple source support
 pub struct ConfigLoader;
 
 impl ConfigLoader {
     /// Load configuration from all sources with proper precedence
-    pub fn load() -> Result<RunMatConfig> {
+    pub fn load() -> Result<RunMatRuntimeConfig> {
         let mut config = Self::load_from_files()?;
         Self::apply_environment_variables(&mut config)?;
         Ok(config)
     }
 
     /// Find and load configuration from files
-    fn load_from_files() -> Result<RunMatConfig> {
+    fn load_from_files() -> Result<RunMatRuntimeConfig> {
         if let Ok(config_path) = std::env::var("RUNMAT_CONFIG") {
             let path = PathBuf::from(config_path);
             if path.is_dir() {
@@ -58,7 +58,7 @@ impl ConfigLoader {
         }
 
         debug!("No configuration file found, using defaults");
-        Ok(RunMatConfig::default())
+        Ok(RunMatRuntimeConfig::default())
     }
 
     /// Walk up from the provided directory looking for the first config file.
@@ -67,22 +67,22 @@ impl ConfigLoader {
     }
 
     /// Load configuration from a specific file
-    pub fn load_from_file(path: &Path) -> Result<RunMatConfig> {
+    pub fn load_from_file(path: &Path) -> Result<RunMatRuntimeConfig> {
         file::load_from_file(path)
     }
 
     /// Apply environment variable overrides
-    fn apply_environment_variables(config: &mut RunMatConfig) -> Result<()> {
+    fn apply_environment_variables(config: &mut RunMatRuntimeConfig) -> Result<()> {
         env::apply_environment_variables(config)
     }
 
     /// Save configuration to a file
-    pub fn save_to_file(config: &RunMatConfig, path: &Path) -> Result<()> {
+    pub fn save_to_file(config: &RunMatRuntimeConfig, path: &Path) -> Result<()> {
         file::save_to_file(config, path)
     }
 
     /// Render runtime config into TOML/JSON text matching the output file contract.
-    pub fn render_runtime_config(config: &RunMatConfig, path: &Path) -> Result<String> {
+    pub fn render_runtime_config(config: &RunMatRuntimeConfig, path: &Path) -> Result<String> {
         let format = file::format_from_path(path)?;
         file::render_runtime_config(config, format)
     }

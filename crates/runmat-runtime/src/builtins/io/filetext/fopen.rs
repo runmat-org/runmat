@@ -612,7 +612,7 @@ impl ListOutputs {
         }
         let shape = if rows == 0 { vec![0, 1] } else { vec![rows, 1] };
         let tensor = Tensor::new(handles, shape)
-            .map_err(|e| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, e.to_string()))?;
+            .map_err(|e| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, &e))?;
 
         let mut name_values = Vec::with_capacity(infos.len());
         let mut machine_values = Vec::with_capacity(infos.len());
@@ -1044,11 +1044,10 @@ fn scalar_string(
 fn make_cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
     let len = values.len();
     if len == 0 {
-        make_cell(values, 0, 0)
-            .map_err(|err| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, err.to_string()))
+        make_cell(values, 0, 0).map_err(|err| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, &err))
     } else {
         make_cell(values, len, 1)
-            .map_err(|err| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, err.to_string()))
+            .map_err(|err| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, &err))
     }
 }
 

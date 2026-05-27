@@ -261,7 +261,7 @@ async fn sinc_gpu_host_fallback(
         }
         let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
         let tensor = ComplexTensor::new(complex, shape)
-            .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))?;
+            .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
         return sinc_complex_tensor(tensor);
     }
 
@@ -270,13 +270,13 @@ async fn sinc_gpu_host_fallback(
         runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
     };
     let tensor = Tensor::new_with_dtype(data, shape, dtype)
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))?;
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
     Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
 }
 
 fn sinc_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, e.to_string()))?;
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, &e))?;
     Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
 }
 
@@ -287,7 +287,7 @@ fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .map(|&value| sinc_real_value(value))
         .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))
 }
 
 fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -297,7 +297,7 @@ fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| sinc_complex_value(re, im))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))?;
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 

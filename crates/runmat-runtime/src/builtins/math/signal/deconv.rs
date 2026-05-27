@@ -289,9 +289,10 @@ async fn convert_value(value: Value) -> BuiltinResult<(PolyInput, bool)> {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
                 .await
                 .map_err(|flow| {
+                    let message = flow.message().to_owned();
                     deconv_error_with_source(
                         &DECONV_ERROR_GATHER_FAILED,
-                        flow.message().to_string(),
+                        message,
                         map_control_flow_with_builtin(flow, BUILTIN_NAME),
                     )
                 })?;
@@ -537,16 +538,15 @@ fn convert_output(
         Ok(Value::Complex(re, im))
     } else {
         let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
-        let tensor = ComplexTensor::new(complex_data, shape).map_err(|e| {
-            deconv_error_with_detail(&DECONV_ERROR_BUILD_COMPLEX_OUTPUT, e.to_string())
-        })?;
+        let tensor = ComplexTensor::new(complex_data, shape)
+            .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
 fn finalize_real(data: Vec<f64>, shape: Vec<usize>, prefer_gpu: bool) -> BuiltinResult<Value> {
     let tensor = Tensor::new(data, shape.clone())
-        .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_OUTPUT, e.to_string()))?;
+        .map_err(|e| deconv_error_with_detail(&DECONV_ERROR_BUILD_OUTPUT, &e))?;
     if prefer_gpu {
         #[cfg(all(test, feature = "wgpu"))]
         {

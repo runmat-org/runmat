@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_hir::LoweringContext;
 use runmat_parser::ParserOptions;
 use runmat_vm::Instr;
@@ -13,7 +13,7 @@ use crate::diagnostics::parser_compat;
 
 pub fn emit_bytecode(
     source: &str,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
     source_name: Option<&str>,
 ) -> Result<String> {
     let options = ParserOptions::new(parser_compat(config.language.compat));
@@ -30,7 +30,7 @@ pub fn emit_bytecode(
 }
 
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
-    use runmat_config::discover_known_project_symbols_from_source_name;
+    use runmat_config::project::discover_known_project_symbols_from_source_name;
 
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
@@ -168,7 +168,9 @@ roots = ["."]
         let _cwd = ScopedCurrentDir::enter(tmp.path());
         let source_name = tmp.path().join("main.m");
         let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
-        let compat = runmat_config::RunMatConfig::default().language.compat;
+        let compat = runmat_config::runtime::RunMatRuntimeConfig::default()
+            .language
+            .compat;
         let options = runmat_parser::ParserOptions::new(crate::diagnostics::parser_compat(compat));
         let ast = runmat_parser::parse_with_options("import stats.*; y = summarize(1);", options)
             .expect("parse source");

@@ -12,7 +12,7 @@ use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
 use crate::core::workspace::{workspace_symbols_from_documents, workspace_symbols_with_project};
 use log::{debug, info};
-use runmat_config::{ConfigLoader, LanguageCompatMode};
+use runmat_config::runtime::{ConfigLoader, LanguageCompatMode};
 use serde_json::json;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
@@ -433,107 +433,6 @@ fn dependent_documents_for_symbols(
             }
         })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn dependent_selection_targets_only_docs_referencing_changed_symbols() {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("runmat_lsp_invalidation_{suffix}"));
-        fs::create_dir_all(root.join("src/+stats")).expect("create package dir");
-        fs::write(
-            root.join("runmat.toml"),
-            r#"
-[package]
-name = "demo"
-
-[sources]
-roots = ["src"]
-"#,
-        )
-        .expect("write manifest");
-        fs::write(
-            root.join("src/+stats/summarize.m"),
-            "function y = summarize(x); y = x + 1; end",
-        )
-        .expect("write summarize");
-        fs::write(root.join("src/main.m"), "x = summarize(41);").expect("write main");
-        fs::write(root.join("src/other.m"), "x = 1 + 2;").expect("write other");
-
-        let summarize_uri =
-            Url::from_file_path(root.join("src/+stats/summarize.m")).expect("summarize uri");
-        let main_uri = Url::from_file_path(root.join("src/main.m")).expect("main uri");
-        let other_uri = Url::from_file_path(root.join("src/other.m")).expect("other uri");
-
-        let summarize_text =
-            fs::read_to_string(root.join("src/+stats/summarize.m")).expect("read summarize");
-        let main_text = fs::read_to_string(root.join("src/main.m")).expect("read main");
-        let other_text = fs::read_to_string(root.join("src/other.m")).expect("read other");
-
-        let summarize_analysis = analyze_document_with_compat_and_source(
-            &summarize_text,
-            CompatMode::RunMat,
-            root.join("src/+stats/summarize.m").to_str(),
-        );
-        let main_analysis = analyze_document_with_compat_and_source(
-            &main_text,
-            CompatMode::RunMat,
-            root.join("src/main.m").to_str(),
-        );
-        let other_analysis = analyze_document_with_compat_and_source(
-            &other_text,
-            CompatMode::RunMat,
-            root.join("src/other.m").to_str(),
-        );
-
-        let mut docs = HashMap::new();
-        docs.insert(
-            summarize_uri.clone(),
-            DocumentState {
-                text: summarize_text,
-                version: Some(1),
-                analysis: Some(summarize_analysis),
-            },
-        );
-        docs.insert(
-            main_uri.clone(),
-            DocumentState {
-                text: main_text,
-                version: Some(1),
-                analysis: Some(main_analysis),
-            },
-        );
-        docs.insert(
-            other_uri.clone(),
-            DocumentState {
-                text: other_text,
-                version: Some(1),
-                analysis: Some(other_analysis),
-            },
-        );
-
-        let changed_symbols = HashSet::from_iter([String::from("summarize")]);
-        let dependents = dependent_documents_for_symbols(&docs, &summarize_uri, &changed_symbols);
-        assert!(
-            dependents.contains(&main_uri),
-            "main.m should be invalidated by summarize change"
-        );
-        assert!(
-            !dependents.contains(&other_uri),
-            "other.m should not be invalidated"
-        );
-
-        let _ = fs::remove_dir_all(&root);
-    }
 }
 
 #[async_trait]
@@ -961,5 +860,106 @@ fn compat_label(mode: CompatMode) -> &'static str {
         CompatMode::RunMat => "runmat",
         CompatMode::Matlab => "matlab",
         CompatMode::Strict => "strict",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn dependent_selection_targets_only_docs_referencing_changed_symbols() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("runmat_lsp_invalidation_{suffix}"));
+        fs::create_dir_all(root.join("src/+stats")).expect("create package dir");
+        fs::write(
+            root.join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            root.join("src/+stats/summarize.m"),
+            "function y = summarize(x); y = x + 1; end",
+        )
+        .expect("write summarize");
+        fs::write(root.join("src/main.m"), "x = summarize(41);").expect("write main");
+        fs::write(root.join("src/other.m"), "x = 1 + 2;").expect("write other");
+
+        let summarize_uri =
+            Url::from_file_path(root.join("src/+stats/summarize.m")).expect("summarize uri");
+        let main_uri = Url::from_file_path(root.join("src/main.m")).expect("main uri");
+        let other_uri = Url::from_file_path(root.join("src/other.m")).expect("other uri");
+
+        let summarize_text =
+            fs::read_to_string(root.join("src/+stats/summarize.m")).expect("read summarize");
+        let main_text = fs::read_to_string(root.join("src/main.m")).expect("read main");
+        let other_text = fs::read_to_string(root.join("src/other.m")).expect("read other");
+
+        let summarize_analysis = analyze_document_with_compat_and_source(
+            &summarize_text,
+            CompatMode::RunMat,
+            root.join("src/+stats/summarize.m").to_str(),
+        );
+        let main_analysis = analyze_document_with_compat_and_source(
+            &main_text,
+            CompatMode::RunMat,
+            root.join("src/main.m").to_str(),
+        );
+        let other_analysis = analyze_document_with_compat_and_source(
+            &other_text,
+            CompatMode::RunMat,
+            root.join("src/other.m").to_str(),
+        );
+
+        let mut docs = HashMap::new();
+        docs.insert(
+            summarize_uri.clone(),
+            DocumentState {
+                text: summarize_text,
+                version: Some(1),
+                analysis: Some(summarize_analysis),
+            },
+        );
+        docs.insert(
+            main_uri.clone(),
+            DocumentState {
+                text: main_text,
+                version: Some(1),
+                analysis: Some(main_analysis),
+            },
+        );
+        docs.insert(
+            other_uri.clone(),
+            DocumentState {
+                text: other_text,
+                version: Some(1),
+                analysis: Some(other_analysis),
+            },
+        );
+
+        let changed_symbols = HashSet::from_iter([String::from("summarize")]);
+        let dependents = dependent_documents_for_symbols(&docs, &summarize_uri, &changed_symbols);
+        assert!(
+            dependents.contains(&main_uri),
+            "main.m should be invalidated by summarize change"
+        );
+        assert!(
+            !dependents.contains(&other_uri),
+            "other.m should not be invalidated"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -1,6 +1,6 @@
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Parser, Subcommand};
-use runmat_config::{PlotBackend, PlotMode};
+use runmat_config::runtime::{PlotBackend, PlotMode};
 use runmat_server_client::auth::CredentialStoreMode;
 use std::path::PathBuf;
 use uuid::Uuid;

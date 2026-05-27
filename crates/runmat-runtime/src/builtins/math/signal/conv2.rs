@@ -499,9 +499,10 @@ async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Ma
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|flow| {
+                    let message = flow.message().to_owned();
                     conv2_error_with_source(
                         &CONV2_ERROR_GATHER_FAILED,
-                        flow.message().to_string(),
+                        message,
                         map_control_flow_with_builtin(flow, BUILTIN_NAME),
                     )
                 })?;
@@ -662,13 +663,13 @@ fn matrix_to_value(matrix: Matrix) -> BuiltinResult<Value> {
     if all_real {
         let real_data: Vec<f64> = matrix.data.into_iter().map(|c| c.re).collect();
         let tensor = Tensor::new(real_data, vec![rows, cols])
-            .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, e.to_string()))?;
+            .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, &e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let complex_data: Vec<(f64, f64)> = matrix.data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, vec![rows, cols])
-        .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, e.to_string()))?;
+        .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
     if tensor.data.len() == 1 {
         let (re, im) = tensor.data[0];
         if im.abs() <= EPS {

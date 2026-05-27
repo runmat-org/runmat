@@ -796,7 +796,7 @@ where
         vec![rows, cols, output_channels]
     };
     Tensor::new_with_dtype(data, shape, dtype)
-        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, format!("{err}")))
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
 }
 
 fn alpha_from_interleaved<T>(
@@ -821,13 +821,13 @@ where
         }
     }
     Tensor::new_with_dtype(data, vec![rows, cols], dtype)
-        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, format!("{err}")))
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
 }
 
 fn empty_tensor_value() -> BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, format!("{err}")))
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, &err))
 }
 
 #[cfg(test)]

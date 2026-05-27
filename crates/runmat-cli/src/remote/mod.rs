@@ -56,7 +56,7 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
 pub async fn execute_remote_command(
     command: RemoteCommand,
     cli: &crate::cli::Cli,
-    config: &runmat_config::RunMatConfig,
+    config: &runmat_config::runtime::RunMatRuntimeConfig,
 ) -> Result<()> {
     match command {
         RemoteCommand::Run {

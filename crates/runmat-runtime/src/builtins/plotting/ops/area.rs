@@ -413,7 +413,7 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             let series = area_series_from_tensor(x.clone(), &y_tensor)?;
             for (idx, (upper, lower)) in series.iter().enumerate() {
                 let mut plot = AreaPlot::new(x.clone(), upper.clone())
-                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e.to_string()))?;
+                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, &e))?;
                 if let Some(lower) = lower.clone() {
                     plot = plot.with_lower_curve(lower);
                 } else {
@@ -666,7 +666,7 @@ fn parse_area_args(
     };
     let Some(second) = it.next() else {
         let y = Tensor::try_from(&first)
-            .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, e.to_string()))?;
+            .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, &e))?;
         let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
@@ -679,7 +679,7 @@ fn parse_area_args(
     };
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
         let y = Tensor::try_from(&first)
-            .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, e.to_string()))?;
+            .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, &e))?;
         let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),

@@ -133,10 +133,9 @@ async fn project_symbols_async(
 fn source_name_from_uri(uri: &Url) -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return uri
-            .to_file_path()
+        uri.to_file_path()
             .ok()
-            .and_then(|path| path.to_str().map(str::to_owned));
+            .and_then(|path| path.to_str().map(str::to_owned))
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -182,7 +181,7 @@ fn filter_symbols(symbols: Vec<SymbolInformation>, query: Option<&str>) -> Vec<S
 fn file_path_to_url(path: &std::path::Path) -> Option<Url> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return Url::from_file_path(path).ok();
+        Url::from_file_path(path).ok()
     }
     #[cfg(target_arch = "wasm32")]
     {

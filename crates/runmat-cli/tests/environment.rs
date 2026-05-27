@@ -1,4 +1,4 @@
-use runmat_config::{ConfigLoader, JitOptLevel, RunMatConfig};
+use runmat_config::runtime::{ConfigLoader, JitOptLevel, RunMatRuntimeConfig};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -132,7 +132,7 @@ fn runmat_config_save_and_load_use_canonical_extensions() {
     let temp_dir = TempDir::new().unwrap();
     let config_path = temp_dir.path().join("runmat.toml");
 
-    let mut config = RunMatConfig::default();
+    let mut config = RunMatRuntimeConfig::default();
     config.jit.threshold = 33;
     config.jit.optimization_level = JitOptLevel::Aggressive;
 

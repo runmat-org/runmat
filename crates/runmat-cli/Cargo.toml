@@ -74,3 +74,4 @@ vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 tempfile = "3.12" 
 serde_json = { workspace = true }
 openapiv3 = "2.0"
+serde_yaml = "0.9"

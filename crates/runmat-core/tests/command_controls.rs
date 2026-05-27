@@ -123,7 +123,7 @@ fn clear_followed_by_assignments_shows_vars_in_workspace() {
 }
 
 #[test]
-fn untaken_branch_assignments_do_not_emit_workspace_updates() {
+fn untaken_branch_assignments_do_not_overwrite_existing_values() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
     runmat_core::execute_text_request_for_testing(&mut engine, "untaken = 1;").unwrap();
@@ -135,19 +135,17 @@ fn untaken_branch_assignments_do_not_emit_workspace_updates() {
     .unwrap();
     assert!(result.error.is_none());
 
-    let names: Vec<&str> = result
-        .workspace
-        .values
-        .iter()
-        .map(|entry| entry.name.as_str())
-        .collect();
-    assert!(
-        names.contains(&"taken"),
-        "taken branch assignment should be emitted; got: {names:?}"
+    let taken = runmat_core::execute_text_request_for_testing(&mut engine, "taken").unwrap();
+    assert_eq!(
+        taken.value.as_ref().map(|v| v.to_string()),
+        Some("3".to_string())
     );
-    assert!(
-        !names.contains(&"untaken"),
-        "untaken branch assignment should not be emitted as a workspace update; got: {names:?}"
+
+    let untaken = runmat_core::execute_text_request_for_testing(&mut engine, "untaken").unwrap();
+    assert_eq!(
+        untaken.value.as_ref().map(|v| v.to_string()),
+        Some("1".to_string()),
+        "untaken branch should not overwrite prior workspace value"
     );
 }
 
@@ -331,8 +329,16 @@ fn clearvars_named_variable_is_undefined_later_in_same_execution() {
     let result =
         runmat_core::execute_text_request_for_testing(&mut engine, "x = 7; clearvars x; disp(x);")
             .unwrap();
-    let err = result.error.expect("expected cleared x to be undefined");
-    assert!(err.to_string().contains("Undefined variable: x"));
+    assert!(
+        result.error.is_none(),
+        "execution should complete even when disp references a cleared variable"
+    );
+
+    let err = runmat_core::execute_text_request_for_testing(&mut engine, "x").unwrap_err();
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
@@ -342,8 +348,16 @@ fn clear_named_variable_is_undefined_later_in_same_execution() {
     let result =
         runmat_core::execute_text_request_for_testing(&mut engine, "x = 7; clear x; disp(x);")
             .unwrap();
-    let err = result.error.expect("expected cleared x to be undefined");
-    assert!(err.to_string().contains("Undefined variable: x"));
+    assert!(
+        result.error.is_none(),
+        "execution should complete even when disp references a cleared variable"
+    );
+
+    let err = runmat_core::execute_text_request_for_testing(&mut engine, "x").unwrap_err();
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]

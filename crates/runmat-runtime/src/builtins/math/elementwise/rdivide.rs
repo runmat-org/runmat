@@ -601,7 +601,7 @@ fn rdivide_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -618,7 +618,7 @@ fn rdivide_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn rdivide_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -638,7 +638,7 @@ fn rdivide_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinR
 
 fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;
@@ -658,7 +658,7 @@ fn rdivide_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Valu
 
 fn rdivide_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, err.to_string()))?;
+        .map_err(|err| rdivide_error_with_detail(&RDIVIDE_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("rdivide: {e}")))?;

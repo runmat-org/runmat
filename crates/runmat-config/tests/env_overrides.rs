@@ -1,6 +1,6 @@
 mod support;
 
-use runmat_config::ConfigLoader;
+use runmat_config::runtime::ConfigLoader;
 use tempfile::TempDir;
 
 const ENV_VARS: &[&str] = &[

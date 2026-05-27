@@ -962,7 +962,7 @@ fn prod_tensor(
         output.push(result);
     }
 
-    Tensor::new(output, output_shape).map_err(|e| prod_internal_error(e.to_string()))
+    Tensor::new(output, output_shape).map_err(|e| prod_internal_error(&e))
 }
 
 async fn apply_output_template(
@@ -1011,14 +1011,14 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
                 Ok(Value::Tensor(tensor))
             }
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| prod_internal_error(e.to_string()))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| prod_internal_error(&e))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| prod_internal_error(e.to_string()))?;
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
@@ -1045,13 +1045,13 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| prod_internal_error(e.to_string()))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| prod_internal_error(&e))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| prod_internal_error(e.to_string()))?;
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
                 upload_tensor(tensor)
             }
             other => Err(prod_descriptor_error_with_detail(
@@ -1099,13 +1099,13 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
-                .map_err(|e| prod_internal_error(e.to_string()))?;
+            let tensor =
+                ComplexTensor::new(data, t.shape.clone()).map_err(|e| prod_internal_error(&e))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| prod_internal_error(e.to_string()))?;
+            let tensor =
+                tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
             real_to_complex(Value::Tensor(tensor))
         }
         other => Err(prod_descriptor_error_with_detail(

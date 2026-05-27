@@ -388,7 +388,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         } else {
             ErrorBar::new_vertical(x, y, yn, yp)
         }
-        .map_err(|e| errorbar_invalid(e.to_string()))?
+        .map_err(|e| errorbar_invalid(&e))?
         .with_style(
             parsed.color,
             parsed.line_width,

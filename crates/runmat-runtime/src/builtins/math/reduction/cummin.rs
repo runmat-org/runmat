@@ -461,7 +461,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvalu
         Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cummin_internal_error(e.to_string()))?;
+                .map_err(|e| cummin_internal_error(&e))?;
             let target_dim = dim.unwrap_or(1);
             let (values, indices) =
                 cummin_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
@@ -685,8 +685,8 @@ fn cummin_tensor(
         ));
     }
     if tensor.data.is_empty() {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_internal_error(e.to_string()))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -697,8 +697,8 @@ fn cummin_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_internal_error(e.to_string()))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -824,10 +824,10 @@ fn cummin_tensor(
         }
     }
 
-    let values_tensor = Tensor::new(values_out, tensor.shape.clone())
-        .map_err(|e| cummin_internal_error(e.to_string()))?;
-    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
-        .map_err(|e| cummin_internal_error(e.to_string()))?;
+    let values_tensor =
+        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
+    let indices_tensor =
+        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -844,8 +844,8 @@ fn cummin_complex_tensor(
         ));
     }
     if tensor.data.is_empty() {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_internal_error(e.to_string()))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -856,8 +856,8 @@ fn cummin_complex_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_internal_error(e.to_string()))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -986,9 +986,9 @@ fn cummin_complex_tensor(
     }
 
     let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
-        .map_err(|e| cummin_internal_error(e.to_string()))?;
-    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
-        .map_err(|e| cummin_internal_error(e.to_string()))?;
+        .map_err(|e| cummin_internal_error(&e))?;
+    let indices_tensor =
+        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -1044,7 +1044,7 @@ fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
     } else {
         vec![1.0f64; len]
     };
-    Tensor::new(data, shape.to_vec()).map_err(|e| cummin_internal_error(e.to_string()))
+    Tensor::new(data, shape.to_vec()).map_err(|e| cummin_internal_error(&e))
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {

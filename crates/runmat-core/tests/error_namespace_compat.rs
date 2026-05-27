@@ -5,6 +5,7 @@
 
 use runmat_core::{RunError, RunMatSession};
 use runmat_gc::gc_test_context;
+use runmat_parser::CompatMode;
 
 fn extract_identifier_and_message(error: RunError) -> (Option<String>, String) {
     match error {
@@ -22,17 +23,28 @@ fn assert_error_prefix(namespace: &str, code: &str) {
     let mut session = RunMatSession::new().expect("create session");
     session.set_error_namespace(namespace.to_string());
 
-    let (identifier, message) =
-        match runmat_core::execute_text_request_for_testing(&mut session, code) {
-            Ok(result) => match result.error {
-                Some(error) => (
-                    error.identifier().map(ToString::to_string),
-                    error.message().to_string(),
-                ),
-                None => panic!("expected failure for code: {code}"),
-            },
-            Err(error) => extract_identifier_and_message(error),
-        };
+    let request = runmat_core::abi::ExecutionRequest::for_source(
+        runmat_core::abi::SourceInput::Text {
+            name: "<test>".to_string(),
+            text: code.to_string(),
+        },
+        CompatMode::Matlab,
+        runmat_core::abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+
+    let (identifier, message) = match futures::executor::block_on(session.execute_request(request))
+    {
+        Ok(outcome) => {
+            let diag = outcome
+                .diagnostics
+                .iter()
+                .find(|d| d.severity == runmat_core::abi::DiagnosticSeverity::Error)
+                .unwrap_or_else(|| panic!("expected failure for code: {code}"));
+            (Some(diag.code.clone()), diag.message.clone())
+        }
+        Err(error) => extract_identifier_and_message(error),
+    };
 
     let prefix = format!("{namespace}:");
     let identifier_ok = identifier

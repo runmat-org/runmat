@@ -1,11 +1,11 @@
 use anyhow::Result;
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
 use crate::commands::{accel, benchmark, config, gc, repl, script, snapshot, version};
 use crate::remote;
 
-pub async fn dispatch(cli: &Cli, config: &RunMatConfig) -> Result<()> {
+pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     let command = cli.command.clone();
     let mut script_path = cli.script.clone();
     let mut emit_bytecode = cli.emit_bytecode.clone();
@@ -36,7 +36,7 @@ pub async fn dispatch(cli: &Cli, config: &RunMatConfig) -> Result<()> {
     }
 }
 
-async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) -> Result<()> {
+async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     match command {
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();

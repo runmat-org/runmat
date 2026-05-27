@@ -27,7 +27,7 @@ fn mir_local_fact_count_for_entrypoint(
 }
 
 fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
-    use runmat_config::discover_known_project_symbols_from_source_name;
+    use runmat_config::project::discover_known_project_symbols_from_source_name;
 
     let source_path = PathBuf::from(source_name);
     let cwd = if source_path.is_absolute() {

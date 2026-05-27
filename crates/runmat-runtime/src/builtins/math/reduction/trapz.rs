@@ -364,7 +364,7 @@ pub(crate) fn trapz_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = 1;
-    Tensor::new(output, out_shape).map_err(|err| trapz_internal_error(err.to_string()))
+    Tensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
 }
 
 fn trapz_complex_tensor(
@@ -408,7 +408,7 @@ fn trapz_complex_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = 1;
-    ComplexTensor::new(output, out_shape).map_err(|err| trapz_internal_error(err.to_string()))
+    ComplexTensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
 }
 
 #[cfg(test)]

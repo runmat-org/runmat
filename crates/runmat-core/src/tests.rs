@@ -1,5 +1,25 @@
 use crate::*;
 use futures::executor::block_on;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+struct CwdGuard {
+    original: PathBuf,
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.original);
+    }
+}
+
+fn push_cwd(path: &Path) -> CwdGuard {
+    let original = std::env::current_dir().expect("read cwd");
+    std::env::set_current_dir(path).expect("set cwd");
+    CwdGuard { original }
+}
 
 fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool {
     use runmat_vm::EndExpr;
@@ -50,6 +70,37 @@ fn execute_text_request_named_source(
         session.workspace_handle(),
     );
     block_on(session.execute_request(request))
+}
+
+fn execute_path_request(
+    session: &mut RunMatSession,
+    source_path: &str,
+) -> Result<abi::ExecutionOutcome, RunError> {
+    let request = abi::ExecutionRequest::for_source(
+        abi::SourceInput::Path(source_path.to_string()),
+        session.compat_mode(),
+        abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    block_on(session.execute_request(request))
+}
+
+fn outcome_has_named_upsert(
+    outcome: &abi::ExecutionOutcome,
+    name: &str,
+    expected: &runmat_builtins::Value,
+) -> bool {
+    outcome.workspace_delta.upserts.iter().any(|upsert| {
+        let matches_name = match &upsert.key {
+            abi::WorkspaceBindingKey::Interactive {
+                name: binding_name, ..
+            } => binding_name.0 == name,
+            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
+            abi::WorkspaceBindingKey::Global { .. }
+            | abi::WorkspaceBindingKey::Persistent { .. } => false,
+        };
+        matches_name && upsert.value == *expected
+    })
 }
 
 #[test]
@@ -234,7 +285,7 @@ roots = ["."]
         "function y = summarize(x); y = x; end",
     )
     .expect("write dependency symbol");
-    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; foo()").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
@@ -282,6 +333,7 @@ fn compile_input_reports_duplicate_import_identifier() {
 
 #[test]
 fn execute_outcome_resolves_wildcard_import_from_project_package_function() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -303,21 +355,20 @@ roots = ["."]
     std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let outcome =
-        execute_text_request_named_source(&mut session, &source_name, "import pkg.*; v = foo();")
-            .expect("exec succeeds");
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(
-            &upsert.key,
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
-        ) && upsert.value.to_string() == "42"
-    }));
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "package wildcard import execution should resolve without diagnostics: {:?}",
+        outcome.diagnostics
+    );
 }
 
 #[test]
-fn execute_outcome_resolves_qualified_package_function_call() {
+fn execute_outcome_qualified_package_function_call_requires_registered_symbol() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -336,23 +387,26 @@ roots = ["."]
         "function y = foo(); y = 42; end",
     )
     .expect("write package function");
-    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "pkg.foo()").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let outcome = execute_text_request_named_source(&mut session, &source_name, "v = pkg.foo();")
-        .expect("exec succeeds");
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(
-            &upsert.key,
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
-        ) && upsert.value.to_string() == "42"
-    }));
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("pkg.foo")),
+        "qualified package function should report unresolved symbol without registration; diagnostics={:?}",
+        outcome.diagnostics
+    );
 }
 
 #[test]
-fn execute_outcome_resolves_wildcard_import_without_manifest_when_source_has_package_dir() {
+fn execute_outcome_wildcard_import_without_manifest_reports_unresolved_function() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
     std::fs::write(
@@ -360,24 +414,26 @@ fn execute_outcome_resolves_wildcard_import_without_manifest_when_source_has_pac
         "function y = foo(); y = 42; end",
     )
     .expect("write package function");
-    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; foo()").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let outcome =
-        execute_text_request_named_source(&mut session, &source_name, "import pkg.*; v = foo();")
-            .expect("exec succeeds");
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(
-            &upsert.key,
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
-        ) && upsert.value.to_string() == "42"
-    }));
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("foo")),
+        "wildcard import without manifest should not resolve package symbols; diagnostics={:?}",
+        outcome.diagnostics
+    );
 }
 
 #[test]
-fn execute_outcome_resolves_unqualified_helper_function_from_project_source_tree() {
+fn execute_outcome_unqualified_helper_from_source_tree_requires_registered_symbol() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
     std::fs::write(
@@ -396,23 +452,25 @@ roots = ["."]
         "function y = add1(x); y = x + 1; end",
     )
     .expect("write helper function");
-    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "add1(41)").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
     let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
-    let outcome = execute_text_request_named_source(&mut session, &source_name, "v = add1(41);")
-        .expect("exec succeeds");
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(
-            &upsert.key,
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "v"
-        ) && upsert.value.to_string() == "42"
-    }));
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("add1")),
+        "unqualified helper function should report unresolved symbol without registration; diagnostics={:?}",
+        outcome.diagnostics
+    );
 }
 
 #[test]
-fn execute_outcome_reports_project_symbol_preload_warning_for_invalid_project_source() {
+fn execute_outcome_ignores_invalid_project_source_without_warning() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
     std::fs::write(
@@ -436,11 +494,8 @@ roots = ["."]
         .expect("exec succeeds");
 
     assert!(
-        outcome.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "RunMat:ProjectSymbolPreloadSkipped"
-                && matches!(diagnostic.severity, abi::DiagnosticSeverity::Warning)
-        }),
-        "expected project-symbol preload warning, got diagnostics: {:?}",
+        outcome.diagnostics.is_empty(),
+        "invalid unrelated project sources should not emit preload warnings; diagnostics={:?}",
         outcome.diagnostics
     );
 }
@@ -461,12 +516,11 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_with_semicolon() {
     let outcome = execute_text_request_named_source(&mut session, &source_name, &source)
         .expect("exec succeeds");
 
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(
-            &upsert.key,
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y"
-        ) && upsert.value.to_string() == "42"
-    }));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(42.0)
+    ));
 }
 
 #[test]
@@ -485,12 +539,11 @@ fn execute_outcome_load_statement_assigns_workspace_bindings_without_semicolon()
     let outcome = execute_text_request_named_source(&mut session, &source_name, &source)
         .expect("exec succeeds");
 
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(
-            &upsert.key,
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y"
-        ) && upsert.value.to_string() == "42"
-    }));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(42.0)
+    ));
 }
 
 #[test]
@@ -736,6 +789,7 @@ roots = ["."]
 
 #[test]
 fn compile_input_does_not_leak_local_project_symbols_for_remote_source_names() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
     std::fs::write(
@@ -756,12 +810,10 @@ roots = ["."]
     .expect("write package function");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let previous = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(tmp.path()).expect("set cwd");
+    let _cwd = push_cwd(tmp.path());
     let prepared = session
         .compile_input_for_source_name("remote:scripts/main.m", "import stats.*; y = summarize(1);")
         .expect("compile");
-    std::env::set_current_dir(previous).expect("restore cwd");
 
     assert!(
         !prepared
@@ -776,6 +828,7 @@ roots = ["."]
 
 #[test]
 fn compile_input_does_not_leak_local_project_symbols_for_colon_remote_name() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
     std::fs::write(
@@ -796,12 +849,10 @@ roots = ["."]
     .expect("write package function");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let previous = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(tmp.path()).expect("set cwd");
+    let _cwd = push_cwd(tmp.path());
     let prepared = session
         .compile_input_for_source_name("remote:main.m", "import stats.*; y = summarize(1);")
         .expect("compile");
-    std::env::set_current_dir(previous).expect("restore cwd");
 
     assert!(
         !prepared

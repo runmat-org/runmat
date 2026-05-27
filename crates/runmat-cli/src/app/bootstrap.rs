@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use env_logger::Env;
 use log::{debug, error, info, warn};
 use runmat_accelerate::AccelerateInitOptions;
-use runmat_config::{self as config, ConfigLoader, PlotMode, RunMatConfig};
+use runmat_config::runtime::{self as config, ConfigLoader, PlotMode, RunMatRuntimeConfig};
 
 use crate::app::dispatch;
 use crate::cli::{Cli, CliOverrideSources, GcPreset, LogLevel, OptLevel};
@@ -99,7 +99,7 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 }
 
 /// Load configuration from files and environment
-fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
+fn load_configuration(cli: &Cli) -> Result<RunMatRuntimeConfig> {
     if let Some(config_file) = &cli.config {
         if config_file.is_dir() {
             error!(
@@ -123,7 +123,7 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
 }
 
 /// Apply CLI argument overrides to configuration
-fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverrideSources) {
+fn apply_cli_overrides(config: &mut RunMatRuntimeConfig, cli: &Cli, sources: &CliOverrideSources) {
     if cli.no_jit {
         config.jit.enabled = false;
     }
@@ -205,7 +205,7 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
 }
 
 /// Configure GC from the loaded configuration
-fn configure_gc_from_config(config: &RunMatConfig) -> Result<()> {
+fn configure_gc_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
     let mut gc_config = if let Some(preset) = config.gc.preset {
         gc_config_from_preset(preset)
     } else {
@@ -251,7 +251,7 @@ fn gc_config_from_preset(preset: config::GcPreset) -> runmat_gc::GcConfig {
     }
 }
 
-fn configure_plotting_from_config(config: &RunMatConfig) {
+fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
     use runmat_runtime::builtins::plotting::{
         set_runtime_plotting_mode, set_scatter_target_points, set_surface_vertex_budget,
         RuntimePlottingMode,
@@ -276,7 +276,7 @@ fn configure_plotting_from_config(config: &RunMatConfig) {
     }
 }
 
-fn report_plot_context_status(config: &RunMatConfig) {
+fn report_plot_context_status(config: &RunMatRuntimeConfig) {
     if let Err(err) = runmat_runtime::builtins::plotting::context::ensure_context_from_provider() {
         if config.accelerate.enabled {
             warn!("Shared plotting context unavailable: {err}");

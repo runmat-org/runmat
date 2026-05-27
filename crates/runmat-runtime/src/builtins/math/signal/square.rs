@@ -252,7 +252,7 @@ fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
         .map(|&value| square_scalar(value, duty))
         .collect::<Vec<_>>();
     Tensor::new(data, tensor.shape.clone())
-        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, err.to_string()))
+        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, &err))
 }
 
 #[cfg(test)]

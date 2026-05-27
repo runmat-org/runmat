@@ -8,7 +8,7 @@ use super::{
 /// Main RunMat configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct RunMatConfig {
+pub struct RunMatRuntimeConfig {
     /// Runtime configuration
     #[serde(default)]
     pub runtime: RuntimeConfig,

@@ -316,7 +316,7 @@ async fn cumsum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::GpuTensor(handle) => cumsum_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cumsum_internal_error(e.to_string()))?;
+                .map_err(|e| cumsum_internal_error(&e))?;
             let target_dim = dim.unwrap_or(1);
             let result = cumsum_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
             Ok(complex_tensor_into_value(result))
@@ -610,7 +610,7 @@ fn cumsum_tensor(
         }
     }
 
-    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_internal_error(e.to_string()))
+    Tensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_internal_error(&e))
 }
 
 fn cumsum_complex_tensor(
@@ -712,8 +712,7 @@ fn cumsum_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, tensor.shape.clone())
-        .map_err(|e| cumsum_internal_error(e.to_string()))
+    ComplexTensor::new(output, tensor.shape.clone()).map_err(|e| cumsum_internal_error(&e))
 }
 
 fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {

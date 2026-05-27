@@ -1,4 +1,4 @@
-use runmat_config::{
+use runmat_config::project::{
     build_project_composition_graph_async, discover_project_manifest_from_async,
     ProjectCompositionGraph,
 };

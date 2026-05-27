@@ -368,9 +368,10 @@ async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|flow| {
+                    let message = flow.message().to_owned();
                     conv_error_with_source(
                         &CONV_ERROR_GATHER_FAILED,
-                        flow.message().to_string(),
+                        message,
                         map_control_flow_with_builtin(flow, BUILTIN_NAME),
                     )
                 })?;
@@ -537,13 +538,13 @@ fn convert_output(data: Vec<Complex<f64>>, orientation: Orientation) -> BuiltinR
     if all_real {
         let real_data: Vec<f64> = data.into_iter().map(|c| c.re).collect();
         let tensor = Tensor::new(real_data, shape)
-            .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_OUTPUT, e.to_string()))?;
+            .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_OUTPUT, &e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let complex_data: Vec<(f64, f64)> = data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, shape)
-        .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_COMPLEX_OUTPUT, e.to_string()))?;
+        .map_err(|e| conv_error_with_detail(&CONV_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
     if tensor.data.len() == 1 {
         let (re, im) = tensor.data[0];
         if im.abs() <= EPS {

@@ -5006,6 +5006,7 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "serde_yaml",
  "supports-color",
  "tempfile",
  "tokio",

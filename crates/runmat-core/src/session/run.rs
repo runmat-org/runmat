@@ -26,7 +26,7 @@ fn mir_local_fact_count_for_entrypoint(
 }
 
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
-    use runmat_config::discover_known_project_symbols_from_source_name;
+    use runmat_config::project::discover_known_project_symbols_from_source_name;
     use std::path::{Path, PathBuf};
 
     let Ok(cwd) = runmat_filesystem::current_dir() else {
@@ -1262,7 +1262,7 @@ async fn resolve_path_source_input(
 ) -> std::result::Result<std::path::PathBuf, RunError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use runmat_config::resolve_project_source_input_from;
+        use runmat_config::project::resolve_project_source_input_from;
         use std::path::Path;
 
         let cwd = runmat_filesystem::current_dir().map_err(|err| {
@@ -1341,10 +1341,31 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
     #[cfg(not(target_arch = "wasm32"))]
+    use std::path::{Path, PathBuf};
+    #[cfg(not(target_arch = "wasm32"))]
     use std::sync::Mutex;
 
     #[cfg(not(target_arch = "wasm32"))]
     static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(not(target_arch = "wasm32"))]
+    struct CwdGuard {
+        original: PathBuf,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn push_cwd(path: &Path) -> CwdGuard {
+        let original = std::env::current_dir().expect("read cwd");
+        std::env::set_current_dir(path).expect("set cwd");
+        CwdGuard { original }
+    }
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
@@ -1362,18 +1383,15 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "main"
+[entrypoints.main]
 path = "src/main"
 "#,
         )
         .unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = push_cwd(tmp.path());
         let (source_name, source_text) =
             futures::executor::block_on(source_input_text(SourceInput::Path("main".to_string())))
                 .expect("named entrypoint should resolve");
-        std::env::set_current_dir(original).unwrap();
         let resolved = std::path::PathBuf::from(source_name)
             .canonicalize()
             .unwrap();
@@ -1392,15 +1410,12 @@ path = "src/main"
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = push_cwd(tmp.path());
 
         let (source_name, source_text) = futures::executor::block_on(source_input_text(
             SourceInput::Path("src/main".to_string()),
         ))
         .expect("path without extension should infer .m");
-
-        std::env::set_current_dir(prev).unwrap();
 
         assert!(source_name.ends_with("src/main.m"));
         assert_eq!(source_text.trim(), "x = 1;");
@@ -1421,19 +1436,16 @@ name = "demo"
 [sources]
 roots = ["src"]
 
-[[entrypoints]]
-name = "server"
+[entrypoints.server]
 module = "app.server"
 function = "main"
 "#,
         )
         .unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = push_cwd(tmp.path());
         let err =
             futures::executor::block_on(source_input_text(SourceInput::Path("server".to_string())))
                 .expect_err("invalid module/function entrypoint should report resolve error");
-        std::env::set_current_dir(original).unwrap();
         let RunError::Runtime(runtime_err) = err else {
             panic!("expected runtime error");
         };
@@ -1466,14 +1478,11 @@ roots = ["."]
         )
         .unwrap();
         fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = push_cwd(tmp.path());
 
         let symbols = discover_known_project_symbols(Some(
             tmp.path().join("main.m").to_string_lossy().as_ref(),
         ));
-
-        std::env::set_current_dir(prev).unwrap();
         assert!(
             symbols.contains("stats.summarize"),
             "source-context discovery should include project symbols for eval-hook lowering"
@@ -1518,14 +1527,11 @@ roots = ["."]
         )
         .unwrap();
         fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
+        let _cwd = push_cwd(tmp.path());
 
         let symbols = discover_known_project_symbols(Some(
             tmp.path().join("main.m").to_string_lossy().as_ref(),
         ));
-
-        std::env::set_current_dir(prev).unwrap();
         assert!(
             symbols.contains("summarize"),
             "expected base dependency symbol in known-project discovery"

@@ -5,7 +5,7 @@ use runmat_accelerate::{
     AccelerateProviderPreference as RuntimeProviderPreference,
     AutoOffloadLogLevel as RuntimeAutoLogLevel,
 };
-use runmat_config::{
+use runmat_config::runtime::{
     AccelPowerPreference, AccelerateConfig, AccelerateProviderPreference, AutoOffloadConfig,
     AutoOffloadLogLevel,
 };
