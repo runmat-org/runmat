@@ -1901,7 +1901,9 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position).unwrap_or_else(|| {
+                panic!("signature help missing for `{text}`; status={}", analysis.status_message())
+            });
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1926,7 +1928,9 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position).unwrap_or_else(|| {
+                panic!("signature help missing for `{text}`; status={}", analysis.status_message())
+            });
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -3316,6 +3320,35 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_ode_descriptors() {
+        let cases = [
+            ("ode23(1, [0 1], 1);", "y = ode23(odefun, tspan, y0)"),
+            (
+                "ode45(1, [0 1], 1, struct());",
+                "y = ode45(odefun, tspan, y0, options)",
+            ),
+            (
+                "ode15s(1, [0 1], 1);",
+                "[t, y] = ode15s(odefun, tspan, y0)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).unwrap_or_else(|| {
+                panic!("signature help missing for `{text}`; status={}", analysis.status_message())
+            });
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_image_color_descriptors() {
         let cases = [
             ("gray2rgb([0.1,0.2;0.3,0.4]);", "RGB = gray2rgb(I)"),
@@ -3609,6 +3642,29 @@ mod tests {
         let completions = completion_at(text, &analysis, &position);
 
         for builtin in ["interp1", "interp2", "spline", "pchip", "ppval"] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            assert!(
+                details
+                    .iter()
+                    .any(|detail| detail.contains(&format!("{builtin}("))),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_math_ode_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["ode23", "ode45", "ode15s"] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))

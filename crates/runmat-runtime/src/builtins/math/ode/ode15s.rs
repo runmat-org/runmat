@@ -1,6 +1,9 @@
 //! MATLAB-compatible `ode15s` builtin.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -11,9 +14,171 @@ use crate::builtins::math::ode::common::{
     build_ode_output, ode_options_from_struct, parse_ode_input, parse_options, solve_ode, OdeMethod,
 };
 use crate::builtins::math::ode::type_resolvers::ode_solution_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ode15s";
+
+const ODE15S_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Solution states evaluated over tspan.",
+}];
+
+const ODE15S_OUTPUT_TY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Time points selected by solver.",
+    },
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Solution states at each returned time point.",
+    },
+];
+
+const ODE15S_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "odefun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "ODE right-hand-side callback f(t,y).",
+    },
+    BuiltinParamDescriptor {
+        name: "tspan",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Time interval or monotonic time vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "y0",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Initial state vector/value.",
+    },
+];
+
+const ODE15S_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "odefun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "ODE right-hand-side callback f(t,y).",
+    },
+    BuiltinParamDescriptor {
+        name: "tspan",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Time interval or monotonic time vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "y0",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Initial state vector/value.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional struct with tolerances and step controls.",
+    },
+];
+
+const ODE15S_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "y = ode15s(odefun, tspan, y0)",
+        inputs: &ODE15S_INPUTS_CORE,
+        outputs: &ODE15S_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = ode15s(odefun, tspan, y0, options)",
+        inputs: &ODE15S_INPUTS_WITH_OPTIONS,
+        outputs: &ODE15S_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[t, y] = ode15s(odefun, tspan, y0)",
+        inputs: &ODE15S_INPUTS_CORE,
+        outputs: &ODE15S_OUTPUT_TY,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[t, y] = ode15s(odefun, tspan, y0, options)",
+        inputs: &ODE15S_INPUTS_WITH_OPTIONS,
+        outputs: &ODE15S_OUTPUT_TY,
+    },
+];
+
+const ODE15S_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ODE15S.INVALID_ARGUMENT",
+    identifier: Some("RunMat:ode15s:InvalidArgument"),
+    when: "Input argument count/options struct grammar is invalid.",
+    message: "ode15s: invalid argument",
+};
+
+const ODE15S_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ODE15S.INVALID_INPUT",
+    identifier: Some("RunMat:ode15s:InvalidInput"),
+    when: "ODE input/state/callback semantics are invalid for integration.",
+    message: "ode15s: invalid input",
+};
+
+const ODE15S_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ODE15S.INTERNAL",
+    identifier: Some("RunMat:ode15s:Internal"),
+    when: "Internal output materialization fails.",
+    message: "ode15s: internal runtime failure",
+};
+
+const ODE15S_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ODE15S_ERROR_INVALID_ARGUMENT,
+    ODE15S_ERROR_INVALID_INPUT,
+    ODE15S_ERROR_INTERNAL,
+];
+
+pub const ODE15S_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ODE15S_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ODE15S_ERRORS,
+};
+
+fn ode15s_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let message = if detail.starts_with("ode15s:") {
+        detail.to_string()
+    } else {
+        format!("{}: {}", error.message, detail)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn ode15s_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        ode15s_error_with_detail(fallback, err.message())
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::ode::ode15s")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -49,6 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "ode15s,ode,stiff,implicit,adaptive step",
     accel = "sink",
     type_resolver(ode_solution_type),
+    descriptor(crate::builtins::math::ode::ode15s::ODE15S_DESCRIPTOR),
     builtin_path = "crate::builtins::math::ode::ode15s"
 )]
 async fn ode15s_builtin(
@@ -58,16 +224,22 @@ async fn ode15s_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(crate::builtins::math::ode::common::ode_error(
-            NAME,
-            "ode15s: too many input arguments",
+        return Err(ode15s_error_with_detail(
+            &ODE15S_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
         ));
     }
-    let options = parse_options(NAME, rest.first())?;
-    let opts = ode_options_from_struct(NAME, options.as_ref())?;
-    let input = parse_ode_input(NAME, tspan, y0).await?;
-    let result = solve_ode(NAME, OdeMethod::Ode15s, &function, &input, &opts).await?;
-    build_ode_output(NAME, result)
+    let options = parse_options(NAME, rest.first())
+        .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
+    let opts = ode_options_from_struct(NAME, options.as_ref())
+        .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_ARGUMENT))?;
+    let input = parse_ode_input(NAME, tspan, y0)
+        .await
+        .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_INPUT))?;
+    let result = solve_ode(NAME, OdeMethod::Ode15s, &function, &input, &opts)
+        .await
+        .map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INVALID_INPUT))?;
+    build_ode_output(NAME, result).map_err(|err| ode15s_map_error(err, &ODE15S_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -189,5 +361,52 @@ mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+    }
+
+    #[test]
+    fn ode15s_too_many_inputs_uses_stable_identifier() {
+        let err = block_on(ode15s_builtin(
+            Value::FunctionHandle("stiff_decay".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        ))
+        .expect_err("expected too many inputs error");
+        assert_eq!(err.identifier(), ODE15S_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn ode15s_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = ODE15S_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "y = ode15s(odefun, tspan, y0)",
+                "y = ode15s(odefun, tspan, y0, options)",
+                "[t, y] = ode15s(odefun, tspan, y0)",
+                "[t, y] = ode15s(odefun, tspan, y0, options)",
+            ]
+        );
+    }
+
+    #[test]
+    fn ode15s_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = ODE15S_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                "RM.ODE15S.INVALID_ARGUMENT",
+                "RM.ODE15S.INVALID_INPUT",
+                "RM.ODE15S.INTERNAL",
+            ]
+        );
     }
 }
