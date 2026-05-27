@@ -3363,6 +3363,8 @@ mod tests {
                 "optimset(\"TolX\", 1e-8);",
                 "options = optimset(name, value, ...)",
             ),
+            ("fminbnd(1, 0, 1);", "x = fminbnd(fun, x1, x2)"),
+            ("integral(1, 0, 1);", "q = integral(fun, xmin, xmax)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3722,7 +3724,7 @@ mod tests {
         let position = lsp_types::Position::new(0, 0);
         let completions = completion_at(text, &analysis, &position);
 
-        for builtin in ["fzero", "fsolve", "optimset"] {
+        for builtin in ["fzero", "fsolve", "optimset", "fminbnd", "integral"] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))

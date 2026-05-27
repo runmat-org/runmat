@@ -1,21 +1,198 @@
 //! MATLAB-compatible `integral` builtin for finite scalar numerical integration.
 
-use runmat_builtins::{LogicalArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::optim::common::{call_function, optim_error};
+use crate::builtins::math::optim::common::call_function;
 use crate::builtins::math::optim::type_resolvers::numerical_integral_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "integral";
 const DEFAULT_ABS_TOL: f64 = 1.0e-10;
 const DEFAULT_REL_TOL: f64 = 1.0e-6;
 const DEFAULT_MAX_FUN_EVALS: usize = 10_000;
 const MAX_DEPTH: usize = 30;
+
+const INTEGRAL_OUTPUT_Q: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "q",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numerical integral estimate.",
+}];
+
+const INTEGRAL_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar integrand callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmin",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower integration bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmax",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper integration bound.",
+    },
+];
+
+const INTEGRAL_INPUTS_OPTIONS_STRUCT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar integrand callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmin",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower integration bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmax",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper integration bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Options struct for AbsTol/RelTol/MaxFunEvals.",
+    },
+];
+
+const INTEGRAL_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar integrand callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmin",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower integration bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmax",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper integration bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Option name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::PropertyValue,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option value and additional name/value pairs.",
+    },
+];
+
+const INTEGRAL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "q = integral(fun, xmin, xmax)",
+        inputs: &INTEGRAL_INPUTS_CORE,
+        outputs: &INTEGRAL_OUTPUT_Q,
+    },
+    BuiltinSignatureDescriptor {
+        label: "q = integral(fun, xmin, xmax, options)",
+        inputs: &INTEGRAL_INPUTS_OPTIONS_STRUCT,
+        outputs: &INTEGRAL_OUTPUT_Q,
+    },
+    BuiltinSignatureDescriptor {
+        label: "q = integral(fun, xmin, xmax, name, value, ...)",
+        inputs: &INTEGRAL_INPUTS_NAME_VALUE,
+        outputs: &INTEGRAL_OUTPUT_Q,
+    },
+];
+
+const INTEGRAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTEGRAL.INVALID_ARGUMENT",
+    identifier: Some("RunMat:integral:InvalidArgument"),
+    when: "Option grammar/name-value parsing is invalid.",
+    message: "integral: invalid argument",
+};
+
+const INTEGRAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTEGRAL.INVALID_INPUT",
+    identifier: Some("RunMat:integral:InvalidInput"),
+    when: "Bounds/integrand/adaptive solver semantics are invalid.",
+    message: "integral: invalid input",
+};
+
+const INTEGRAL_ERRORS: [BuiltinErrorDescriptor; 2] = [
+    INTEGRAL_ERROR_INVALID_ARGUMENT,
+    INTEGRAL_ERROR_INVALID_INPUT,
+];
+
+pub const INTEGRAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTEGRAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INTEGRAL_ERRORS,
+};
+
+fn integral_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let message = if detail.starts_with("integral:") {
+        detail.to_string()
+    } else {
+        format!("{}: {detail}", error.message)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn integral_map_error(
+    err: RuntimeError,
+    fallback: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        integral_error_with_detail(fallback, err.message())
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::optim::integral")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,6 +228,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "integral,numerical integration,adaptive quadrature,quadrature,function handle",
     accel = "sink",
     type_resolver(numerical_integral_type),
+    descriptor(crate::builtins::math::optim::integral::INTEGRAL_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::integral"
 )]
 async fn integral_builtin(
@@ -59,9 +237,14 @@ async fn integral_builtin(
     b: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let options = IntegralOptions::parse(rest)?;
-    let a = scalar_bound("lower bound", a).await?;
-    let b = scalar_bound("upper bound", b).await?;
+    let options = IntegralOptions::parse(rest)
+        .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_ARGUMENT))?;
+    let a = scalar_bound("lower bound", a)
+        .await
+        .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
+    let b = scalar_bound("upper bound", b)
+        .await
+        .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
     if a == b {
         return Ok(Value::Num(0.0));
     }
@@ -69,7 +252,9 @@ async fn integral_builtin(
     let sign = if b < a { -1.0 } else { 1.0 };
     let lo = a.min(b);
     let hi = a.max(b);
-    let result = integrate_finite_scalar(&function, lo, hi, &options).await?;
+    let result = integrate_finite_scalar(&function, lo, hi, &options)
+        .await
+        .map_err(|err| integral_map_error(err, &INTEGRAL_ERROR_INVALID_INPUT))?;
     Ok(Value::Num(sign * result))
 }
 
@@ -96,16 +281,16 @@ impl IntegralOptions {
                     options.apply_struct(fields)?;
                     Ok(options)
                 }
-                other => Err(optim_error(
-                    NAME,
-                    format!("integral: expected option name/value pairs, got {other:?}"),
+                other => Err(integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                    format!("expected option name/value pairs, got {other:?}"),
                 )),
             };
         }
         if !rest.len().is_multiple_of(2) {
-            return Err(optim_error(
-                NAME,
-                "integral: expected option name/value pairs",
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "expected option name/value pairs",
             ));
         }
         for pair in rest.chunks(2) {
@@ -130,25 +315,25 @@ impl IntegralOptions {
             "maxfunevals" | "maxintervalcount" => {
                 let parsed = integer_option(name, value)?;
                 if parsed < 5 {
-                    return Err(optim_error(
-                        NAME,
-                        "integral: MaxFunEvals must be an integer scalar >= 5",
+                    return Err(integral_error_with_detail(
+                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                        "MaxFunEvals must be an integer scalar >= 5",
                     ));
                 }
                 self.max_fun_evals = parsed;
             }
             "arrayvalued" => {
                 if bool_option("ArrayValued", value)? {
-                    return Err(optim_error(
-                        NAME,
-                        "integral: ArrayValued true is not supported yet",
+                    return Err(integral_error_with_detail(
+                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                        "ArrayValued true is not supported yet",
                     ));
                 }
             }
             other => {
-                return Err(optim_error(
-                    NAME,
-                    format!("integral: unsupported option {other}"),
+                return Err(integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                    format!("unsupported option {other}"),
                 ))
             }
         }
@@ -157,15 +342,21 @@ impl IntegralOptions {
 
     fn validate(&self) -> BuiltinResult<()> {
         if self.abs_tol < 0.0 {
-            return Err(optim_error(NAME, "integral: AbsTol must be nonnegative"));
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "AbsTol must be nonnegative",
+            ));
         }
         if self.rel_tol < 0.0 {
-            return Err(optim_error(NAME, "integral: RelTol must be nonnegative"));
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "RelTol must be nonnegative",
+            ));
         }
         if self.abs_tol == 0.0 && self.rel_tol == 0.0 {
-            return Err(optim_error(
-                NAME,
-                "integral: AbsTol and RelTol cannot both be zero",
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                "AbsTol and RelTol cannot both be zero",
             ));
         }
         Ok(())
@@ -177,9 +368,9 @@ fn option_name(value: &Value) -> BuiltinResult<String> {
         Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        other => Err(optim_error(
-            NAME,
-            format!("integral: option names must be strings, got {other:?}"),
+        other => Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option names must be strings, got {other:?}"),
         )),
     }
 }
@@ -205,18 +396,18 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
             }
         }
         other => {
-            return Err(optim_error(
-                NAME,
-                format!("integral: {label} must be a finite real scalar, got {other:?}"),
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_INPUT,
+                format!("{label} must be a finite real scalar, got {other:?}"),
             ))
         }
     };
     if parsed.is_finite() {
         Ok(parsed)
     } else {
-        Err(optim_error(
-            NAME,
-            format!("integral: {label} must be finite"),
+        Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            format!("{label} must be finite"),
         ))
     }
 }
@@ -241,18 +432,18 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
             }
         }
         other => {
-            return Err(optim_error(
-                NAME,
-                format!("integral: option {name} must be numeric, got {other:?}"),
+            return Err(integral_error_with_detail(
+                &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                format!("option {name} must be numeric, got {other:?}"),
             ))
         }
     };
     if parsed.is_finite() {
         Ok(parsed)
     } else {
-        Err(optim_error(
-            NAME,
-            format!("integral: option {name} must be finite"),
+        Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} must be finite"),
         ))
     }
 }
@@ -260,15 +451,15 @@ fn numeric_option(name: &str, value: &Value) -> BuiltinResult<f64> {
 fn integer_option(name: &str, value: &Value) -> BuiltinResult<usize> {
     let parsed = numeric_option(name, value)?;
     if parsed < 0.0 {
-        return Err(optim_error(
-            NAME,
-            format!("integral: option {name} must be nonnegative"),
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} must be nonnegative"),
         ));
     }
     if parsed.fract() != 0.0 {
-        return Err(optim_error(
-            NAME,
-            format!("integral: option {name} must be an integer scalar"),
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} must be an integer scalar"),
         ));
     }
     Ok(parsed as usize)
@@ -283,15 +474,15 @@ fn bool_option(name: &str, value: &Value) -> BuiltinResult<bool> {
             if raw == 0 || raw == 1 {
                 Ok(raw != 0)
             } else {
-                Err(optim_error(
-                    NAME,
-                    format!("integral: option {name} must be logical scalar"),
+                Err(integral_error_with_detail(
+                    &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                    format!("option {name} must be logical scalar"),
                 ))
             }
         }
-        other => Err(optim_error(
-            NAME,
-            format!("integral: option {name} must be logical scalar, got {other:?}"),
+        other => Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_ARGUMENT,
+            format!("option {name} must be logical scalar, got {other:?}"),
         )),
     }
 }
@@ -347,9 +538,9 @@ async fn adaptive_simpson(
     max_fun_evals: usize,
 ) -> BuiltinResult<f64> {
     if *evals + 2 > max_fun_evals {
-        return Err(optim_error(
-            NAME,
-            "integral: exceeded maximum function evaluations",
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "exceeded maximum function evaluations",
         ));
     }
 
@@ -368,9 +559,9 @@ async fn adaptive_simpson(
         return Ok(refined + error / 15.0);
     }
     if state.depth == 0 {
-        return Err(optim_error(
-            NAME,
-            "integral: adaptive quadrature did not converge",
+        return Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "adaptive quadrature did not converge",
         ));
     }
 
@@ -426,13 +617,13 @@ async fn call_integrand(function: &Value, x: f64) -> BuiltinResult<f64> {
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        Value::Num(_) | Value::Tensor(_) => Err(optim_error(
-            NAME,
-            "integral: function value must be a finite real scalar",
+        Value::Num(_) | Value::Tensor(_) => Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            "function value must be a finite real scalar",
         )),
-        other => Err(optim_error(
-            NAME,
-            format!("integral: function value must be real numeric scalar, got {other:?}"),
+        other => Err(integral_error_with_detail(
+            &INTEGRAL_ERROR_INVALID_INPUT,
+            format!("function value must be real numeric scalar, got {other:?}"),
         )),
     }
 }
@@ -580,5 +771,44 @@ mod tests {
         ))
         .unwrap_err();
         assert!(err.message().contains("integer scalar"));
+    }
+
+    #[test]
+    fn integral_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = INTEGRAL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "q = integral(fun, xmin, xmax)",
+                "q = integral(fun, xmin, xmax, options)",
+                "q = integral(fun, xmin, xmax, name, value, ...)",
+            ]
+        );
+
+        let codes: Vec<&str> = INTEGRAL_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(
+            codes,
+            vec!["RM.INTEGRAL.INVALID_ARGUMENT", "RM.INTEGRAL.INVALID_INPUT"]
+        );
+    }
+
+    #[test]
+    fn integral_bad_name_value_pairs_use_stable_identifier() {
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("AbsTol")],
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:integral:InvalidArgument"));
     }
 }
