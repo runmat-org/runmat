@@ -12,9 +12,7 @@
     "gpu"
   ],
   "summary": "Map integer symbols onto a rectangular QAM complex-baseband constellation.",
-  "references": [
-    "https://www.mathworks.com/help/comm/ref/qammod.html"
-  ],
+  "references": [],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
