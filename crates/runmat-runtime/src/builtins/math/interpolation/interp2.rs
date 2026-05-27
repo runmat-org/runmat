@@ -1,6 +1,10 @@
 //! MATLAB-compatible `interp2` builtin for gridded dense real data.
 
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -9,13 +13,368 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::dispatcher;
+use crate::{build_runtime_error, RuntimeError};
 
 use super::pp::{
-    interp_error, interval_index, is_vector_shape, out_of_range_value, parse_extrapolation,
-    parse_method, query_points, vector_from_value, Extrapolation, InterpMethod,
+    interval_index, is_vector_shape, out_of_range_value, parse_extrapolation, parse_method,
+    query_points, vector_from_value, Extrapolation, InterpMethod,
 };
 
 const NAME: &str = "interp2";
+
+const INTERP2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Vq",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Interpolated values over a 2-D grid.",
+}];
+
+const INTERP2_INPUTS_Z_XQ_YQ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid sample matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Yq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query Y coordinates.",
+    },
+];
+
+const INTERP2_INPUTS_X_Y_Z_XQ_YQ: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid X axis vector or mesh.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid Y axis vector or mesh.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid sample matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Yq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query Y coordinates.",
+    },
+];
+
+const INTERP2_INPUTS_Z_XQ_YQ_METHOD: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid sample matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Yq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\" or \"nearest\".",
+    },
+];
+
+const INTERP2_INPUTS_Z_XQ_YQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid sample matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Yq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\" or \"nearest\".",
+    },
+    BuiltinParamDescriptor {
+        name: "extrap",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("NaN"),
+        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
+    },
+];
+
+const INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD: [BuiltinParamDescriptor; 6] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid X axis vector or mesh.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid Y axis vector or mesh.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid sample matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Yq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\" or \"nearest\".",
+    },
+];
+
+const INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 7] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid X axis vector or mesh.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid Y axis vector or mesh.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Grid sample matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Yq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\" or \"nearest\".",
+    },
+    BuiltinParamDescriptor {
+        name: "extrap",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("NaN"),
+        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
+    },
+];
+
+const INTERP2_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(Z, Xq, Yq)",
+        inputs: &INTERP2_INPUTS_Z_XQ_YQ,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(X, Y, Z, Xq, Yq)",
+        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(Z, Xq, Yq, method)",
+        inputs: &INTERP2_INPUTS_Z_XQ_YQ_METHOD,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(X, Y, Z, Xq, Yq, method)",
+        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(Z, Xq, Yq, extrap)",
+        inputs: &INTERP2_INPUTS_Z_XQ_YQ_METHOD,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(X, Y, Z, Xq, Yq, extrap)",
+        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(Z, Xq, Yq, method, extrap)",
+        inputs: &INTERP2_INPUTS_Z_XQ_YQ_METHOD_EXTRAP,
+        outputs: &INTERP2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp2(X, Y, Z, Xq, Yq, method, extrap)",
+        inputs: &INTERP2_INPUTS_X_Y_Z_XQ_YQ_METHOD_EXTRAP,
+        outputs: &INTERP2_OUTPUT,
+    },
+];
+
+const INTERP2_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERP2.INVALID_ARGUMENT",
+    identifier: Some("RunMat:interp2:InvalidArgument"),
+    when: "Argument count, method/extrapolation options, or axis/query compatibility is invalid.",
+    message: "interp2: invalid argument",
+};
+
+const INTERP2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERP2.INVALID_INPUT",
+    identifier: Some("RunMat:interp2:InvalidInput"),
+    when: "Grid or query values cannot be converted to numeric interpolation domains.",
+    message: "interp2: invalid input",
+};
+
+const INTERP2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERP2.INTERNAL",
+    identifier: Some("RunMat:interp2:Internal"),
+    when: "Interpolation output construction fails due to internal tensor assembly paths.",
+    message: "interp2: internal interpolation failure",
+};
+
+const INTERP2_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    INTERP2_ERROR_INVALID_ARGUMENT,
+    INTERP2_ERROR_INVALID_INPUT,
+    INTERP2_ERROR_INTERNAL,
+];
+
+pub const INTERP2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTERP2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INTERP2_ERRORS,
+};
+
+fn interp2_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn interp2_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    interp2_error_with_message(
+        format!(
+            "{}: {}",
+            INTERP2_ERROR_INVALID_ARGUMENT.message,
+            detail.as_ref()
+        ),
+        &INTERP2_ERROR_INVALID_ARGUMENT,
+    )
+}
+
+fn interp2_invalid_input(detail: impl AsRef<str>) -> RuntimeError {
+    interp2_error_with_message(
+        format!(
+            "{}: {}",
+            INTERP2_ERROR_INVALID_INPUT.message,
+            detail.as_ref()
+        ),
+        &INTERP2_ERROR_INVALID_INPUT,
+    )
+}
+
+fn interp2_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        interp2_error_with_message(err.message().to_string(), fallback)
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::interpolation::interp2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -69,16 +428,21 @@ fn interp2_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     accel = "sink",
     sink = true,
     type_resolver(interp2_type),
+    descriptor(crate::builtins::math::interpolation::interp2::INTERP2_DESCRIPTOR),
     builtin_path = "crate::builtins::math::interpolation::interp2"
 )]
 async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedInterp2::parse(args).await?;
-    let data = evaluate_grid(&parsed)?;
+    let parsed = ParsedInterp2::parse(args)
+        .await
+        .map_err(|err| interp2_map_error(err, &INTERP2_ERROR_INVALID_INPUT))?;
+    let data =
+        evaluate_grid(&parsed).map_err(|err| interp2_map_error(err, &INTERP2_ERROR_INTERNAL))?;
     if data.len() == 1 {
         return Ok(Value::Num(data[0]));
     }
-    let tensor = Tensor::new(data, parsed.output_shape)
-        .map_err(|err| interp_error(NAME, format!("{NAME}: {err}")))?;
+    let tensor = Tensor::new(data, parsed.output_shape).map_err(|err| {
+        interp2_error_with_message(format!("{NAME}: {err}"), &INTERP2_ERROR_INTERNAL)
+    })?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -96,9 +460,8 @@ struct ParsedInterp2 {
 impl ParsedInterp2 {
     async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         if args.len() < 3 {
-            return Err(interp_error(
-                NAME,
-                "interp2: expected Z, Xq, and Yq or X, Y, Z, Xq, and Yq",
+            return Err(interp2_invalid_argument(
+                "expected Z, Xq, and Yq or X, Y, Z, Xq, and Yq",
             ));
         }
 
@@ -141,17 +504,16 @@ impl ParsedInterp2 {
                 match parsed {
                     InterpMethod::Linear | InterpMethod::Nearest => method = parsed,
                     _ => {
-                        return Err(interp_error(
-                            NAME,
-                            "interp2: only linear and nearest methods are supported",
-                        ))
+                        return Err(interp2_invalid_argument(
+                            "only linear and nearest methods are supported",
+                        ));
                     }
                 }
                 continue;
             }
-            return Err(interp_error(
-                NAME,
+            return Err(interp2_error_with_message(
                 "interp2: unsupported interpolation option",
+                &INTERP2_ERROR_INVALID_ARGUMENT,
             ));
         }
 
@@ -175,14 +537,13 @@ fn is_option_arg(value: &Value) -> bool {
 async fn z_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let gathered = dispatcher::gather_if_needed_async(&value).await?;
     let z = tensor::value_into_tensor_for(NAME, gathered)
-        .map_err(|err| interp_error(NAME, format!("{NAME}: {err}")))?;
+        .map_err(|err| interp2_invalid_input(err.to_string()))?;
     if z.shape.len() > 2 {
-        return Err(interp_error(NAME, "interp2: Z must be a 2-D matrix"));
+        return Err(interp2_invalid_argument("Z must be a 2-D matrix"));
     }
     if z.rows < 2 || z.cols < 2 {
-        return Err(interp_error(
-            NAME,
-            "interp2: Z must have at least two rows and two columns",
+        return Err(interp2_invalid_argument(
+            "Z must have at least two rows and two columns",
         ));
     }
     Ok(z)
@@ -211,9 +572,8 @@ async fn axis_from_value(
         if is_vector_shape(&t.shape) {
             let expected = if is_x { cols } else { rows };
             if t.data.len() != expected {
-                return Err(interp_error(
-                    NAME,
-                    format!("{NAME}: axis vector length must match Z dimensions"),
+                return Err(interp2_invalid_argument(
+                    "axis vector length must match Z dimensions",
                 ));
             }
             return Ok(t.data);
@@ -232,23 +592,20 @@ async fn axis_from_value(
 
 fn validate_axis(axis: &[f64], label: &str) -> crate::BuiltinResult<()> {
     if axis.len() < 2 {
-        return Err(interp_error(
-            NAME,
-            format!("{NAME}: {label} axis must contain at least two points"),
-        ));
+        return Err(interp2_invalid_argument(format!(
+            "{label} axis must contain at least two points"
+        )));
     }
     if axis.iter().any(|v| !v.is_finite()) {
-        return Err(interp_error(
-            NAME,
-            format!("{NAME}: {label} axis must be finite"),
-        ));
+        return Err(interp2_invalid_argument(format!(
+            "{label} axis must be finite"
+        )));
     }
     for pair in axis.windows(2) {
         if pair[1] <= pair[0] {
-            return Err(interp_error(
-                NAME,
-                format!("{NAME}: {label} axis must be strictly increasing"),
-            ));
+            return Err(interp2_invalid_argument(format!(
+                "{label} axis must be strictly increasing"
+            )));
         }
     }
     Ok(())
@@ -265,9 +622,8 @@ fn align_queries(
         (left, right) if left == right && xq.shape == yq.shape => {
             Ok((xq.values, yq.values, xq.shape))
         }
-        _ => Err(interp_error(
-            NAME,
-            "interp2: Xq and Yq must be scalar or matching-size arrays",
+        _ => Err(interp2_invalid_argument(
+            "Xq and Yq must be scalar or matching-size arrays",
         )),
     }
 }
@@ -381,5 +737,36 @@ mod tests {
         ]))
         .expect("interp2");
         assert_eq!(value, Value::Num(2.0));
+    }
+
+    #[test]
+    fn interp2_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = INTERP2_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"Vq = interp2(Z, Xq, Yq)"));
+        assert!(labels.contains(&"Vq = interp2(X, Y, Z, Xq, Yq)"));
+        assert!(labels.contains(&"Vq = interp2(X, Y, Z, Xq, Yq, method, extrap)"));
+    }
+
+    #[test]
+    fn interp2_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = INTERP2_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.INTERP2.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.INTERP2.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.INTERP2.INTERNAL"));
+    }
+
+    #[test]
+    fn interp2_too_few_args_uses_stable_identifier() {
+        let err = block_on(interp2_builtin(vec![Value::Num(1.0), Value::Num(2.0)]))
+            .expect_err("expected interp2 argument error");
+        assert_eq!(err.identifier(), INTERP2_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

@@ -136,12 +136,13 @@
 | Wave 131 (Math Linalg Solve Core B) | `cond`, `norm`, `linsolve` | Done | `9054bbfa` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::cond::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::norm::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::linsolve::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for condition-number/norm/linsolve forms (including optional norm-order and options-struct variants plus by-requested-output `[X,R]` for `linsolve`), routed argument-grammar branches to descriptor-backed invalid-argument rows and shape/solve branches to invalid-input rows with stable identifiers, added runtime descriptor signature/code + identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for the full linalg-solve family. |
 | Wave 132 (Math Linalg Structure Core) | `bandwidth`, `issymmetric`, `ishermitian`, `symrcm` | Done | `ed375cce` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::structure:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for linalg structure-analysis forms (selector/tolerance/flag permutations and `symrcm` permutation output), migrated stable runtime branches to descriptor-backed invalid-argument/invalid-input/internal rows with identifier assertions, added descriptor signature+stable-code runtime coverage, and extended descriptor-driven LSP signature-help/completion coverage for the structure family. |
 | Wave 133 (Math Poly Core) | `polyfit`, `polyval`, `roots`, `polyint`, `polyder` | Done | `bf93cb54` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::poly:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for polynomial fitting/evaluation/roots/integration/derivative forms (including by-requested-output surfaces for `polyfit`, `polyval`, and `polyder`), migrated stable runtime branches to descriptor-backed invalid-argument/invalid-input/internal rows with identifier assertions, added runtime descriptor signature+stable-code coverage across all five builtins, and added descriptor-driven LSP signature-help/completion coverage for the `math/poly` family. |
+| Wave 134 (Math Interpolation Core) | `interp1`, `interp2`, `spline`, `pchip`, `ppval` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::interpolation:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for 1-D/2-D interpolation and piecewise-polynomial evaluation surfaces, added stable descriptor error rows/codes for each builtin, routed stable runtime branches through descriptor-backed identifiers, added runtime descriptor signature+code+identifier coverage for interpolation builtins, and extended descriptor-driven LSP signature-help/completion coverage for `math/interpolation`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `377`
-- Remaining: `191`
+- Migrated with attached descriptor: `382`
+- Remaining: `186`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -153,6 +154,7 @@ Loop instructions:
    - no `IDENT_*`, `*_CODE`, `*_MESSAGE` mirrors;
    - no stable-branch `with_identifier("RunMat:...")` literals in migrated runtime paths;
    - stable throws must route through descriptor-aware helpers (`foo_error(&FOO_ERROR_...)`).
+   - if any duplicated stable literals are found in previously migrated files, repair those files before starting the next wave.
 1. Read docs-tmp/BUILTIN_METADATA_DELTA_PLAN.md and follow its canonical descriptor/error rules.
 2. For each builtin in the wave:
    - add `const <NAME>_DESCRIPTOR: BuiltinDescriptor` with exhaustive signatures from real parser/runtime branches;
@@ -194,6 +196,8 @@ Loop instructions:
    - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" <touched_builtin_files...>`
    - `rg -n 'with_identifier\\(\"RunMat:' <touched_builtin_files...>`
    - `for f in <touched_builtin_files...>; do sed -n 's/^[[:space:]]*message:[[:space:]]*\"\\(.*\\)\",[[:space:]]*$/\\1/p' "$f" | sort -u | while IFS= read -r m; do c=$(rg -F --count "$m" "$f"); test "${c:-0}" -eq 1 || echo "duplicate message literal in $f: $m"; done; done`
+   - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`
+   - rely on `descriptor_error_source_of_truth` for migrated-file enforcement of `with_identifier("RunMat:...")` and stable-literal duplication.
    - `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`
 7. Update this progress tracker wave row with commit hash and validation set.
 ```
