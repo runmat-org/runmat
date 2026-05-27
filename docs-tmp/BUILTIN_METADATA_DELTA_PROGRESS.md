@@ -97,12 +97,13 @@
 | Wave 92 (Math Elementwise Complex Introspection) | `abs`, `angle`, `conj`, `real`, `imag` | Done | `1845c145` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::elementwise:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core unary complex-inspection elementwise forms, migrated invalid-input/internal runtime branches to descriptor-backed stable codes/messages/identifiers (single source of truth), added runtime descriptor-signature + identifier assertions, and extended descriptor-driven LSP signature-help coverage for the family. |
 | Wave 93 (Math Elementwise Binary Core A) | `plus`, `minus`, `times`, `rdivide`, `ldivide`, `power` | Done | `b1a1d814` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::elementwise:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for elementwise binary arithmetic forms (core + `"like"` prototype variants), mapped parser/input/shape/internal branches to descriptor-backed stable error codes/identifiers/messages, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help coverage for the binary family. |
 | Wave 94 (Math Elementwise Unary Transcendental) | `exp`, `expm1`, `log`, `log1p`, `log2`, `log10`, `sqrt` | Done | `4fb877d2` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::elementwise:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached unary transcendental/log descriptors, added stable descriptor-backed invalid-input/internal error rows, migrated stable string-input rejection branches to descriptor-backed identifiers, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP signature-help coverage for the family. |
+| Wave 95 (Math Elementwise Numeric Casts) | `double`, `single`, `int32`, `uint16`, `uint8` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`; `cargo test -p runmat-runtime builtins::math::elementwise::double::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::elementwise::single::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::elementwise::int32::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::elementwise::uint16::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::elementwise::uint8::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for numeric cast/conversion builtins including `"like"` overloads for `double`/`single`, added stable descriptor-backed argument/input/internal/GPU-support error rows, migrated runtime branches to descriptor-sourced identifiers/messages/codes, added runtime descriptor signature + stable identifier assertions, and added descriptor-driven LSP signature-help coverage for cast builtins. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `279`
-- Remaining: `289`
+- Migrated with attached descriptor: `284`
+- Remaining: `284`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -120,6 +121,7 @@ Loop instructions:
    - no `const IDENT_*`, no `const *_MESSAGE`, no `const *_CODE`;
    - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
    - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
+   - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
    - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.

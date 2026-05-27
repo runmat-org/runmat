@@ -2,7 +2,11 @@
 
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, IntValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, IntValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -19,6 +23,62 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "int32";
 const INT32_MIN_F64: f64 = i32::MIN as f64;
 const INT32_MAX_F64: f64 = i32::MAX as f64;
+
+const INT32_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "int32-converted output value.",
+}];
+
+const INT32_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar/array value to convert.",
+}];
+
+const INT32_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = int32(X)",
+    inputs: &INT32_INPUTS_X,
+    outputs: &INT32_OUTPUT,
+}];
+
+const INT32_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INT32.INVALID_ARGUMENT",
+    identifier: Some("RunMat:int32:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "int32: invalid argument",
+};
+
+const INT32_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INT32.INVALID_INPUT",
+    identifier: Some("RunMat:int32:InvalidInput"),
+    when: "Input value cannot be converted to int32.",
+    message: "int32: invalid input",
+};
+
+const INT32_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INT32.INTERNAL",
+    identifier: Some("RunMat:int32:Internal"),
+    when: "Internal conversion, gather, or provider upload failed.",
+    message: "int32: internal error",
+};
+
+const INT32_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    INT32_ERROR_INVALID_ARGUMENT,
+    INT32_ERROR_INVALID_INPUT,
+    INT32_ERROR_INTERNAL,
+];
+
+pub const INT32_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INT32_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INT32_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::int32")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -48,16 +108,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Runs outside fusion today because integer storage remains host-represented in f64 buffers.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn int32_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    int32_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn int32_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn conversion_error(type_name: &str) -> RuntimeError {
-    builtin_error(format!(
-        "int32: conversion to int32 from {type_name} is not possible"
-    ))
+    int32_error_with_detail(
+        &INT32_ERROR_INVALID_INPUT,
+        format!("conversion to int32 from {type_name} is not possible"),
+    )
 }
 
 #[runtime_builtin(
@@ -67,11 +140,15 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     keywords = "int32,cast,integer,conversion,gpuArray",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::int32::INT32_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::int32"
 )]
 async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(builtin_error("int32: too many input arguments"));
+        return Err(int32_error_with_detail(
+            &INT32_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        ));
     }
     match value {
         Value::Num(n) => Ok(Value::Int(IntValue::I32(cast_scalar_to_int32(n)))),
@@ -80,7 +157,7 @@ async fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => Ok(int32_value_from_tensor(int32_tensor_to_host(tensor))),
         Value::LogicalArray(array) => {
             let tensor = tensor::logical_to_tensor(&array)
-                .map_err(|e| builtin_error(format!("int32: {e}")))?;
+                .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
             Ok(int32_value_from_tensor(int32_tensor_to_host(tensor)))
         }
         Value::CharArray(chars) => int32_from_char_array(chars),
@@ -110,12 +187,16 @@ fn int32_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| cast_scalar_to_int32(ch as u32 as f64) as f64)
         .collect();
     let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-        .map_err(|e| builtin_error(format!("int32: {e}")))?;
+        .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?;
     Ok(int32_value_from_tensor(tensor))
 }
 
 async fn int32_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    let converted = int32_tensor_to_host(gpu_helpers::gather_tensor_async(&handle).await?);
+    let converted = int32_tensor_to_host(
+        gpu_helpers::gather_tensor_async(&handle)
+            .await
+            .map_err(|e| int32_error_with_detail(&INT32_ERROR_INTERNAL, e))?,
+    );
 
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let _ = provider.free(&handle);
@@ -171,6 +252,16 @@ pub(crate) mod tests {
 
     fn int32_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::int32_builtin(value, rest))
+    }
+
+    #[test]
+    fn int32_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = INT32_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = int32(X)"));
     }
 
     #[test]
@@ -247,8 +338,16 @@ pub(crate) mod tests {
     fn int32_errors_on_string_input() {
         let err = int32_builtin(Value::String("hello".to_string()), Vec::new())
             .expect_err("expected error");
-        assert!(err.message().contains("int32"));
+        assert_eq!(err.identifier(), INT32_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("string"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn int32_too_many_arguments_has_stable_identifier() {
+        let err = int32_builtin(Value::Num(1.0), vec![Value::Num(2.0)])
+            .expect_err("expected too-many-args error");
+        assert_eq!(err.identifier(), INT32_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

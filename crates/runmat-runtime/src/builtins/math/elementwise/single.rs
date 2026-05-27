@@ -2,7 +2,11 @@
 
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -60,16 +64,124 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "single";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const SINGLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Single-precision output value.",
+}];
+
+const SINGLE_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar/array value to convert.",
+}];
+
+const SINGLE_INPUTS_X_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar/array value to convert.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const SINGLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = single(X)",
+        inputs: &SINGLE_INPUTS_X,
+        outputs: &SINGLE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = single(X, \"like\", prototype)",
+        inputs: &SINGLE_INPUTS_X_LIKE,
+        outputs: &SINGLE_OUTPUT,
+    },
+];
+
+const SINGLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINGLE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:single:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "single: invalid argument",
+};
+
+const SINGLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINGLE.INVALID_INPUT",
+    identifier: Some("RunMat:single:InvalidInput"),
+    when: "Input value or prototype cannot be converted to single.",
+    message: "single: invalid input",
+};
+
+const SINGLE_ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINGLE.GPU_UNSUPPORTED",
+    identifier: Some("RunMat:single:GpuUnsupported"),
+    when: "GPU output via \"like\" is requested but no compatible provider is active.",
+    message: "single: gpu output not supported",
+};
+
+const SINGLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINGLE.INTERNAL",
+    identifier: Some("RunMat:single:Internal"),
+    when: "Internal conversion, gather, or provider upload failed.",
+    message: "single: internal error",
+};
+
+const SINGLE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    SINGLE_ERROR_INVALID_ARGUMENT,
+    SINGLE_ERROR_INVALID_INPUT,
+    SINGLE_ERROR_GPU_UNSUPPORTED,
+    SINGLE_ERROR_INTERNAL,
+];
+
+pub const SINGLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SINGLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SINGLE_ERRORS,
+};
+
+fn single_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    single_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn single_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn conversion_error(type_name: &str) -> RuntimeError {
-    builtin_error(format!(
-        "single: conversion to single from {type_name} is not possible"
-    ))
+    single_error_with_detail(
+        &SINGLE_ERROR_INVALID_INPUT,
+        format!("conversion to single from {type_name} is not possible"),
+    )
 }
 
 #[runtime_builtin(
@@ -79,6 +191,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     keywords = "single,float32,cast,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::single::SINGLE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::single"
 )]
 async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -123,8 +236,8 @@ fn single_from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn single_from_logical_array(array: LogicalArray) -> BuiltinResult<Value> {
-    let tensor =
-        tensor::logical_to_tensor(&array).map_err(|e| builtin_error(format!("single: {e}")))?;
+    let tensor = tensor::logical_to_tensor(&array)
+        .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
     single_tensor_to_host(tensor).map(Value::Tensor)
 }
 
@@ -197,7 +310,7 @@ fn cast_f64_to_single(value: f64) -> f64 {
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let ascii: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
     Tensor::new(ascii, vec![chars.rows, chars.cols])
-        .map_err(|e| builtin_error(format!("single: {e}")))
+        .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))
 }
 
 #[derive(Clone)]
@@ -211,21 +324,31 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err(builtin_error("single: expected prototype after 'like'"))
+                Err(single_error_with_detail(
+                    &SINGLE_ERROR_INVALID_ARGUMENT,
+                    "expected prototype after 'like'",
+                ))
             } else {
-                Err(builtin_error("single: unrecognised argument for single"))
+                Err(single_error_with_detail(
+                    &SINGLE_ERROR_INVALID_ARGUMENT,
+                    "unrecognised argument for single",
+                ))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(builtin_error(
-                    "single: unsupported option; only 'like' is accepted",
+                Err(single_error_with_detail(
+                    &SINGLE_ERROR_INVALID_ARGUMENT,
+                    "unsupported option; only 'like' is accepted",
                 ))
             }
         }
-        _ => Err(builtin_error("single: too many input arguments")),
+        _ => Err(single_error_with_detail(
+            &SINGLE_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        )),
     }
 }
 
@@ -239,11 +362,13 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
             | Value::Int(_)
             | Value::Bool(_)
             | Value::LogicalArray(_) => convert_to_host_like(value).await,
-            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-                "single: complex prototypes for 'like' are not supported yet",
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(single_error_with_detail(
+                &SINGLE_ERROR_INVALID_INPUT,
+                "complex prototypes for 'like' are not supported yet",
             )),
-            _ => Err(builtin_error(
-                "single: unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
+            _ => Err(single_error_with_detail(
+                &SINGLE_ERROR_INVALID_INPUT,
+                "unsupported prototype for 'like'; provide a numeric or gpuArray prototype",
             )),
         },
     }
@@ -251,8 +376,9 @@ async fn apply_output_template(value: Value, template: &OutputTemplate) -> Built
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        builtin_error(
-            "single: GPU output requested via 'like' but no acceleration provider is active",
+        single_error_with_detail(
+            &SINGLE_ERROR_GPU_UNSUPPORTED,
+            "GPU output requested via 'like' but no acceleration provider is active",
         )
     })?;
     match value {
@@ -264,12 +390,12 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             };
             let handle = provider
                 .upload(&view)
-                .map_err(|e| builtin_error(format!("single: {e}")))?;
+                .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
             Ok(Value::GpuTensor(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| builtin_error(format!("single: {e}")))?;
+                .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))?;
             convert_to_gpu(Value::Tensor(tensor))
         }
         Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64())),
@@ -278,12 +404,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             let tensor = tensor::logical_to_tensor(&logical)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "single: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(single_error_with_detail(
+            &SINGLE_ERROR_INVALID_INPUT,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        other => Err(builtin_error(format!(
-            "single: unsupported result type for GPU output via 'like' ({other:?})"
-        ))),
+        other => Err(single_error_with_detail(
+            &SINGLE_ERROR_INVALID_INPUT,
+            format!("unsupported result type for GPU output via 'like' ({other:?})"),
+        )),
     }
 }
 
@@ -293,7 +421,7 @@ async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
             let proxy = Value::GpuTensor(handle);
             gpu_helpers::gather_value_async(&proxy)
                 .await
-                .map_err(|e| builtin_error(format!("single: {e}")))
+                .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))
         }
         other => Ok(other),
     }
@@ -309,6 +437,17 @@ pub(crate) mod tests {
 
     fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::single_builtin(value, rest))
+    }
+
+    #[test]
+    fn single_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SINGLE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = single(X)"));
+        assert!(labels.contains(&"Y = single(X, \"like\", prototype)"));
     }
 
     #[test]
@@ -408,7 +547,7 @@ pub(crate) mod tests {
     fn single_errors_on_string_input() {
         let err = single_builtin(Value::String("hello".to_string()), Vec::new())
             .expect_err("expected error");
-        assert!(err.message().contains("single"));
+        assert_eq!(err.identifier(), SINGLE_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("string"));
     }
 
