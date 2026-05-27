@@ -5,7 +5,11 @@ use std::f64::consts::PI;
 
 use log::warn;
 use runmat_accelerate_api::{self, FspecialFilter, FspecialRequest};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -14,6 +18,123 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::image::filters::type_resolvers::fspecial_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "fspecial";
+
+const FSPECIAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "H",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Generated 2-D correlation kernel.",
+}];
+
+const FSPECIAL_INPUTS_KIND: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "type",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Filter name: 'average'|'disk'|'gaussian'|'laplacian'|'log'|'motion'|'prewitt'|'sobel'|'unsharp'.",
+}];
+
+const FSPECIAL_INPUTS_KIND_ARG1: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "type",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description:
+            "Filter name: 'average'|'disk'|'gaussian'|'laplacian'|'log'|'motion'|'prewitt'|'sobel'|'unsharp'.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description:
+            "Filter-specific parameter (size/radius/lengths/alpha/length depending on type).",
+    },
+];
+
+const FSPECIAL_INPUTS_KIND_ARG2: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "type",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description:
+            "Filter name: 'average'|'disk'|'gaussian'|'laplacian'|'log'|'motion'|'prewitt'|'sobel'|'unsharp'.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description:
+            "First filter-specific parameter (for example lengths or motion length).",
+    },
+    BuiltinParamDescriptor {
+        name: "arg2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description:
+            "Second filter-specific parameter (for example sigma or motion angle).",
+    },
+];
+
+const FSPECIAL_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "H = fspecial(type)",
+        inputs: &FSPECIAL_INPUTS_KIND,
+        outputs: &FSPECIAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "H = fspecial(type, arg1)",
+        inputs: &FSPECIAL_INPUTS_KIND_ARG1,
+        outputs: &FSPECIAL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "H = fspecial(type, arg1, arg2)",
+        inputs: &FSPECIAL_INPUTS_KIND_ARG2,
+        outputs: &FSPECIAL_OUTPUT,
+    },
+];
+
+const FSPECIAL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FSPECIAL.INVALID_ARGUMENT",
+    identifier: Some("RunMat:fspecial:InvalidArgument"),
+    when: "Filter name or argument count shape is invalid for the selected filter type.",
+    message: "fspecial: invalid argument",
+};
+
+const FSPECIAL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FSPECIAL.INVALID_INPUT",
+    identifier: Some("RunMat:fspecial:InvalidInput"),
+    when: "Filter parameters have invalid values or unsupported input types.",
+    message: "fspecial: invalid input",
+};
+
+const FSPECIAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FSPECIAL.INTERNAL",
+    identifier: Some("RunMat:fspecial:Internal"),
+    when: "Kernel generation fails internally.",
+    message: "fspecial: internal kernel generation failure",
+};
+
+const FSPECIAL_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    FSPECIAL_ERROR_INVALID_ARGUMENT,
+    FSPECIAL_ERROR_INVALID_INPUT,
+    FSPECIAL_ERROR_INTERNAL,
+];
+
+pub const FSPECIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FSPECIAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FSPECIAL_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::fspecial")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -42,10 +163,33 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Generates constant kernels; fusion is not applicable.",
 };
 
-fn fspecial_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("fspecial")
-        .build()
+fn fspecial_descriptor_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let message = if detail.starts_with("fspecial:") {
+        detail.to_string()
+    } else {
+        format!("{}: {}", error.message, detail)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fspecial_argument_error(detail: impl AsRef<str>) -> RuntimeError {
+    fspecial_descriptor_error(&FSPECIAL_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn fspecial_error(detail: impl AsRef<str>) -> RuntimeError {
+    fspecial_descriptor_error(&FSPECIAL_ERROR_INVALID_INPUT, detail)
+}
+
+fn fspecial_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    fspecial_descriptor_error(&FSPECIAL_ERROR_INTERNAL, detail)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -230,6 +374,7 @@ pub fn spec_from_request(filter: &FspecialFilter) -> BuiltinResult<FspecialFilte
     keywords = "fspecial,filter,gaussian,sobel,motion,laplacian,disk",
     accel = "array_construct",
     type_resolver(fspecial_type),
+    descriptor(crate::builtins::image::filters::fspecial::FSPECIAL_DESCRIPTOR),
     builtin_path = "crate::builtins::image::filters::fspecial"
 )]
 async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -328,7 +473,7 @@ fn finalize_output(spec: &FspecialFilterSpec, tensor: Tensor) -> BuiltinResult<V
 
 fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
     let text = value_to_string(value)
-        .ok_or_else(|| fspecial_error("fspecial: first argument must be a string filter name"))?;
+        .ok_or_else(|| fspecial_argument_error("first argument must be a string filter name"))?;
     let lower = text.to_ascii_lowercase();
     match lower.as_str() {
         "average" => Ok(FilterKind::Average),
@@ -340,7 +485,7 @@ fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
         "prewitt" => Ok(FilterKind::Prewitt),
         "sobel" => Ok(FilterKind::Sobel),
         "unsharp" => Ok(FilterKind::Unsharp),
-        other => Err(fspecial_error(format!(
+        other => Err(fspecial_argument_error(format!(
             "fspecial: filter type '{other}' is not supported"
         ))),
     }
@@ -349,12 +494,12 @@ fn parse_filter_kind(value: &Value) -> BuiltinResult<FilterKind> {
 fn ensure_arg_count(name: &str, args: &[Value], min: usize, max: usize) -> BuiltinResult<()> {
     if args.len() < min || args.len() > max {
         if min == max {
-            Err(fspecial_error(format!(
+            Err(fspecial_argument_error(format!(
                 "fspecial: '{name}' expects exactly {min} argument{}",
                 if min == 1 { "" } else { "s" }
             )))
         } else {
-            Err(fspecial_error(format!(
+            Err(fspecial_argument_error(format!(
                 "fspecial: '{name}' expects between {min} and {max} arguments"
             )))
         }
@@ -520,13 +665,14 @@ fn generate_average(rows: usize, cols: usize) -> BuiltinResult<Tensor> {
     }
     let fill = 1.0 / total as f64;
     let data = vec![fill; total];
-    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![rows, cols])
+        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
     if radius == 0.0 {
         return Tensor::new(vec![1.0], vec![1, 1])
-            .map_err(|e| fspecial_error(format!("fspecial: {e}")));
+            .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")));
     }
 
     let mut data = vec![0.0f64; size * size];
@@ -559,7 +705,8 @@ fn generate_disk(radius: f64, size: usize) -> BuiltinResult<Tensor> {
         *value /= sum;
     }
 
-    Tensor::new(data, vec![size, size]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![size, size])
+        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
@@ -586,7 +733,8 @@ fn generate_gaussian(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tens
         *value /= sum;
     }
 
-    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![rows, cols])
+        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
@@ -601,7 +749,7 @@ fn generate_laplacian(alpha: f64) -> BuiltinResult<Tensor> {
     for value in &mut data {
         *value *= scale;
     }
-    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
@@ -638,7 +786,8 @@ fn generate_log(rows: usize, cols: usize, sigma: f64) -> BuiltinResult<Tensor> {
             *value -= correction;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![rows, cols])
+        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn sigma6(sigma: f64) -> f64 {
@@ -680,7 +829,7 @@ fn generate_motion(
     }
 
     Tensor::new(data, vec![kernel_size, kernel_size])
-        .map_err(|e| fspecial_error(format!("fspecial: {e}")))
+        .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn deposit_bilinear(data: &mut [f64], size: usize, x: f64, y: f64, contribution: f64) {
@@ -715,7 +864,7 @@ fn generate_prewitt() -> BuiltinResult<Tensor> {
         ],
         vec![3, 3],
     )
-    .map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn generate_sobel() -> BuiltinResult<Tensor> {
@@ -727,7 +876,7 @@ fn generate_sobel() -> BuiltinResult<Tensor> {
         ],
         vec![3, 3],
     )
-    .map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    .map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn generate_unsharp(alpha: f64) -> BuiltinResult<Tensor> {
@@ -746,7 +895,7 @@ fn generate_unsharp(alpha: f64) -> BuiltinResult<Tensor> {
     for value in &mut data {
         *value /= denom;
     }
-    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_error(format!("fspecial: {e}")))
+    Tensor::new(data, vec![3, 3]).map_err(|e| fspecial_internal_error(format!("fspecial: {e}")))
 }
 
 fn should_materialize_on_gpu() -> bool {
@@ -1177,7 +1326,9 @@ pub(crate) mod tests {
             vec![Value::from(-1.0)],
         ))
         .expect_err("fspecial should error");
-        assert!(error_message(err).contains("non-negative"));
+        let message = err.message().to_string();
+        assert!(message.contains("non-negative"));
+        assert_eq!(err.identifier(), FSPECIAL_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1203,7 +1354,43 @@ pub(crate) mod tests {
     fn fspecial_invalid_filter_name() {
         let err = block_on(fspecial_builtin(Value::from("notafilter"), Vec::new()))
             .expect_err("fspecial should error");
-        assert!(error_message(err).contains("not supported"));
+        let message = err.message().to_string();
+        assert!(message.contains("not supported"));
+        assert_eq!(err.identifier(), FSPECIAL_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn fspecial_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = FSPECIAL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "H = fspecial(type)",
+                "H = fspecial(type, arg1)",
+                "H = fspecial(type, arg1, arg2)"
+            ]
+        );
+    }
+
+    #[test]
+    fn fspecial_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = FSPECIAL_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                "RM.FSPECIAL.INVALID_ARGUMENT",
+                "RM.FSPECIAL.INVALID_INPUT",
+                "RM.FSPECIAL.INTERNAL",
+            ]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

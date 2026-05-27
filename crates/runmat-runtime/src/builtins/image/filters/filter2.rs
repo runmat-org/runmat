@@ -8,7 +8,11 @@
 use runmat_accelerate_api::{
     GpuTensorHandle, HostTensorView, ImfilterMode, ImfilterOptions, ImfilterShape,
 };
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::imfilter::apply_imfilter_tensor;
@@ -49,10 +53,130 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const FILTER2_BUILTIN: &str = "filter2";
 
-fn filter2_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(FILTER2_BUILTIN)
-        .build()
+const FILTER2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filtered output image/array.",
+}];
+
+const FILTER2_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "h",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filter kernel.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input image/array.",
+    },
+];
+
+const FILTER2_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "h",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filter kernel.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input image/array.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional filter2 flags: 'same'|'full'|'valid'|'conv'|'corr'.",
+    },
+];
+
+const FILTER2_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = filter2(h, X)",
+        inputs: &FILTER2_INPUTS_CORE,
+        outputs: &FILTER2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = filter2(h, X, options...)",
+        inputs: &FILTER2_INPUTS_WITH_OPTIONS,
+        outputs: &FILTER2_OUTPUT,
+    },
+];
+
+const FILTER2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER2.INVALID_INPUT",
+    identifier: Some("RunMat:filter2:InvalidInput"),
+    when: "Input/kernel tensors are invalid or cannot be converted.",
+    message: "filter2: invalid input",
+};
+
+const FILTER2_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER2.INVALID_OPTION",
+    identifier: Some("RunMat:filter2:InvalidOption"),
+    when: "One or more option flags are invalid.",
+    message: "filter2: invalid option",
+};
+
+const FILTER2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FILTER2.INTERNAL",
+    identifier: Some("RunMat:filter2:Internal"),
+    when: "Internal filtering operation fails.",
+    message: "filter2: internal operation failed",
+};
+
+const FILTER2_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    FILTER2_ERROR_INVALID_INPUT,
+    FILTER2_ERROR_INVALID_OPTION,
+    FILTER2_ERROR_INTERNAL,
+];
+
+pub const FILTER2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FILTER2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FILTER2_ERRORS,
+};
+
+fn filter2_descriptor_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: Option<&str>,
+) -> RuntimeError {
+    let message = match detail {
+        Some(detail) => format!("{}: {}", error.message, detail),
+        None => error.message.to_string(),
+    };
+    let mut builder = build_runtime_error(message).with_builtin(FILTER2_BUILTIN);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn filter2_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    filter2_descriptor_error(error, Some(detail.as_ref()))
+}
+
+fn filter2_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        filter2_error_with_detail(fallback, err.message())
+    }
 }
 
 #[runtime_builtin(
@@ -62,6 +186,7 @@ fn filter2_error(message: impl Into<String>) -> RuntimeError {
     keywords = "filter2,correlation,convolution,image filtering,gpu",
     accel = "custom-imfilter",
     type_resolver(filter2_type),
+    descriptor(crate::builtins::image::filters::filter2::FILTER2_DESCRIPTOR),
     builtin_path = "crate::builtins::image::filters::filter2"
 )]
 async fn filter2_builtin(
@@ -75,7 +200,9 @@ async fn filter2_builtin(
             filter2_gpu(Value::GpuTensor(kernel_handle), image_handle, &options).await
         }
         (Value::GpuTensor(kernel_handle), image_value) => {
-            let kernel_tensor = gpu_helpers::gather_tensor_async(&kernel_handle).await?;
+            let kernel_tensor = gpu_helpers::gather_tensor_async(&kernel_handle)
+                .await
+                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
             filter2_host(Value::Tensor(kernel_tensor), image_value, &options)
         }
         (kernel_value, Value::GpuTensor(image_handle)) => {
@@ -90,11 +217,12 @@ fn filter2_host(
     image_value: Value,
     options: &ImfilterOptions,
 ) -> BuiltinResult<Value> {
-    let kernel_tensor =
-        tensor::value_into_tensor_for(FILTER2_BUILTIN, kernel_value).map_err(filter2_error)?;
-    let image_tensor =
-        tensor::value_into_tensor_for(FILTER2_BUILTIN, image_value).map_err(filter2_error)?;
-    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)?;
+    let kernel_tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, kernel_value)
+        .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
+    let image_tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, image_value)
+        .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
+    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
+        .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
     Ok(tensor::tensor_into_value(result))
 }
 
@@ -116,11 +244,14 @@ async fn filter2_gpu(
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => {
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                .await
+                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
             let kernel_tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, kernel_clone)
-                .map_err(filter2_error)?;
+                .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
             let result =
-                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)?;
+                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
+                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
             return Ok(tensor::tensor_into_value(result));
         }
     };
@@ -131,8 +262,8 @@ async fn filter2_gpu(
     let kernel_handle = match kernel_value {
         Value::GpuTensor(handle) => handle,
         other => {
-            let tensor =
-                tensor::value_into_tensor_for(FILTER2_BUILTIN, other).map_err(filter2_error)?;
+            let tensor = tensor::value_into_tensor_for(FILTER2_BUILTIN, other)
+                .map_err(|err| filter2_error_with_detail(&FILTER2_ERROR_INVALID_INPUT, err))?;
             let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
@@ -144,9 +275,12 @@ async fn filter2_gpu(
                     uploaded
                 }
                 Err(_) => {
-                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                        .await
+                        .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
                     let result =
-                        apply_imfilter_tensor(&image_tensor, &tensor, options, FILTER2_BUILTIN)?;
+                        apply_imfilter_tensor(&image_tensor, &tensor, options, FILTER2_BUILTIN)
+                            .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
                     return Ok(tensor::tensor_into_value(result));
                 }
             }
@@ -169,14 +303,19 @@ async fn filter2_gpu(
             if let Some(uploaded) = uploaded_kernel {
                 let _ = provider.free(&uploaded);
             }
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                .await
+                .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
             let kernel_tensor = if let Some(ref tensor) = kernel_tensor_cache {
                 tensor.clone()
             } else {
-                gpu_helpers::gather_tensor_async(&kernel_handle_clone).await?
+                gpu_helpers::gather_tensor_async(&kernel_handle_clone)
+                    .await
+                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?
             };
             let result =
-                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)?;
+                apply_imfilter_tensor(&image_tensor, &kernel_tensor, options, FILTER2_BUILTIN)
+                    .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
             Ok(tensor::tensor_into_value(result))
         }
     }
@@ -186,8 +325,9 @@ fn parse_filter2_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
     let mut options = ImfilterOptions::default();
     for value in args {
         let Some(text) = tensor::value_to_string(value) else {
-            return Err(filter2_error(
-                "filter2: expected string option ('same', 'full', 'valid', 'conv', 'corr')",
+            return Err(filter2_error_with_detail(
+                &FILTER2_ERROR_INVALID_OPTION,
+                "expected string option ('same', 'full', 'valid', 'conv', 'corr')",
             ));
         };
         let lowered = text.trim().to_ascii_lowercase();
@@ -198,10 +338,13 @@ fn parse_filter2_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
             "conv" => options.mode = ImfilterMode::Convolution,
             "corr" => options.mode = ImfilterMode::Correlation,
             other => {
-                return Err(filter2_error(format!(
-                "filter2: unknown option '{}' (supported: 'same', 'full', 'valid', 'conv', 'corr')",
-                other
-            )))
+                return Err(filter2_error_with_detail(
+                    &FILTER2_ERROR_INVALID_OPTION,
+                    format!(
+                        "unknown option '{}' (supported: 'same', 'full', 'valid', 'conv', 'corr')",
+                        other
+                    ),
+                ))
             }
         }
     }
@@ -220,7 +363,7 @@ pub(crate) mod tests {
         Tensor::new(data, vec![rows, cols]).expect("tensor construction")
     }
 
-    fn error_message(err: crate::RuntimeError) -> String {
+    fn error_message(err: &crate::RuntimeError) -> String {
         err.message().to_string()
     }
 
@@ -374,11 +517,12 @@ pub(crate) mod tests {
             vec![Value::Tensor(tensor(vec![2.0], 1, 1))],
         ))
         .expect_err("expected option parsing error");
-        let message = error_message(err);
+        let message = error_message(&err);
         assert!(
             message.contains("expected string option"),
             "unexpected error message: {message}"
         );
+        assert_eq!(err.identifier(), FILTER2_ERROR_INVALID_OPTION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -427,11 +571,12 @@ pub(crate) mod tests {
             vec![Value::from("replicate")],
         ))
         .expect_err("filter2 should error");
-        let message = error_message(err);
+        let message = error_message(&err);
         assert!(
             message.contains("filter2"),
             "expected error mentioning builtin, got {message}"
         );
+        assert_eq!(err.identifier(), FILTER2_ERROR_INVALID_OPTION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -629,5 +774,28 @@ pub(crate) mod tests {
         let _ = provider.free(&image_handle);
         std::env::remove_var("RUNMAT_WGPU_SKIP_WARMUP");
         std::env::remove_var("RUNMAT_WGPU_DISABLE_IMFILTER");
+    }
+
+    #[test]
+    fn filter2_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = FILTER2_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"B = filter2(h, X)"));
+        assert!(labels.contains(&"B = filter2(h, X, options...)"));
+    }
+
+    #[test]
+    fn filter2_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = FILTER2_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.FILTER2.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.FILTER2.INVALID_OPTION"));
+        assert!(codes.contains(&"RM.FILTER2.INTERNAL"));
     }
 }

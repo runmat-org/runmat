@@ -3659,6 +3659,117 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_image_filter_descriptors() {
+        let cases = [
+            ("filter2([1,0;-1,0], rand(4,4));", "B = filter2(h, X)"),
+            (
+                "filter2([1,0;-1,0], rand(4,4), \"full\", \"conv\");",
+                "B = filter2(h, X, options...)",
+            ),
+            ("imfilter(rand(4,4), [1,0;-1,0]);", "B = imfilter(A, H)"),
+            (
+                "imfilter(rand(4,4), [1,0;-1,0], \"same\", \"replicate\");",
+                "B = imfilter(A, H, options...)",
+            ),
+            ("fspecial(\"gaussian\");", "H = fspecial(type)"),
+            (
+                "fspecial(\"gaussian\", [5, 5], 1.0);",
+                "H = fspecial(type, arg1, arg2)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_image_filter_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["filter2", "imfilter", "fspecial"] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            assert!(
+                details
+                    .iter()
+                    .any(|detail| detail.contains(&format!("{builtin}("))),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
+    }
+
+    #[test]
+    fn signature_help_uses_image_io_descriptors() {
+        let cases = [
+            (
+                "imread('img.png');",
+                vec![
+                    "I = imread(filename)",
+                    "[I, map] = imread(filename)",
+                    "[I, map, alpha] = imread(filename)",
+                ],
+            ),
+            (
+                "imread('img', 'png');",
+                vec![
+                    "I = imread(filename, fmt)",
+                    "[I, map] = imread(filename, fmt)",
+                    "[I, map, alpha] = imread(filename, fmt)",
+                ],
+            ),
+        ];
+
+        for (text, expected_labels) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            for expected_label in expected_labels {
+                assert!(
+                    labels.contains(&expected_label),
+                    "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                    labels
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_image_io_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        let details: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("imread"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            details.iter().any(|detail| detail.contains("imread(")),
+            "expected descriptor signature detail for imread completion, got {:?}",
+            details
+        );
+    }
+
+    #[test]
     fn completion_detail_uses_math_reduction_descriptors() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());

@@ -233,6 +233,7 @@ Rule:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches (including the branch's canonical message text).
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
    - disallowed: fallback helpers that accept only free-form message text (for example `fn foo_error(message: impl Into<String>)`) because they bypass descriptor-row source-of-truth for stable branches.
+   - disallowed: stable-branch helpers that accept arbitrary replacement message text even when they also take a descriptor row (for example `foo_error_with_message(message, &FOO_ERROR_...)`); use `foo_error(&FOO_ERROR_...)` or `foo_error_with_detail(&FOO_ERROR_..., detail)` so canonical message text remains descriptor-owned.
 17. Canonical in-file source-of-truth:
    - Declare each stable branch as one `const FOO_ERROR_BAR: BuiltinErrorDescriptor = ...`.
    - Build `FOO_ERRORS` from those constants.
@@ -368,8 +369,8 @@ Disallowed source:
 5. When remapping parser/broadcast/helper failures into builtin error branches, throw via the descriptor row helper (`*_error(&FOO_ERROR_...)`) rather than `format!(...)` message copies.
 6. If a branch needs extra context in the text, wrap the descriptor message (`format!("{base}: {detail}")`) while still anchoring the branch to that descriptor row.
 7. Canonical throw helper pattern:
-   - `fn foo_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError { foo_error_with_message(error.message, error) }`
-   - `fn foo_error_with_detail(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError { foo_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error) }`
+   - `fn foo_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError { foo_descriptor_error(error, None) }`
+   - `fn foo_error_with_detail(error: &'static BuiltinErrorDescriptor, detail: impl AsRef<str>) -> RuntimeError { foo_descriptor_error(error, Some(detail.as_ref())) }`
    - Use `foo_error(&FOO_ERROR_...)` for stable branches.
    - Use `foo_error_with_detail(&FOO_ERROR_..., "...")` (or `format!(...)`) only for contextual/internal details.
    - Do not call `foo_error_with_detail(&FOO_ERROR_..., "foo: ...")` with a full stable message literal; pass only suffix detail text (for example `"unsupported datatype 'x'"`).

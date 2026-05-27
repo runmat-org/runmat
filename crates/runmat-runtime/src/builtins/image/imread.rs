@@ -4,7 +4,11 @@ use std::time::Duration;
 
 use image::io::Reader as ImageReader;
 use image::{DynamicImage, ImageFormat};
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use url::Url;
 
@@ -22,6 +26,243 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const BUILTIN_NAME: &str = "imread";
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat imread/0.0";
+
+const IMREAD_OUTPUT_I: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "I",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Loaded image array (grayscale, truecolor, or multi-channel numeric tensor).",
+}];
+
+const IMREAD_OUTPUT_IMAP: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Loaded image array.",
+    },
+    BuiltinParamDescriptor {
+        name: "map",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Colormap output placeholder (empty for direct-color image formats).",
+    },
+];
+
+const IMREAD_OUTPUT_IMAP_ALPHA: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Loaded image array.",
+    },
+    BuiltinParamDescriptor {
+        name: "map",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Colormap output placeholder (empty for direct-color image formats).",
+    },
+    BuiltinParamDescriptor {
+        name: "alpha",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Alpha channel output when present; otherwise empty.",
+    },
+];
+
+const IMREAD_INPUTS_SOURCE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "File path or HTTP(S) URL to load.",
+}];
+
+const IMREAD_INPUTS_SOURCE_FORMAT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File path or HTTP(S) URL to load.",
+    },
+    BuiltinParamDescriptor {
+        name: "fmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Explicit image format hint (e.g. 'png', 'jpg', 'tiff').",
+    },
+];
+
+const IMREAD_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "I = imread(filename)",
+        inputs: &IMREAD_INPUTS_SOURCE,
+        outputs: &IMREAD_OUTPUT_I,
+    },
+    BuiltinSignatureDescriptor {
+        label: "I = imread(filename, fmt)",
+        inputs: &IMREAD_INPUTS_SOURCE_FORMAT,
+        outputs: &IMREAD_OUTPUT_I,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[I, map] = imread(filename)",
+        inputs: &IMREAD_INPUTS_SOURCE,
+        outputs: &IMREAD_OUTPUT_IMAP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[I, map] = imread(filename, fmt)",
+        inputs: &IMREAD_INPUTS_SOURCE_FORMAT,
+        outputs: &IMREAD_OUTPUT_IMAP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[I, map, alpha] = imread(filename)",
+        inputs: &IMREAD_INPUTS_SOURCE,
+        outputs: &IMREAD_OUTPUT_IMAP_ALPHA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[I, map, alpha] = imread(filename, fmt)",
+        inputs: &IMREAD_INPUTS_SOURCE_FORMAT,
+        outputs: &IMREAD_OUTPUT_IMAP_ALPHA,
+    },
+];
+
+const IMREAD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:imread:InvalidArgument"),
+    when: "Input argument types are invalid (for example non-string filename or format).",
+    message: "imread: invalid argument",
+};
+
+const IMREAD_ERROR_INVALID_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.INVALID_FILENAME",
+    identifier: Some("RunMat:imread:InvalidFilename"),
+    when: "Filename input is empty.",
+    message: "imread: invalid filename",
+};
+
+const IMREAD_ERROR_INVALID_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.INVALID_FORMAT",
+    identifier: Some("RunMat:imread:InvalidFormat"),
+    when: "Format hint input is empty.",
+    message: "imread: invalid format hint",
+};
+
+const IMREAD_ERROR_UNSUPPORTED_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.UNSUPPORTED_FORMAT",
+    identifier: Some("RunMat:imread:UnsupportedFormat"),
+    when: "Requested format hint is not supported.",
+    message: "imread: unsupported image format",
+};
+
+const IMREAD_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:imread:TooManyInputs"),
+    when: "More than two input arguments are supplied.",
+    message: "imread: too many input arguments",
+};
+
+const IMREAD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:imread:TooManyOutputs"),
+    when: "More than three outputs are requested.",
+    message: "imread: too many output arguments",
+};
+
+const IMREAD_ERROR_UNSUPPORTED_SCHEME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.UNSUPPORTED_SCHEME",
+    identifier: Some("RunMat:imread:UnsupportedScheme"),
+    when: "Source URL uses an unsupported non-file scheme.",
+    message: "imread: unsupported URL scheme",
+};
+
+const IMREAD_ERROR_FILE_READ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.FILE_READ",
+    identifier: Some("RunMat:imread:FileReadError"),
+    when: "Local file source cannot be read.",
+    message: "imread: file read error",
+};
+
+const IMREAD_ERROR_INVALID_FILE_URL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.INVALID_FILE_URL",
+    identifier: Some("RunMat:imread:InvalidFileUrl"),
+    when: "File URL path/host encoding is invalid.",
+    message: "imread: invalid file URL",
+};
+
+const IMREAD_ERROR_TIMEOUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.TIMEOUT",
+    identifier: Some("RunMat:imread:Timeout"),
+    when: "HTTP request times out.",
+    message: "imread: request timed out",
+};
+
+const IMREAD_ERROR_NETWORK: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.NETWORK",
+    identifier: Some("RunMat:imread:NetworkError"),
+    when: "HTTP request fails due to network/connectivity issues.",
+    message: "imread: network error",
+};
+
+const IMREAD_ERROR_HTTP_STATUS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.HTTP_STATUS",
+    identifier: Some("RunMat:imread:HttpStatus"),
+    when: "HTTP response returns non-success status.",
+    message: "imread: HTTP status error",
+};
+
+const IMREAD_ERROR_INVALID_HEADER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.INVALID_HEADER",
+    identifier: Some("RunMat:imread:InvalidHeader"),
+    when: "HTTP request contains invalid headers.",
+    message: "imread: invalid request header",
+};
+
+const IMREAD_ERROR_DECODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.DECODE",
+    identifier: Some("RunMat:imread:DecodeError"),
+    when: "Image bytes cannot be decoded into a supported raster format.",
+    message: "imread: decode error",
+};
+
+const IMREAD_ERROR_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMREAD.SHAPE",
+    identifier: Some("RunMat:imread:ShapeError"),
+    when: "Decoded image cannot be materialized into tensor shape.",
+    message: "imread: shape materialization error",
+};
+
+const IMREAD_ERRORS: [BuiltinErrorDescriptor; 15] = [
+    IMREAD_ERROR_INVALID_ARGUMENT,
+    IMREAD_ERROR_INVALID_FILENAME,
+    IMREAD_ERROR_INVALID_FORMAT,
+    IMREAD_ERROR_UNSUPPORTED_FORMAT,
+    IMREAD_ERROR_TOO_MANY_INPUTS,
+    IMREAD_ERROR_TOO_MANY_OUTPUTS,
+    IMREAD_ERROR_UNSUPPORTED_SCHEME,
+    IMREAD_ERROR_FILE_READ,
+    IMREAD_ERROR_INVALID_FILE_URL,
+    IMREAD_ERROR_TIMEOUT,
+    IMREAD_ERROR_NETWORK,
+    IMREAD_ERROR_HTTP_STATUS,
+    IMREAD_ERROR_INVALID_HEADER,
+    IMREAD_ERROR_DECODE,
+    IMREAD_ERROR_SHAPE,
+];
+
+pub const IMREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IMREAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IMREAD_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::imread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,11 +291,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; image loading performs file or network I/O and CPU decoding.",
 };
 
-fn imread_error(identifier: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .build()
+fn imread_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn imread_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let message = if detail.starts_with("imread:") {
+        detail.to_string()
+    } else {
+        format!("{}: {}", error.message, detail)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
@@ -68,6 +327,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     keywords = "imread,image,read,file,jpeg,jpg,png,bmp,gif,tiff,webp,url",
     accel = "sink",
     type_resolver(imread_type),
+    descriptor(crate::builtins::image::imread::IMREAD_DESCRIPTOR),
     builtin_path = "crate::builtins::image::imread"
 )]
 async fn imread_builtin(source: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -79,21 +339,16 @@ async fn imread_builtin(source: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 
     let source = string_arg("filename", &source)?;
     if source.is_empty() {
-        return Err(imread_error(
-            "RunMat:imread:InvalidFilename",
-            "imread: filename must not be empty",
+        return Err(imread_error_with_detail(
+            &IMREAD_ERROR_INVALID_FILENAME,
+            "filename must not be empty",
         ));
     }
 
     let format_hint = match gathered_rest.as_slice() {
         [] => None,
         [format] => Some(parse_format_hint(&string_arg("format", format)?)?),
-        _ => {
-            return Err(imread_error(
-                "RunMat:imread:TooManyInputs",
-                "imread: too many input arguments",
-            ))
-        }
+        _ => return Err(imread_error(&IMREAD_ERROR_TOO_MANY_INPUTS)),
     };
 
     let bytes = read_source_bytes(&source).await?;
@@ -116,18 +371,15 @@ async fn imread_builtin(source: Value, rest: Vec<Value>) -> BuiltinResult<Value>
                 .map(Value::Tensor)
                 .unwrap_or(empty_tensor_value()?),
         ])),
-        Some(_) => Err(imread_error(
-            "RunMat:imread:TooManyOutputs",
-            "imread: too many output arguments",
-        )),
+        Some(_) => Err(imread_error(&IMREAD_ERROR_TOO_MANY_OUTPUTS)),
     }
 }
 
 fn string_arg(label: &str, value: &Value) -> BuiltinResult<String> {
     tensor::value_to_string(value).ok_or_else(|| {
-        imread_error(
-            "RunMat:imread:InvalidArgument",
-            format!("imread: {label} must be a string scalar or character vector"),
+        imread_error_with_detail(
+            &IMREAD_ERROR_INVALID_ARGUMENT,
+            format!("{label} must be a string scalar or character vector"),
         )
     })
 }
@@ -135,9 +387,9 @@ fn string_arg(label: &str, value: &Value) -> BuiltinResult<String> {
 fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
     let label = value.trim().trim_start_matches('.').to_ascii_lowercase();
     if label.is_empty() {
-        return Err(imread_error(
-            "RunMat:imread:InvalidFormat",
-            "imread: format hint must not be empty",
+        return Err(imread_error_with_detail(
+            &IMREAD_ERROR_INVALID_FORMAT,
+            "format hint must not be empty",
         ));
     }
     let format = match label.as_str() {
@@ -149,9 +401,9 @@ fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
         "webp" => ImageFormat::WebP,
         "ico" => ImageFormat::Ico,
         other => ImageFormat::from_extension(other).ok_or_else(|| {
-            imread_error(
-                "RunMat:imread:UnsupportedFormat",
-                format!("imread: unsupported image format '{other}'"),
+            imread_error_with_detail(
+                &IMREAD_ERROR_UNSUPPORTED_FORMAT,
+                format!("unsupported image format '{other}'"),
             )
         })?,
     };
@@ -169,9 +421,9 @@ async fn read_source_bytes(source: &str) -> BuiltinResult<Vec<u8>> {
                     let path = file_url_to_path(&url)?;
                     read_local_path(&path).await
                 }
-                _ => Err(imread_error(
-                    "RunMat:imread:UnsupportedScheme",
-                    format!("imread: unsupported URL scheme '{scheme}'"),
+                _ => Err(imread_error_with_detail(
+                    &IMREAD_ERROR_UNSUPPORTED_SCHEME,
+                    format!("unsupported URL scheme '{scheme}'"),
                 )),
             };
         }
@@ -182,9 +434,9 @@ async fn read_source_bytes(source: &str) -> BuiltinResult<Vec<u8>> {
 
 async fn read_local_path(path: &Path) -> BuiltinResult<Vec<u8>> {
     runmat_filesystem::read_async(path).await.map_err(|err| {
-        imread_error(
-            "RunMat:imread:FileReadError",
-            format!("imread: unable to read '{}': {err}", path.display()),
+        imread_error_with_detail(
+            &IMREAD_ERROR_FILE_READ,
+            format!("unable to read '{}': {err}", path.display()),
         )
     })
 }
@@ -192,9 +444,9 @@ async fn read_local_path(path: &Path) -> BuiltinResult<Vec<u8>> {
 fn file_url_to_path(url: &Url) -> BuiltinResult<PathBuf> {
     if let Some(host) = url.host_str() {
         if !host.is_empty() && !host.eq_ignore_ascii_case("localhost") {
-            return Err(imread_error(
-                "RunMat:imread:InvalidFileUrl",
-                format!("imread: file URL host '{host}' is not local"),
+            return Err(imread_error_with_detail(
+                &IMREAD_ERROR_INVALID_FILE_URL,
+                format!("file URL host '{host}' is not local"),
             ));
         }
     }
@@ -226,21 +478,21 @@ fn percent_decode_url_path(input: &str) -> BuiltinResult<String> {
     while index < bytes.len() {
         if bytes[index] == b'%' {
             if index + 2 >= bytes.len() {
-                return Err(imread_error(
-                    "RunMat:imread:InvalidFileUrl",
-                    "imread: invalid percent escape in file URL",
+                return Err(imread_error_with_detail(
+                    &IMREAD_ERROR_INVALID_FILE_URL,
+                    "invalid percent escape in file URL",
                 ));
             }
             let hi = hex_value(bytes[index + 1]).ok_or_else(|| {
-                imread_error(
-                    "RunMat:imread:InvalidFileUrl",
-                    "imread: invalid percent escape in file URL",
+                imread_error_with_detail(
+                    &IMREAD_ERROR_INVALID_FILE_URL,
+                    "invalid percent escape in file URL",
                 )
             })?;
             let lo = hex_value(bytes[index + 2]).ok_or_else(|| {
-                imread_error(
-                    "RunMat:imread:InvalidFileUrl",
-                    "imread: invalid percent escape in file URL",
+                imread_error_with_detail(
+                    &IMREAD_ERROR_INVALID_FILE_URL,
+                    "invalid percent escape in file URL",
                 )
             })?;
             output.push((hi << 4) | lo);
@@ -252,9 +504,9 @@ fn percent_decode_url_path(input: &str) -> BuiltinResult<String> {
     }
 
     String::from_utf8(output).map_err(|err| {
-        imread_error(
-            "RunMat:imread:InvalidFileUrl",
-            format!("imread: file URL path is not valid UTF-8: {err}"),
+        imread_error_with_detail(
+            &IMREAD_ERROR_INVALID_FILE_URL,
+            format!("file URL path is not valid UTF-8: {err}"),
         )
     })
 }
@@ -285,19 +537,19 @@ async fn read_url_bytes(url: Url) -> BuiltinResult<Vec<u8>> {
 }
 
 fn imread_transport_error(err: TransportError) -> RuntimeError {
-    let identifier = match &err.kind {
-        TransportErrorKind::Timeout => "RunMat:imread:Timeout",
-        TransportErrorKind::Connect => "RunMat:imread:NetworkError",
-        TransportErrorKind::Status(_) => "RunMat:imread:HttpStatus",
-        TransportErrorKind::InvalidHeader(_) => "RunMat:imread:InvalidHeader",
-        TransportErrorKind::Other => "RunMat:imread:NetworkError",
+    let error = match &err.kind {
+        TransportErrorKind::Timeout => &IMREAD_ERROR_TIMEOUT,
+        TransportErrorKind::Connect => &IMREAD_ERROR_NETWORK,
+        TransportErrorKind::Status(_) => &IMREAD_ERROR_HTTP_STATUS,
+        TransportErrorKind::InvalidHeader(_) => &IMREAD_ERROR_INVALID_HEADER,
+        TransportErrorKind::Other => &IMREAD_ERROR_NETWORK,
     };
     let message = err.message_with_prefix(BUILTIN_NAME);
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_source(err).build()
 }
 
 fn decode_image_bytes(bytes: &[u8], format: Option<ImageFormat>) -> BuiltinResult<DynamicImage> {
@@ -307,16 +559,16 @@ fn decode_image_bytes(bytes: &[u8], format: Option<ImageFormat>) -> BuiltinResul
         ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
             .map_err(|err| {
-                imread_error(
-                    "RunMat:imread:DecodeError",
-                    format!("imread: unable to detect image format: {err}"),
+                imread_error_with_detail(
+                    &IMREAD_ERROR_DECODE,
+                    format!("unable to detect image format: {err}"),
                 )
             })?
     };
     reader.decode().map_err(|err| {
-        imread_error(
-            "RunMat:imread:DecodeError",
-            format!("imread: unable to decode image: {err}"),
+        imread_error_with_detail(
+            &IMREAD_ERROR_DECODE,
+            format!("unable to decode image: {err}"),
         )
     })
 }
@@ -544,7 +796,7 @@ where
         vec![rows, cols, output_channels]
     };
     Tensor::new_with_dtype(data, shape, dtype)
-        .map_err(|err| imread_error("RunMat:imread:ShapeError", format!("imread: {err}")))
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, format!("{err}")))
 }
 
 fn alpha_from_interleaved<T>(
@@ -569,13 +821,13 @@ where
         }
     }
     Tensor::new_with_dtype(data, vec![rows, cols], dtype)
-        .map_err(|err| imread_error("RunMat:imread:ShapeError", format!("imread: {err}")))
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, format!("{err}")))
 }
 
 fn empty_tensor_value() -> BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
-        .map_err(|err| imread_error("RunMat:imread:ShapeError", format!("imread: {err}")))
+        .map_err(|err| imread_error_with_detail(&IMREAD_ERROR_SHAPE, format!("{err}")))
 }
 
 #[cfg(test)]
@@ -692,7 +944,7 @@ mod tests {
         .expect_err("expected error for missing file");
         assert_ne!(
             err.identifier(),
-            Some("RunMat:imread:UnsupportedScheme"),
+            IMREAD_ERROR_UNSUPPORTED_SCHEME.identifier,
             "drive-letter path incorrectly rejected as unsupported URL scheme"
         );
     }
@@ -717,7 +969,7 @@ mod tests {
             vec![Value::from("not-a-format")],
         ))
         .expect_err("expected error");
-        assert_eq!(err.identifier(), Some("RunMat:imread:UnsupportedFormat"));
+        assert_eq!(err.identifier(), IMREAD_ERROR_UNSUPPORTED_FORMAT.identifier);
     }
 
     #[test]
@@ -728,9 +980,58 @@ mod tests {
         );
         let err = crate::call_builtin("imread", &[Value::from(format!("{url}/missing.jpg"))])
             .expect_err("expected 404");
-        assert_eq!(err.identifier(), Some("RunMat:imread:HttpStatus"));
+        assert_eq!(err.identifier(), IMREAD_ERROR_HTTP_STATUS.identifier);
         assert!(err.message().contains("HTTP status 404"));
         assert!(!err.message().contains("No matching overload"));
+    }
+
+    #[test]
+    fn imread_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = IMREAD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "I = imread(filename)",
+                "I = imread(filename, fmt)",
+                "[I, map] = imread(filename)",
+                "[I, map] = imread(filename, fmt)",
+                "[I, map, alpha] = imread(filename)",
+                "[I, map, alpha] = imread(filename, fmt)",
+            ]
+        );
+    }
+
+    #[test]
+    fn imread_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = IMREAD_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(
+            codes,
+            vec![
+                "RM.IMREAD.INVALID_ARGUMENT",
+                "RM.IMREAD.INVALID_FILENAME",
+                "RM.IMREAD.INVALID_FORMAT",
+                "RM.IMREAD.UNSUPPORTED_FORMAT",
+                "RM.IMREAD.TOO_MANY_INPUTS",
+                "RM.IMREAD.TOO_MANY_OUTPUTS",
+                "RM.IMREAD.UNSUPPORTED_SCHEME",
+                "RM.IMREAD.FILE_READ",
+                "RM.IMREAD.INVALID_FILE_URL",
+                "RM.IMREAD.TIMEOUT",
+                "RM.IMREAD.NETWORK",
+                "RM.IMREAD.HTTP_STATUS",
+                "RM.IMREAD.INVALID_HEADER",
+                "RM.IMREAD.DECODE",
+                "RM.IMREAD.SHAPE",
+            ]
+        );
     }
 
     #[test]
