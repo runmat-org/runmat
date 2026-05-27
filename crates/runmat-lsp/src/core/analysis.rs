@@ -3054,6 +3054,8 @@ mod tests {
     #[test]
     fn signature_help_uses_math_reduction_cumulative_descriptors() {
         let cases = [
+            ("sum([1,2,3]);", "S = sum(A)"),
+            ("sum([1,2,3], \"all\");", "S = sum(A, \"all\")"),
             ("cumsum([1,2,3]);", "B = cumsum(A)"),
             ("cumsum([1,2,3], \"reverse\");", "B = cumsum(A, direction)"),
             ("cumprod([1,2,3]);", "B = cumprod(A)"),
@@ -3193,6 +3195,17 @@ mod tests {
                 .any(|detail| detail.contains("cummin(")),
             "expected descriptor signature detail for cummin completion, got {:?}",
             cummin_candidates
+        );
+
+        let sum_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("sum"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            sum_candidates.iter().any(|detail| detail.contains("sum(")),
+            "expected descriptor signature detail for sum completion, got {:?}",
+            sum_candidates
         );
 
         let trapz_candidates: Vec<String> = completions

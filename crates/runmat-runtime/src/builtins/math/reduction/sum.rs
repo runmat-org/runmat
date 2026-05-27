@@ -5,7 +5,11 @@ use std::collections::HashSet;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision, ReductionFlavor,
 };
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+};
 const NAME: &str = "sum";
 
 use runmat_builtins::ResolveContext;
@@ -30,6 +34,245 @@ use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
 
+const SUM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sum reduction result.",
+}];
+
+const SUM_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const SUM_INPUTS_A_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const SUM_INPUTS_A_ALL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "all",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"all\""),
+        description: "Reduce across all dimensions.",
+    },
+];
+
+const SUM_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const SUM_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "outtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+    },
+];
+
+const SUM_INPUTS_A_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const SUM_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const SUM_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"like\""),
+        description: "Prototype keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value controlling output class/device.",
+    },
+];
+
+const SUM_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A)",
+        inputs: &SUM_INPUTS_A,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, dim)",
+        inputs: &SUM_INPUTS_A_DIM,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, \"all\")",
+        inputs: &SUM_INPUTS_A_ALL,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, nanflag)",
+        inputs: &SUM_INPUTS_A_NANFLAG,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, outtype)",
+        inputs: &SUM_INPUTS_A_OUTTYPE,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, dim, nanflag)",
+        inputs: &SUM_INPUTS_A_DIM_NANFLAG,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, nanflag, dim)",
+        inputs: &SUM_INPUTS_A_NANFLAG_DIM,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, \"like\", prototype)",
+        inputs: &SUM_INPUTS_A_LIKE,
+        outputs: &SUM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = sum(A, vecdim)",
+        inputs: &SUM_INPUTS_A_DIM,
+        outputs: &SUM_OUTPUT,
+    },
+];
+
+const SUM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUM.INVALID_ARGUMENT",
+    identifier: Some("RunMat:sum:InvalidArgument"),
+    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    message: "sum: invalid argument",
+};
+
+const SUM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUM.INVALID_INPUT",
+    identifier: Some("RunMat:sum:InvalidInput"),
+    when: "Input values cannot be converted to supported sum reduction domains.",
+    message: "sum: invalid input",
+};
+
+const SUM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUM.INTERNAL",
+    identifier: Some("RunMat:sum:Internal"),
+    when:
+        "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
+    message: "sum: internal reduction failure",
+};
+
+const SUM_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SUM_ERROR_INVALID_ARGUMENT,
+    SUM_ERROR_INVALID_INPUT,
+    SUM_ERROR_INTERNAL,
+];
+
+pub const SUM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SUM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SUM_ERRORS,
+};
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::sum")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "sum",
@@ -49,8 +292,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_sum_dim / reduce_sum; omitnan and multi-axis reductions fall back to the CPU path when unsupported.",
 };
 
-fn sum_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn sum_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    sum_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn sum_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn sum_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    sum_descriptor_error_with_detail(&SUM_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn sum_invalid_input(detail: impl AsRef<str>) -> RuntimeError {
+    sum_descriptor_error_with_detail(&SUM_ERROR_INVALID_INPUT, detail)
+}
+
+fn sum_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    sum_descriptor_error_with_detail(&SUM_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::sum")]
@@ -80,6 +349,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "sum,reduction,gpu,omitnan,all,like",
     accel = "reduction",
     type_resolver(sum_type),
+    descriptor(crate::builtins::math::reduction::sum::SUM_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::sum"
 )]
 async fn sum_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -214,11 +484,15 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(sum_error("sum: cannot represent NaN as an integer output"));
+            return Err(sum_internal_error(
+                "sum: cannot represent NaN as an integer output",
+            ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(sum_error("sum: integer output overflowed the target type"));
+            return Err(sum_internal_error(
+                "sum: integer output overflowed the target type",
+            ));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -258,7 +532,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if selection_set && !matches!(selection, DimSelection::Auto) {
-                        return Err(sum_error(
+                        return Err(sum_invalid_argument(
                             "sum: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -284,7 +558,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if selection_set && !matches!(selection, DimSelection::Auto) {
-                        return Err(sum_error(
+                        return Err(sum_invalid_argument(
                             "sum: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -295,7 +569,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(sum_error(
+                        return Err(sum_invalid_argument(
                             "sum: multiple output class specifications provided",
                         ));
                     }
@@ -306,7 +580,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(sum_error(
+                        return Err(sum_invalid_argument(
                             "sum: multiple output class specifications provided",
                         ));
                     }
@@ -317,17 +591,19 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(sum_error(
+                        return Err(sum_invalid_argument(
                             "sum: cannot combine 'like' with another output class specifier",
                         ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(sum_error("sum: expected prototype after 'like'"));
+                        return Err(sum_invalid_argument("sum: expected prototype after 'like'"));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err(sum_error("sum: 'like' must be the final argument"));
+                        return Err(sum_invalid_argument(
+                            "sum: 'like' must be the final argument",
+                        ));
                     }
                     break;
                 }
@@ -344,7 +620,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
             }
         }
 
-        return Err(sum_error(format!("sum: unrecognised argument {arg:?}")));
+        return Err(sum_invalid_argument(format!(
+            "sum: unrecognised argument {arg:?}"
+        )));
     }
 
     Ok(ParsedArguments {
@@ -359,7 +637,7 @@ async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelectio
         Value::Int(_) | Value::Num(_) => {
             let dim = tensor::dimension_from_value_async(value, "sum", false)
                 .await
-                .map_err(sum_error)?;
+                .map_err(sum_invalid_argument)?;
             Ok(dim.map(DimSelection::Dim))
         }
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
@@ -376,7 +654,7 @@ async fn parse_dimension_tensor(
     shape: &[usize],
 ) -> BuiltinResult<Option<DimSelection>> {
     if !is_vector_shape(shape) {
-        return Err(sum_error(
+        return Err(sum_invalid_argument(
             "sum: dimension vector must be a row or column vector",
         ));
     }
@@ -391,7 +669,7 @@ async fn parse_dimension_tensor(
     }
     for &dim in &dims {
         if dim < 1 {
-            return Err(sum_error("sum: dimension indices must be >= 1"));
+            return Err(sum_invalid_argument("sum: dimension indices must be >= 1"));
         }
     }
     Ok(Some(DimSelection::Vec(dims)))
@@ -399,15 +677,15 @@ async fn parse_dimension_tensor(
 
 fn map_dims_error(message: String) -> RuntimeError {
     if message.contains("non-negative") {
-        return sum_error("sum: dimension indices must be >= 1");
+        return sum_invalid_argument("sum: dimension indices must be >= 1");
     }
     if message.contains("finite") {
-        return sum_error("sum: dimensions must be finite");
+        return sum_invalid_argument("sum: dimensions must be finite");
     }
     if message.contains("integer") {
-        return sum_error("sum: dimensions must contain integers");
+        return sum_invalid_argument("sum: dimensions must contain integers");
     }
-    sum_error(message)
+    sum_invalid_argument(message)
 }
 
 fn is_vector_shape(shape: &[usize]) -> bool {
@@ -422,7 +700,7 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 fn sum_host(value: Value, parsed: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor(value).map_err(sum_error)?;
+    let tensor = tensor::value_into_tensor(value).map_err(sum_invalid_input)?;
     let resolved = resolve_dims(&tensor.shape, &parsed.selection)?;
     let reduced = sum_tensor(&tensor, &resolved, parsed.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
@@ -436,7 +714,7 @@ fn sum_host_complex_tensor(ct: ComplexTensor, parsed: &ParsedArguments) -> Built
 
 fn sum_host_complex_scalar(re: f64, im: f64, parsed: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-        .map_err(|e| sum_error(format!("sum: {e}")))?;
+        .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
     sum_host_complex_tensor(tensor, parsed)
 }
 
@@ -675,7 +953,7 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
 
     for dim1 in dims_1_based {
         if dim1 == 0 {
-            return Err(sum_error("sum: dimension indices must be >= 1"));
+            return Err(sum_invalid_argument("sum: dimension indices must be >= 1"));
         }
         if !seen.insert(dim1) {
             continue;
@@ -784,7 +1062,7 @@ fn sum_tensor(
         output.push(result);
     }
 
-    Tensor::new(output, output_shape).map_err(|e| sum_error(format!("sum: {e}")))
+    Tensor::new(output, output_shape).map_err(|e| sum_internal_error(format!("sum: {e}")))
 }
 
 fn sum_complex_tensor(
@@ -873,7 +1151,7 @@ fn sum_complex_tensor(
         output.push(result);
     }
 
-    ComplexTensor::new(output, output_shape).map_err(|e| sum_error(format!("sum: {e}")))
+    ComplexTensor::new(output, output_shape).map_err(|e| sum_internal_error(format!("sum: {e}")))
 }
 
 fn linear_to_multi(index: usize, shape: &[usize], out: &mut [usize]) {
@@ -943,13 +1221,13 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
             }
             Value::Num(n) => {
                 let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| sum_error(format!("{NAME}: {e}")))?;
+                    .map_err(|e| sum_internal_error(format!("{NAME}: {e}")))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| sum_error(format!("{NAME}: {e}")))?;
+                    .map_err(|e| sum_internal_error(format!("{NAME}: {e}")))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
@@ -976,15 +1254,15 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor =
-                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| sum_error(format!("sum: {e}")))?;
+                let tensor = Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(sum_error)?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(sum_internal_error)?;
                 upload_tensor(tensor)
             }
-            other => Err(sum_error(format!(
+            other => Err(sum_invalid_input(format!(
                 "sum: cannot place value {other:?} on the GPU"
             ))),
         },
@@ -993,7 +1271,7 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(sum_error(
+        return Err(sum_internal_error(
             "sum: no acceleration provider available to honour GPU output",
         ));
     };
@@ -1003,7 +1281,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| sum_error(format!("sum: failed to upload GPU result: {e}")))?;
+        .map_err(|e| sum_internal_error(format!("sum: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -1028,14 +1306,14 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
-                .map_err(|e| sum_error(format!("sum: {e}")))?;
+                .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(sum_error)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(sum_internal_error)?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(sum_error(format!(
+        other => Err(sum_invalid_input(format!(
             "sum: cannot convert value {other:?} to a complex result"
         ))),
     }
@@ -1073,7 +1351,7 @@ async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
         other => {
             let gathered = crate::dispatcher::gather_if_needed_async(other)
                 .await
-                .map_err(|e| sum_error(format!("sum: {e}")))?;
+                .map_err(|e| sum_internal_error(format!("sum: {e}")))?;
             analyse_like_prototype(&gathered).await
         }
     }
@@ -1105,6 +1383,40 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn sum_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SUM_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"S = sum(A)"));
+        assert!(labels.contains(&"S = sum(A, dim)"));
+        assert!(labels.contains(&"S = sum(A, \"all\")"));
+        assert!(labels.contains(&"S = sum(A, nanflag)"));
+        assert!(labels.contains(&"S = sum(A, outtype)"));
+        assert!(labels.contains(&"S = sum(A, dim, nanflag)"));
+        assert!(labels.contains(&"S = sum(A, nanflag, dim)"));
+        assert!(labels.contains(&"S = sum(A, \"like\", prototype)"));
+        assert!(labels.contains(&"S = sum(A, vecdim)"));
+    }
+
+    #[test]
+    fn sum_descriptor_errors_have_stable_codes() {
+        assert!(SUM_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == SUM_ERROR_INVALID_ARGUMENT.code));
+        assert!(SUM_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == SUM_ERROR_INVALID_INPUT.code));
+        assert!(SUM_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == SUM_ERROR_INTERNAL.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1236,7 +1548,17 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = sum_builtin(Value::Tensor(tensor), vec![Value::from("like")])
             .expect_err("expected error");
+        assert_eq!(err.identifier(), SUM_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("prototype"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sum_invalid_dim_identifier_is_descriptor_backed() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = sum_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
+            .expect_err("sum");
+        assert_eq!(err.identifier(), SUM_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
