@@ -296,6 +296,7 @@ Required:
 3. Throw stable branches exclusively through helper functions that accept `&'static BuiltinErrorDescriptor` (for example `foo_error(&FOO_ERROR_INVALID_INPUT)`).
 4. Stable branch identifiers/messages such as `RunMat:lt:ComplexNotSupported` must be authored once on the descriptor row and consumed by throw helpers; do not keep parallel per-branch identifier/message constants.
 5. Stable descriptor literals must be unique in-file: each descriptor `code`/`identifier`/`message` literal appears only in descriptor rows, never repeated at throw sites.
+6. Stable throw helpers must take the descriptor row itself (`foo_error(&FOO_ERROR_...)`), not message/code/identifier fragments (`foo_error_with_message(FOO_ERROR_X.message, ...)` or `with_identifier("RunMat:...")` in stable branches).
 
 Disallowed:
 

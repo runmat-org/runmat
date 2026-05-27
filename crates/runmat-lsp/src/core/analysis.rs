@@ -3061,6 +3061,9 @@ mod tests {
             ("max([1,2,3]);", "M = max(A)"),
             ("max([1,2,3], [3,2,1]);", "M = max(A, B)"),
             ("max([1,2,3], [], 1);", "M = max(A, [], dim)"),
+            ("min([1,2,3]);", "M = min(A)"),
+            ("min([1,2,3], [3,2,1]);", "M = min(A, B)"),
+            ("min([1,2,3], [], 1);", "M = min(A, [], dim)"),
             ("diff([1,2,3]);", "B = diff(X)"),
             ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
             ("gradient([1,2,3]);", "G = gradient(F)"),
@@ -3239,6 +3242,17 @@ mod tests {
             max_candidates.iter().any(|detail| detail.contains("max(")),
             "expected descriptor signature detail for max completion, got {:?}",
             max_candidates
+        );
+
+        let min_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("min"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            min_candidates.iter().any(|detail| detail.contains("min(")),
+            "expected descriptor signature detail for min completion, got {:?}",
+            min_candidates
         );
 
         let diff_candidates: Vec<String> = completions

@@ -120,12 +120,13 @@
 | Wave 115 (Math Reduction Core B) | `mean` | Done | `c92dcc60` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::mean::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Completed descriptor-backed `mean` migration with exhaustive signature set (dim/vecdim/\"all\"/nanflag/outtype/\"like\" forms), stable descriptor error rows (`INVALID_ARGUMENT`/`INVALID_INPUT`/`INTERNAL`) as source-of-truth, runtime descriptor signature + identifier assertions, and LSP descriptor-driven signature-help/completion coverage for `mean`. |
 | Wave 116 (Math Reduction Finite-Difference Core) | `diff`, `gradient` | Done | `74689f26` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::diff::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::gradient::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for finite-difference and numerical-gradient forms (including by-requested-output gradient signatures), migrated stable runtime argument/input/internal branches to descriptor-backed error rows, added runtime descriptor signature + identifier assertions for both builtins, and expanded descriptor-driven LSP reduction signature/completion coverage to include `diff` and `gradient`. |
 | Wave 117 (Math Reduction Extrema Core A) | `max` | Done | `7a9d6b15` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::max::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for reduction/elementwise extrema forms (single-output and `[M,I]`, `[]` placeholder reduction grammar, `all`/`linear` flags, nanflag and `ComparisonMethod` options), migrated runtime argument/input/size/internal branches to descriptor-backed stable errors, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `max`. |
+| Wave 118 (Math Reduction Extrema Core B) | `min` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::min::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for reduction/elementwise minima forms (single-output and `[M,I]`, `[]` placeholder reduction grammar, `all`/`linear` flags, nanflag and `ComparisonMethod` options), preserved runtime semantics while migrating stable argument/input/size/internal branches to descriptor-backed errors, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `min`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `342`
-- Remaining: `226`
+- Migrated with attached descriptor: `343`
+- Remaining: `225`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -149,6 +150,7 @@ Loop instructions:
    - example: author `RunMat:lt:ComplexNotSupported` and `lt: complex numbers are not supported` exactly once on `LT_ERROR_COMPLEX_UNSUPPORTED`, then throw with `lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED)`;
    - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
    - do not throw stable branches via message-only helpers (`foo_error(FOO_ERROR_X.message)` is disallowed); pass descriptor rows to helpers so identifier/code/message stay coupled;
+   - do not construct stable throws from partial fields (`foo_error_with_message(FOO_ERROR_X.message, ...)` / direct `with_identifier("RunMat:...")`); stable throw helpers must take `&BuiltinErrorDescriptor` for the branch;
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
    - tests should prefer descriptor constants for stable identifier/message/code assertions when practical;
