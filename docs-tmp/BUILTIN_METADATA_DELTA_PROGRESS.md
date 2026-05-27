@@ -103,12 +103,13 @@
 | Wave 98 (Math Trigonometry Core B) | `asin`, `acos`, `atan` | Done | `fecc6bcb` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime builtins::math::trigonometry:: -- --nocapture`; `cargo test -p runmat-runtime builtins::structs::core::getfield::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::structs::core::setfield::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for inverse trig core forms, added stable descriptor-backed runtime error rows (including `atan` `"like"` option/prototype/provider branches), migrated stable runtime branches to descriptor-sourced identifiers/messages/codes, added runtime descriptor signature + identifier assertions, extended descriptor-driven LSP signature-help coverage for `asin`/`acos`/`atan`, and normalized undefined-function identifier usage in migrated struct-core paths to shared runtime constant source-of-truth. |
 | Wave 99 (Math Trigonometry Hyperbolic Core) | `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | Done | `1f130ebb` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime builtins::math::trigonometry:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for hyperbolic and inverse-hyperbolic trigonometry unary forms, added stable descriptor-backed invalid-input/internal error rows, migrated runtime parser/reduction/conversion/allocation branches to descriptor-sourced identifiers/messages/codes, added runtime descriptor signature + identifier assertions for all six builtins, and extended descriptor-driven LSP signature-help coverage for hyperbolic forms. |
 | Wave 100 (Math Trigonometry Degree/Core Conversion) | `sind`, `cosd`, `tand`, `deg2rad`, `rad2deg` | Done | `2ac088e3` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime builtins::math::trigonometry:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for degree-domain trigonometry and degree/radian conversion unary forms, added stable descriptor-backed invalid-input/internal error rows, migrated runtime conversion/allocation branches to descriptor-sourced identifiers/messages/codes, added runtime descriptor signature + identifier assertions for all five builtins, and extended descriptor-driven LSP signature-help coverage for `sind`/`cosd`/`tand`/`deg2rad`/`rad2deg`. |
+| Wave 101 (Math Signal Window/Waveform Core A) | `hann`, `hamming`, `blackman`, `sinc`, `square`, `sawtooth` | Done | `5238fdc9` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::signal:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for signal window and waveform core forms, introduced typed window-argument error boundaries in shared signal parsing helpers (no string heuristics), migrated stable runtime branches to descriptor-backed codes/identifiers/messages, added runtime descriptor signature tests for all six builtins, and added descriptor-driven LSP signature-help coverage for `hann`/`hamming`/`blackman`/`sinc`/`square`/`sawtooth`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `309`
-- Remaining: `259`
+- Migrated with attached descriptor: `315`
+- Remaining: `253`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -125,6 +126,7 @@ Loop instructions:
 3. Do not duplicate stable identifier/message/code values:
    - no `const IDENT_*`, no `const *_MESSAGE`, no `const *_CODE`;
    - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
+   - example: author `RunMat:lt:ComplexNotSupported` and `lt: complex numbers are not supported` exactly once on `LT_ERROR_COMPLEX_UNSUPPORTED`, then throw with `lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED)`;
    - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
