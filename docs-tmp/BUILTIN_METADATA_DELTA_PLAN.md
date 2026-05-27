@@ -235,6 +235,7 @@ Rule:
    - Build `FOO_ERRORS` from those constants.
    - Throw only through helpers that accept `&'static BuiltinErrorDescriptor`.
    - Do not create parallel `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` mirrors.
+   - Do not introduce temporary mirrors in intermediate commits during migration; descriptor rows are the only stable-literal authoring point from the first migrated commit.
 
 18. Exact anti-pattern to reject (this is not allowed in migrated builtins):
 

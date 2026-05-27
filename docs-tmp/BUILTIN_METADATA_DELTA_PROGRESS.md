@@ -108,12 +108,13 @@
 | Wave 103 (Math Signal Filter Core) | `filter` | Done | `54a20e2a` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::signal::filter::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for filter single/multi-output call forms (`y` and `[y,zf]` with optional `zi`/`dim`), mapped argument/dimension/input/state/provider-upload branches to stable descriptor-backed error rows, added runtime descriptor signature assertions, and added descriptor-driven LSP signature-help coverage for `filter`. |
 | Wave 104 (Math FFT Core A) | `fft`, `ifft` | Done | `c39fddb0` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::fft::forward::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::fft::ifft::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for forward/inverse FFT core forms (including `ifft` symflag permutations), mapped argument/length/dimension/symflag/input/transform branches to stable descriptor-backed error rows, added runtime descriptor signature assertions for both builtins, and added descriptor-driven LSP signature-help coverage for `fft`/`ifft`. |
 | Wave 105 (Math FFT Core B) | `fft2`, `ifft2` | Done | `796c59b8` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::fft::fft2::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::fft::ifft2::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for 2-D FFT/inverse FFT forms (including scalar/size-vector/two-length variants and `ifft2` symflag permutations), mapped length/size/symflag/input/transform branches to stable descriptor-backed error rows, added runtime descriptor signature assertions for both builtins, and expanded descriptor-driven LSP signature-help coverage for the FFT family. |
+| Wave 106 (Math FFT Core C) | `fftn`, `ifftn` | Done | `de5a07f8` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::fft::fftn::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::fft::ifftn::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for N-D FFT/inverse FFT forms (including `ifftn` symflag variants), mapped argument-count/SIZE/symflag/input/transform branches to stable descriptor-backed error rows, added runtime descriptor signature + stable identifier assertions for both builtins, and expanded descriptor-driven LSP signature-help coverage for the FFT family. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `323`
-- Remaining: `245`
+- Migrated with attached descriptor: `325`
+- Remaining: `243`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -135,6 +136,7 @@ Loop instructions:
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
    - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);
+   - do not introduce temporary `IDENT_*` / `*_MESSAGE` / `*_CODE` constants even in intermediate commits; descriptor rows are the only canonical authoring point from the first commit in a wave;
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.
 4. Extend tests:
    - runtime descriptor signature tests for migrated builtins;
