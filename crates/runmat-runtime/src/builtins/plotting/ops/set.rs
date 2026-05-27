@@ -1,8 +1,87 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::properties::{resolve_plot_handle, set_properties};
 use crate::builtins::plotting::type_resolvers::set_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "set";
+
+const SET_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Returns \"ok\" when property updates succeed.",
+}];
+
+const SET_INPUTS_HANDLE_PAIRS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "h",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Graphics handle (figure, axes, plot object, text, legend, etc.).",
+    },
+    BuiltinParamDescriptor {
+        name: "pairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs to assign (for example 'LineWidth', 2).",
+    },
+];
+
+const SET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "status = set(h, property, value, ...)",
+    inputs: &SET_INPUTS_HANDLE_PAIRS,
+    outputs: &SET_OUTPUT_STATUS,
+}];
+
+const SET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SET.INVALID_ARGUMENT",
+    identifier: Some("RunMat:set:InvalidArgument"),
+    when: "Handle value is invalid or property/value pairs are missing/malformed/unsupported.",
+    message: "set: invalid argument",
+};
+
+const SET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SET.INTERNAL",
+    identifier: Some("RunMat:set:Internal"),
+    when: "Internal handle/property mutation fails unexpectedly.",
+    message: "set: internal operation failed",
+};
+
+const SET_ERRORS: [BuiltinErrorDescriptor; 2] = [SET_ERROR_INVALID_ARGUMENT, SET_ERROR_INTERNAL];
+
+pub const SET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SET_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SET_ERRORS,
+};
+
+fn set_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_set_error(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    set_error_with_detail(&SET_ERROR_INVALID_ARGUMENT, err.message)
+}
 
 #[runtime_builtin(
     name = "set",
@@ -11,17 +90,18 @@ use crate::builtins::plotting::type_resolvers::set_type;
     keywords = "set,plotting,handle,property",
     suppress_auto_output = true,
     type_resolver(set_type),
+    descriptor(crate::builtins::plotting::set::SET_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::set"
 )]
 pub fn set_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     if args.len() < 3 {
-        return Err(crate::builtins::plotting::plotting_error(
-            "set",
-            "set: expected a plotting handle followed by property/value pairs",
+        return Err(set_error_with_detail(
+            &SET_ERROR_INVALID_ARGUMENT,
+            "expected a plotting handle followed by property/value pairs",
         ));
     }
-    let handle = resolve_plot_handle(&args[0], "set")?;
-    set_properties(handle, &args[1..], "set")?;
+    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_set_error)?;
+    set_properties(handle, &args[1..], BUILTIN_NAME).map_err(map_set_error)?;
     Ok("ok".to_string())
 }
 
@@ -42,6 +122,24 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    #[test]
+    fn set_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SET_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = set(h, property, value, ...)"));
+    }
+
+    #[test]
+    fn set_missing_pairs_uses_stable_identifier() {
+        let _guard = setup();
+        let err = set_builtin(vec![Value::Num(1.0)])
+            .expect_err("expected missing property/value pairs to fail");
+        assert_eq!(err.identifier(), SET_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

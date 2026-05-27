@@ -2039,6 +2039,11 @@ mod tests {
             ("gca();", "ax = gca()"),
             ("isgraphics(1);", "tf = isgraphics(h)"),
             ("ishandle(1);", "tf = ishandle(h)"),
+            ("get(1);", "value = get(h)"),
+            (
+                "set(1, 'Visible', true);",
+                "status = set(h, property, value, ...)",
+            ),
         ];
 
         for (text, expected_label) in cases {
