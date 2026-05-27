@@ -2130,6 +2130,8 @@ mod tests {
             ("bar([1 2 3], [3 2 1]);", "h = bar(X, Y)"),
             ("mesh([1 2; 3 4]);", "h = mesh(Z)"),
             ("meshc([1 2; 3 4]);", "h = meshc(Z)"),
+            ("stairs([1 2 3]);", "h = stairs(Y)"),
+            ("stem([1 2 3]);", "h = stem(Y)"),
             ("image([1 2; 3 4]);", "h = image(C)"),
             ("imagesc([1 2; 3 4]);", "h = imagesc(C)"),
             ("text(1, 2, 'pt');", "h = text(x, y, label)"),
