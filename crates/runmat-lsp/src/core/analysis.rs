@@ -3158,6 +3158,10 @@ mod tests {
             ("dot([1,2], [3,4], 2);", "C = dot(A, B, dim)"),
             ("cross([1,0,0], [0,1,0]);", "C = cross(A, B)"),
             ("cross([1,0,0], [0,1,0], 2);", "C = cross(A, B, dim)"),
+            ("mldivide([1,2;3,4], [5;6]);", "X = mldivide(A, B)"),
+            ("mrdivide([1,2], [1,2;3,4]);", "X = mrdivide(A, B)"),
+            ("mtimes([1,2;3,4], [5;6]);", "C = mtimes(A, B)"),
+            ("mpower([1,2;3,4], 2);", "B = mpower(A, p)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3305,6 +3309,58 @@ mod tests {
                 .any(|detail| detail.contains("cross(")),
             "expected descriptor signature detail for cross completion, got {:?}",
             cross_candidates
+        );
+
+        let mldivide_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("mldivide"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            mldivide_candidates
+                .iter()
+                .any(|detail| detail.contains("mldivide(")),
+            "expected descriptor signature detail for mldivide completion, got {:?}",
+            mldivide_candidates
+        );
+
+        let mrdivide_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("mrdivide"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            mrdivide_candidates
+                .iter()
+                .any(|detail| detail.contains("mrdivide(")),
+            "expected descriptor signature detail for mrdivide completion, got {:?}",
+            mrdivide_candidates
+        );
+
+        let mtimes_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("mtimes"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            mtimes_candidates
+                .iter()
+                .any(|detail| detail.contains("mtimes(")),
+            "expected descriptor signature detail for mtimes completion, got {:?}",
+            mtimes_candidates
+        );
+
+        let mpower_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("mpower"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            mpower_candidates
+                .iter()
+                .any(|detail| detail.contains("mpower(")),
+            "expected descriptor signature detail for mpower completion, got {:?}",
+            mpower_candidates
         );
     }
 

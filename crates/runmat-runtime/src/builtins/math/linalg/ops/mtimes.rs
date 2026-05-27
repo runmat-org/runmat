@@ -1,7 +1,11 @@
 //! MATLAB-compatible `mtimes` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -14,6 +18,61 @@ use crate::builtins::math::linalg::type_resolvers::matmul_type;
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mtimes";
+
+const MTIMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Matrix product result.",
+}];
+
+const MTIMES_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const MTIMES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "C = mtimes(A, B)",
+    inputs: &MTIMES_INPUTS,
+    outputs: &MTIMES_OUTPUT,
+}];
+
+const MTIMES_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MTIMES.INVALID_INPUT",
+    identifier: Some("RunMat:mtimes:InvalidInput"),
+    when: "Operands are unsupported or matrix dimensions are incompatible.",
+    message: "mtimes: unsupported operand types",
+};
+
+const MTIMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MTIMES.INTERNAL",
+    identifier: Some("RunMat:mtimes:Internal"),
+    when: "Runtime cannot materialize matrix product outputs.",
+    message: "mtimes: internal runtime failure",
+};
+
+const MTIMES_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [MTIMES_ERROR_INVALID_INPUT, MTIMES_ERROR_INTERNAL];
+
+pub const MTIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MTIMES_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MTIMES_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mtimes")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,8 +93,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Calls the provider `matmul` hook when available; otherwise gathers inputs and executes the CPU fallback.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn mtimes_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    mtimes_error_with_message(error.message, error)
+}
+
+fn mtimes_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn mtimes_invalid_input(message: impl Into<String>) -> RuntimeError {
+    mtimes_error_with_message(message, &MTIMES_ERROR_INVALID_INPUT)
+}
+
+fn mtimes_internal_error(message: impl Into<String>) -> RuntimeError {
+    mtimes_error_with_message(message, &MTIMES_ERROR_INTERNAL)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -73,6 +151,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mtimes,matrix multiplication,linear algebra,gpu",
     accel = "matmul",
     type_resolver(matmul_type),
+    descriptor(crate::builtins::math::linalg::ops::mtimes::MTIMES_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::mtimes"
 )]
 async fn mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -178,7 +257,7 @@ async fn real_scalar_value(
         Value::GpuTensor(handle) if is_scalar_handle(handle) => {
             let host = download_handle_async(provider, handle)
                 .await
-                .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+                .map_err(|e| mtimes_internal_error(format!("{NAME}: {e}")))?;
             Ok(host.data.first().copied())
         }
         _ => Ok(None),
@@ -202,11 +281,11 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
     match (lhs, rhs) {
         (LogicalArray(la), other) => {
-            let tensor = tensor::logical_to_tensor(&la).map_err(builtin_error)?;
+            let tensor = tensor::logical_to_tensor(&la).map_err(mtimes_invalid_input)?;
             mtimes_cpu(Value::Tensor(tensor), other).await
         }
         (other, LogicalArray(lb)) => {
-            let tensor = tensor::logical_to_tensor(&lb).map_err(builtin_error)?;
+            let tensor = tensor::logical_to_tensor(&lb).map_err(mtimes_invalid_input)?;
             mtimes_cpu(other, Value::Tensor(tensor)).await
         }
         (Bool(b), other) => {
@@ -245,19 +324,19 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             Ok(complex_tensor_into_value(tensor))
         }
         (ComplexTensor(ta), ComplexTensor(tb)) => {
-            let tensor = linalg::matmul_complex(&ta, &tb).map_err(builtin_error)?;
+            let tensor = linalg::matmul_complex(&ta, &tb).map_err(mtimes_invalid_input)?;
             Ok(complex_tensor_into_value(tensor))
         }
         (ComplexTensor(ta), Tensor(tb)) => {
-            let tensor = linalg::matmul_complex_real(&ta, &tb).map_err(builtin_error)?;
+            let tensor = linalg::matmul_complex_real(&ta, &tb).map_err(mtimes_invalid_input)?;
             Ok(complex_tensor_into_value(tensor))
         }
         (Tensor(ta), ComplexTensor(tb)) => {
-            let tensor = linalg::matmul_real_complex(&ta, &tb).map_err(builtin_error)?;
+            let tensor = linalg::matmul_real_complex(&ta, &tb).map_err(mtimes_invalid_input)?;
             Ok(complex_tensor_into_value(tensor))
         }
         (Tensor(ta), Tensor(tb)) => {
-            let tensor = linalg::matmul_real(&ta, &tb).map_err(builtin_error)?;
+            let tensor = linalg::matmul_real(&ta, &tb).map_err(mtimes_invalid_input)?;
             Ok(tensor::tensor_into_value(tensor))
         }
         (Tensor(ta), Num(s)) => Ok(tensor::tensor_into_value(linalg::scalar_mul_real(&ta, s))),
@@ -274,7 +353,7 @@ async fn mtimes_cpu(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         (Int(x), Num(y)) => Ok(Num(x.to_f64() * y)),
         (Num(x), Int(y)) => Ok(Num(x * y.to_f64())),
         (Int(x), Int(y)) => Ok(Num(x.to_f64() * y.to_f64())),
-        _ => Err(builtin_error("mtimes: unsupported operand types")),
+        _ => Err(mtimes_error(&MTIMES_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -302,7 +381,7 @@ fn prepare_gpu_operand(
             if logical.data.len() == 1 {
                 Ok(None)
             } else {
-                let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
+                let tensor = tensor::logical_to_tensor(logical).map_err(mtimes_invalid_input)?;
                 let uploaded = upload_tensor(provider, &tensor)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
@@ -321,7 +400,7 @@ fn upload_tensor(
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| builtin_error(format!("mtimes: {e}")))?;
+        .map_err(|e| mtimes_internal_error(format!("mtimes: {e}")))?;
     Ok(handle)
 }
 
@@ -408,6 +487,27 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn mtimes_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MTIMES_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"C = mtimes(A, B)"));
+    }
+
+    #[test]
+    fn mtimes_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = MTIMES_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|err| err.code)
+            .collect();
+        assert!(codes.contains(&"RM.MTIMES.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.MTIMES.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn scalar_matrix_product() {
@@ -490,6 +590,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 6.0, 7.0], vec![3, 1]).unwrap();
         let err = unwrap_error(mtimes_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap_err());
+        assert_eq!(err.identifier(), MTIMES_ERROR_INVALID_INPUT.identifier);
         assert!(
             err.message().contains("Inner matrix dimensions must agree"),
             "unexpected error message: {err}"
