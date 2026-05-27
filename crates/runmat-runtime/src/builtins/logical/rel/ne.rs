@@ -118,14 +118,7 @@ pub const NE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 fn ne_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    ne_error_with_message(error.message, error)
-}
-
-fn ne_error_with_message(
-    message: impl Into<String>,
-    error: &'static BuiltinErrorDescriptor,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }

@@ -43,7 +43,15 @@ const ISEQUAL_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDesc
     message: "isequal: requires at least two input arguments",
 };
 
-const ISEQUAL_ERRORS: [BuiltinErrorDescriptor; 1] = [ISEQUAL_ERROR_NOT_ENOUGH_INPUTS];
+const ISEQUAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISEQUAL.INTERNAL",
+    identifier: Some("RunMat:isequal:Internal"),
+    when: "Internal gather/host normalization fails.",
+    message: "isequal: internal error",
+};
+
+const ISEQUAL_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [ISEQUAL_ERROR_NOT_ENOUGH_INPUTS, ISEQUAL_ERROR_INTERNAL];
 
 pub const ISEQUAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ISEQUAL_SIGNATURES,
@@ -53,13 +61,18 @@ pub const ISEQUAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 fn isequal_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    isequal_error_with_message(error.message, error)
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn isequal_error_with_message(
-    message: impl Into<String>,
+fn isequal_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
 ) -> RuntimeError {
+    let message = format!("{}: {}", error.message, detail.as_ref());
     let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
@@ -108,10 +121,7 @@ async fn gather_value(value: Value) -> crate::BuiltinResult<Value> {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| {
-                    isequal_error_with_message(
-                        format!("{BUILTIN_NAME}: {err}"),
-                        &ISEQUAL_ERROR_NOT_ENOUGH_INPUTS,
-                    )
+                    isequal_error_with_detail(&ISEQUAL_ERROR_INTERNAL, err.to_string())
                 })?;
             Ok(Value::Tensor(tensor))
         }

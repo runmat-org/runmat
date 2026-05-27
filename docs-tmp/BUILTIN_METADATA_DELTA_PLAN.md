@@ -232,6 +232,8 @@ Rule:
 16. Keep the helper split explicit:
    - `foo_error(&FOO_ERROR_...)` for stable descriptor-backed branches (including the branch's canonical message text).
    - `foo_internal_error(...)` (or `foo_error_with(&FOO_ERROR_INTERNAL, ...)`) for contextual/internal detail text.
+   - `foo_error_with_detail(&FOO_ERROR_..., detail)` for contextual suffix text while preserving descriptor-owned stable message/code/identifier.
+   - disallowed: defining stable helper surfaces that accept arbitrary message replacement (for example `fn foo_error_with_message(message, error)`); migrated files should expose only descriptor-driven stable helpers.
    - disallowed: fallback helpers that accept only free-form message text (for example `fn foo_error(message: impl Into<String>)`) because they bypass descriptor-row source-of-truth for stable branches.
    - disallowed: stable-branch helpers that accept arbitrary replacement message text even when they also take a descriptor row (for example `foo_error_with_message(message, &FOO_ERROR_...)`); use `foo_error(&FOO_ERROR_...)` or `foo_error_with_detail(&FOO_ERROR_..., detail)` so canonical message text remains descriptor-owned.
 17. Canonical in-file source-of-truth:
