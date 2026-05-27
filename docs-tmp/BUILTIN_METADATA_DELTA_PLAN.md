@@ -282,6 +282,7 @@ No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
 
 21. Literal reuse policy for stable throws:
    - Stable branches must pass the descriptor row itself to the throw helper (for example `foo_error(&FOO_ERROR_X)`), not only `FOO_ERROR_X.message`.
+   - For fixed-message stable branches, use `foo_error(&FOO_ERROR_X)` so the canonical message is owned by the descriptor row.
    - Do not restate exact stable message/code/identifier literals outside descriptor rows in runtime source.
    - If extra context is required, use descriptor-aware detail helpers (for example `foo_error_with_detail(&FOO_ERROR_X, "...")`) so stable identifier/message/code still come from the descriptor row.
 
@@ -310,6 +311,8 @@ Audit checks:
 
 1. `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`
 2. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
+3. Optional narrowed grep for forwarded descriptor fields (avoids generic helper false positives):
+   - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" crates/runmat-runtime/src/builtins`
 
 Notes:
 

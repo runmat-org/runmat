@@ -123,12 +123,13 @@
 | Wave 118 (Math Reduction Extrema Core B) | `min` | Done | `56ef55ca` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::min::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for reduction/elementwise minima forms (single-output and `[M,I]`, `[]` placeholder reduction grammar, `all`/`linear` flags, nanflag and `ComparisonMethod` options), preserved runtime semantics while migrating stable argument/input/size/internal branches to descriptor-backed errors, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `min`. |
 | Wave 119 (Math Reduction Core C) | `median` | Done | `d1a69baa` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::median::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for median reduction forms (default/dim/vecdim/`all`/`[]` and nanflag order permutations), migrated stable argument/input/internal runtime branches to descriptor-backed errors while preserving existing reduction semantics, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `median`. |
 | Wave 120 (Math Reduction Core D) | `std` | Done | `4c8723c2` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::std::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for std reduction forms (normalization `w`, dim/vecdim/`all`, nanflag permutations, outtype, and `"like"` prototype), migrated stable argument/input/complex-unsupported/internal runtime branches to descriptor-backed errors without semantic drift, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `std`. |
+| Wave 121 (Math Reduction Core E) | `var` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::var::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for variance reduction forms (`w` normalization, dim/vecdim/`all`, nanflag permutations), migrated stable argument/input/complex-unsupported/internal runtime branches to descriptor-backed errors without semantic drift, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `var`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `345`
-- Remaining: `223`
+- Migrated with attached descriptor: `346`
+- Remaining: `222`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -151,6 +152,7 @@ Loop instructions:
    - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
    - example: author `RunMat:lt:ComplexNotSupported` and `lt: complex numbers are not supported` exactly once on `LT_ERROR_COMPLEX_UNSUPPORTED`, then throw with `lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED)`;
    - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
+   - for fixed-message stable branches, throw via `foo_error(&FOO_ERROR_...)` (descriptor-owned message) rather than passing a new branch message string;
    - do not throw stable branches via message-only helpers (`foo_error(FOO_ERROR_X.message)` is disallowed); pass descriptor rows to helpers so identifier/code/message stay coupled;
    - do not construct stable throws from partial fields (`foo_error_with_message(FOO_ERROR_X.message, ...)` / direct `with_identifier("RunMat:...")`); stable throw helpers must take `&BuiltinErrorDescriptor` for the branch;
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
@@ -169,7 +171,7 @@ Loop instructions:
    - `cargo test -p runmat-lsp`
 6. Run audit grep before commit:
    - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" <touched_builtin_files...>`
-   - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z0-9_]+\\s*,\\s*$|^\\s*message:\\s*[A-Z0-9_]+\\s*,\\s*$" <touched_builtin_files...>`
+   - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" <touched_builtin_files...>`
    - `rg -n 'with_identifier\\(\"RunMat:' <touched_builtin_files...>`
    - `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`
 7. Update this progress tracker wave row with commit hash and validation set.

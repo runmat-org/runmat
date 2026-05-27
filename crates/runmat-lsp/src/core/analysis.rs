@@ -3073,6 +3073,9 @@ mod tests {
                 "std([1,2,3], \"like\", 1);",
                 "S = std(A, \"like\", prototype)",
             ),
+            ("var([1,2,3]);", "V = var(A)"),
+            ("var([1,2,3], 0, 1);", "V = var(A, w, dim)"),
+            ("var([1,2,3], \"omitnan\");", "V = var(A, nanflag)"),
             ("diff([1,2,3]);", "B = diff(X)"),
             ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
             ("gradient([1,2,3]);", "G = gradient(F)"),
@@ -3286,6 +3289,17 @@ mod tests {
             std_candidates.iter().any(|detail| detail.contains("std(")),
             "expected descriptor signature detail for std completion, got {:?}",
             std_candidates
+        );
+
+        let var_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("var"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            var_candidates.iter().any(|detail| detail.contains("var(")),
+            "expected descriptor signature detail for var completion, got {:?}",
+            var_candidates
         );
 
         let diff_candidates: Vec<String> = completions
