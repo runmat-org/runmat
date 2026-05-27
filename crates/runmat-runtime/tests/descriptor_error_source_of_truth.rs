@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -29,6 +30,13 @@ fn is_upper_snake_token(token: &str) -> bool {
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
+fn parse_inline_string_literal(trimmed_line: &str) -> Option<String> {
+    let first_quote = trimmed_line.find('"')?;
+    let remainder = &trimmed_line[first_quote + 1..];
+    let second_quote = remainder.find('"')?;
+    Some(remainder[..second_quote].to_string())
+}
+
 #[test]
 fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
     let builtins_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/builtins");
@@ -45,6 +53,9 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
             continue;
         }
         let runtime_source = pre_test_source(&source);
+        let mut descriptor_identifier_counts: HashMap<String, usize> = HashMap::new();
+        let mut descriptor_code_counts: HashMap<String, usize> = HashMap::new();
+        let mut descriptor_message_counts: HashMap<String, usize> = HashMap::new();
 
         assert!(
             !source.contains("const IDENT_"),
@@ -53,7 +64,7 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
         );
 
         let mut in_error_descriptor = false;
-        for line in source.lines() {
+        for line in runtime_source.lines() {
             let trimmed = line.trim();
             let is_error_const = trimmed.starts_with("const ")
                 && trimmed.contains(": &str")
@@ -84,6 +95,9 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
                     "{} forwards identifier via constant/expression ({trimmed}); keep identifier text authored inline in BuiltinErrorDescriptor rows",
                     file.display()
                 );
+                if let Some(identifier) = parse_inline_string_literal(trimmed) {
+                    *descriptor_identifier_counts.entry(identifier).or_insert(0) += 1;
+                }
             }
 
             if trimmed.starts_with("code:") {
@@ -94,6 +108,9 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
                         "{} forwards error code via constant/expression ({trimmed}); keep code text authored inline in BuiltinErrorDescriptor rows",
                         file.display()
                     );
+                }
+                if let Some(code) = parse_inline_string_literal(trimmed) {
+                    *descriptor_code_counts.entry(code).or_insert(0) += 1;
                 }
             }
 
@@ -106,6 +123,9 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
                         file.display()
                     );
                 }
+                if let Some(message) = parse_inline_string_literal(trimmed) {
+                    *descriptor_message_counts.entry(message).or_insert(0) += 1;
+                }
             }
         }
 
@@ -114,5 +134,35 @@ fn migrated_builtin_files_do_not_duplicate_stable_error_constants() {
             "{} hard-codes a RunMat identifier via with_identifier(...); throw through BuiltinErrorDescriptor rows instead",
             file.display()
         );
+
+        for (identifier, expected_count) in descriptor_identifier_counts {
+            let quoted_identifier = format!("\"{identifier}\"");
+            let actual_count = runtime_source.matches(&quoted_identifier).count();
+            assert_eq!(
+                actual_count, expected_count,
+                "{} duplicates stable identifier literal `{}` outside BuiltinErrorDescriptor rows; keep identifier authored only in descriptor rows",
+                file.display(), identifier
+            );
+        }
+
+        for (code, expected_count) in descriptor_code_counts {
+            let quoted_code = format!("\"{code}\"");
+            let actual_count = runtime_source.matches(&quoted_code).count();
+            assert_eq!(
+                actual_count, expected_count,
+                "{} duplicates stable error code literal `{}` outside BuiltinErrorDescriptor rows; keep code authored only in descriptor rows",
+                file.display(), code
+            );
+        }
+
+        for (message, expected_count) in descriptor_message_counts {
+            let quoted_message = format!("\"{message}\"");
+            let actual_count = runtime_source.matches(&quoted_message).count();
+            assert_eq!(
+                actual_count, expected_count,
+                "{} duplicates stable error message literal `{}` outside BuiltinErrorDescriptor rows; keep message authored only in descriptor rows",
+                file.display(), message
+            );
+        }
     }
 }

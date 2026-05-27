@@ -241,7 +241,7 @@ async fn circshift_builtin(
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(circshift_too_many_inputs(
-            "circshift: too many input arguments",
+            CIRCSHIFT_ERROR_TOO_MANY_INPUTS.message,
         ));
     }
     let spec = parse_circshift_spec(&shift, &rest)?;
@@ -295,7 +295,7 @@ async fn circshift_builtin(
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::OutputList(_) => Err(circshift_unsupported_input(
-            "circshift: unsupported input type",
+            CIRCSHIFT_ERROR_UNSUPPORTED_INPUT.message,
         )),
     }
 }

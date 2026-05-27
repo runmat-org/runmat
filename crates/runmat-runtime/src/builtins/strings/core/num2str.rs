@@ -486,7 +486,10 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
 
     let captures = FORMAT_RE.captures(text).ok_or_else(|| {
         num2str_error_with_message(
-            "num2str: unsupported format string; expected variants like '%0.3f' or '%.5g'",
+            format!(
+                "{}; expected variants like '%0.3f' or '%.5g'",
+                NUM2STR_ERROR_INVALID_FORMAT.message
+            ),
             &NUM2STR_ERROR_INVALID_FORMAT,
         )
     })?;
@@ -595,8 +598,8 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
         }
         other => Err(num2str_error_with_message(
             format!(
-                "num2str: unsupported input type {:?}; expected numeric or logical values",
-                other
+                "{} {:?}; expected numeric or logical values",
+                NUM2STR_ERROR_INVALID_INPUT.message, other
             ),
             &NUM2STR_ERROR_INVALID_INPUT,
         )),

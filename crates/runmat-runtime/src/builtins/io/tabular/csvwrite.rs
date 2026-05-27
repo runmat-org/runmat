@@ -273,7 +273,7 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
         return Err(csvwrite_error_with(
             &CSVWRITE_ERROR_FILENAME_EMPTY,
-            "csvwrite: filename must not be empty",
+            CSVWRITE_ERROR_FILENAME_EMPTY.message,
         ));
     }
 

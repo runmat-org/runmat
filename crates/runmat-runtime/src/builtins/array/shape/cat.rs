@@ -474,7 +474,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
 )]
 async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
-        return Err(cat_err("cat: at least two input arrays are required"));
+        return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
     }
     let dim_index = match dim {
         Value::Int(_) | Value::Num(_) | Value::GpuTensor(_) => {
@@ -502,14 +502,12 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
 
     let (inputs, like) = extract_like(rest)?;
     if inputs.len() < 2 {
-        return Err(cat_err("cat: at least two input arrays are required"));
+        return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
     }
 
     if inputs.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
         if !inputs.iter().all(|v| matches!(v, Value::GpuTensor(_))) {
-            return Err(cat_err(
-                "cat: cannot mix gpuArray inputs with host arrays; convert them first",
-            ));
+            return Err(cat_err(CAT_ERROR_MIXED_RESIDENCY.message));
         }
         return cat_gpu_tensors(dim_zero, inputs, &like).await;
     }

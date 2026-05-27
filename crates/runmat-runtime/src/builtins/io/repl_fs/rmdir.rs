@@ -322,7 +322,7 @@ impl RmdirResult {
 
     fn empty_name() -> Self {
         Self::failure(
-            "Folder name must not be empty.".to_string(),
+            RMDIR_RESULT_EMPTY_NAME.message.to_string(),
             &RMDIR_RESULT_EMPTY_NAME,
         )
     }

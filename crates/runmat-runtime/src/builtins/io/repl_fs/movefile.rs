@@ -330,14 +330,14 @@ impl MovefileResult {
 
     fn empty_source() -> Self {
         Self::failure(
-            "Source file or folder name must not be empty.".to_string(),
+            MOVEFILE_RESULT_EMPTY_SOURCE.message.to_string(),
             &MOVEFILE_RESULT_EMPTY_SOURCE,
         )
     }
 
     fn empty_destination() -> Self {
         Self::failure(
-            "Destination file or folder name must not be empty.".to_string(),
+            MOVEFILE_RESULT_EMPTY_DEST.message.to_string(),
             &MOVEFILE_RESULT_EMPTY_DEST,
         )
     }

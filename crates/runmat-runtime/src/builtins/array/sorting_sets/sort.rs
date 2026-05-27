@@ -774,7 +774,7 @@ impl SortArgs {
                     "missingplacement" => {
                         return Err(sort_error(
                             &SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
-                            "sort: the 'MissingPlacement' option is not supported yet",
+                            SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.message,
                         )
                         .into());
                     }
@@ -834,7 +834,7 @@ impl SortArgs {
                     "missingplacement" => {
                         return Err(sort_error(
                             &SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED,
-                            "sort: the 'MissingPlacement' option is not supported yet",
+                            SORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.message,
                         )
                         .into());
                     }

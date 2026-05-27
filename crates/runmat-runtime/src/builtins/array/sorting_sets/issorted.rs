@@ -539,7 +539,7 @@ fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResul
     if direction.is_some() {
         Err(issorted_error(
             &ISSORTED_ERROR_DUPLICATE_DIRECTION,
-            "issorted: sorting direction specified more than once",
+            ISSORTED_ERROR_DUPLICATE_DIRECTION.message,
         ))
     } else {
         Ok(())

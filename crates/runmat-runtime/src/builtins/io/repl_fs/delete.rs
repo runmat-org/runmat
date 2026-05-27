@@ -226,7 +226,7 @@ async fn delete_target(raw: &str) -> BuiltinResult<()> {
     if expanded.is_empty() {
         return Err(delete_error_with(
             &DELETE_ERROR_EMPTY_FILENAME,
-            "delete: filename cannot be empty",
+            DELETE_ERROR_EMPTY_FILENAME.message,
         ));
     }
 
@@ -404,7 +404,7 @@ fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> B
         if trimmed.is_empty() {
             return Err(delete_error_with(
                 &DELETE_ERROR_EMPTY_FILENAME,
-                "delete: filename cannot be empty",
+                DELETE_ERROR_EMPTY_FILENAME.message,
             ));
         }
         targets.push(trimmed);
@@ -420,7 +420,7 @@ fn collect_string_array_targets(
         if text.is_empty() {
             return Err(delete_error_with(
                 &DELETE_ERROR_EMPTY_FILENAME,
-                "delete: filename cannot be empty",
+                DELETE_ERROR_EMPTY_FILENAME.message,
             ));
         }
         targets.push(text.clone());
@@ -505,7 +505,7 @@ fn push_nonempty_target(text: &str, targets: &mut Vec<String>) -> BuiltinResult<
     if text.is_empty() {
         Err(delete_error_with(
             &DELETE_ERROR_EMPTY_FILENAME,
-            "delete: filename cannot be empty",
+            DELETE_ERROR_EMPTY_FILENAME.message,
         ))
     } else {
         targets.push(text.to_string());

@@ -318,7 +318,7 @@ async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     if rest.is_empty() {
         return Err(webwrite_error_with(
             &WEBWRITE_ERROR_MISSING_DATA,
-            "webwrite: missing data argument",
+            WEBWRITE_ERROR_MISSING_DATA.message,
         ));
     }
 
@@ -334,7 +334,7 @@ async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     let data_value = queue.pop_front().ok_or_else(|| {
         webwrite_error_with(
             &WEBWRITE_ERROR_MISSING_DATA,
-            "webwrite: missing data argument",
+            WEBWRITE_ERROR_MISSING_DATA.message,
         )
     })?;
 

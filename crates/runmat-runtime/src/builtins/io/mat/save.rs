@@ -515,9 +515,8 @@ async fn ensure_workspace_entries(
 }
 
 async fn collect_workspace_entries() -> BuiltinResult<Vec<(String, Value)>> {
-    let snapshot = workspace::snapshot().ok_or_else(|| {
-        save_error_with(&SAVE_ERROR_WORKSPACE, "save: workspace state unavailable")
-    })?;
+    let snapshot = workspace::snapshot()
+        .ok_or_else(|| save_error_with(&SAVE_ERROR_WORKSPACE, SAVE_ERROR_WORKSPACE.message))?;
     let mut entries = Vec::with_capacity(snapshot.len());
     for (name, value) in snapshot {
         let gathered = gather_if_needed_async(&value).await?;

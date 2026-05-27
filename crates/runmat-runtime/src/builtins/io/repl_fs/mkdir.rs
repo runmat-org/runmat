@@ -274,7 +274,7 @@ impl MkdirResult {
     fn already_exists() -> Self {
         Self {
             status: 1.0,
-            message: "Directory already exists.".to_string(),
+            message: MKDIR_RESULT_DIRECTORY_EXISTS.message.to_string(),
             message_id: message_identifier(&MKDIR_RESULT_DIRECTORY_EXISTS).to_string(),
         }
     }

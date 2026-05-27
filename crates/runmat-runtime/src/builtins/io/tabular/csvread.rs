@@ -407,7 +407,7 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
         return Err(csvread_error_with(
             &CSVREAD_ERROR_FILENAME_EMPTY,
-            "csvread: filename must not be empty",
+            CSVREAD_ERROR_FILENAME_EMPTY.message,
         ));
     }
     let expanded = expand_user_path(raw, BUILTIN_NAME)

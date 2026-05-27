@@ -356,9 +356,7 @@ enum IndexComponent {
 
 fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     if rest.len() < 2 {
-        return Err(setfield_flow(
-            "setfield: expected at least one field name and a value",
-        ));
+        return Err(setfield_flow(SETFIELD_ERROR_NOT_ENOUGH_INPUTS.message));
     }
 
     let value = rest
@@ -379,7 +377,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     }
 
     if rest.is_empty() {
-        return Err(setfield_flow("setfield: expected field name arguments"));
+        return Err(setfield_flow(SETFIELD_ERROR_FIELD_EXPECTED.message));
     }
 
     let mut iter = rest.into_iter().peekable();
@@ -396,7 +394,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     }
 
     if parsed.steps.is_empty() {
-        return Err(setfield_flow("setfield: expected field name arguments"));
+        return Err(setfield_flow(SETFIELD_ERROR_FIELD_EXPECTED.message));
     }
 
     Ok(parsed)
@@ -409,7 +407,7 @@ async fn assign_value(
     rhs: Value,
 ) -> BuiltinResult<Value> {
     if steps.is_empty() {
-        return Err(setfield_flow("setfield: expected field name arguments"));
+        return Err(setfield_flow(SETFIELD_ERROR_FIELD_EXPECTED.message));
     }
     if let Some(selector) = leading_index {
         assign_with_leading_index(base, &selector, &steps, rhs).await
@@ -481,7 +479,7 @@ async fn assign_into_struct_array(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > cell.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             idx - 1
         }
@@ -489,7 +487,7 @@ async fn assign_into_struct_array(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             (row - 1) * cell.cols + (col - 1)
         }
@@ -503,7 +501,7 @@ async fn assign_into_struct_array(
     let handle = cell
         .data
         .get(position)
-        .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))?
+        .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
         .clone();
 
     let current = unsafe { &*handle.as_raw() }.clone();
@@ -639,7 +637,7 @@ async fn assign_with_selector(
                 1 => {
                     let idx = resolved[0];
                     if idx == 0 || idx > cell.data.len() {
-                        return Err(setfield_flow("Index exceeds the number of array elements."));
+                        return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
                     }
                     idx - 1
                 }
@@ -647,7 +645,7 @@ async fn assign_with_selector(
                     let row = resolved[0];
                     let col = resolved[1];
                     if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                        return Err(setfield_flow("Index exceeds the number of array elements."));
+                        return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
                     }
                     (row - 1) * cell.cols + (col - 1)
                 }
@@ -661,7 +659,7 @@ async fn assign_with_selector(
             let handle = cell
                 .data
                 .get(position)
-                .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))?
+                .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
                 .clone();
             let existing = unsafe { &*handle.as_raw() }.clone();
             let new_value = if rest.is_empty() {
@@ -734,7 +732,7 @@ fn assign_tensor_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > tensor.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             tensor.data[idx - 1] = value;
             Ok(())
@@ -743,14 +741,14 @@ fn assign_tensor_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > tensor.rows() || col == 0 || col > tensor.cols() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows();
             tensor
                 .data
                 .get_mut(pos)
                 .map(|slot| *slot = value)
-                .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))
+                .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))
         }
         _ => Err(setfield_flow(
             "setfield: indexing with more than two indices is not supported yet",
@@ -769,25 +767,25 @@ fn assign_logical_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > logical.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             logical.data[idx - 1] = if value { 1 } else { 0 };
             Ok(())
         }
         2 => {
             if logical.shape.len() < 2 {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let row = resolved[0];
             let col = resolved[1];
             let rows = logical.shape[0];
             let cols = logical.shape[1];
             if row == 0 || row > rows || col == 0 || col > cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * rows;
             if pos >= logical.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             logical.data[pos] = if value { 1 } else { 0 };
             Ok(())
@@ -811,7 +809,7 @@ fn assign_string_array_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[idx - 1] = text;
             Ok(())
@@ -820,11 +818,11 @@ fn assign_string_array_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > array.rows || col == 0 || col > array.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * array.rows;
             if pos >= array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[pos] = text;
             Ok(())
@@ -853,7 +851,7 @@ fn assign_char_array_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[idx - 1] = ch;
             Ok(())
@@ -862,11 +860,11 @@ fn assign_char_array_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > array.rows || col == 0 || col > array.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) * array.cols + (col - 1);
             if pos >= array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[pos] = ch;
             Ok(())
@@ -897,7 +895,7 @@ fn assign_complex_tensor_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > tensor.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             tensor.data[idx - 1] = (re, im);
             Ok(())
@@ -906,11 +904,11 @@ fn assign_complex_tensor_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > tensor.rows || col == 0 || col > tensor.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows;
             if pos >= tensor.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             tensor.data[pos] = (re, im);
             Ok(())
@@ -1053,9 +1051,7 @@ fn is_index_selector(value: &Value) -> bool {
 
 fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     let Value::Cell(cell) = value else {
-        return Err(setfield_flow(
-            "setfield: indices must be provided in a cell array",
-        ));
+        return Err(setfield_flow(SETFIELD_ERROR_INDEX_SELECTOR_TYPE.message));
     };
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {

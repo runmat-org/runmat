@@ -140,7 +140,7 @@ async fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Cell(ca) => cell_array_to_matrix(&ca).await,
         other => Err(cell2mat_error_with_message(
-            format!("cell2mat: expected a cell array input, got {other:?}"),
+            format!("{}, got {other:?}", CELL2MAT_ERROR_INVALID_INPUT.message),
             &CELL2MAT_ERROR_INVALID_INPUT,
         )),
     }

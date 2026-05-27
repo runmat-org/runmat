@@ -268,7 +268,7 @@ fn repelem_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(repelem_missing_factors(
-            "repelem: replication factors must be specified",
+            REPELEM_ERROR_MISSING_FACTORS.message,
         ));
     }
     let factors = parse_factor_args(&rest).await?;

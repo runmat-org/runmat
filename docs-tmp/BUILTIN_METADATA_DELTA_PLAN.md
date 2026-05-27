@@ -279,6 +279,11 @@ return Err(lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED));
 No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
 `"RunMat:lt:ComplexNotSupported"` or `"lt: complex numbers are not supported"` at throw sites.
 
+21. Literal reuse policy for stable throws:
+   - Stable branches must call helpers with descriptor-backed fields (for example `foo_error(FOO_ERROR_X.message)` or `foo_error_with(&FOO_ERROR_X, FOO_ERROR_X.message)`), not repeated string literals.
+   - Do not restate exact stable message/code/identifier literals outside descriptor rows in runtime source.
+   - If extra context is required, compose from descriptor text (`format!("{}: ...", FOO_ERROR_X.message)`), rather than repeating the literal prefix.
+
 ### Canonical Error Source-Of-Truth (Required)
 
 For every migrated builtin file, `BuiltinErrorDescriptor` rows are the only place stable error identity is authored.

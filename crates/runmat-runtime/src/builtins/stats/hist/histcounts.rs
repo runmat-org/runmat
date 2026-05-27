@@ -430,9 +430,7 @@ fn compute_edges_standard(
 
     if let Some(width) = options.bin_width {
         if !width.is_finite() || width <= 0.0 {
-            return Err(builtin_error(
-                "histcounts: BinWidth must be a positive finite scalar",
-            ));
+            return Err(builtin_error(HISTCOUNTS_ERROR_BINWIDTH_INVALID.message));
         }
 
         if original_range_zero && options.bin_limits.is_none() {

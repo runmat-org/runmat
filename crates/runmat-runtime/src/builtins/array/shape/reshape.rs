@@ -239,7 +239,7 @@ fn reshape_type(args: &[Type], ctx: &ResolveContext) -> Type {
 )]
 async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(reshape_error("reshape: size information missing"));
+        return Err(reshape_error(RESHAPE_ERROR_SIZE_MISSING.message));
     }
     let tokens = parse_size_arguments(&rest).await?;
     let numel = value_numel(&value).await?;

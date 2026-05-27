@@ -305,9 +305,7 @@ fn repmat_type(args: &[Type], ctx: &ResolveContext) -> Type {
 )]
 async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(repmat_missing_factors(
-            "repmat: replication factors must be specified",
-        ));
+        return Err(repmat_missing_factors(REPMAT_ERROR_MISSING_FACTORS.message));
     }
     let raw_reps = parse_replication_factors(&rest).await?;
     match value {
@@ -368,9 +366,7 @@ async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 
 async fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
     if args.is_empty() {
-        return Err(repmat_missing_factors(
-            "repmat: replication factors must be specified",
-        ));
+        return Err(repmat_missing_factors(REPMAT_ERROR_MISSING_FACTORS.message));
     }
     if args.len() == 1 {
         parse_replication_vector(&args[0]).await
@@ -688,9 +684,7 @@ fn repmat_row_major<T: Clone>(
 
 fn compute_2d_reps(reps: &[usize]) -> crate::BuiltinResult<(usize, usize)> {
     if reps.is_empty() {
-        return Err(repmat_missing_factors(
-            "repmat: replication factors must be specified",
-        ));
+        return Err(repmat_missing_factors(REPMAT_ERROR_MISSING_FACTORS.message));
     }
     if reps.len() == 1 {
         Ok((reps[0], reps[0]))
