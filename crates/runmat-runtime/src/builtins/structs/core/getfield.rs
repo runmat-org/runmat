@@ -286,7 +286,7 @@ fn remap_getfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError 
 }
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
-    err.identifier() == Some("RunMat:UndefinedFunction")
+    err.identifier() == Some(crate::IDENT_UNDEFINED_FUNCTION)
 }
 
 #[runtime_builtin(
@@ -1472,11 +1472,13 @@ pub(crate) mod tests {
     #[test]
     fn getfield_undefined_detection_requires_identifier() {
         let with_identifier = build_runtime_error("missing")
-            .with_identifier("RunMat:UndefinedFunction")
+            .with_identifier(crate::IDENT_UNDEFINED_FUNCTION)
             .build();
         assert!(is_undefined_function(&with_identifier));
 
-        let message_only = build_runtime_error("RunMat:UndefinedFunction message only").build();
+        let message_only =
+            build_runtime_error(format!("{} message only", crate::IDENT_UNDEFINED_FUNCTION))
+                .build();
         assert!(
             !is_undefined_function(&message_only),
             "message-only undefined markers should not trigger getter fallback"

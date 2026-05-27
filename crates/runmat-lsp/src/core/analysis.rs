@@ -3198,6 +3198,10 @@ mod tests {
     #[test]
     fn signature_help_uses_math_trigonometry_descriptors() {
         let cases = [
+            ("asin(0.5);", "Y = asin(X)"),
+            ("acos(0.5);", "Y = acos(X)"),
+            ("atan(1);", "Y = atan(X)"),
+            ("atan(1, \"like\", 1);", "Y = atan(X, \"like\", P)"),
             ("sin(1);", "Y = sin(X)"),
             ("sin(1, \"like\", 1);", "Y = sin(X, \"like\", P)"),
             ("cos(1);", "Y = cos(X)"),

@@ -263,6 +263,22 @@ const FOO_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 return Err(foo_error(&FOO_ERROR_INVALID_INPUT));
 ```
 
+20. Canonical `lt` shape (same rule applies to every builtin):
+
+```rust
+const LT_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LT.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:lt:ComplexNotSupported"),
+    when: "At least one operand is complex.",
+    message: "lt: complex numbers are not supported",
+};
+
+return Err(lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED));
+```
+
+No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
+`"RunMat:lt:ComplexNotSupported"` or `"lt: complex numbers are not supported"` at throw sites.
+
 ### Canonical Error Source-Of-Truth (Required)
 
 For every migrated builtin file, `BuiltinErrorDescriptor` rows are the only place stable error identity is authored.
@@ -283,11 +299,15 @@ Disallowed:
 4. Restating stable descriptor literals via `_error_with_message("...")` for stable branches; use descriptor-backed helpers (`foo_error(&FOO_ERROR_...)`) or detail-only suffix helpers (`foo_error_with_detail(&FOO_ERROR_..., "...")`).
 5. Duplicating stable error identifier/code/message constants in `#[cfg(test)]` sections of migrated builtin files; tests should reference descriptor rows directly as well.
 
-Audit command (must stay clean):
+Audit checks:
 
 1. `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" crates/runmat-runtime/src/builtins`
-2. `rg -n 'with_identifier\\("RunMat:' crates/runmat-runtime/src/builtins`
-3. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
+2. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
+
+Notes:
+
+1. Check (1) must stay clean for migrated builtin files.
+2. Descriptor-source-of-truth enforcement for migrated files (including pre-test source filtering) lives in `descriptor_error_source_of_truth`.
 
 ## Shared Helper Reuse Strategy
 

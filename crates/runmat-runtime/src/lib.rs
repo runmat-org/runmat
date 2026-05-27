@@ -50,6 +50,7 @@ pub const OBJECT_INDEX_MEMBER: &str = ".";
 pub const CALL_METHOD_BUILTIN_NAME: &str = "call_method";
 pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
 pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
+pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
 
 pub fn object_property_getter_name(field: &str) -> String {
     format!("get.{field}")
@@ -66,12 +67,12 @@ fn current_requested_outputs() -> usize {
 fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
     let detail = format!("Undefined function for callable identity {identity:?}");
     build_runtime_error(detail)
-        .with_identifier("RunMat:UndefinedFunction")
+        .with_identifier(IDENT_UNDEFINED_FUNCTION)
         .build()
 }
 
 fn is_undefined_function_error(err: &RuntimeError) -> bool {
-    err.identifier() == Some("RunMat:UndefinedFunction")
+    err.identifier() == Some(IDENT_UNDEFINED_FUNCTION)
 }
 
 fn build_shape_checked_cell(
