@@ -313,6 +313,8 @@ Audit checks:
 2. `cargo test -p runmat-runtime descriptor_error_source_of_truth`
 3. Optional narrowed grep for forwarded descriptor fields (avoids generic helper false positives):
    - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" crates/runmat-runtime/src/builtins`
+4. Canonical-literal duplication check for touched files:
+   - `for f in <touched_builtin_files...>; do sed -n 's/^[[:space:]]*message:[[:space:]]*\"\\(.*\\)\",[[:space:]]*$/\\1/p' "$f" | sort -u | while IFS= read -r m; do c=$(rg -F --count "$m" "$f"); test "${c:-0}" -eq 1 || echo "duplicate message literal in $f: $m"; done; done`
 
 Notes:
 

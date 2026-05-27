@@ -3131,6 +3131,8 @@ mod tests {
             ("lu([1,2;3,4], \"vector\");", "LU = lu(A, pivotMode)"),
             ("svd([1,2;3,4]);", "S = svd(A)"),
             ("svd([1,2;3,4], \"econ\");", "S = svd(A, option)"),
+            ("eig([1,2;3,4]);", "d = eig(A)"),
+            ("eig([1,2;3,4], \"vector\");", "d = eig(A, options...)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3216,6 +3218,17 @@ mod tests {
             svd_candidates.iter().any(|detail| detail.contains("svd(")),
             "expected descriptor signature detail for svd completion, got {:?}",
             svd_candidates
+        );
+
+        let eig_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("eig"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            eig_candidates.iter().any(|detail| detail.contains("eig(")),
+            "expected descriptor signature detail for eig completion, got {:?}",
+            eig_candidates
         );
     }
 

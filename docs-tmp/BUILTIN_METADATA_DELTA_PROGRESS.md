@@ -129,12 +129,13 @@
 | Wave 124 (Math Linalg Factor Core B) | `chol` | Done | `627f85b1` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::factor::chol::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for Cholesky forms (`R=chol(A)`, optional triangle, and two-output failure-flag forms), migrated stable argument/input/not-positive-definite/internal runtime branches to descriptor-backed errors, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for `chol`. |
 | Wave 125 (Math Linalg Factor Core C) | `lu` | Done | `d78ebb8b` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::factor::lu::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for LU factorization forms (combined output, `[L,U]`, `[L,U,P]`, optional pivot-mode), migrated stable argument/input/internal runtime branches to descriptor-backed errors, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for `lu`. |
 | Wave 126 (Math Linalg Factor Core D) | `svd` | Done | `bf188595` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::factor::svd::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for SVD forms (single-output singular values, `[U,S]`, `[U,S,V]`, optional one/two-option selectors), migrated stable argument/input/internal runtime branches to descriptor-backed errors, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for `svd`. |
+| Wave 127 (Math Linalg Factor Core E) | `eig` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::factor::eig::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for eig forms (`d=eig(A)`, option-variadic selectors, `[V,D]`, and `[V,D,W]` variants), migrated stable argument/input/internal runtime branches to descriptor-backed errors with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for `eig`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `352`
-- Remaining: `216`
+- Migrated with attached descriptor: `353`
+- Remaining: `215`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -178,6 +179,7 @@ Loop instructions:
    - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" <touched_builtin_files...>`
    - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$|^\\s*message:\\s*[A-Z][A-Z0-9]*_[A-Z0-9_]*\\s*,\\s*$" <touched_builtin_files...>`
    - `rg -n 'with_identifier\\(\"RunMat:' <touched_builtin_files...>`
+   - `for f in <touched_builtin_files...>; do sed -n 's/^[[:space:]]*message:[[:space:]]*\"\\(.*\\)\",[[:space:]]*$/\\1/p' "$f" | sort -u | while IFS= read -r m; do c=$(rg -F --count "$m" "$f"); test "${c:-0}" -eq 1 || echo "duplicate message literal in $f: $m"; done; done`
    - `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`
 7. Update this progress tracker wave row with commit hash and validation set.
 ```
