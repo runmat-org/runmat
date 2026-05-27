@@ -3329,6 +3329,39 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_fft_core_descriptors() {
+        let cases = [
+            ("fft([1,2,3]);", "Y = fft(X)"),
+            ("fft([1,2,3], 8);", "Y = fft(X, N)"),
+            ("fft([1,2,3], 8, 2);", "Y = fft(X, N, DIM)"),
+            ("ifft([1,2,3]);", "Y = ifft(X)"),
+            ("ifft([1,2,3], 8);", "Y = ifft(X, N)"),
+            ("ifft([1,2,3], \"symmetric\");", "Y = ifft(X, symflag)"),
+            ("ifft([1,2,3], 8, 2);", "Y = ifft(X, N, DIM)"),
+            (
+                "ifft([1,2,3], 8, \"nonsymmetric\");",
+                "Y = ifft(X, N, symflag)",
+            ),
+            (
+                "ifft([1,2,3], 8, 2, \"symmetric\");",
+                "Y = ifft(X, N, DIM, symflag)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

@@ -6,7 +6,11 @@ use super::common::{
     value_to_complex_tensor, TransformDirection,
 };
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -47,10 +51,260 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "ifft";
 
-fn ifft_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const IFFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Inverse FFT result.",
+}];
+
+const IFFT_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input spectrum or signal.",
+}];
+
+const IFFT_INPUTS_WITH_N: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input spectrum or signal.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Transform length along selected dimension.",
+    },
+];
+
+const IFFT_INPUTS_WITH_SYMFLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input spectrum or signal.",
+    },
+    BuiltinParamDescriptor {
+        name: "symflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"nonsymmetric\""),
+        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
+    },
+];
+
+const IFFT_INPUTS_WITH_N_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input spectrum or signal.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Transform length along selected dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "DIM",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("first non-singleton dimension"),
+        description: "Dimension to transform along.",
+    },
+];
+
+const IFFT_INPUTS_WITH_N_SYMFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input spectrum or signal.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Transform length along selected dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "symflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"nonsymmetric\""),
+        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
+    },
+];
+
+const IFFT_INPUTS_WITH_N_DIM_SYMFLAG: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input spectrum or signal.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Transform length along selected dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "DIM",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("first non-singleton dimension"),
+        description: "Dimension to transform along.",
+    },
+    BuiltinParamDescriptor {
+        name: "symflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"nonsymmetric\""),
+        description: "Symmetry flag: \"symmetric\" or \"nonsymmetric\".",
+    },
+];
+
+const IFFT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = ifft(X)",
+        inputs: &IFFT_INPUTS_CORE,
+        outputs: &IFFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = ifft(X, N)",
+        inputs: &IFFT_INPUTS_WITH_N,
+        outputs: &IFFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = ifft(X, symflag)",
+        inputs: &IFFT_INPUTS_WITH_SYMFLAG,
+        outputs: &IFFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = ifft(X, N, DIM)",
+        inputs: &IFFT_INPUTS_WITH_N_DIM,
+        outputs: &IFFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = ifft(X, N, symflag)",
+        inputs: &IFFT_INPUTS_WITH_N_SYMFLAG,
+        outputs: &IFFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = ifft(X, N, DIM, symflag)",
+        inputs: &IFFT_INPUTS_WITH_N_DIM_SYMFLAG,
+        outputs: &IFFT_OUTPUT,
+    },
+];
+
+const IFFT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.ARG_COUNT",
+    identifier: Some("RunMat:ifft:ArgCount"),
+    when: "More than four input arguments are supplied.",
+    message: "ifft: invalid argument count",
+};
+
+const IFFT_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.INVALID_LENGTH",
+    identifier: Some("RunMat:ifft:InvalidLength"),
+    when: "Length argument N is invalid.",
+    message: "ifft: invalid length argument",
+};
+
+const IFFT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.INVALID_DIMENSION",
+    identifier: Some("RunMat:ifft:InvalidDimension"),
+    when: "Dimension argument DIM is invalid.",
+    message: "ifft: invalid dimension argument",
+};
+
+const IFFT_ERROR_INVALID_SYMFLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.INVALID_SYMFLAG",
+    identifier: Some("RunMat:ifft:InvalidSymflag"),
+    when: "Symmetry flag is invalid or appears in an invalid position.",
+    message: "ifft: invalid symmetry flag usage",
+};
+
+const IFFT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.INVALID_INPUT",
+    identifier: Some("RunMat:ifft:InvalidInput"),
+    when: "Input cannot be converted to supported numeric/complex domain.",
+    message: "ifft: invalid input",
+};
+
+const IFFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IFFT.INTERNAL",
+    identifier: Some("RunMat:ifft:Internal"),
+    when: "IFFT execution or tensor shaping fails.",
+    message: "ifft: internal error",
+};
+
+const IFFT_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    IFFT_ERROR_ARG_COUNT,
+    IFFT_ERROR_INVALID_LENGTH,
+    IFFT_ERROR_INVALID_DIMENSION,
+    IFFT_ERROR_INVALID_SYMFLAG,
+    IFFT_ERROR_INVALID_INPUT,
+    IFFT_ERROR_INTERNAL,
+];
+
+pub const IFFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IFFT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IFFT_ERRORS,
+};
+
+fn ifft_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    ifft_error_with_message(error.message, error)
+}
+
+fn ifft_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    ifft_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn ifft_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn ifft_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -59,6 +313,7 @@ fn ifft_error(message: impl Into<String>) -> RuntimeError {
     summary = "Inverse discrete Fourier transform with optional length, dimension, and symmetric flag.",
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
     type_resolver(ifft_type),
+    descriptor(crate::builtins::math::fft::ifft::IFFT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::fft::ifft"
 )]
 async fn ifft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -75,7 +330,9 @@ fn ifft_host(
     dimension: Option<usize>,
     symmetric: bool,
 ) -> BuiltinResult<Value> {
-    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME).map_err(|source| {
+        ifft_error_with_source(&IFFT_ERROR_INVALID_INPUT, "input conversion failed", source)
+    })?;
     let transformed = ifft_complex_tensor(tensor, length, dimension)?;
     finalize_ifft_output(transformed, symmetric)
 }
@@ -89,7 +346,7 @@ async fn ifft_gpu(
     let mut logical_shape = normalize_scalar_shape(&handle.shape);
 
     let dim_one_based = match dimension {
-        Some(0) => return Err(ifft_error("ifft: dimension must be >= 1")),
+        Some(0) => return Err(ifft_error(&IFFT_ERROR_INVALID_DIMENSION)),
         Some(dim) => dim,
         None => default_dimension(&logical_shape),
     };
@@ -113,19 +370,37 @@ async fn ifft_gpu(
                     runmat_accelerate_api::clear_residency(&out);
                     return Ok(Value::GpuTensor(real));
                 }
-                let complex =
-                    download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true).await?;
+                let complex = download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true)
+                    .await
+                    .map_err(|source| {
+                        ifft_error_with_source(
+                            &IFFT_ERROR_INVALID_INPUT,
+                            "provider download failed",
+                            source,
+                        )
+                    })?;
                 return finalize_ifft_output(complex, true);
             }
         }
 
-        let complex =
-            download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
+        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false)
+            .await
+            .map_err(|source| {
+                ifft_error_with_source(
+                    &IFFT_ERROR_INVALID_INPUT,
+                    "provider download failed",
+                    source,
+                )
+            })?;
         let transformed = ifft_complex_tensor(complex, length, dimension)?;
         return finalize_ifft_output(transformed, symmetric);
     }
 
-    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
+        .await
+        .map_err(|source| {
+            ifft_error_with_source(&IFFT_ERROR_INVALID_INPUT, "gpu gather failed", source)
+        })?;
     let transformed = ifft_complex_tensor(complex, length, dimension)?;
     finalize_ifft_output(transformed, symmetric)
 }
@@ -142,11 +417,14 @@ pub(super) fn ifft_complex_tensor(
         TransformDirection::Inverse,
         BUILTIN_NAME,
     )
+    .map_err(|source| ifft_error_with_source(&IFFT_ERROR_INTERNAL, "transform failed", source))
 }
 
 fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult<Value> {
     if symmetric {
-        complex_tensor_to_real_value(tensor, BUILTIN_NAME)
+        complex_tensor_to_real_value(tensor, BUILTIN_NAME).map_err(|source| {
+            ifft_error_with_source(&IFFT_ERROR_INTERNAL, "real-value extraction failed", source)
+        })
     } else {
         Ok(complex_tensor_into_value(tensor))
     }
@@ -155,64 +433,98 @@ fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
         .await
-        .map_err(ifft_error)?
+        .map_err(|detail| ifft_error_with_detail(&IFFT_ERROR_INVALID_DIMENSION, detail))?
         .ok_or_else(|| {
-            ifft_error(format!(
-                "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-            ))
+            ifft_error_with_detail(&IFFT_ERROR_INVALID_DIMENSION, format!("received {value:?}"))
         })
 }
 
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>, bool)> {
     match args.len() {
         0 => Ok((None, None, false)),
-        1 => match parse_symflag(&args[0], BUILTIN_NAME)? {
+        1 => match parse_symflag(&args[0], BUILTIN_NAME).map_err(|source| {
+            ifft_error_with_source(&IFFT_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
+        })? {
             Some(flag) => Ok((None, None, flag)),
             None => {
-                let len = parse_length(&args[0], BUILTIN_NAME)?;
+                let len = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                    ifft_error_with_source(
+                        &IFFT_ERROR_INVALID_LENGTH,
+                        "length parse failed",
+                        source,
+                    )
+                })?;
                 Ok((len, None, false))
             }
         },
         2 => {
-            let first_flag = parse_symflag(&args[0], BUILTIN_NAME)?;
-            let second_flag = parse_symflag(&args[1], BUILTIN_NAME)?;
+            let first_flag = parse_symflag(&args[0], BUILTIN_NAME).map_err(|source| {
+                ifft_error_with_source(&IFFT_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
+            })?;
+            let second_flag = parse_symflag(&args[1], BUILTIN_NAME).map_err(|source| {
+                ifft_error_with_source(&IFFT_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
+            })?;
             if let Some(flag) = second_flag {
                 if first_flag.is_some() {
-                    return Err(ifft_error(
-                        "ifft: symmetry flag must appear as the final argument",
+                    return Err(ifft_error_with_detail(
+                        &IFFT_ERROR_INVALID_SYMFLAG,
+                        "symmetry flag must appear as the final argument",
                     ));
                 }
-                let len = parse_length(&args[0], BUILTIN_NAME)?;
+                let len = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                    ifft_error_with_source(
+                        &IFFT_ERROR_INVALID_LENGTH,
+                        "length parse failed",
+                        source,
+                    )
+                })?;
                 Ok((len, None, flag))
             } else if first_flag.is_some() {
-                Err(ifft_error(
-                    "ifft: symmetry flag must appear as the final argument",
+                Err(ifft_error_with_detail(
+                    &IFFT_ERROR_INVALID_SYMFLAG,
+                    "symmetry flag must appear as the final argument",
                 ))
             } else {
-                let len = parse_length(&args[0], BUILTIN_NAME)?;
+                let len = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                    ifft_error_with_source(
+                        &IFFT_ERROR_INVALID_LENGTH,
+                        "length parse failed",
+                        source,
+                    )
+                })?;
                 let dim = Some(parse_dimension_arg(&args[1]).await?);
                 Ok((len, dim, false))
             }
         }
         3 => {
-            let first_flag = parse_symflag(&args[0], BUILTIN_NAME)?;
-            let second_flag = parse_symflag(&args[1], BUILTIN_NAME)?;
-            let third_flag = parse_symflag(&args[2], BUILTIN_NAME)?;
+            let first_flag = parse_symflag(&args[0], BUILTIN_NAME).map_err(|source| {
+                ifft_error_with_source(&IFFT_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
+            })?;
+            let second_flag = parse_symflag(&args[1], BUILTIN_NAME).map_err(|source| {
+                ifft_error_with_source(&IFFT_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
+            })?;
+            let third_flag = parse_symflag(&args[2], BUILTIN_NAME).map_err(|source| {
+                ifft_error_with_source(&IFFT_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
+            })?;
             let symmetry = third_flag.ok_or_else(|| {
-                ifft_error("ifft: expected 'symmetric' or 'nonsymmetric' as the final argument")
+                ifft_error_with_detail(
+                    &IFFT_ERROR_INVALID_SYMFLAG,
+                    "expected 'symmetric' or 'nonsymmetric' as the final argument",
+                )
             })?;
             if first_flag.is_some() || second_flag.is_some() {
-                return Err(ifft_error(
-                    "ifft: symmetry flag may only appear once at the end",
+                return Err(ifft_error_with_detail(
+                    &IFFT_ERROR_INVALID_SYMFLAG,
+                    "symmetry flag may only appear once at the end",
                 ));
             }
-            let len = parse_length(&args[0], BUILTIN_NAME)?;
+            let len = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                ifft_error_with_source(&IFFT_ERROR_INVALID_LENGTH, "length parse failed", source)
+            })?;
             let dim = Some(parse_dimension_arg(&args[1]).await?);
             Ok((len, dim, symmetry))
         }
-        _ => Err(ifft_error(
-            "ifft: expected ifft(X), ifft(X, N), ifft(X, N, DIM), or ifft(X, N, DIM, symflag)",
-        )),
+        _ => Err(ifft_error(&IFFT_ERROR_ARG_COUNT)),
     }
 }
 
@@ -226,7 +538,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
-        ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Tensor, Type,
+        builtin_function_by_name, ComplexTensor as HostComplexTensor, IntValue, ResolveContext,
+        Tensor, Type,
     };
     use rustfft::FftPlanner;
 
@@ -236,6 +549,10 @@ pub(crate) mod tests {
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
     }
 
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
@@ -272,6 +589,23 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(4), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn ifft_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("ifft builtin");
+        let descriptor = builtin.descriptor.expect("ifft descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = ifft(X)"));
+        assert!(labels.contains(&"Y = ifft(X, N)"));
+        assert!(labels.contains(&"Y = ifft(X, symflag)"));
+        assert!(labels.contains(&"Y = ifft(X, N, DIM)"));
+        assert!(labels.contains(&"Y = ifft(X, N, symflag)"));
+        assert!(labels.contains(&"Y = ifft(X, N, DIM, symflag)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.IFFT.INVALID_SYMFLAG"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -390,9 +724,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft_rejects_unknown_string_option() {
-        let err =
-            error_message(block_on(parse_arguments(&[Value::from("invalidflag")])).unwrap_err());
-        assert!(err.contains("unrecognized option"));
+        let err = block_on(parse_arguments(&[Value::from("invalidflag")])).unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            IFFT_ERROR_INVALID_SYMFLAG.identifier
+        );
+        assert!(error_message(err).contains(IFFT_ERROR_INVALID_SYMFLAG.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
