@@ -4,6 +4,7 @@ pub mod common;
 pub mod acceleration;
 pub mod array;
 pub mod cells;
+pub mod comms;
 pub mod constants;
 pub mod containers;
 pub mod control;
