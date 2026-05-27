@@ -3064,6 +3064,9 @@ mod tests {
             ("min([1,2,3]);", "M = min(A)"),
             ("min([1,2,3], [3,2,1]);", "M = min(A, B)"),
             ("min([1,2,3], [], 1);", "M = min(A, [], dim)"),
+            ("median([1,2,3]);", "M = median(A)"),
+            ("median([1,2,3], 1);", "M = median(A, dim)"),
+            ("median([1,2,3], \"omitnan\");", "M = median(A, nanflag)"),
             ("diff([1,2,3]);", "B = diff(X)"),
             ("diff([1,2,3], 2, 1);", "B = diff(X, n, dim)"),
             ("gradient([1,2,3]);", "G = gradient(F)"),
@@ -3253,6 +3256,19 @@ mod tests {
             min_candidates.iter().any(|detail| detail.contains("min(")),
             "expected descriptor signature detail for min completion, got {:?}",
             min_candidates
+        );
+
+        let median_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("median"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            median_candidates
+                .iter()
+                .any(|detail| detail.contains("median(")),
+            "expected descriptor signature detail for median completion, got {:?}",
+            median_candidates
         );
 
         let diff_candidates: Vec<String> = completions
