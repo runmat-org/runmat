@@ -117,12 +117,13 @@
 | Wave 112 (Math Reduction Cumulative Core B) | `cummax`, `cummin` | Done | `776f1b44` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::cummax::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::cummin::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for cumulative extrema forms with by-requested-output semantics (`M` and `[M, I]`) across `dim`/`direction`/`nanflag` permutations, migrated stable runtime branches to descriptor-backed invalid-argument/invalid-input/internal errors, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `cummax`/`cummin`. |
 | Wave 113 (Math Reduction Integration Core) | `trapz`, `cumtrapz` | Done | `50e91a22` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::trapz::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::cumtrapz::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for trapezoidal integration and cumulative trapezoidal integration forms (`Y`, `Y,dim`, `X,Y`, `X,Y,dim`), migrated runtime parser/conversion/spacing/gather/promote branches to descriptor-backed stable error rows, added runtime descriptor signature + identifier assertions, and expanded descriptor-driven LSP signature-help/completion coverage for `trapz`/`cumtrapz`. |
 | Wave 114 (Math Reduction Core A) | `sum` | Done | `2c40b8bc` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::sum::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `sum` reduction forms (dim/vecdim/\"all\"/nanflag/outtype/\"like\"), migrated parser/dimension/input/output-device/coercion branches to descriptor-backed stable errors, added runtime descriptor signature + identifier assertions, and expanded descriptor-driven LSP reduction signature/completion coverage to include `sum`. |
+| Wave 115 (Math Reduction Core B) | `mean` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::mean::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Completed descriptor-backed `mean` migration with exhaustive signature set (dim/vecdim/\"all\"/nanflag/outtype/\"like\" forms), stable descriptor error rows (`INVALID_ARGUMENT`/`INVALID_INPUT`/`INTERNAL`) as source-of-truth, runtime descriptor signature + identifier assertions, and LSP descriptor-driven signature-help/completion coverage for `mean`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `338`
-- Remaining: `230`
+- Migrated with attached descriptor: `339`
+- Remaining: `229`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -130,6 +131,10 @@
 /goal Migrate next builtin wave to attached BuiltinDescriptor metadata with zero hacks and descriptor-row error source-of-truth.
 
 Loop instructions:
+0. Hard gate for every migrated builtin: `BuiltinErrorDescriptor` rows are the only source of truth for stable `code`/`identifier`/`message`.
+   - no `IDENT_*`, `*_CODE`, `*_MESSAGE` mirrors;
+   - no stable-branch `with_identifier("RunMat:...")` literals in migrated runtime paths;
+   - stable throws must route through descriptor-aware helpers (`foo_error(&FOO_ERROR_...)`).
 1. Read docs-tmp/BUILTIN_METADATA_DELTA_PLAN.md and follow its canonical descriptor/error rules.
 2. For each builtin in the wave:
    - add `const <NAME>_DESCRIPTOR: BuiltinDescriptor` with exhaustive signatures from real parser/runtime branches;

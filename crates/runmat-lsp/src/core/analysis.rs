@@ -3056,6 +3056,8 @@ mod tests {
         let cases = [
             ("sum([1,2,3]);", "S = sum(A)"),
             ("sum([1,2,3], \"all\");", "S = sum(A, \"all\")"),
+            ("mean([1,2,3]);", "M = mean(A)"),
+            ("mean([1,2,3], \"all\");", "M = mean(A, \"all\")"),
             ("cumsum([1,2,3]);", "B = cumsum(A)"),
             ("cumsum([1,2,3], \"reverse\");", "B = cumsum(A, direction)"),
             ("cumprod([1,2,3]);", "B = cumprod(A)"),
@@ -3206,6 +3208,19 @@ mod tests {
             sum_candidates.iter().any(|detail| detail.contains("sum(")),
             "expected descriptor signature detail for sum completion, got {:?}",
             sum_candidates
+        );
+
+        let mean_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("mean"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            mean_candidates
+                .iter()
+                .any(|detail| detail.contains("mean(")),
+            "expected descriptor signature detail for mean completion, got {:?}",
+            mean_candidates
         );
 
         let trapz_candidates: Vec<String> = completions
