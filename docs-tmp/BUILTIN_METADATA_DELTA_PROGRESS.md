@@ -110,12 +110,13 @@
 | Wave 105 (Math FFT Core B) | `fft2`, `ifft2` | Done | `796c59b8` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::fft::fft2::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::fft::ifft2::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for 2-D FFT/inverse FFT forms (including scalar/size-vector/two-length variants and `ifft2` symflag permutations), mapped length/size/symflag/input/transform branches to stable descriptor-backed error rows, added runtime descriptor signature assertions for both builtins, and expanded descriptor-driven LSP signature-help coverage for the FFT family. |
 | Wave 106 (Math FFT Core C) | `fftn`, `ifftn` | Done | `de5a07f8` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::fft::fftn::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::fft::ifftn::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for N-D FFT/inverse FFT forms (including `ifftn` symflag variants), mapped argument-count/SIZE/symflag/input/transform branches to stable descriptor-backed error rows, added runtime descriptor signature + stable identifier assertions for both builtins, and expanded descriptor-driven LSP signature-help coverage for the FFT family. |
 | Wave 107 (Math FFT Core D) | `fftshift`, `ifftshift` | Done | `40aba1fd` | `cargo fmt`; `cargo test -p runmat-runtime builtins::math::fft::fftshift::tests:: -- --nocapture`; `cargo test -p runmat-runtime builtins::math::fft::ifftshift::tests:: -- --nocapture`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for frequency-shift builtins with optional dimension selectors (`DIM` scalar/vector/logical mask), mapped argument-count/dimension-parse/input/unsupported/internal runtime branches to stable descriptor-backed error rows, added runtime descriptor signature + stable identifier assertions for both builtins, and expanded descriptor-driven LSP signature-help coverage for the FFT family. |
+| Wave 108 (Math Reduction Logical Core) | `all`, `any` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::all::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::any::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for logical reduction forms (`A`, `dim`, `"all"`, `nanflag`, mixed dim/nanflag order), added stable descriptor-backed runtime error rows for argument/input/internal boundaries, remapped stable parser/dimension/type branches to descriptor helpers, added runtime descriptor signature tests, and added LSP coverage via descriptor-backed completion detail assertions for `all`/`any`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `327`
-- Remaining: `241`
+- Migrated with attached descriptor: `329`
+- Remaining: `239`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -137,6 +138,7 @@ Loop instructions:
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
    - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);
+   - no duplicated stable literals in test assertions (for example assert against `LT_ERROR_COMPLEX_UNSUPPORTED.code`, not `"RM.LT.COMPLEX_UNSUPPORTED"`);
    - do not introduce temporary `IDENT_*` / `*_MESSAGE` / `*_CODE` constants even in intermediate commits; descriptor rows are the only canonical authoring point from the first commit in a wave;
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.
 4. Extend tests:

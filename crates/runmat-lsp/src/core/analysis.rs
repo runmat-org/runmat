@@ -1901,8 +1901,7 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position)
-                .unwrap_or_else(|| panic!("signature help missing for {text}"));
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1971,7 +1970,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -1994,7 +1994,8 @@ mod tests {
         for (text, expected_label) in cases {
             let analysis = analyze_document_with_compat(text, CompatMode::default());
             let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let sig = signature_help_at(text, &analysis, &position)
+                .unwrap_or_else(|| panic!("signature help missing for {text}"));
             let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
             assert!(
                 labels.contains(&expected_label),
@@ -3048,6 +3049,36 @@ mod tests {
                 labels
             );
         }
+    }
+
+    #[test]
+    fn completion_detail_uses_math_reduction_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        let all_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("all"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            all_candidates.iter().any(|detail| detail.contains("all(")),
+            "expected descriptor signature detail for all completion, got {:?}",
+            all_candidates
+        );
+
+        let any_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("any"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            any_candidates.iter().any(|detail| detail.contains("any(")),
+            "expected descriptor signature detail for any completion, got {:?}",
+            any_candidates
+        );
     }
 
     #[test]

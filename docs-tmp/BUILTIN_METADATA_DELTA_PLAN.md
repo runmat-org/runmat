@@ -304,6 +304,7 @@ Disallowed:
 3. Repeating the same stable message text at throw sites when that message already exists in a descriptor row.
 4. Restating stable descriptor literals via `_error_with_message("...")` for stable branches; use descriptor-backed helpers (`foo_error(&FOO_ERROR_...)`) or detail-only suffix helpers (`foo_error_with_detail(&FOO_ERROR_..., "...")`).
 5. Duplicating stable error identifier/code/message constants in `#[cfg(test)]` sections of migrated builtin files; tests should reference descriptor rows directly as well.
+6. Repeating stable descriptor literals in test assertions; use descriptor constants in assertions (for example `err.code == LT_ERROR_COMPLEX_UNSUPPORTED.code`).
 
 Audit checks:
 
