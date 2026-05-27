@@ -207,6 +207,9 @@ Rule:
    - define `code`/`identifier`/`message` literals directly in the descriptor row,
    - throw stable branches through `foo_error(&FOO_ERROR_...)`,
    - never mirror those stable literals in separate `const IDENT_*`, `const *_CODE`, or `const *_MESSAGE` constants.
+   - the same descriptor row constant must be reused in both places:
+     1. included in `<NAME>_ERRORS` for `BuiltinDescriptor.errors`;
+     2. referenced at runtime throw sites (`foo_error(&FOO_ERROR_...)` / `foo_error_with_detail(&FOO_ERROR_..., ...)`).
 4. For runtime errors, keep one per-builtin source-of-truth row per stable error in `BuiltinErrorDescriptor` constants, and reuse those constants when throwing runtime errors.
 5. Source-of-truth is the descriptor row itself: identifier/message/code must be authored once in `BuiltinErrorDescriptor` and referenced from throw helpers (`foo_error(&FOO_ERROR_...)`), never duplicated as separate stable constants or repeated literal throw strings.
 6. Do not add separate `IDENT_*` / `*_MESSAGE` constants for migrated builtins when they duplicate descriptor rows; identifier/message live in the descriptor row and runtime helpers consume that row.

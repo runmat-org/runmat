@@ -3,7 +3,11 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPinvOptions};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::linalg::{
@@ -19,6 +23,86 @@ use crate::builtins::math::linalg::type_resolvers::pinv_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pinv";
+
+const PINV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Pseudoinverse of A.",
+}];
+
+const PINV_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const PINV_INPUTS_TOL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "tol",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Singular-value threshold.",
+    },
+];
+
+const PINV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = pinv(A)",
+        inputs: &PINV_INPUTS,
+        outputs: &PINV_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = pinv(A, tol)",
+        inputs: &PINV_INPUTS_TOL,
+        outputs: &PINV_OUTPUT,
+    },
+];
+
+const PINV_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PINV.INVALID_ARGUMENT",
+    identifier: Some("RunMat:pinv:InvalidArgument"),
+    when: "Optional tolerance argument is malformed or outside accepted bounds.",
+    message: "pinv: invalid argument",
+};
+
+const PINV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PINV.INVALID_INPUT",
+    identifier: Some("RunMat:pinv:InvalidInput"),
+    when: "Input shape/type cannot be processed for pseudoinverse evaluation.",
+    message: "pinv: invalid input",
+};
+
+const PINV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PINV.INTERNAL",
+    identifier: Some("RunMat:pinv:Internal"),
+    when: "Runtime fails while computing pseudoinverse or executing fallback/upload paths.",
+    message: "pinv: internal runtime failure",
+};
+
+const PINV_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    PINV_ERROR_INVALID_ARGUMENT,
+    PINV_ERROR_INVALID_INPUT,
+    PINV_ERROR_INTERNAL,
+];
+
+pub const PINV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PINV_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PINV_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::pinv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,8 +120,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native GPU pseudoinverse; the reference WGPU backend gathers to host SVD and re-uploads the result.",
 };
 
+fn pinv_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+    pinv_error_with_message(message, &PINV_ERROR_INVALID_INPUT)
+}
+
+fn argument_error(message: impl Into<String>) -> RuntimeError {
+    pinv_error_with_message(message, &PINV_ERROR_INVALID_ARGUMENT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -75,10 +174,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "pinv,pseudoinverse,svd,least squares,gpu",
     accel = "pinv",
     type_resolver(pinv_type),
+    descriptor(crate::builtins::math::linalg::solve::pinv::PINV_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::pinv"
 )]
 async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(builtin_error)?;
+    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
     match value {
         Value::GpuTensor(handle) => pinv_gpu(handle, tol).await,
         Value::ComplexTensor(t) => pinv_complex_value(t, tol),
@@ -279,6 +379,25 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn pinv_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = PINV_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"X = pinv(A)"));
+        assert!(labels.contains(&"X = pinv(A, tol)"));
+    }
+
+    #[test]
+    fn pinv_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = PINV_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.PINV.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.PINV.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.PINV.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pinv_rank_deficient_square() {
@@ -406,6 +525,7 @@ pub(crate) mod tests {
             pinv_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(-1))]).unwrap_err(),
         );
         assert!(err.message().contains("tolerance"));
+        assert_eq!(err.identifier(), PINV_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -428,6 +548,7 @@ pub(crate) mod tests {
             pinv_builtin(Value::Tensor(tensor), vec![Value::Tensor(tol_tensor)]).unwrap_err(),
         );
         assert!(err.message().contains("tolerance must be a real scalar"));
+        assert_eq!(err.identifier(), PINV_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -439,6 +560,7 @@ pub(crate) mod tests {
             pinv_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).unwrap_err(),
         );
         assert!(err.message().contains("tolerance must be a real scalar"));
+        assert_eq!(err.identifier(), PINV_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

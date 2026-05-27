@@ -3178,6 +3178,31 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_linalg_solve_descriptors() {
+        let cases = [
+            ("det([1,2;3,4]);", "d = det(A)"),
+            ("inv([1,2;3,4]);", "X = inv(A)"),
+            ("rank([1,2;3,4]);", "k = rank(A)"),
+            ("rank([1,2;3,4], 1e-6);", "k = rank(A, tol)"),
+            ("rcond([1,2;3,4]);", "c = rcond(A)"),
+            ("pinv([1,2;3,4]);", "X = pinv(A)"),
+            ("pinv([1,2;3,4], 1e-6);", "X = pinv(A, tol)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_uses_math_linalg_factor_descriptors() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
@@ -3362,6 +3387,29 @@ mod tests {
             "expected descriptor signature detail for mpower completion, got {:?}",
             mpower_candidates
         );
+    }
+
+    #[test]
+    fn completion_detail_uses_math_linalg_solve_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["det", "inv", "rank", "rcond", "pinv"] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            assert!(
+                details
+                    .iter()
+                    .any(|detail| detail.contains(&format!("{builtin}("))),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
     }
 
     #[test]

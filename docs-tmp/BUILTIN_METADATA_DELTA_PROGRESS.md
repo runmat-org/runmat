@@ -132,12 +132,13 @@
 | Wave 127 (Math Linalg Factor Core E) | `eig` | Done | `7fe4e287` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::factor::eig::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for eig forms (`d=eig(A)`, option-variadic selectors, `[V,D]`, and `[V,D,W]` variants), migrated stable argument/input/internal runtime branches to descriptor-backed errors with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for `eig`. |
 | Wave 128 (Math Linalg Ops Core B) | `trace`, `dot`, `cross` | Done | `8762de20` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::trace::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::dot::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::cross::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for trace/dot/cross core forms (including `dim` variants for dot/cross), migrated stable argument/input/internal runtime branches to descriptor-backed errors with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions, and extended descriptor-driven LSP signature-help/completion coverage for linalg-ops completions and callsites. |
 | Wave 129 (Math Linalg Ops Core C) | `mldivide`, `mrdivide`, `mtimes`, `mpower` | Done | `63d4abe1` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mldivide::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mrdivide::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mtimes::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::ops::mpower::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for core matrix division/multiplication/power operators, migrated stable argument/input/internal runtime branches to descriptor-backed errors with descriptor-row canonical source-of-truth, added runtime descriptor signature + stable identifier assertions for each builtin, and extended descriptor-driven LSP signature-help/completion coverage for these linalg-ops callsites and completion entries. |
+| Wave 130 (Math Linalg Solve Core A) | `det`, `inv`, `rank`, `rcond`, `pinv` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::det::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::inv::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::rank::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::rcond::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::linalg::solve::pinv::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for determinant/inverse/rank/reciprocal-condition/pseudoinverse forms (including tolerance variants for `rank`/`pinv`), added stable descriptor-backed error rows and identifier assertions for invalid-input/invalid-argument branches, and extended descriptor-driven LSP signature-help/completion coverage for `math/linalg/solve` builtins. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `360`
-- Remaining: `208`
+- Migrated with attached descriptor: `365`
+- Remaining: `203`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -158,6 +159,9 @@ Loop instructions:
 3. Do not duplicate stable identifier/message/code values:
    - no `const IDENT_*`, no `const *_MESSAGE`, no `const *_CODE`;
    - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
+   - descriptor-row constants must be reused for both metadata and runtime throws:
+     - include each stable row in `<NAME>_ERRORS` (`BuiltinDescriptor.errors`);
+     - throw using the same row (`foo_error(&FOO_ERROR_...)`, `foo_error_with_detail(&FOO_ERROR_..., ...)`);
    - example: author `RunMat:lt:ComplexNotSupported` and `lt: complex numbers are not supported` exactly once on `LT_ERROR_COMPLEX_UNSUPPORTED`, then throw with `lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED)`;
    - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
    - for fixed-message stable branches, throw via `foo_error(&FOO_ERROR_...)` (descriptor-owned message) rather than passing a new branch message string;
