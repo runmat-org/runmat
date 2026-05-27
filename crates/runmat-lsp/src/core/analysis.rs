@@ -2834,6 +2834,14 @@ mod tests {
                 "writematrix([1 2; 3 4], \"out.csv\", \"Delimiter\", \";\");",
                 "bytesWritten = writematrix(data, filename, name, optionValue)",
             ),
+            (
+                "dlmwrite(\"out.csv\", [1 2; 3 4]);",
+                "bytesWritten = dlmwrite(filename, M)",
+            ),
+            (
+                "dlmwrite(\"out.csv\", [1 2; 3 4], \";\", 1, 2);",
+                "bytesWritten = dlmwrite(filename, M, delimiter, row, col)",
+            ),
         ];
 
         for (text, expected_label) in cases {

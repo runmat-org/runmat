@@ -7,7 +7,11 @@ use core::ffi::{c_char, c_int};
     all(windows, target_env = "gnu")
 ))]
 use libc;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_filesystem::{self as vfs, File, OpenOptions};
 use runmat_macros::runtime_builtin;
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,6 +29,200 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const BUILTIN_NAME: &str = "dlmwrite";
 
+const DLMWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "bytesWritten",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of bytes written to the output file.",
+}];
+const DLMWRITE_INPUTS_FILENAME_DATA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical matrix to write.",
+    },
+];
+const DLMWRITE_INPUTS_FILENAME_DATA_DELIM_ROW_COL: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical matrix to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\",\""),
+        description: "Delimiter token.",
+    },
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("0"),
+        description: "Row offset before writing matrix rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("0"),
+        description: "Column offset before writing matrix columns.",
+    },
+];
+const DLMWRITE_INPUTS_FILENAME_DATA_NAME_VALUE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical matrix to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option name.",
+    },
+    BuiltinParamDescriptor {
+        name: "optionValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option value.",
+    },
+];
+const DLMWRITE_INPUTS_FILENAME_DATA_NAME_VALUE_PAIRS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical matrix to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "args...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional delimiter/offset/append and name-value options.",
+    },
+];
+const DLMWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "bytesWritten = dlmwrite(filename, M)",
+        inputs: &DLMWRITE_INPUTS_FILENAME_DATA,
+        outputs: &DLMWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bytesWritten = dlmwrite(filename, M, delimiter, row, col)",
+        inputs: &DLMWRITE_INPUTS_FILENAME_DATA_DELIM_ROW_COL,
+        outputs: &DLMWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bytesWritten = dlmwrite(filename, M, name, optionValue)",
+        inputs: &DLMWRITE_INPUTS_FILENAME_DATA_NAME_VALUE,
+        outputs: &DLMWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bytesWritten = dlmwrite(filename, M, args...)",
+        inputs: &DLMWRITE_INPUTS_FILENAME_DATA_NAME_VALUE_PAIRS,
+        outputs: &DLMWRITE_OUTPUT,
+    },
+];
+
+const DLMWRITE_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.ARG_CONFIG",
+    identifier: None,
+    when: "Argument sequence or name-value grammar is malformed.",
+    message: "dlmwrite: invalid argument configuration",
+};
+const DLMWRITE_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.FILENAME",
+    identifier: None,
+    when: "Filename is missing, empty, or not a scalar string/char vector.",
+    message: "dlmwrite: invalid filename input",
+};
+const DLMWRITE_ERROR_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.OPTION",
+    identifier: None,
+    when: "Option name or value is invalid.",
+    message: "dlmwrite: invalid option value",
+};
+const DLMWRITE_ERROR_DATA: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.DATA",
+    identifier: None,
+    when: "Input data cannot be converted to a supported numeric/logical matrix.",
+    message: "dlmwrite: invalid input data",
+};
+const DLMWRITE_ERROR_DATA_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.DATA_SHAPE",
+    identifier: None,
+    when: "Input matrix is not 2-D.",
+    message: "dlmwrite: input must be 2-D",
+};
+const DLMWRITE_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.FORMAT",
+    identifier: None,
+    when: "Numeric precision format is invalid or unsupported.",
+    message: "dlmwrite: invalid precision format",
+};
+const DLMWRITE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMWRITE.IO",
+    identifier: None,
+    when: "File inspection/open/write/flush operations fail.",
+    message: "dlmwrite: file write failed",
+};
+const DLMWRITE_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    DLMWRITE_ERROR_ARG_CONFIG,
+    DLMWRITE_ERROR_FILENAME,
+    DLMWRITE_ERROR_OPTION,
+    DLMWRITE_ERROR_DATA,
+    DLMWRITE_ERROR_DATA_SHAPE,
+    DLMWRITE_ERROR_FORMAT,
+    DLMWRITE_ERROR_IO,
+];
+pub const DLMWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DLMWRITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DLMWRITE_ERRORS,
+};
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::dlmwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "dlmwrite",
@@ -41,20 +239,36 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host; gpuArray inputs are gathered before formatting.",
 };
 
-fn dlmwrite_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn dlmwrite_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    dlmwrite_error_with(error, error.message)
 }
 
-fn dlmwrite_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
+fn dlmwrite_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn dlmwrite_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -87,6 +301,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "dlmwrite,delimiter,precision,append,roffset,coffset",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
+    descriptor(crate::builtins::io::tabular::dlmwrite::DLMWRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::tabular::dlmwrite"
 )]
 async fn dlmwrite_builtin(
@@ -112,8 +327,8 @@ async fn dlmwrite_builtin(
     let gathered_data = gather_if_needed_async(&data)
         .await
         .map_err(map_control_flow)?;
-    let tensor =
-        tensor::value_into_tensor_for("dlmwrite", gathered_data).map_err(dlmwrite_error)?;
+    let tensor = tensor::value_into_tensor_for("dlmwrite", gathered_data)
+        .map_err(|msg| dlmwrite_error_with(&DLMWRITE_ERROR_DATA, format!("dlmwrite: {msg}")))?;
     ensure_matrix_shape(&tensor)?;
 
     let bytes = write_dlm(&path, &tensor, &options).await?;
@@ -224,14 +439,12 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> {
         }
 
         let name = value_to_lowercase_string(&args[idx]).ok_or_else(|| {
-            dlmwrite_error(format!(
-                "dlmwrite: expected name-value pair, got {:?}",
-                args[idx]
-            ))
+            dlmwrite_error(&DLMWRITE_ERROR_ARG_CONFIG)
         })?;
         idx += 1;
         if idx >= args.len() {
-            return Err(dlmwrite_error(
+            return Err(dlmwrite_error_with(
+                &DLMWRITE_ERROR_ARG_CONFIG,
                 "dlmwrite: name-value arguments must appear in pairs",
             ));
         }
@@ -258,9 +471,10 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> {
                 options.append = parse_append_value(value)?;
             }
             other => {
-                return Err(dlmwrite_error(format!(
-                    "dlmwrite: unsupported name-value pair '{other}'"
-                )));
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
+                    format!("dlmwrite: unsupported name-value pair '{other}'"),
+                ));
             }
         }
     }
@@ -306,7 +520,8 @@ fn parse_delimiter_value(value: &Value) -> BuiltinResult<String> {
             interpret_delimiter_string(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => interpret_delimiter_string(&sa.data[0]),
-        _ => Err(dlmwrite_error(
+        _ => Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
             "dlmwrite: delimiter must be a string scalar or character vector",
         )),
     }
@@ -314,7 +529,10 @@ fn parse_delimiter_value(value: &Value) -> BuiltinResult<String> {
 
 fn interpret_delimiter_string(raw: &str) -> BuiltinResult<String> {
     if raw.is_empty() {
-        return Err(dlmwrite_error("dlmwrite: delimiter must not be empty"));
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "dlmwrite: delimiter must not be empty",
+        ));
     }
     if raw == r"\t" {
         return Ok("\t".to_string());
@@ -338,21 +556,27 @@ fn is_numeric_scalar(value: &Value) -> bool {
 }
 
 fn parse_offset_value(value: &Value, context: &str) -> BuiltinResult<usize> {
-    let scalar =
-        extract_scalar(value).map_err(|e| dlmwrite_error(format!("dlmwrite: {context} {e}")))?;
+    let scalar = extract_scalar(value).map_err(|e| {
+        dlmwrite_error_with(&DLMWRITE_ERROR_OPTION, format!("dlmwrite: {context} {e}"))
+    })?;
     if !scalar.is_finite() {
-        return Err(dlmwrite_error(format!(
-            "dlmwrite: {context} must be finite"
-        )));
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            format!("dlmwrite: {context} must be finite"),
+        ));
     }
     let rounded = scalar.round();
     if (rounded - scalar).abs() > 1e-9 {
-        return Err(dlmwrite_error(format!(
-            "dlmwrite: {context} must be an integer, got {scalar}"
-        )));
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            format!("dlmwrite: {context} must be an integer, got {scalar}"),
+        ));
     }
     if rounded < 0.0 {
-        return Err(dlmwrite_error(format!("dlmwrite: {context} must be >= 0")));
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            format!("dlmwrite: {context} must be >= 0"),
+        ));
     }
     Ok(rounded as usize)
 }
@@ -362,7 +586,8 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
         Value::Int(i) => {
             let digits = i.to_i64();
             if digits <= 0 {
-                return Err(dlmwrite_error(
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
                     "dlmwrite: precision must be a positive integer",
                 ));
             }
@@ -370,16 +595,21 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(dlmwrite_error("dlmwrite: precision scalar must be finite"));
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
+                    "dlmwrite: precision scalar must be finite",
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1e-9 {
-                return Err(dlmwrite_error(
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
                     "dlmwrite: precision scalar must be an integer",
                 ));
             }
             if rounded <= 0.0 {
-                return Err(dlmwrite_error(
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
                     "dlmwrite: precision must be a positive integer",
                 ));
             }
@@ -390,7 +620,8 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
             if logical.data[0] != 0 {
                 Ok(PrecisionSpec::Significant(1))
             } else {
-                Err(dlmwrite_error(
+                Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
                     "dlmwrite: precision must be a positive integer",
                 ))
             }
@@ -399,7 +630,8 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
             if *b {
                 Ok(PrecisionSpec::Significant(1))
             } else {
-                Err(dlmwrite_error(
+                Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_OPTION,
                     "dlmwrite: precision must be a positive integer",
                 ))
             }
@@ -410,7 +642,8 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
             parse_precision_format(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => parse_precision_format(&sa.data[0]),
-        _ => Err(dlmwrite_error(
+        _ => Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
             "dlmwrite: precision must be numeric or a format string",
         )),
     }
@@ -418,7 +651,8 @@ fn parse_precision_value(value: &Value) -> BuiltinResult<PrecisionSpec> {
 
 fn parse_precision_format(text: &str) -> BuiltinResult<PrecisionSpec> {
     if text.is_empty() {
-        return Err(dlmwrite_error(
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
             "dlmwrite: precision format string must not be empty",
         ));
     }
@@ -427,15 +661,19 @@ fn parse_precision_format(text: &str) -> BuiltinResult<PrecisionSpec> {
 
 fn parse_newline_value(value: &Value) -> BuiltinResult<LineEnding> {
     let text = value_to_lowercase_string(value).ok_or_else(|| {
-        dlmwrite_error("dlmwrite: newline must be a string scalar or character vector")
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "dlmwrite: newline must be a string scalar or character vector",
+        )
     })?;
     match text.as_str() {
         "pc" | "windows" | "crlf" => Ok(LineEnding::Pc),
         "unix" | "lf" => Ok(LineEnding::Unix),
         "mac" | "cr" => Ok(LineEnding::Mac),
-        other => Err(dlmwrite_error(format!(
-            "dlmwrite: unsupported newline setting '{other}' (expected 'pc' or 'unix')"
-        ))),
+        other => Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            format!("dlmwrite: unsupported newline setting '{other}' (expected 'pc' or 'unix')"),
+        )),
     }
 }
 
@@ -450,7 +688,10 @@ fn parse_append_value(value: &Value) -> BuiltinResult<bool> {
             parse_bool_string(&text)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
-        _ => Err(dlmwrite_error("dlmwrite: append value must be logical")),
+        _ => Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "dlmwrite: append value must be logical",
+        )),
     }
 }
 
@@ -459,7 +700,10 @@ fn parse_bool_string(text: &str) -> BuiltinResult<bool> {
     match lowered.as_str() {
         "true" | "on" | "yes" | "1" => Ok(true),
         "false" | "off" | "no" | "0" => Ok(false),
-        _ => Err(dlmwrite_error("dlmwrite: append value must be logical")),
+        _ => Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "dlmwrite: append value must be logical",
+        )),
     }
 }
 
@@ -472,7 +716,10 @@ fn extract_scalar(value: &Value) -> BuiltinResult<f64> {
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        _ => Err(dlmwrite_error("must be numeric scalar")),
+        _ => Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_OPTION,
+            "must be numeric scalar",
+        )),
     }
 }
 
@@ -486,15 +733,20 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         _ => {
-            return Err(dlmwrite_error(
+            return Err(dlmwrite_error_with(
+                &DLMWRITE_ERROR_FILENAME,
                 "dlmwrite: filename must be a string scalar or character vector",
             ))
         }
     };
     if raw.trim().is_empty() {
-        return Err(dlmwrite_error("dlmwrite: filename must not be empty"));
+        return Err(dlmwrite_error_with(
+            &DLMWRITE_ERROR_FILENAME,
+            "dlmwrite: filename must not be empty",
+        ));
     }
-    let expanded = expand_user_path(&raw, BUILTIN_NAME).map_err(dlmwrite_error)?;
+    let expanded = expand_user_path(&raw, BUILTIN_NAME)
+        .map_err(|msg| dlmwrite_error_with(&DLMWRITE_ERROR_FILENAME, msg))?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
@@ -505,7 +757,8 @@ fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
     if tensor.shape[2..].iter().all(|&dim| dim == 1) {
         return Ok(());
     }
-    Err(dlmwrite_error(
+    Err(dlmwrite_error_with(
+        &DLMWRITE_ERROR_DATA_SHAPE,
         "dlmwrite: input must be 2-D; reshape before writing",
     ))
 }
@@ -524,6 +777,7 @@ async fn write_dlm(
             Ok(meta) if !meta.is_empty() => {
                 let ends = file_ends_with_newline(path).await.map_err(|err| {
                     dlmwrite_error_with_source(
+                        &DLMWRITE_ERROR_IO,
                         format!(
                             "dlmwrite: failed to inspect existing file \"{}\" ({err})",
                             path.display()
@@ -539,6 +793,7 @@ async fn write_dlm(
                     (false, false)
                 } else {
                     return Err(dlmwrite_error_with_source(
+                        &DLMWRITE_ERROR_IO,
                         format!("dlmwrite: unable to inspect \"{}\" ({err})", path.display()),
                         err,
                     ));
@@ -559,6 +814,7 @@ async fn write_dlm(
 
     let mut file = open.open(path).map_err(|err| {
         dlmwrite_error_with_source(
+            &DLMWRITE_ERROR_IO,
             format!(
                 "dlmwrite: unable to open \"{}\" for writing ({err})",
                 path.display()
@@ -572,6 +828,7 @@ async fn write_dlm(
     if options.append && existing_nonempty && !ends_with_newline {
         file.write_all(newline.as_bytes()).map_err(|err| {
             dlmwrite_error_with_source(
+                &DLMWRITE_ERROR_IO,
                 format!("dlmwrite: failed to insert newline before append ({err})"),
                 err,
             )
@@ -591,7 +848,11 @@ async fn write_dlm(
 
     if rows == 0 || cols == 0 {
         file.flush().map_err(|err| {
-            dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
+            dlmwrite_error_with_source(
+                &DLMWRITE_ERROR_IO,
+                format!("dlmwrite: failed to flush output ({err})"),
+                err,
+            )
         })?;
         return Ok(bytes);
     }
@@ -609,18 +870,30 @@ async fn write_dlm(
         let line = fields.join(&options.delimiter);
         if !line.is_empty() {
             file.write_all(line.as_bytes()).map_err(|err| {
-                dlmwrite_error_with_source(format!("dlmwrite: failed to write data ({err})"), err)
+                dlmwrite_error_with_source(
+                    &DLMWRITE_ERROR_IO,
+                    format!("dlmwrite: failed to write data ({err})"),
+                    err,
+                )
             })?;
             bytes += line.len();
         }
         file.write_all(newline.as_bytes()).map_err(|err| {
-            dlmwrite_error_with_source(format!("dlmwrite: failed to write newline ({err})"), err)
+            dlmwrite_error_with_source(
+                &DLMWRITE_ERROR_IO,
+                format!("dlmwrite: failed to write newline ({err})"),
+                err,
+            )
         })?;
         bytes += newline.len();
     }
 
     file.flush().map_err(|err| {
-        dlmwrite_error_with_source(format!("dlmwrite: failed to flush output ({err})"), err)
+        dlmwrite_error_with_source(
+            &DLMWRITE_ERROR_IO,
+            format!("dlmwrite: failed to flush output ({err})"),
+            err,
+        )
     })?;
     Ok(bytes)
 }
@@ -636,6 +909,7 @@ fn write_blank_row(
     if coffset == 0 && cols == 0 {
         file.write_all(newline.as_bytes()).map_err(|err| {
             dlmwrite_error_with_source(
+                &DLMWRITE_ERROR_IO,
                 format!("dlmwrite: failed to write offset newline ({err})"),
                 err,
             )
@@ -652,12 +926,17 @@ fn write_blank_row(
     let line = fields.join(delimiter);
     if !line.is_empty() {
         file.write_all(line.as_bytes()).map_err(|err| {
-            dlmwrite_error_with_source(format!("dlmwrite: failed to write offset row ({err})"), err)
+            dlmwrite_error_with_source(
+                &DLMWRITE_ERROR_IO,
+                format!("dlmwrite: failed to write offset row ({err})"),
+                err,
+            )
         })?;
         bytes += line.len();
     }
     file.write_all(newline.as_bytes()).map_err(|err| {
         dlmwrite_error_with_source(
+            &DLMWRITE_ERROR_IO,
             format!("dlmwrite: failed to write offset newline ({err})"),
             err,
         )
@@ -694,7 +973,10 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> BuiltinResult<String
     match precision {
         PrecisionSpec::Significant(digits) => {
             if *digits == 0 {
-                return Err(dlmwrite_error("dlmwrite: precision must be positive"));
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_FORMAT,
+                    "dlmwrite: precision must be positive",
+                ));
             }
             let fmt = format!("%.{digits}g");
             let mut rendered = c_format(value, &fmt)?;
@@ -717,7 +999,10 @@ fn format_numeric(value: f64, precision: &PrecisionSpec) -> BuiltinResult<String
 #[cfg(not(target_arch = "wasm32"))]
 fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
     let fmt = CString::new(spec.as_bytes()).map_err(|_| {
-        dlmwrite_error("dlmwrite: precision format must not contain embedded null bytes")
+        dlmwrite_error_with(
+            &DLMWRITE_ERROR_FORMAT,
+            "dlmwrite: precision format must not contain embedded null bytes",
+        )
     })?;
     let mut size: usize = 128;
     loop {
@@ -731,7 +1016,8 @@ fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
             )
         };
         if written < 0 {
-            return Err(dlmwrite_error(
+            return Err(dlmwrite_error_with(
+                &DLMWRITE_ERROR_FORMAT,
                 "dlmwrite: failed to apply precision format string",
             ));
         }
@@ -741,8 +1027,12 @@ fn c_format(value: f64, spec: &str) -> BuiltinResult<String> {
             continue;
         }
         buffer.truncate(written);
-        return String::from_utf8(buffer)
-            .map_err(|_| dlmwrite_error("dlmwrite: formatted output was not valid UTF-8"));
+        return String::from_utf8(buffer).map_err(|_| {
+            dlmwrite_error_with(
+                &DLMWRITE_ERROR_FORMAT,
+                "dlmwrite: formatted output was not valid UTF-8",
+            )
+        });
     }
 }
 
@@ -840,9 +1130,10 @@ impl ParsedFormat {
                         .checked_mul(10)
                         .and_then(|v| v.checked_add((ch as u8 - b'0') as usize))
                         .ok_or_else(|| {
-                            dlmwrite_error(format!(
-                                "dlmwrite: {label} too large in precision format"
-                            ))
+                            dlmwrite_error_with(
+                                &DLMWRITE_ERROR_FORMAT,
+                                format!("dlmwrite: {label} too large in precision format"),
+                            )
                         })?;
                     chars.next();
                 } else {
@@ -856,7 +1147,8 @@ impl ParsedFormat {
         match chars.next() {
             Some('%') => {}
             _ => {
-                return Err(dlmwrite_error(
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_FORMAT,
                     "dlmwrite: precision format must start with '%'",
                 ));
             }
@@ -906,16 +1198,21 @@ impl ParsedFormat {
         };
 
         if matches!(chars.peek(), Some('l' | 'L' | 'h')) {
-            return Err(dlmwrite_error(
+            return Err(dlmwrite_error_with(
+                &DLMWRITE_ERROR_FORMAT,
                 "dlmwrite: length modifiers are not supported in precision formats",
             ));
         }
 
-        let spec_ch = chars
-            .next()
-            .ok_or_else(|| dlmwrite_error("dlmwrite: incomplete precision format"))?;
+        let spec_ch = chars.next().ok_or_else(|| {
+            dlmwrite_error_with(
+                &DLMWRITE_ERROR_FORMAT,
+                "dlmwrite: incomplete precision format",
+            )
+        })?;
         if chars.next().is_some() {
-            return Err(dlmwrite_error(
+            return Err(dlmwrite_error_with(
+                &DLMWRITE_ERROR_FORMAT,
                 "dlmwrite: unexpected trailing characters in precision format",
             ));
         }
@@ -928,9 +1225,10 @@ impl ParsedFormat {
             'g' => (FloatSpecifier::General, false),
             'G' => (FloatSpecifier::General, true),
             other => {
-                return Err(dlmwrite_error(format!(
-                    "dlmwrite: unsupported precision format specifier '{other}'"
-                )));
+                return Err(dlmwrite_error_with(
+                    &DLMWRITE_ERROR_FORMAT,
+                    format!("dlmwrite: unsupported precision format specifier '{other}'"),
+                ));
             }
         };
 
@@ -1205,6 +1503,20 @@ pub(crate) mod tests {
             ext
         ));
         path
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn dlmwrite_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DLMWRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"bytesWritten = dlmwrite(filename, M)"));
+        assert!(labels.contains(&"bytesWritten = dlmwrite(filename, M, delimiter, row, col)"));
+        assert!(labels.contains(&"bytesWritten = dlmwrite(filename, M, name, optionValue)"));
+        assert!(labels.contains(&"bytesWritten = dlmwrite(filename, M, args...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
