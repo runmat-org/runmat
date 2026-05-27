@@ -1,7 +1,11 @@
 //! MATLAB-compatible normalized `sinc` builtin for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
-use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -15,6 +19,78 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinc";
+
+const SINC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise normalized sinc output.",
+}];
+
+const SINC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input values.",
+}];
+
+const SINC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = sinc(X)",
+    inputs: &SINC_INPUTS,
+    outputs: &SINC_OUTPUT,
+}];
+
+const SINC_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINC.INVALID_INPUT",
+    identifier: Some("RunMat:sinc:InvalidInput"),
+    when: "Input cannot be interpreted as numeric/complex data.",
+    message: "sinc: expected numeric input",
+};
+
+const SINC_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINC.PROVIDER_FAILED",
+    identifier: Some("RunMat:sinc:ProviderFailed"),
+    when: "Provider unary_sinc dispatch fails with a non-unsupported error.",
+    message: "sinc: GPU provider unary_sinc failed",
+};
+
+const SINC_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINC.GATHER_FAILED",
+    identifier: Some("RunMat:gather:DownloadFailed"),
+    when: "GPU host fallback cannot download source data.",
+    message: "gather: download failed",
+};
+
+const SINC_ERROR_MALFORMED_COMPLEX_BUFFER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINC.MALFORMED_COMPLEX_BUFFER",
+    identifier: Some("RunMat:sinc:MalformedComplexBuffer"),
+    when: "Complex-interleaved fallback buffer has odd element count.",
+    message: "sinc: malformed complex buffer, odd length",
+};
+
+const SINC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINC.INTERNAL",
+    identifier: Some("RunMat:sinc:InternalError"),
+    when: "Internal tensor conversion/materialization fails.",
+    message: "sinc: internal error",
+};
+
+const SINC_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    SINC_ERROR_INVALID_INPUT,
+    SINC_ERROR_PROVIDER_FAILED,
+    SINC_ERROR_GATHER_FAILED,
+    SINC_ERROR_MALFORMED_COMPLEX_BUFFER,
+    SINC_ERROR_INTERNAL,
+];
+
+pub const SINC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SINC_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SINC_ERRORS,
+};
 
 #[derive(Debug)]
 struct ProviderAnyhowError {
@@ -66,10 +142,40 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion emits a guarded normalized sinc expression with explicit zero and integer branches.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+fn sinc_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    sinc_error_with_message(error.message, error)
+}
+
+fn sinc_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    sinc_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn sinc_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn sinc_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn provider_error_is_unsupported(err: &anyhow::Error) -> bool {
@@ -82,10 +188,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     let source = ProviderAnyhowError {
         message: format!("{err:?}"),
     };
-    build_runtime_error(format!("sinc: GPU provider unary_sinc failed: {message}"))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+    sinc_error_with_source(&SINC_ERROR_PROVIDER_FAILED, message, source)
 }
 
 #[runtime_builtin(
@@ -95,6 +198,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
     keywords = "sinc,normalized sinc,signal processing,elementwise",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::signal::sinc::SINC_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::sinc"
 )]
 async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
@@ -106,7 +210,7 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(tensor) => sinc_complex_tensor(tensor),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("sinc: expected numeric input"))
+            Err(sinc_error(&SINC_ERROR_INVALID_INPUT))
         }
         other => sinc_real(other),
     }
@@ -135,11 +239,7 @@ async fn sinc_gpu_host_fallback(
 ) -> BuiltinResult<Value> {
     let host = crate::dispatcher::download_handle_async(provider, handle)
         .await
-        .map_err(|err| {
-            build_runtime_error(format!("gather: {err}"))
-                .with_identifier("RunMat:gather:DownloadFailed")
-                .build()
-        })?;
+        .map_err(|err| sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string()))?;
 
     let runmat_accelerate_api::HostTensorOwned {
         mut data,
@@ -157,11 +257,11 @@ async fn sinc_gpu_host_fallback(
     if storage == GpuTensorStorage::ComplexInterleaved {
         let chunks = data.chunks_exact(2);
         if !chunks.remainder().is_empty() {
-            return Err(builtin_error("sinc: malformed complex buffer, odd length"));
+            return Err(sinc_error(&SINC_ERROR_MALFORMED_COMPLEX_BUFFER));
         }
         let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
-        let tensor =
-            ComplexTensor::new(complex, shape).map_err(|e| builtin_error(format!("sinc: {e}")))?;
+        let tensor = ComplexTensor::new(complex, shape)
+            .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))?;
         return sinc_complex_tensor(tensor);
     }
 
@@ -170,13 +270,13 @@ async fn sinc_gpu_host_fallback(
         runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
     };
     let tensor = Tensor::new_with_dtype(data, shape, dtype)
-        .map_err(|e| builtin_error(format!("sinc: {e}")))?;
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))?;
     Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
 }
 
 fn sinc_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|e| builtin_error(format!("sinc: {e}")))?;
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INVALID_INPUT, e.to_string()))?;
     Ok(tensor::tensor_into_value(sinc_tensor(tensor)?))
 }
 
@@ -186,7 +286,8 @@ fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&value| sinc_real_value(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("sinc: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))
 }
 
 fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -196,7 +297,7 @@ fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| sinc_complex_value(re, im))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|e| builtin_error(format!("sinc: {e}")))?;
+        .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, e.to_string()))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -408,6 +509,18 @@ mod tests {
                 .any(|tag| matches!(tag, AccelTag::Unary)),
             "sinc must be tagged unary so native auto-promotion uploads host numeric inputs for unary_sinc"
         );
+    }
+
+    #[test]
+    fn sinc_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered sinc builtin");
+        let descriptor = builtin.descriptor.expect("sinc descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = sinc(X)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.SINC.PROVIDER_FAILED"));
     }
 
     #[test]

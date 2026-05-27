@@ -3236,6 +3236,35 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_signal_waveform_descriptors() {
+        let cases = [
+            ("hann(8);", "w = hann(n)"),
+            ("hann(8, \"periodic\");", "w = hann(n, sampling)"),
+            ("hamming(8);", "w = hamming(n)"),
+            ("hamming(8, \"periodic\");", "w = hamming(n, sampling)"),
+            ("blackman(8);", "w = blackman(n)"),
+            ("blackman(8, \"single\");", "w = blackman(n, precision)"),
+            ("sinc(0.5);", "Y = sinc(X)"),
+            ("square(0.5);", "Y = square(t)"),
+            ("square(0.5, 25);", "Y = square(t, duty)"),
+            ("sawtooth(0.5);", "Y = sawtooth(t)"),
+            ("sawtooth(0.5, 0.5);", "Y = sawtooth(t, xmax)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
             ("fieldnames(struct());", "names = fieldnames(S)"),

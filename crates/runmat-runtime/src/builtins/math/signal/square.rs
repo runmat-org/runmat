@@ -9,7 +9,11 @@
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
@@ -20,10 +24,144 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "square";
 const TWO_PI: f64 = 2.0 * PI;
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const SQUARE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square-wave output sampled at t.",
+}];
+
+const SQUARE_SIG_DEFAULT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "t",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sample times.",
+}];
+
+const SQUARE_SIG_DUTY_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample times.",
+    },
+    BuiltinParamDescriptor {
+        name: "duty",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("50"),
+        description: "Duty cycle percentage in [0, 100].",
+    },
+];
+
+const SQUARE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = square(t)",
+        inputs: &SQUARE_SIG_DEFAULT_INPUTS,
+        outputs: &SQUARE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = square(t, duty)",
+        inputs: &SQUARE_SIG_DUTY_INPUTS,
+        outputs: &SQUARE_OUTPUT,
+    },
+];
+
+const SQUARE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUARE.INVALID_INPUT",
+    identifier: Some("RunMat:square:InvalidInput"),
+    when: "Primary input is not numeric-real tensor/scalar compatible.",
+    message: "square: expected numeric input",
+};
+
+const SQUARE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUARE.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:square:ComplexUnsupported"),
+    when: "Primary input includes complex values.",
+    message: "square: input must be real; complex values are not supported",
+};
+
+const SQUARE_ERROR_DUTY_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUARE.DUTY_INVALID",
+    identifier: Some("RunMat:square:DutyInvalid"),
+    when: "Duty argument is not a real numeric scalar.",
+    message: "square: duty must be a real numeric scalar in [0, 100]",
+};
+
+const SQUARE_ERROR_DUTY_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUARE.DUTY_RANGE",
+    identifier: Some("RunMat:square:DutyOutOfRange"),
+    when: "Duty argument lies outside [0, 100] or is non-finite.",
+    message: "square: duty must be a finite scalar in [0, 100]",
+};
+
+const SQUARE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUARE.ARG_COUNT",
+    identifier: Some("RunMat:square:ArgCount"),
+    when: "More than one optional argument is provided.",
+    message: "square: expected 1 or 2 arguments",
+};
+
+const SQUARE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUARE.INTERNAL",
+    identifier: Some("RunMat:square:InternalError"),
+    when: "Internal tensor construction or GPU gather fails.",
+    message: "square: internal error",
+};
+
+const SQUARE_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    SQUARE_ERROR_INVALID_INPUT,
+    SQUARE_ERROR_COMPLEX_UNSUPPORTED,
+    SQUARE_ERROR_DUTY_INVALID,
+    SQUARE_ERROR_DUTY_RANGE,
+    SQUARE_ERROR_ARG_COUNT,
+    SQUARE_ERROR_INTERNAL,
+];
+
+pub const SQUARE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SQUARE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SQUARE_ERRORS,
+};
+
+fn square_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    square_error_with_message(error.message, error)
+}
+
+fn square_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    square_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn square_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn square_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Element-wise scalar square wave.
@@ -52,17 +190,18 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
     summary = "Generate a periodic square wave with optional duty cycle.",
     keywords = "square,waveform,signal processing,duty cycle,periodic",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::square"
 )]
 async fn square_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
     let duty = parse_duty(&varargin).await?;
     match t {
         Value::GpuTensor(handle) => square_gpu(handle, duty).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "square: input must be real; complex values are not supported",
-        )),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            Err(square_error(&SQUARE_ERROR_COMPLEX_UNSUPPORTED))
+        }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(builtin_error("square: expected numeric input"))
+            Err(square_error(&SQUARE_ERROR_INVALID_INPUT))
         }
         other => square_real(other, duty),
     }
@@ -74,31 +213,35 @@ async fn parse_duty(varargin: &[Value]) -> BuiltinResult<f64> {
         1 => {
             let raw = scalar_f64_from_value_async(&varargin[0])
                 .await
-                .map_err(|err| builtin_error(format!("square: {err}")))?
-                .ok_or_else(|| {
-                    builtin_error("square: duty must be a real numeric scalar in [0, 100]")
-                })?;
+                .map_err(|err| square_error_with_detail(&SQUARE_ERROR_DUTY_INVALID, err))?
+                .ok_or_else(|| square_error(&SQUARE_ERROR_DUTY_INVALID))?;
             if !raw.is_finite() || !(0.0..=100.0).contains(&raw) {
-                return Err(builtin_error(format!(
-                    "square: duty must be a finite scalar in [0, 100], got {raw}"
-                )));
+                return Err(square_error_with_detail(
+                    &SQUARE_ERROR_DUTY_RANGE,
+                    format!("got {raw}"),
+                ));
             }
             Ok(raw)
         }
-        _ => Err(builtin_error(format!(
-            "square: expected 1 or 2 arguments, got {}",
-            varargin.len() + 1
-        ))),
+        _ => Err(square_error_with_detail(
+            &SQUARE_ERROR_ARG_COUNT,
+            format!("got {}", varargin.len() + 1),
+        )),
     }
 }
 
 async fn square_gpu(handle: GpuTensorHandle, duty: f64) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|source| {
+            square_error_with_source(&SQUARE_ERROR_INTERNAL, "gpu gather failed", source)
+        })?;
     square_tensor(tensor, duty).map(tensor_into_value)
 }
 
 fn square_real(value: Value, duty: f64) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INVALID_INPUT, err))?;
     square_tensor(tensor, duty).map(tensor_into_value)
 }
 
@@ -108,14 +251,15 @@ fn square_tensor(tensor: Tensor, duty: f64) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&value| square_scalar(value, duty))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|err| builtin_error(format!("square: {err}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|err| square_error_with_detail(&SQUARE_ERROR_INTERNAL, err.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Type};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(square_builtin(t, Vec::new()))
@@ -153,6 +297,19 @@ mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn square_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("square builtin");
+        let descriptor = builtin.descriptor.expect("square descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = square(t)"));
+        assert!(labels.contains(&"Y = square(t, duty)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.SQUARE.DUTY_RANGE"));
     }
 
     #[test]

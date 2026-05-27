@@ -2,15 +2,194 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
+use crate::{build_runtime_error, RuntimeError};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::{
-    parse_window_options, provider_precision_matches, window_tensor, WindowOutputType,
-    WindowSampling,
+    parse_window_options, provider_precision_matches, window_tensor, WindowArgError,
+    WindowOutputType, WindowSampling,
 };
 use crate::builtins::math::signal::type_resolvers::window_vector_type;
 
 const BUILTIN_NAME: &str = "blackman";
+
+const BLACKMAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "w",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Blackman window column vector.",
+}];
+
+const BLACKMAN_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Window length.",
+}];
+
+const BLACKMAN_SIG_SAMPLING_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Window length.",
+    },
+    BuiltinParamDescriptor {
+        name: "sampling",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"symmetric\""),
+        description: "Sampling mode: \"symmetric\" or \"periodic\".",
+    },
+];
+
+const BLACKMAN_SIG_TYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Window length.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output precision: \"double\" or \"single\".",
+    },
+];
+
+const BLACKMAN_SIG_FULL_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Window length.",
+    },
+    BuiltinParamDescriptor {
+        name: "sampling",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"symmetric\""),
+        description: "Sampling mode: \"symmetric\" or \"periodic\".",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output precision: \"double\" or \"single\".",
+    },
+];
+
+const BLACKMAN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "w = blackman(n)",
+        inputs: &BLACKMAN_SIG_N_INPUTS,
+        outputs: &BLACKMAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "w = blackman(n, sampling)",
+        inputs: &BLACKMAN_SIG_SAMPLING_INPUTS,
+        outputs: &BLACKMAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "w = blackman(n, precision)",
+        inputs: &BLACKMAN_SIG_TYPE_INPUTS,
+        outputs: &BLACKMAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "w = blackman(n, sampling, precision)",
+        inputs: &BLACKMAN_SIG_FULL_INPUTS,
+        outputs: &BLACKMAN_OUTPUT,
+    },
+];
+
+const BLACKMAN_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BLACKMAN.INVALID_LENGTH",
+    identifier: Some("RunMat:blackman:InvalidLength"),
+    when: "Length input is not a finite nonnegative scalar value.",
+    message: "blackman: expected a nonnegative scalar integer length",
+};
+
+const BLACKMAN_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BLACKMAN.INVALID_OPTION",
+    identifier: Some("RunMat:blackman:InvalidOption"),
+    when: "An option argument is not a string-like sampling/precision token.",
+    message: "blackman: unrecognized option",
+};
+
+const BLACKMAN_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BLACKMAN.UNKNOWN_OPTION",
+    identifier: Some("RunMat:blackman:UnknownOption"),
+    when: "An option string is not recognized by blackman.",
+    message: "blackman: unrecognized option",
+};
+
+const BLACKMAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BLACKMAN.INTERNAL",
+    identifier: Some("RunMat:blackman:InternalError"),
+    when: "Window materialization fails internally.",
+    message: "blackman: internal error",
+};
+
+const BLACKMAN_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    BLACKMAN_ERROR_INVALID_LENGTH,
+    BLACKMAN_ERROR_INVALID_OPTION,
+    BLACKMAN_ERROR_UNKNOWN_OPTION,
+    BLACKMAN_ERROR_INTERNAL,
+];
+
+pub const BLACKMAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BLACKMAN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &BLACKMAN_ERRORS,
+};
+
+fn blackman_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    blackman_error_with_message(error.message, error)
+}
+
+fn blackman_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    blackman_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn blackman_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn blackman_map_window_error(error: WindowArgError) -> RuntimeError {
+    match error {
+        WindowArgError::InvalidLength => blackman_error(&BLACKMAN_ERROR_INVALID_LENGTH),
+        WindowArgError::InvalidOptionType => blackman_error(&BLACKMAN_ERROR_INVALID_OPTION),
+        WindowArgError::UnknownOption(option) => {
+            blackman_error_with_detail(&BLACKMAN_ERROR_UNKNOWN_OPTION, format!("'{option}'"))
+        }
+        WindowArgError::TensorBuild(detail) => {
+            blackman_error_with_detail(&BLACKMAN_ERROR_INTERNAL, detail)
+        }
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::blackman")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -45,13 +224,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Generate a Blackman window as an N-by-1 real column vector.",
     keywords = "blackman,window,signal processing,dsp,fft",
     type_resolver(window_vector_type),
+    descriptor(crate::builtins::math::signal::blackman::BLACKMAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::blackman"
 )]
 async fn blackman_builtin(
     n: runmat_builtins::Value,
     varargin: Vec<runmat_builtins::Value>,
 ) -> crate::BuiltinResult<runmat_builtins::Value> {
-    let options = parse_window_options(BUILTIN_NAME, n, &varargin, true)?;
+    let options = parse_window_options(n, &varargin, true).map_err(blackman_map_window_error)?;
     if options.len > 1 && provider_precision_matches(options.output_type) {
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(handle) = provider.blackman_window(
@@ -67,11 +247,12 @@ async fn blackman_builtin(
             }
         }
     }
-    window_tensor(options, BUILTIN_NAME, |idx, total| {
+    window_tensor(options, |idx, total| {
         let denom = (total - 1) as f64;
         let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
         0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos()
     })
+    .map_err(blackman_map_window_error)
 }
 
 #[cfg(test)]
@@ -79,7 +260,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Value;
+    use runmat_builtins::{builtin_function_by_name, Value};
 
     #[test]
     fn blackman_returns_expected_values() {
@@ -102,6 +283,21 @@ mod tests {
         for (got, want) in t.data.iter().zip(expected.iter()) {
             assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
         }
+    }
+
+    #[test]
+    fn blackman_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("blackman builtin");
+        let descriptor = builtin.descriptor.expect("blackman descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"w = blackman(n)"));
+        assert!(labels.contains(&"w = blackman(n, sampling)"));
+        assert!(labels.contains(&"w = blackman(n, precision)"));
+        assert!(labels.contains(&"w = blackman(n, sampling, precision)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.BLACKMAN.INVALID_LENGTH"));
     }
 
     #[test]
