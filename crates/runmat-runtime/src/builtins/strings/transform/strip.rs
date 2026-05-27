@@ -470,10 +470,7 @@ async fn parse_arguments(
             let pattern = parse_pattern(&args[1], expectation).await?;
             Ok((direction, pattern))
         }
-        _ => Err(strip_error_with_message(
-            "strip: too many input arguments",
-            &STRIP_ERROR_ARG_COUNT,
-        )),
+        _ => Err(strip_error(&STRIP_ERROR_ARG_COUNT)),
     }
 }
 
@@ -969,7 +966,7 @@ pub(crate) mod tests {
             ],
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), "strip: too many input arguments");
+        assert_eq!(err.to_string(), STRIP_ERROR_ARG_COUNT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

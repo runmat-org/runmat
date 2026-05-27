@@ -139,5 +139,6 @@ Loop instructions:
    - `rg -n "const IDENT_|const [A-Z0-9_]+_(MESSAGE|CODE): &str" <touched_builtin_files...>`
    - `rg -n "identifier:\\s*Some\\([A-Z0-9_]+\\)|^\\s*code:\\s*[A-Z0-9_]+\\s*,\\s*$|^\\s*message:\\s*[A-Z0-9_]+\\s*,\\s*$" <touched_builtin_files...>`
    - `rg -n 'with_identifier\\(\"RunMat:' <touched_builtin_files...>`
+   - `cargo test -p runmat-runtime --test descriptor_error_source_of_truth`
 7. Update this progress tracker wave row with commit hash and validation set.
 ```

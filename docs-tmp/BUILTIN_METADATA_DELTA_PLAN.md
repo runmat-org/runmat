@@ -273,13 +273,15 @@ Required:
 2. Build `FOO_ERRORS` from those rows.
 3. Throw stable branches exclusively through helper functions that accept `&'static BuiltinErrorDescriptor` (for example `foo_error(&FOO_ERROR_INVALID_INPUT)`).
 4. Stable branch identifiers/messages such as `RunMat:lt:ComplexNotSupported` must be authored once on the descriptor row and consumed by throw helpers; do not keep parallel per-branch identifier/message constants.
+5. Stable descriptor literals must be unique in-file: each descriptor `code`/`identifier`/`message` literal appears only in descriptor rows, never repeated at throw sites.
 
 Disallowed:
 
 1. `const IDENT_*`, `const *_CODE`, `const *_MESSAGE` mirrors for stable branches.
 2. `with_identifier("RunMat:...")` direct stable-branch throws in migrated builtin files.
 3. Repeating the same stable message text at throw sites when that message already exists in a descriptor row.
-4. Duplicating stable error identifier/code/message constants in `#[cfg(test)]` sections of migrated builtin files; tests should reference descriptor rows directly as well.
+4. Restating stable descriptor literals via `_error_with_message("...")` for stable branches; use descriptor-backed helpers (`foo_error(&FOO_ERROR_...)`) or detail-only suffix helpers (`foo_error_with_detail(&FOO_ERROR_..., "...")`).
+5. Duplicating stable error identifier/code/message constants in `#[cfg(test)]` sections of migrated builtin files; tests should reference descriptor rows directly as well.
 
 Audit command (must stay clean):
 
