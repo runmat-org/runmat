@@ -3071,6 +3071,10 @@ mod tests {
                 "cummin([1,2,3], \"omitnan\", \"reverse\");",
                 "M = cummin(A, nanflag, direction)",
             ),
+            ("trapz([1,2,3]);", "Q = trapz(Y)"),
+            ("trapz([0,1,2], [1,2,3]);", "Q = trapz(X, Y)"),
+            ("cumtrapz([1,2,3]);", "Q = cumtrapz(Y)"),
+            ("cumtrapz([0,1,2], [1,2,3], 2);", "Q = cumtrapz(X, Y, dim)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3189,6 +3193,32 @@ mod tests {
                 .any(|detail| detail.contains("cummin(")),
             "expected descriptor signature detail for cummin completion, got {:?}",
             cummin_candidates
+        );
+
+        let trapz_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("trapz"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            trapz_candidates
+                .iter()
+                .any(|detail| detail.contains("trapz(")),
+            "expected descriptor signature detail for trapz completion, got {:?}",
+            trapz_candidates
+        );
+
+        let cumtrapz_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("cumtrapz"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            cumtrapz_candidates
+                .iter()
+                .any(|detail| detail.contains("cumtrapz(")),
+            "expected descriptor signature detail for cumtrapz completion, got {:?}",
+            cumtrapz_candidates
         );
     }
 

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `cumtrapz` builtin for cumulative trapezoidal integration.
 
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -10,14 +14,145 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::math::reduction::integration_common::{
     canonical_shape_complex, canonical_shape_tensor, default_dimension_from_shape, dim_product,
-    gather_host_value, integration_error, interval_width, is_dimension_candidate, is_scalar_like,
-    pad_shape_for_dim, parse_optional_dim, promote_real_value_to_gpu, spacing_from_value,
-    value_has_gpu_tensor, value_into_complex_tensor, SpacingSpec,
+    gather_host_value, interval_width, is_dimension_candidate, is_scalar_like, pad_shape_for_dim,
+    parse_optional_dim, promote_real_value_to_gpu, spacing_from_value, value_has_gpu_tensor,
+    value_into_complex_tensor, SpacingSpec,
 };
 use crate::builtins::math::reduction::type_resolvers::cumulative_numeric_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cumtrapz";
+
+const CUMTRAPZ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Q",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cumulative trapezoidal integral output.",
+}];
+
+const CUMTRAPZ_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sample values.",
+}];
+
+const CUMTRAPZ_INPUTS_Y_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integration dimension.",
+    },
+];
+
+const CUMTRAPZ_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample points or spacing.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+];
+
+const CUMTRAPZ_INPUTS_X_Y_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample points or spacing.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integration dimension.",
+    },
+];
+
+const CUMTRAPZ_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "Q = cumtrapz(Y)",
+        inputs: &CUMTRAPZ_INPUTS_Y,
+        outputs: &CUMTRAPZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Q = cumtrapz(Y, dim)",
+        inputs: &CUMTRAPZ_INPUTS_Y_DIM,
+        outputs: &CUMTRAPZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Q = cumtrapz(X, Y)",
+        inputs: &CUMTRAPZ_INPUTS_X_Y,
+        outputs: &CUMTRAPZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Q = cumtrapz(X, Y, dim)",
+        inputs: &CUMTRAPZ_INPUTS_X_Y_DIM,
+        outputs: &CUMTRAPZ_OUTPUT,
+    },
+];
+
+const CUMTRAPZ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMTRAPZ.INVALID_ARGUMENT",
+    identifier: Some("RunMat:cumtrapz:InvalidArgument"),
+    when: "Input argument count, dimension selector, or spacing arguments are invalid.",
+    message: "cumtrapz: invalid argument",
+};
+
+const CUMTRAPZ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMTRAPZ.INVALID_INPUT",
+    identifier: Some("RunMat:cumtrapz:InvalidInput"),
+    when: "Input values cannot be converted to supported numeric integration domains.",
+    message: "cumtrapz: invalid input",
+};
+
+const CUMTRAPZ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMTRAPZ.INTERNAL",
+    identifier: Some("RunMat:cumtrapz:Internal"),
+    when: "Integration execution fails during gather, allocation, or provider promotion.",
+    message: "cumtrapz: internal integration failure",
+};
+
+const CUMTRAPZ_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    CUMTRAPZ_ERROR_INVALID_ARGUMENT,
+    CUMTRAPZ_ERROR_INVALID_INPUT,
+    CUMTRAPZ_ERROR_INTERNAL,
+];
+
+pub const CUMTRAPZ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CUMTRAPZ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CUMTRAPZ_ERRORS,
+};
 
 fn cumtrapz_type(args: &[Type], ctx: &ResolveContext) -> Type {
     cumulative_numeric_type(args, ctx)
@@ -50,6 +185,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Cumulative discrete integration currently lowers to the runtime implementation rather than fusion kernels.",
 };
 
+fn cumtrapz_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    cumtrapz_error_with_message(error.message, error)
+}
+
+fn cumtrapz_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    cumtrapz_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn cumtrapz_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cumtrapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INTERNAL, detail)
+}
+
 #[runtime_builtin(
     name = "cumtrapz",
     category = "math/reduction",
@@ -57,6 +218,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "cumtrapz,cumulative trapezoidal integration,numerical integration,gpu",
     accel = "none",
     type_resolver(cumtrapz_type),
+    descriptor(crate::builtins::math::reduction::cumtrapz::CUMTRAPZ_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::cumtrapz"
 )]
 async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -68,30 +230,42 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
             .map(value_has_gpu_tensor)
             .unwrap_or(false);
 
-    let y_value = gather_host_value(parsed.y).await?;
+    let y_value = gather_host_value(parsed.y)
+        .await
+        .map_err(|err| cumtrapz_internal_error(err.message()))?;
     let spacing_value = match parsed.spacing {
-        Some(value) => Some(gather_host_value(value).await?),
+        Some(value) => Some(
+            gather_host_value(value)
+                .await
+                .map_err(|err| cumtrapz_internal_error(err.message()))?,
+        ),
         None => None,
     };
 
     let result = match y_value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            let tensor = value_into_complex_tensor(NAME, y_value)?;
+            let tensor = value_into_complex_tensor(NAME, y_value).map_err(|err| {
+                cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_INPUT, err.message())
+            })?;
             let shape = canonical_shape_complex(&tensor);
             let dim = parsed
                 .dim
                 .unwrap_or_else(|| default_dimension_from_shape(&shape));
-            let spacing = spacing_from_value(NAME, spacing_value, &shape, dim)?;
+            let spacing = spacing_from_value(NAME, spacing_value, &shape, dim).map_err(|err| {
+                cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+            })?;
             complex_tensor_into_value(cumtrapz_complex_tensor(&tensor, &spacing, dim)?)
         }
         other => {
             let tensor = crate::builtins::common::tensor::value_into_tensor_for(NAME, other)
-                .map_err(|err| integration_error(NAME, err))?;
+                .map_err(|err| cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_INPUT, err))?;
             let shape = canonical_shape_tensor(&tensor);
             let dim = parsed
                 .dim
                 .unwrap_or_else(|| default_dimension_from_shape(&shape));
-            let spacing = spacing_from_value(NAME, spacing_value, &shape, dim)?;
+            let spacing = spacing_from_value(NAME, spacing_value, &shape, dim).map_err(|err| {
+                cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+            })?;
             crate::builtins::common::tensor::tensor_into_value(cumtrapz_tensor(
                 &tensor, &spacing, dim,
             )?)
@@ -100,6 +274,7 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
     if wants_gpu_result && !matches!(result, Value::Complex(_, _) | Value::ComplexTensor(_)) {
         promote_real_value_to_gpu(NAME, result)
+            .map_err(|err| cumtrapz_internal_error(err.message()))
     } else {
         Ok(result)
     }
@@ -124,7 +299,9 @@ fn parse_arguments(first: Value, rest: Vec<Value>) -> BuiltinResult<ParsedCumtra
                 Ok(ParsedCumtrapzArgs {
                     spacing: None,
                     y: first,
-                    dim: parse_optional_dim(NAME, &second)?,
+                    dim: parse_optional_dim(NAME, &second).map_err(|err| {
+                        cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                    })?,
                 })
             } else {
                 Ok(ParsedCumtrapzArgs {
@@ -141,19 +318,21 @@ fn parse_arguments(first: Value, rest: Vec<Value>) -> BuiltinResult<ParsedCumtra
             Ok(ParsedCumtrapzArgs {
                 spacing: Some(first),
                 y,
-                dim: parse_optional_dim(NAME, &dim_arg)?,
+                dim: parse_optional_dim(NAME, &dim_arg).map_err(|err| {
+                    cumtrapz_error_with_detail(&CUMTRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                })?,
             })
         }
-        _ => Err(integration_error(
-            NAME,
-            "cumtrapz: too many input arguments",
-        )),
+        _ => Err(cumtrapz_error(&CUMTRAPZ_ERROR_INVALID_ARGUMENT)),
     }
 }
 
 fn cumtrapz_tensor(tensor: &Tensor, spacing: &SpacingSpec, dim: usize) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err(integration_error(NAME, "cumtrapz: dimension must be >= 1"));
+        return Err(cumtrapz_error_with_detail(
+            &CUMTRAPZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
 
     let shape = pad_shape_for_dim(&canonical_shape_tensor(tensor), dim);
@@ -182,7 +361,7 @@ fn cumtrapz_tensor(tensor: &Tensor, spacing: &SpacingSpec, dim: usize) -> Builti
         }
     }
 
-    Tensor::new(output, shape).map_err(|err| integration_error(NAME, format!("cumtrapz: {err}")))
+    Tensor::new(output, shape).map_err(|err| cumtrapz_internal_error(err.to_string()))
 }
 
 fn cumtrapz_complex_tensor(
@@ -191,7 +370,10 @@ fn cumtrapz_complex_tensor(
     dim: usize,
 ) -> BuiltinResult<ComplexTensor> {
     if dim == 0 {
-        return Err(integration_error(NAME, "cumtrapz: dimension must be >= 1"));
+        return Err(cumtrapz_error_with_detail(
+            &CUMTRAPZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
 
     let shape = pad_shape_for_dim(&canonical_shape_complex(tensor), dim);
@@ -223,8 +405,7 @@ fn cumtrapz_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, shape)
-        .map_err(|err| integration_error(NAME, format!("cumtrapz: {err}")))
+    ComplexTensor::new(output, shape).map_err(|err| cumtrapz_internal_error(err.to_string()))
 }
 
 #[cfg(test)]
@@ -293,6 +474,53 @@ pub(crate) mod tests {
         };
         assert_eq!(out.shape, vec![2, 3]);
         assert_eq!(out.data, vec![0.0, 0.0, 1.5, 4.5, 4.0, 10.0]);
+    }
+
+    #[test]
+    fn cumtrapz_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CUMTRAPZ_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Q = cumtrapz(Y)"));
+        assert!(labels.contains(&"Q = cumtrapz(Y, dim)"));
+        assert!(labels.contains(&"Q = cumtrapz(X, Y)"));
+        assert!(labels.contains(&"Q = cumtrapz(X, Y, dim)"));
+    }
+
+    #[test]
+    fn cumtrapz_descriptor_errors_have_stable_codes() {
+        assert!(CUMTRAPZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == CUMTRAPZ_ERROR_INVALID_ARGUMENT.code));
+        assert!(CUMTRAPZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == CUMTRAPZ_ERROR_INVALID_INPUT.code));
+        assert!(CUMTRAPZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == CUMTRAPZ_ERROR_INTERNAL.code));
+    }
+
+    #[test]
+    fn cumtrapz_invalid_dim_uses_descriptor_identifier() {
+        let y = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let err = run_cumtrapz(Value::Tensor(y), vec![Value::Int(IntValue::I32(0))])
+            .expect_err("cumtrapz");
+        assert_eq!(err.identifier(), CUMTRAPZ_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn cumtrapz_too_many_inputs_uses_descriptor_identifier() {
+        let err = run_cumtrapz(
+            Value::Num(1.0),
+            vec![Value::Num(2.0), Value::Num(3.0), Value::Num(4.0)],
+        )
+        .expect_err("cumtrapz");
+        assert_eq!(err.identifier(), CUMTRAPZ_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
