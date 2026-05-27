@@ -142,8 +142,7 @@ Loop instructions:
    - do not throw stable branches via message-only helpers (`foo_error(FOO_ERROR_X.message)` is disallowed); pass descriptor rows to helpers so identifier/code/message stay coupled;
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
-   - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);
-   - no duplicated stable literals in test assertions (for example assert against `LT_ERROR_COMPLEX_UNSUPPORTED.code`, not `"RM.LT.COMPLEX_UNSUPPORTED"`);
+   - tests should prefer descriptor constants for stable identifier/message/code assertions when practical;
    - do not introduce temporary `IDENT_*` / `*_MESSAGE` / `*_CODE` constants even in intermediate commits; descriptor rows are the only canonical authoring point from the first commit in a wave;
    - no hard-coded `with_identifier("RunMat:...")` in migrated builtin runtime branches.
 4. Extend tests:

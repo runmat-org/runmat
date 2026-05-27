@@ -303,8 +303,7 @@ Disallowed:
 2. `with_identifier("RunMat:...")` direct stable-branch throws in migrated builtin files.
 3. Repeating the same stable message text at throw sites when that message already exists in a descriptor row.
 4. Restating stable descriptor literals via `_error_with_message("...")` for stable branches; use descriptor-backed helpers (`foo_error(&FOO_ERROR_...)`) or detail-only suffix helpers (`foo_error_with_detail(&FOO_ERROR_..., "...")`).
-5. Duplicating stable error identifier/code/message constants in `#[cfg(test)]` sections of migrated builtin files; tests should reference descriptor rows directly as well.
-6. Repeating stable descriptor literals in test assertions; use descriptor constants in assertions (for example `err.code == LT_ERROR_COMPLEX_UNSUPPORTED.code`).
+5. Restating stable descriptor literals in runtime branches via helper/literal duplicates, even when wrapped in local constants.
 
 Audit checks:
 
@@ -314,7 +313,8 @@ Audit checks:
 Notes:
 
 1. Check (1) must stay clean for migrated builtin files.
-2. Descriptor-source-of-truth enforcement for migrated files (including pre-test source filtering) lives in `descriptor_error_source_of_truth`.
+2. Descriptor-source-of-truth enforcement for migrated runtime code (pre-`#[cfg(test)]`) lives in `descriptor_error_source_of_truth`.
+3. Tests should still prefer descriptor constants over repeated literal identifiers/messages where practical.
 
 ## Shared Helper Reuse Strategy
 

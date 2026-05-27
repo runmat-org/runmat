@@ -877,10 +877,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let err = dir_builtin(vec![Value::from("*bad"), Value::from("*.txt")])
             .expect_err("expected wildcard folder error");
-        assert_eq!(
-            err.message(),
-            "dir: folder input must not contain wildcard characters"
-        );
+        assert_eq!(err.message(), DIR_ERROR_FOLDER_WILDCARD.message);
     }
 
     #[cfg(not(windows))]

@@ -260,6 +260,10 @@ async fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 pub(crate) mod tests {
     use super::index_output_type;
     use super::sort;
+    use super::ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING;
+    use super::ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN;
+    use super::ARGSORT_ERROR_INVALID_DIMENSION;
+    use super::ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED;
     use futures::executor::block_on;
 
     fn argsort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -377,7 +381,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err =
             argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]).unwrap_err();
-        assert_eq!(err.identifier(), Some("RunMat:sort:InvalidDimension"));
+        assert_eq!(err.identifier(), ARGSORT_ERROR_INVALID_DIMENSION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -391,7 +395,7 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some("RunMat:sort:MissingPlacementUnsupported")
+            ARGSORT_ERROR_MISSINGPLACEMENT_UNSUPPORTED.identifier
         );
     }
 
@@ -406,7 +410,7 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some("RunMat:sort:ComparisonMethodUnknown")
+            ARGSORT_ERROR_COMPARISON_METHOD_UNKNOWN.identifier
         );
     }
 
@@ -424,7 +428,7 @@ pub(crate) mod tests {
         .unwrap_err();
         assert_eq!(
             err.identifier(),
-            Some("RunMat:sort:ComparisonMethodRequiresString")
+            ARGSORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING.identifier
         );
     }
 

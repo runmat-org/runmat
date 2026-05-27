@@ -1604,7 +1604,7 @@ pub(crate) mod tests {
         .expect_err("unresolved external callback should error");
         assert_eq!(
             err.identifier(),
-            Some("RunMat:UndefinedFunction"),
+            ARRAYFUN_ERROR_UNDEFINED_FUNCTION.identifier,
             "unexpected error: {}",
             err.message()
         );
@@ -1631,7 +1631,7 @@ pub(crate) mod tests {
         .expect_err("malformed unresolved external callback should error");
         assert_eq!(
             err.identifier(),
-            Some("RunMat:UndefinedFunction"),
+            ARRAYFUN_ERROR_UNDEFINED_FUNCTION.identifier,
             "unexpected error: {}",
             err.message()
         );
@@ -1812,7 +1812,7 @@ pub(crate) mod tests {
         .expect_err("expected unresolved function error");
         assert_eq!(
             err.identifier(),
-            Some("RunMat:UndefinedFunction"),
+            ARRAYFUN_ERROR_UNDEFINED_FUNCTION.identifier,
             "unexpected error: {}",
             err.message()
         );

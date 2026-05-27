@@ -383,7 +383,7 @@ pub(crate) mod tests {
 
         let missing = Value::from("this-directory-does-not-exist".to_string());
         let err = cd_builtin(vec![missing]).expect_err("error");
-        assert!(err.message().contains("cd: unable to change directory"));
+        assert!(err.message().contains(CD_ERROR_CHANGE_FAILED.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -417,7 +417,7 @@ pub(crate) mod tests {
         let _guard = DirGuard::new();
 
         let err = cd_builtin(vec![Value::from("".to_string())]).expect_err("empty string error");
-        assert_eq!(err.message(), "cd: folder name must not be empty");
+        assert_eq!(err.message(), CD_ERROR_EMPTY_FOLDER.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -431,10 +431,7 @@ pub(crate) mod tests {
         let strings =
             StringArray::new(vec!["foo".to_string(), "bar".to_string()], vec![2]).expect("array");
         let err = cd_builtin(vec![Value::StringArray(strings)]).expect_err("string array error");
-        assert_eq!(
-            err.message(),
-            "cd: folder name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), CD_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -447,10 +444,7 @@ pub(crate) mod tests {
 
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let err = cd_builtin(vec![Value::CharArray(chars)]).expect_err("char array error");
-        assert_eq!(
-            err.message(),
-            "cd: folder name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), CD_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
