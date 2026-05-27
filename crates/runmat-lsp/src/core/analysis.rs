@@ -3129,6 +3129,8 @@ mod tests {
             ("chol([2,0;0,3], \"lower\");", "R = chol(A, triangle)"),
             ("lu([1,2;3,4]);", "LU = lu(A)"),
             ("lu([1,2;3,4], \"vector\");", "LU = lu(A, pivotMode)"),
+            ("svd([1,2;3,4]);", "S = svd(A)"),
+            ("svd([1,2;3,4], \"econ\");", "S = svd(A, option)"),
         ];
 
         for (text, expected_label) in cases {
@@ -3203,6 +3205,17 @@ mod tests {
             lu_candidates.iter().any(|detail| detail.contains("lu(")),
             "expected descriptor signature detail for lu completion, got {:?}",
             lu_candidates
+        );
+
+        let svd_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("svd"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            svd_candidates.iter().any(|detail| detail.contains("svd(")),
+            "expected descriptor signature detail for svd completion, got {:?}",
+            svd_candidates
         );
     }
 
