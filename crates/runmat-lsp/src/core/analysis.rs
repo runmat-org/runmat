@@ -3079,6 +3079,17 @@ mod tests {
             "expected descriptor signature detail for any completion, got {:?}",
             any_candidates
         );
+
+        let nnz_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("nnz"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            nnz_candidates.iter().any(|detail| detail.contains("nnz(")),
+            "expected descriptor signature detail for nnz completion, got {:?}",
+            nnz_candidates
+        );
     }
 
     #[test]
