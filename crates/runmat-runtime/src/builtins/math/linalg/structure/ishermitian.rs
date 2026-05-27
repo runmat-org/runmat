@@ -1,7 +1,11 @@
 //! MATLAB-compatible `ishermitian` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderHermitianKind};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -11,6 +15,122 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "ishermitian";
+
+const ISHERMITIAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when the matrix satisfies the selected Hermitian predicate.",
+}];
+
+const ISHERMITIAN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const ISHERMITIAN_INPUTS_OPTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Hermitian mode flag or tolerance scalar.",
+    },
+];
+
+const ISHERMITIAN_INPUTS_FLAG_TOL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "flag",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Mode flag (for example \"hermitian\" or \"skew\").",
+    },
+    BuiltinParamDescriptor {
+        name: "tol",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Tolerance for Hermitian comparison checks.",
+    },
+];
+
+const ISHERMITIAN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = ishermitian(A)",
+        inputs: &ISHERMITIAN_INPUTS,
+        outputs: &ISHERMITIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = ishermitian(A, option)",
+        inputs: &ISHERMITIAN_INPUTS_OPTION,
+        outputs: &ISHERMITIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = ishermitian(A, flag, tol)",
+        inputs: &ISHERMITIAN_INPUTS_FLAG_TOL,
+        outputs: &ISHERMITIAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = ishermitian(A, tol, flag)",
+        inputs: &ISHERMITIAN_INPUTS_FLAG_TOL,
+        outputs: &ISHERMITIAN_OUTPUT,
+    },
+];
+
+const ISHERMITIAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISHERMITIAN.INVALID_ARGUMENT",
+    identifier: Some("RunMat:ishermitian:InvalidArgument"),
+    when: "Flag/tolerance arguments are malformed, duplicated, or unsupported.",
+    message: "ishermitian: invalid argument",
+};
+
+const ISHERMITIAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISHERMITIAN.INVALID_INPUT",
+    identifier: Some("RunMat:ishermitian:InvalidInput"),
+    when: "Input shape/type cannot be interpreted as a numeric or logical 2-D matrix.",
+    message: "ishermitian: invalid input",
+};
+
+const ISHERMITIAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISHERMITIAN.INTERNAL",
+    identifier: Some("RunMat:ishermitian:Internal"),
+    when: "Runtime fails while creating internal tensors or coercing values.",
+    message: "ishermitian: internal runtime failure",
+};
+
+const ISHERMITIAN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+    ISHERMITIAN_ERROR_INVALID_INPUT,
+    ISHERMITIAN_ERROR_INTERNAL,
+];
+
+pub const ISHERMITIAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISHERMITIAN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISHERMITIAN_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
@@ -43,10 +163,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Returns a host logical scalar and terminates fusion graphs.",
 };
 
-const BUILTIN_NAME: &str = "ishermitian";
+fn ishermitian_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
-fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
+fn ishermitian_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    ishermitian_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 #[runtime_builtin(
@@ -56,6 +188,7 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     keywords = "ishermitian,hermitian,skew-hermitian,matrix structure,gpu",
     accel = "metadata",
     type_resolver(logical_scalar_type),
+    descriptor(crate::builtins::math::linalg::structure::ishermitian::ISHERMITIAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -124,24 +257,24 @@ impl MatrixInput {
         let data = match value {
             Value::Tensor(tensor) => MatrixData::Real(tensor),
             Value::LogicalArray(logical) => {
-                let tensor = logical_to_tensor(BUILTIN_NAME, &logical)?;
+                let tensor = logical_to_tensor(&logical)?;
                 MatrixData::Real(tensor)
             }
             Value::ComplexTensor(tensor) => MatrixData::Complex(tensor),
             Value::Complex(re, im) => {
                 let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+                    .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e))?;
                 MatrixData::Complex(tensor)
             }
             v @ Value::Num(_) | v @ Value::Int(_) | v @ Value::Bool(_) => {
-                let tensor = value_into_tensor_for(BUILTIN_NAME, v)?;
+                let tensor = value_into_tensor_for(v)?;
                 MatrixData::Real(tensor)
             }
             other => {
-                return Err(runtime_error(
-                    BUILTIN_NAME,
+                return Err(ishermitian_error_with_detail(
+                    &ISHERMITIAN_ERROR_INVALID_INPUT,
                     format!(
-                        "ishermitian: unsupported input type {:?}; expected numeric or logical matrix",
+                        "unsupported input type {:?}; expected numeric or logical matrix",
                         other
                     ),
                 ));
@@ -149,7 +282,7 @@ impl MatrixInput {
         };
 
         let shape = data.shape();
-        let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
+        let (rows, cols) = matrix_dimensions_for(shape)?;
         Ok(Self { data, rows, cols })
     }
 }
@@ -166,9 +299,9 @@ fn evaluate_matrix(matrix: &MatrixInput, mode: HermitianMode, tol: f64) -> bool 
 
 fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
     if args.len() > 2 {
-        return Err(runtime_error(
-            BUILTIN_NAME,
-            "ishermitian: too many input arguments",
+        return Err(ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
         ));
     }
 
@@ -179,9 +312,9 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
     for arg in args {
         if let Some(flag) = parse_mode_flag(arg)? {
             if mode_set {
-                return Err(runtime_error(
-                    BUILTIN_NAME,
-                    "ishermitian: duplicate symmetry flag",
+                return Err(ishermitian_error_with_detail(
+                    &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+                    "duplicate symmetry flag",
                 ));
             }
             mode = flag;
@@ -190,9 +323,9 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
         }
 
         if tol.is_some() {
-            return Err(runtime_error(
-                BUILTIN_NAME,
-                "ishermitian: tolerance specified more than once",
+            return Err(ishermitian_error_with_detail(
+                &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+                "tolerance specified more than once",
             ));
         }
 
@@ -219,19 +352,19 @@ fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<HermitianMode>> {
     match lowered.as_str() {
         "skew" | "skewhermitian" | "skew-hermitian" => Ok(Some(HermitianMode::Skew)),
         "hermitian" | "nonskew" | "non-skew" | "symmetric" => Ok(Some(HermitianMode::Hermitian)),
-        other => Err(runtime_error(
-            BUILTIN_NAME,
-            format!("ishermitian: unknown flag '{other}'"),
+        other => Err(ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+            format!("unknown flag '{other}'"),
         )),
     }
 }
 
 fn parse_single_tolerance(arg: &Value) -> BuiltinResult<f64> {
-    let value = parse_tolerance_value(BUILTIN_NAME, arg)?;
+    let value = parse_tolerance_value(arg)?;
     Ok(value)
 }
 
-fn parse_tolerance_value(name: &str, value: &Value) -> BuiltinResult<f64> {
+fn parse_tolerance_value(value: &Value) -> BuiltinResult<f64> {
     let raw = match value {
         Value::Num(n) => *n,
         Value::Int(i) => i.to_f64(),
@@ -251,36 +384,36 @@ fn parse_tolerance_value(name: &str, value: &Value) -> BuiltinResult<f64> {
             }
         }
         other => {
-            return Err(runtime_error(
-                name,
-                format!("{name}: tolerance must be a real scalar, got {other:?}"),
+            return Err(ishermitian_error_with_detail(
+                &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+                format!("tolerance must be a real scalar, got {other:?}"),
             ))
         }
     };
     if !raw.is_finite() {
-        return Err(runtime_error(
-            name,
-            format!("{name}: tolerance must be finite"),
+        return Err(ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+            "tolerance must be finite",
         ));
     }
     if raw < 0.0 {
-        return Err(runtime_error(
-            name,
-            format!("{name}: tolerance must be >= 0"),
+        return Err(ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+            "tolerance must be >= 0",
         ));
     }
     Ok(raw)
 }
 
-fn matrix_dimensions_for(name: &str, shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+fn matrix_dimensions_for(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     match shape.len() {
         0 => Ok((1, 1)),
         1 => Ok((shape[0], 1)),
         _ => {
             if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(runtime_error(
-                    name,
-                    format!("{name}: inputs must be 2-D matrices or vectors"),
+                Err(ishermitian_error_with_detail(
+                    &ISHERMITIAN_ERROR_INVALID_INPUT,
+                    "inputs must be 2-D matrices or vectors",
                 ))
             } else {
                 Ok((shape[0], shape[1]))
@@ -289,34 +422,34 @@ fn matrix_dimensions_for(name: &str, shape: &[usize]) -> BuiltinResult<(usize, u
     }
 }
 
-fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
+fn value_into_tensor_for(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
-        Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
+        Value::LogicalArray(logical) => logical_to_tensor(&logical),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+            .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e)),
         Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+            .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e)),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
-        other => Err(runtime_error(
-            name,
+            .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e)),
+        other => Err(ishermitian_error_with_detail(
+            &ISHERMITIAN_ERROR_INVALID_INPUT,
             format!(
-                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                "unsupported input type {:?}; expected numeric or logical values",
                 other
             ),
         )),
     }
 }
 
-fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+fn logical_to_tensor(logical: &LogicalArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = logical
         .data
         .iter()
         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
         .collect();
     Tensor::new(data, logical.shape.clone())
-        .map_err(|e| runtime_error(name, format!("{name}: {e}")))
+        .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e))
 }
 
 fn is_hermitian_real(tensor: &Tensor, mode: HermitianMode, tol: f64) -> bool {
@@ -409,11 +542,11 @@ fn complex_within(re: f64, im: f64, ref_re: f64, ref_im: f64, tol: f64) -> bool 
 }
 
 pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
-    matrix_dimensions_for(BUILTIN_NAME, shape)
+    matrix_dimensions_for(shape)
 }
 
 pub fn ishermitian_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> BuiltinResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, &tensor.shape)?;
+    let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
     if rows != cols {
         return Ok(false);
     }
@@ -430,7 +563,7 @@ pub fn ishermitian_host_complex_tensor(
     skew: bool,
     tol: f64,
 ) -> BuiltinResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, &tensor.shape)?;
+    let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
     if rows != cols {
         return Ok(false);
     }
@@ -448,12 +581,12 @@ pub fn ishermitian_host_real_data(
     skew: bool,
     tol: f64,
 ) -> BuiltinResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
+    let (rows, cols) = matrix_dimensions_for(shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = Tensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+        .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e))?;
     ishermitian_host_real_tensor(&tensor, skew, tol)
 }
 
@@ -463,12 +596,12 @@ pub fn ishermitian_host_complex_data(
     skew: bool,
     tol: f64,
 ) -> BuiltinResult<bool> {
-    let (rows, cols) = matrix_dimensions_for(BUILTIN_NAME, shape)?;
+    let (rows, cols) = matrix_dimensions_for(shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+        .map_err(|e| ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, e))?;
     ishermitian_host_complex_tensor(&tensor, skew, tol)
 }
 
@@ -500,6 +633,31 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Bool);
+    }
+
+    #[test]
+    fn ishermitian_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ISHERMITIAN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"tf = ishermitian(A)"));
+        assert!(labels.contains(&"tf = ishermitian(A, option)"));
+        assert!(labels.contains(&"tf = ishermitian(A, flag, tol)"));
+        assert!(labels.contains(&"tf = ishermitian(A, tol, flag)"));
+    }
+
+    #[test]
+    fn ishermitian_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = ISHERMITIAN_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.ISHERMITIAN.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.ISHERMITIAN.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.ISHERMITIAN.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -648,6 +806,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = ishermitian_builtin(Value::Tensor(tensor), vec![Value::from("not-a-flag")])
             .expect_err("ishermitian should error on unknown flag");
+        assert_eq!(
+            err.identifier(),
+            ISHERMITIAN_ERROR_INVALID_ARGUMENT.identifier
+        );
         let message = err.to_string();
         assert!(message.contains("unknown flag"));
     }

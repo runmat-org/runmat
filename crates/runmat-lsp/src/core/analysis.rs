@@ -3212,6 +3212,48 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_linalg_structure_descriptors() {
+        let cases = [
+            ("bandwidth([1,2;3,4]);", "bw = bandwidth(A)"),
+            (
+                "bandwidth([1,2;3,4], \"lower\");",
+                "b = bandwidth(A, selector)",
+            ),
+            ("issymmetric([1,2;2,1]);", "tf = issymmetric(A)"),
+            (
+                "issymmetric([1,2;2,1], \"skew\");",
+                "tf = issymmetric(A, option)",
+            ),
+            (
+                "issymmetric([1,2;2,1], \"skew\", 1e-9);",
+                "tf = issymmetric(A, flag, tol)",
+            ),
+            ("ishermitian([1,2;2,1]);", "tf = ishermitian(A)"),
+            (
+                "ishermitian([1,2;2,1], \"skew\");",
+                "tf = ishermitian(A, option)",
+            ),
+            (
+                "ishermitian([1,2;2,1], \"skew\", 1e-9);",
+                "tf = ishermitian(A, flag, tol)",
+            ),
+            ("symrcm([1,2;2,1]);", "p = symrcm(A)"),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_uses_math_linalg_factor_descriptors() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
@@ -3408,6 +3450,29 @@ mod tests {
         for builtin in [
             "det", "inv", "rank", "rcond", "pinv", "cond", "norm", "linsolve",
         ] {
+            let details: Vec<String> = completions
+                .iter()
+                .filter(|item| item.label.eq_ignore_ascii_case(builtin))
+                .map(|item| item.detail.clone().unwrap_or_default())
+                .collect();
+            assert!(
+                details
+                    .iter()
+                    .any(|detail| detail.contains(&format!("{builtin}("))),
+                "expected descriptor signature detail for {builtin} completion, got {:?}",
+                details
+            );
+        }
+    }
+
+    #[test]
+    fn completion_detail_uses_math_linalg_structure_descriptors() {
+        let text = "x = 1;";
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let completions = completion_at(text, &analysis, &position);
+
+        for builtin in ["bandwidth", "issymmetric", "ishermitian", "symrcm"] {
             let details: Vec<String> = completions
                 .iter()
                 .filter(|item| item.label.eq_ignore_ascii_case(builtin))

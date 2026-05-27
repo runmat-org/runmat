@@ -2,7 +2,11 @@
 
 use log::debug;
 use runmat_accelerate_api::{self, GpuTensorHandle};
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -12,6 +16,96 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::type_resolvers::bandwidth_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+const NAME: &str = "bandwidth";
+
+const BANDWIDTH_OUTPUT_BW: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "bw",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Two-element row vector [lower upper] bandwidth.",
+}];
+
+const BANDWIDTH_OUTPUT_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "b",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Selected lower or upper bandwidth scalar.",
+}];
+
+const BANDWIDTH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const BANDWIDTH_INPUTS_SELECTOR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "selector",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Selector string: \"lower\" or \"upper\".",
+    },
+];
+
+const BANDWIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "bw = bandwidth(A)",
+        inputs: &BANDWIDTH_INPUTS,
+        outputs: &BANDWIDTH_OUTPUT_BW,
+    },
+    BuiltinSignatureDescriptor {
+        label: "b = bandwidth(A, selector)",
+        inputs: &BANDWIDTH_INPUTS_SELECTOR,
+        outputs: &BANDWIDTH_OUTPUT_SCALAR,
+    },
+];
+
+const BANDWIDTH_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BANDWIDTH.INVALID_ARGUMENT",
+    identifier: Some("RunMat:bandwidth:InvalidArgument"),
+    when: "Selector argument is invalid or argument count exceeds supported forms.",
+    message: "bandwidth: invalid argument",
+};
+
+const BANDWIDTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BANDWIDTH.INVALID_INPUT",
+    identifier: Some("RunMat:bandwidth:InvalidInput"),
+    when: "Input type/shape cannot be processed as a numeric or logical 2-D matrix.",
+    message: "bandwidth: invalid input",
+};
+
+const BANDWIDTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BANDWIDTH.INTERNAL",
+    identifier: Some("RunMat:bandwidth:Internal"),
+    when: "Runtime fails while constructing intermediate tensors or values.",
+    message: "bandwidth: internal runtime failure",
+};
+
+const BANDWIDTH_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    BANDWIDTH_ERROR_INVALID_ARGUMENT,
+    BANDWIDTH_ERROR_INVALID_INPUT,
+    BANDWIDTH_ERROR_INTERNAL,
+];
+
+pub const BANDWIDTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &BANDWIDTH_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &BANDWIDTH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
@@ -45,10 +139,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Structure query that returns a small host tensor; fusion treats it as a metadata operation.",
 };
 
-const BUILTIN_NAME: &str = "bandwidth";
+fn bandwidth_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
-fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
+fn bandwidth_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    bandwidth_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +171,7 @@ enum BandSelector {
     keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
     accel = "structure",
     type_resolver(bandwidth_type),
+    descriptor(crate::builtins::math::linalg::structure::bandwidth::BANDWIDTH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -74,7 +181,7 @@ async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinRes
     match selector {
         BandSelector::Both => {
             let tensor = Tensor::new(vec![lower as f64, upper as f64], vec![1, 2])
-                .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+                .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e))?;
             Ok(Value::Tensor(tensor))
         }
         BandSelector::Lower => Ok(Value::Num(lower as f64)),
@@ -87,9 +194,9 @@ fn parse_selector(args: &[Value]) -> BuiltinResult<BandSelector> {
         0 => Ok(BandSelector::Both),
         1 => {
             let text = tensor::value_to_string(&args[0]).ok_or_else(|| {
-                runtime_error(
-                    BUILTIN_NAME,
-                    "bandwidth: selector must be a character vector or string scalar",
+                bandwidth_error_with_detail(
+                    &BANDWIDTH_ERROR_INVALID_ARGUMENT,
+                    "selector must be a character vector or string scalar",
                 )
             })?;
             let trimmed = text.trim();
@@ -97,17 +204,15 @@ fn parse_selector(args: &[Value]) -> BuiltinResult<BandSelector> {
             match lowered.as_str() {
                 "lower" => Ok(BandSelector::Lower),
                 "upper" => Ok(BandSelector::Upper),
-                other => Err(runtime_error(
-                    BUILTIN_NAME,
-                    format!(
-                        "bandwidth: unrecognized selector '{other}'; expected 'lower' or 'upper'"
-                    ),
+                other => Err(bandwidth_error_with_detail(
+                    &BANDWIDTH_ERROR_INVALID_ARGUMENT,
+                    format!("unrecognized selector '{other}'; expected 'lower' or 'upper'"),
                 )),
             }
         }
-        _ => Err(runtime_error(
-            BUILTIN_NAME,
-            "bandwidth: too many input arguments",
+        _ => Err(bandwidth_error_with_detail(
+            &BANDWIDTH_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
         )),
     }
 }
@@ -117,29 +222,29 @@ fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
         Value::Tensor(t) => Ok(t),
         Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+            .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e)),
         Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+            .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e)),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
-        other => Err(runtime_error(
-            name,
+            .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e)),
+        other => Err(bandwidth_error_with_detail(
+            &BANDWIDTH_ERROR_INVALID_INPUT,
             format!(
-                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                "unsupported input type {:?}; expected numeric or logical values",
                 other
             ),
         )),
     }
 }
 
-fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+fn logical_to_tensor(_name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = logical
         .data
         .iter()
         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
         .collect();
     Tensor::new(data, logical.shape.clone())
-        .map_err(|e| runtime_error(name, format!("{name}: {e}")))
+        .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e))
 }
 
 enum MatrixData {
@@ -154,12 +259,12 @@ impl MatrixData {
             Value::ComplexTensor(ct) => Ok(Self::Complex(ct)),
             Value::Complex(re, im) => {
                 let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+                    .map_err(|e| bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, e))?;
                 Ok(Self::Complex(tensor))
             }
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
             other => {
-                let tensor = value_into_tensor_for(BUILTIN_NAME, other)?;
+                let tensor = value_into_tensor_for(NAME, other)?;
                 Ok(Self::Real(tensor))
             }
         }
@@ -201,9 +306,9 @@ pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
         1 => Ok((1, shape[0])),
         _ => {
             if shape[2..].iter().any(|&dim| dim > 1) {
-                Err(runtime_error(
-                    BUILTIN_NAME,
-                    "bandwidth: input must be a 2-D matrix",
+                Err(bandwidth_error_with_detail(
+                    &BANDWIDTH_ERROR_INVALID_INPUT,
+                    "input must be a 2-D matrix",
                 ))
             } else {
                 Ok((shape[0], shape[1]))
@@ -323,6 +428,29 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn bandwidth_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = BANDWIDTH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"bw = bandwidth(A)"));
+        assert!(labels.contains(&"b = bandwidth(A, selector)"));
+    }
+
+    #[test]
+    fn bandwidth_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = BANDWIDTH_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.BANDWIDTH.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.BANDWIDTH.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.BANDWIDTH.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bandwidth_lower_selector() {
@@ -426,6 +554,10 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err =
             bandwidth_builtin(Value::Tensor(tensor), vec![Value::from("middle")]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            BANDWIDTH_ERROR_INVALID_ARGUMENT.identifier
+        );
         let message = err.to_string();
         assert!(
             message.contains("lower") && message.contains("upper"),
