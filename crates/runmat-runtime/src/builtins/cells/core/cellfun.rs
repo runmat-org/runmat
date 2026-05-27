@@ -1661,8 +1661,99 @@ pub(crate) mod tests {
         assert!((gathered.data[0] - expected).abs() < 1e-12);
     }
 
+    const CELLFUN_TEST_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+    const CELLFUN_TEST_HELPER_OUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "out",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Helper output value.",
+    }];
+    const CELLFUN_TEST_HANDLER_INPUTS: [BuiltinParamDescriptor; 3] = [
+        BuiltinParamDescriptor {
+            name: "seed",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Seed value.",
+        },
+        BuiltinParamDescriptor {
+            name: "err",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Error context placeholder.",
+        },
+        BuiltinParamDescriptor {
+            name: "rest",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Variadic,
+            default: None,
+            description: "Additional values.",
+        },
+    ];
+    const CELLFUN_ADD_INPUTS: [BuiltinParamDescriptor; 2] = [
+        BuiltinParamDescriptor {
+            name: "lhs",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Left operand.",
+        },
+        BuiltinParamDescriptor {
+            name: "rhs",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Right operand.",
+        },
+    ];
+    const CELLFUN_IDENTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value.",
+    }];
+    const CELLFUN_TEST_HANDLER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "out = __cellfun_test_handler(seed, err, ...)",
+            inputs: &CELLFUN_TEST_HANDLER_INPUTS,
+            outputs: &CELLFUN_TEST_HELPER_OUT,
+        }];
+    const CELLFUN_ADD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+        label: "out = __cellfun_add(lhs, rhs)",
+        inputs: &CELLFUN_ADD_INPUTS,
+        outputs: &CELLFUN_TEST_HELPER_OUT,
+    }];
+    const CELLFUN_IDENTITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "out = __cellfun_identity(value)",
+            inputs: &CELLFUN_IDENTITY_INPUTS,
+            outputs: &CELLFUN_TEST_HELPER_OUT,
+        }];
+    const CELLFUN_TEST_HANDLER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &CELLFUN_TEST_HANDLER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &CELLFUN_TEST_HELPER_ERRORS,
+    };
+    const CELLFUN_ADD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &CELLFUN_ADD_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &CELLFUN_TEST_HELPER_ERRORS,
+    };
+    const CELLFUN_IDENTITY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &CELLFUN_IDENTITY_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &CELLFUN_TEST_HELPER_ERRORS,
+    };
+
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_test_handler",
+        descriptor(crate::builtins::cells::core::cellfun::tests::CELLFUN_TEST_HANDLER_DESCRIPTOR),
         type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
@@ -1678,6 +1769,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_add",
+        descriptor(crate::builtins::cells::core::cellfun::tests::CELLFUN_ADD_DESCRIPTOR),
         type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]
@@ -1689,6 +1781,7 @@ pub(crate) mod tests {
 
     #[runmat_macros::runtime_builtin(
         name = "__cellfun_identity",
+        descriptor(crate::builtins::cells::core::cellfun::tests::CELLFUN_IDENTITY_DESCRIPTOR),
         type_resolver(cellfun_type),
         builtin_path = "crate::builtins::cells::core::cellfun::tests"
     )]

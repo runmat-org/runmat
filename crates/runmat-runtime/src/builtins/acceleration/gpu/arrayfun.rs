@@ -2016,8 +2016,55 @@ pub(crate) mod tests {
         let _ = provider.free(&out_handle);
     }
 
+    const ARRAYFUN_TEST_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+    const ARRAYFUN_TEST_HELPER_OUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "out",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Helper output value.",
+    }];
+    const ARRAYFUN_TEST_HANDLER_INPUTS: [BuiltinParamDescriptor; 3] = [
+        BuiltinParamDescriptor {
+            name: "seed",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Seed value.",
+        },
+        BuiltinParamDescriptor {
+            name: "err",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Error context placeholder.",
+        },
+        BuiltinParamDescriptor {
+            name: "rest",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Variadic,
+            default: None,
+            description: "Additional values.",
+        },
+    ];
+    const ARRAYFUN_TEST_HANDLER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "out = __arrayfun_test_handler(seed, err, ...)",
+            inputs: &ARRAYFUN_TEST_HANDLER_INPUTS,
+            outputs: &ARRAYFUN_TEST_HELPER_OUT,
+        }];
+    const ARRAYFUN_TEST_HANDLER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &ARRAYFUN_TEST_HANDLER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &ARRAYFUN_TEST_HELPER_ERRORS,
+    };
+
     #[runmat_macros::runtime_builtin(
         name = "__arrayfun_test_handler",
+        descriptor(
+            crate::builtins::acceleration::gpu::arrayfun::tests::ARRAYFUN_TEST_HANDLER_DESCRIPTOR
+        ),
         type_resolver(arrayfun_type),
         builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]

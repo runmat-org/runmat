@@ -4,7 +4,11 @@
 
 use crate::builtins::common::linalg;
 use crate::BuiltinResult;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 /// Matrix addition: C = A + B
@@ -163,8 +167,98 @@ pub fn matrix_eye(n: usize) -> Tensor {
     Tensor::new_2d(data, n, n).unwrap() // Always valid
 }
 
+const MATRIX_TEST_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+const MATRIX_ROWS_COLS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "rows",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row count.",
+    },
+    BuiltinParamDescriptor {
+        name: "cols",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column count.",
+    },
+];
+const MATRIX_N_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square matrix size.",
+}];
+const MATRIX_A_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+const MATRIX_OUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output matrix.",
+}];
+
+const MATRIX_ZEROS_SIGS: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = matrix_zeros(rows, cols)",
+    inputs: &MATRIX_ROWS_COLS_INPUTS,
+    outputs: &MATRIX_OUT,
+}];
+const MATRIX_ONES_SIGS: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = matrix_ones(rows, cols)",
+    inputs: &MATRIX_ROWS_COLS_INPUTS,
+    outputs: &MATRIX_OUT,
+}];
+const MATRIX_EYE_SIGS: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = matrix_eye(n)",
+    inputs: &MATRIX_N_INPUT,
+    outputs: &MATRIX_OUT,
+}];
+const MATRIX_TRANSPOSE_SIGS: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = matrix_transpose(A)",
+    inputs: &MATRIX_A_INPUT,
+    outputs: &MATRIX_OUT,
+}];
+
+const MATRIX_ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MATRIX_ZEROS_SIGS,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+    errors: &MATRIX_TEST_ERRORS,
+};
+const MATRIX_ONES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MATRIX_ONES_SIGS,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+    errors: &MATRIX_TEST_ERRORS,
+};
+const MATRIX_EYE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MATRIX_EYE_SIGS,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+    errors: &MATRIX_TEST_ERRORS,
+};
+const MATRIX_TRANSPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MATRIX_TRANSPOSE_SIGS,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+    errors: &MATRIX_TEST_ERRORS,
+};
+
 // Simple built-in function for testing matrix operations
-#[runtime_builtin(name = "matrix_zeros", builtin_path = "crate::matrix")]
+#[runtime_builtin(
+    name = "matrix_zeros",
+    descriptor(crate::matrix::MATRIX_ZEROS_DESCRIPTOR),
+    builtin_path = "crate::matrix"
+)]
 async fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
         return Err(("Matrix dimensions must be non-negative".to_string()).into());
@@ -172,7 +266,11 @@ async fn matrix_zeros_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tens
     Ok(Tensor::zeros(vec![rows as usize, cols as usize]))
 }
 
-#[runtime_builtin(name = "matrix_ones", builtin_path = "crate::matrix")]
+#[runtime_builtin(
+    name = "matrix_ones",
+    descriptor(crate::matrix::MATRIX_ONES_DESCRIPTOR),
+    builtin_path = "crate::matrix"
+)]
 async fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tensor> {
     if rows < 0 || cols < 0 {
         return Err(("Matrix dimensions must be non-negative".to_string()).into());
@@ -180,7 +278,11 @@ async fn matrix_ones_builtin(rows: i32, cols: i32) -> crate::BuiltinResult<Tenso
     Ok(Tensor::ones(vec![rows as usize, cols as usize]))
 }
 
-#[runtime_builtin(name = "matrix_eye", builtin_path = "crate::matrix")]
+#[runtime_builtin(
+    name = "matrix_eye",
+    descriptor(crate::matrix::MATRIX_EYE_DESCRIPTOR),
+    builtin_path = "crate::matrix"
+)]
 async fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
     if n < 0 {
         return Err(("Matrix size must be non-negative".to_string()).into());
@@ -188,7 +290,11 @@ async fn matrix_eye_builtin(n: i32) -> crate::BuiltinResult<Tensor> {
     Ok(matrix_eye(n as usize))
 }
 
-#[runtime_builtin(name = "matrix_transpose", builtin_path = "crate::matrix")]
+#[runtime_builtin(
+    name = "matrix_transpose",
+    descriptor(crate::matrix::MATRIX_TRANSPOSE_DESCRIPTOR),
+    builtin_path = "crate::matrix"
+)]
 async fn matrix_transpose_builtin(a: Tensor) -> crate::BuiltinResult<Tensor> {
     let args = [Value::Tensor(a)];
     let result = crate::call_builtin_async("transpose", &args).await?;
