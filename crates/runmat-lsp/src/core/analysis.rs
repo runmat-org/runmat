@@ -3052,6 +3052,31 @@ mod tests {
     }
 
     #[test]
+    fn signature_help_uses_math_reduction_cumulative_descriptors() {
+        let cases = [
+            ("cumsum([1,2,3]);", "B = cumsum(A)"),
+            ("cumsum([1,2,3], \"reverse\");", "B = cumsum(A, direction)"),
+            ("cumprod([1,2,3]);", "B = cumprod(A)"),
+            (
+                "cumprod([1,2,3], \"omitnan\", \"reverse\");",
+                "B = cumprod(A, nanflag, direction)",
+            ),
+        ];
+
+        for (text, expected_label) in cases {
+            let analysis = analyze_document_with_compat(text, CompatMode::default());
+            let position = lsp_types::Position::new(0, 0);
+            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
+            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
+            assert!(
+                labels.contains(&expected_label),
+                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
+                labels
+            );
+        }
+    }
+
+    #[test]
     fn completion_detail_uses_math_reduction_descriptors() {
         let text = "x = 1;";
         let analysis = analyze_document_with_compat(text, CompatMode::default());
@@ -3102,6 +3127,32 @@ mod tests {
                 .any(|detail| detail.contains("prod(")),
             "expected descriptor signature detail for prod completion, got {:?}",
             prod_candidates
+        );
+
+        let cumsum_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("cumsum"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            cumsum_candidates
+                .iter()
+                .any(|detail| detail.contains("cumsum(")),
+            "expected descriptor signature detail for cumsum completion, got {:?}",
+            cumsum_candidates
+        );
+
+        let cumprod_candidates: Vec<String> = completions
+            .iter()
+            .filter(|item| item.label.eq_ignore_ascii_case("cumprod"))
+            .map(|item| item.detail.clone().unwrap_or_default())
+            .collect();
+        assert!(
+            cumprod_candidates
+                .iter()
+                .any(|detail| detail.contains("cumprod(")),
+            "expected descriptor signature detail for cumprod completion, got {:?}",
+            cumprod_candidates
         );
     }
 

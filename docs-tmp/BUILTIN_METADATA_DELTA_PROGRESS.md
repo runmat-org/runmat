@@ -113,12 +113,13 @@
 | Wave 108 (Math Reduction Logical Core) | `all`, `any` | Done | `8b674056` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::all::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::any::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for logical reduction forms (`A`, `dim`, `"all"`, `nanflag`, mixed dim/nanflag order), added stable descriptor-backed runtime error rows for argument/input/internal boundaries, remapped stable parser/dimension/type branches to descriptor helpers, added runtime descriptor signature tests, and added LSP coverage via descriptor-backed completion detail assertions for `all`/`any`. |
 | Wave 109 (Math Reduction Count) | `nnz` | Done | `83fff98b` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::nnz::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `nnz` core forms (`nnz(A)`, `nnz(A, dim)`), added stable descriptor-backed runtime errors for argument/input/internal branches, remapped dimension/parser/type/provider failure paths through descriptor helpers, added runtime descriptor signature + identifier assertions, and extended reduction LSP completion-detail coverage to include `nnz`. |
 | Wave 110 (Math Reduction Product) | `prod` | Done | `5998460e` | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::prod::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptor for `prod` reduction surface (dim/\"all\"/nanflag/outtype/\"like\" forms), added stable descriptor-backed runtime errors for invalid-argument/invalid-input/complex-unsupported/internal branches, remapped parser/dimension/type/device/coercion error paths through descriptor helpers, added runtime descriptor signature + identifier assertions, and extended reduction LSP completion-detail coverage to include `prod`. |
+| Wave 111 (Math Reduction Cumulative Core A) | `cumprod`, `cumsum` | Done | _fill_ | `cargo fmt`; `cargo test -p runmat-runtime --test descriptor_error_source_of_truth -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::cumprod::tests:: -- --nocapture`; `cargo test -p runmat-runtime --lib builtins::math::reduction::cumsum::tests:: -- --nocapture`; `cargo test -p runmat-builtins`; `cargo test -p runmat-lsp` | Attached descriptors for cumulative reduction option permutations (`dim`/`direction`/`nanflag` with supported orderings), migrated stable runtime branches to descriptor-backed invalid-argument/invalid-input/internal errors, added runtime descriptor signature + identifier assertions, and extended descriptor-driven LSP reduction signature/completion coverage to include `cumprod`/`cumsum`. |
 
 ## Remaining Work
 
 - Total registered builtins: `568`
-- Migrated with attached descriptor: `331`
-- Remaining: `237`
+- Migrated with attached descriptor: `333`
+- Remaining: `235`
 
 ## `/goal` Loop Command (Use For Each Wave)
 
@@ -137,6 +138,7 @@ Loop instructions:
    - descriptor rows must own stable literals inline (`identifier: Some("RunMat:...")`, `code: "RM...."`, `message: "..."`);
    - example: author `RunMat:lt:ComplexNotSupported` and `lt: complex numbers are not supported` exactly once on `LT_ERROR_COMPLEX_UNSUPPORTED`, then throw with `lt_error(&LT_ERROR_COMPLEX_UNSUPPORTED)`;
    - stable throw text must be sourced from descriptor rows via helpers (`foo_error(&FOO_ERROR_...)`), not re-authored as literal branch strings;
+   - do not throw stable branches via message-only helpers (`foo_error(FOO_ERROR_X.message)` is disallowed); pass descriptor rows to helpers so identifier/code/message stay coupled;
    - if contextual text is needed, append detail to the descriptor message (`foo_error_with_detail(&FOO_ERROR_..., "suffix detail")`) and do not repeat the canonical full message literal in the branch;
    - no forwarded constants/expressions in descriptor rows (`identifier: Some(IDENT_...)`, `code: FOO_CODE`, `message: FOO_MESSAGE`);
    - no duplicated stable constants in `#[cfg(test)]` sections either (tests reference descriptor rows directly);

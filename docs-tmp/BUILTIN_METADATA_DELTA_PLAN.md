@@ -281,9 +281,9 @@ No parallel `IDENT_*`, `*_CODE`, or `*_MESSAGE` constants. No repeated literal
 `"RunMat:lt:ComplexNotSupported"` or `"lt: complex numbers are not supported"` at throw sites.
 
 21. Literal reuse policy for stable throws:
-   - Stable branches must call helpers with descriptor-backed fields (for example `foo_error(FOO_ERROR_X.message)` or `foo_error_with(&FOO_ERROR_X, FOO_ERROR_X.message)`), not repeated string literals.
+   - Stable branches must pass the descriptor row itself to the throw helper (for example `foo_error(&FOO_ERROR_X)`), not only `FOO_ERROR_X.message`.
    - Do not restate exact stable message/code/identifier literals outside descriptor rows in runtime source.
-   - If extra context is required, compose from descriptor text (`format!("{}: ...", FOO_ERROR_X.message)`), rather than repeating the literal prefix.
+   - If extra context is required, use descriptor-aware detail helpers (for example `foo_error_with_detail(&FOO_ERROR_X, "...")`) so stable identifier/message/code still come from the descriptor row.
 
 ### Canonical Error Source-Of-Truth (Required)
 
