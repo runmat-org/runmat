@@ -3334,6 +3334,9 @@ mod tests {
             ("fft([1,2,3]);", "Y = fft(X)"),
             ("fft([1,2,3], 8);", "Y = fft(X, N)"),
             ("fft([1,2,3], 8, 2);", "Y = fft(X, N, DIM)"),
+            ("fft2([1,2;3,4]);", "Y = fft2(X)"),
+            ("fft2([1,2;3,4], [8, 8]);", "Y = fft2(X, SIZE)"),
+            ("fft2([1,2;3,4], 8, 8);", "Y = fft2(X, M, N)"),
             ("ifft([1,2,3]);", "Y = ifft(X)"),
             ("ifft([1,2,3], 8);", "Y = ifft(X, N)"),
             ("ifft([1,2,3], \"symmetric\");", "Y = ifft(X, symflag)"),
@@ -3345,6 +3348,18 @@ mod tests {
             (
                 "ifft([1,2,3], 8, 2, \"symmetric\");",
                 "Y = ifft(X, N, DIM, symflag)",
+            ),
+            ("ifft2([1,2;3,4]);", "Y = ifft2(X)"),
+            ("ifft2([1,2;3,4], [8, 8]);", "Y = ifft2(X, SIZE)"),
+            ("ifft2([1,2;3,4], 8, 8);", "Y = ifft2(X, M, N)"),
+            ("ifft2([1,2;3,4], \"symmetric\");", "Y = ifft2(X, symflag)"),
+            (
+                "ifft2([1,2;3,4], [8, 8], \"nonsymmetric\");",
+                "Y = ifft2(X, SIZE, symflag)",
+            ),
+            (
+                "ifft2([1,2;3,4], 8, 8, \"symmetric\");",
+                "Y = ifft2(X, M, N, symflag)",
             ),
         ];
 
