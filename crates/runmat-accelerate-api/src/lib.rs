@@ -2627,15 +2627,12 @@ pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider>
     {
         return Some(registered);
     }
-    // Preserve legacy/default-handle behavior for callers that use device id 0
-    // without an explicit registry entry.
-    if device_id == 0 {
-        return GLOBAL_PROVIDER
-            .read()
-            .ok()
-            .and_then(|guard| guard.as_ref().copied());
-    }
-    None
+    // Preserve legacy behavior: when no explicit per-device registration exists,
+    // fall back to the globally active provider regardless of handle device id.
+    GLOBAL_PROVIDER
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {

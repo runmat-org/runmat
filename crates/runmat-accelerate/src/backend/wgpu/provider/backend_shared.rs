@@ -398,13 +398,7 @@ pub(super) fn canonical_matrix_shape(shape: &[usize]) -> Vec<usize> {
     match shape.len() {
         0 => vec![1, 1],
         1 => vec![1, shape[0]],
-        _ => {
-            let mut out = shape.to_vec();
-            if out.len() == 1 {
-                out.push(1);
-            }
-            out
-        }
+        _ => shape.to_vec(),
     }
 }
 
