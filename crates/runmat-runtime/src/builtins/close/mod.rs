@@ -92,8 +92,8 @@ fn close_plotting_targets(args: &[Value]) -> crate::BuiltinResult<f64> {
 
 #[cfg(not(feature = "plot-core"))]
 fn close_plotting_targets(_args: &[Value]) -> crate::BuiltinResult<f64> {
-    let mut builder = crate::build_runtime_error(CLOSE_ERROR_INVALID_ARGUMENT.message)
-        .with_builtin("close");
+    let mut builder =
+        crate::build_runtime_error(CLOSE_ERROR_INVALID_ARGUMENT.message).with_builtin("close");
     if let Some(identifier) = CLOSE_ERROR_INVALID_ARGUMENT.identifier {
         builder = builder.with_identifier(identifier);
     }

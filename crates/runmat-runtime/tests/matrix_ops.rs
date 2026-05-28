@@ -160,11 +160,7 @@ fn test_builtin_dispatch() {
     }
 
     // Test eye function
-    let result = call_builtin(
-        "eye",
-        &[Value::Int(runmat_builtins::IntValue::I32(2))],
-    )
-    .unwrap();
+    let result = call_builtin("eye", &[Value::Int(runmat_builtins::IntValue::I32(2))]).unwrap();
     if let Value::Tensor(m) = result {
         assert_eq!(m.data, vec![1.0, 0.0, 0.0, 1.0]);
     } else {
