@@ -127,6 +127,49 @@ fn colorbar_without_arg_allowed() {
 }
 
 #[test]
+fn drawnow_without_arg_is_command_form() {
+    let program = parse_with_options("drawnow", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "drawnow");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected drawnow command form"),
+    }
+}
+
+#[test]
+fn axis_on_off_rewrite_to_string_args() {
+    for src in ["axis on", "axis off"] {
+        let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();
+        match &program.body[0] {
+            Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+                assert_eq!(name, "axis");
+                assert_eq!(args.len(), 1);
+                let expected = src.split_whitespace().nth(1).unwrap();
+                assert!(matches!(&args[0], Expr::String(s, _) if s.trim_matches('"') == expected));
+            }
+            _ => panic!("expected {src} command form"),
+        }
+    }
+}
+
+#[test]
+fn warning_stringifies_bare_word_args() {
+    let program =
+        parse_with_options("warning off all", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "warning");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"off\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"all\""));
+        }
+        _ => panic!("expected warning command form"),
+    }
+}
+
+#[test]
 fn close_all_stringifies_bare_word_arg() {
     let program = parse_with_options("close all", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {

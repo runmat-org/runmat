@@ -45,7 +45,7 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "axis",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["auto", "manual", "tight", "equal", "ij", "xy"],
+            allowed: &["auto", "manual", "tight", "equal", "ij", "xy", "on", "off"],
             optional: false,
         },
     },
@@ -98,6 +98,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "drawnow",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },
@@ -107,6 +111,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     },
     CommandVerb {
         name: "clearvars",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "warning",
         arg_kind: CommandArgKind::StringifyWords,
     },
     CommandVerb {

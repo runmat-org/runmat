@@ -53,8 +53,6 @@ struct LoweringCtx {
     runmat_extensions_enabled: bool,
     top_level_await_enabled: bool,
     function_names: HashMap<String, FunctionId>,
-    function_input_signatures: HashMap<String, (usize, bool)>,
-    function_output_signatures: HashMap<String, (usize, bool)>,
     external_function_names: HashMap<String, FunctionId>,
     known_project_symbols: HashSet<String>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
@@ -144,8 +142,6 @@ impl LoweringCtx {
             runmat_extensions_enabled: context.runmat_extensions_enabled,
             top_level_await_enabled: context.top_level_await_enabled,
             function_names: HashMap::new(),
-            function_input_signatures: HashMap::new(),
-            function_output_signatures: HashMap::new(),
             external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
             captures: HashMap::new(),
@@ -163,16 +159,8 @@ impl LoweringCtx {
         });
 
         for stmt in &prog.body {
-            if let AstStmt::Function {
-                name,
-                params,
-                outputs,
-                ..
-            } = stmt
-            {
+            if let AstStmt::Function { name, .. } = stmt {
                 let id = ctx.reserve_function_name(name);
-                ctx.reserve_function_input_signature(name, params);
-                ctx.reserve_function_output_signature(name, outputs);
                 ctx.assembly.modules[ctx.module.0]
                     .top_level_functions
                     .push(id);
@@ -297,20 +285,6 @@ impl LoweringCtx {
         let id = self.take_function_id();
         self.function_names.insert(name.to_string(), id);
         id
-    }
-
-    fn reserve_function_input_signature(&mut self, name: &str, params: &[String]) {
-        let has_varargin = params.last().is_some_and(|param| param == "varargin");
-        let fixed_count = params.len() - usize::from(has_varargin);
-        self.function_input_signatures
-            .insert(name.to_string(), (fixed_count, has_varargin));
-    }
-
-    fn reserve_function_output_signature(&mut self, name: &str, outputs: &[String]) {
-        let has_varargout = outputs.last().is_some_and(|output| output == "varargout");
-        let fixed_count = outputs.len() - usize::from(has_varargout);
-        self.function_output_signatures
-            .insert(name.to_string(), (fixed_count, has_varargout));
     }
 
     fn take_function_id(&mut self) -> FunctionId {
@@ -547,16 +521,8 @@ impl LoweringCtx {
             false,
             |ctx| {
                 for stmt in body {
-                    if let AstStmt::Function {
-                        name,
-                        params,
-                        outputs,
-                        ..
-                    } = stmt
-                    {
+                    if let AstStmt::Function { name, .. } = stmt {
                         ctx.reserve_function_name(name);
-                        ctx.reserve_function_input_signature(name, params);
-                        ctx.reserve_function_output_signature(name, outputs);
                     }
                 }
                 let mut param_ids = Vec::new();
@@ -1596,75 +1562,12 @@ impl LoweringCtx {
 
     fn lower_call_arguments_for_name(
         &mut self,
-        name: &str,
+        _name: &str,
         args: &[AstExpr],
     ) -> Result<Vec<HirExpr>, HirError> {
-        let expanded_last_outputs = self.expanded_last_output_count_for_call(name, args);
-
         args.iter()
-            .enumerate()
-            .map(|(index, arg)| {
-                let requested_outputs = match (
-                    Some(index) == args.len().checked_sub(1),
-                    expanded_last_outputs,
-                ) {
-                    (true, Some(count)) => RequestedOutputCount::Exactly(count),
-                    _ => RequestedOutputCount::One,
-                };
-                self.lower_call_argument(arg, requested_outputs)
-            })
+            .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
             .collect()
-    }
-
-    fn expanded_last_output_count_for_call(&self, name: &str, args: &[AstExpr]) -> Option<usize> {
-        let arg_count = args.len();
-        if let Some((fixed_inputs, has_varargin)) = self.function_input_signatures.get(name) {
-            if !has_varargin && *fixed_inputs > arg_count {
-                return Some(*fixed_inputs - arg_count + 1);
-            }
-            return None;
-        }
-
-        if let Some(min_inputs) = builtin_min_inputs_for_last_arg_expansion(name) {
-            if min_inputs <= arg_count {
-                return None;
-            }
-            let requested = min_inputs - arg_count + 1;
-            return self
-                .call_argument_can_supply_outputs(args.last()?, requested)
-                .then_some(requested);
-        }
-
-        if self.lookup_binding(name).is_some() {
-            return None;
-        }
-
-        // Builtin signature metadata currently includes optional/overloaded forms that are not
-        // safe to treat as fixed-arity expansion requests (for example `sum(A(:))`). Keep
-        // builtin expansion inference explicit to known variadic/min-input builtins above.
-        if runmat_builtins::builtin_function_by_name(name).is_some() {
-            return None;
-        }
-        None
-    }
-
-    fn call_argument_can_supply_outputs(&self, arg: &AstExpr, requested: usize) -> bool {
-        match arg {
-            AstExpr::FuncCall(name, _, _) => {
-                if let Some((fixed_outputs, has_varargout)) =
-                    self.function_output_signatures.get(name)
-                {
-                    return *has_varargout || *fixed_outputs >= requested;
-                }
-                if runmat_builtins::builtin_function_by_name(name).is_some() {
-                    return builtin_can_supply_requested_outputs(name, requested);
-                }
-                // If the callee resolves at runtime (import/path/external), allow the expansion
-                // request and let runtime call ABI enforce arity diagnostics.
-                true
-            }
-            _ => false,
-        }
     }
 
     fn lower_call_argument(
@@ -2285,38 +2188,6 @@ fn is_builtin(name: &str) -> bool {
         .iter()
         .any(|builtin| builtin.name == name)
         || runmat_builtins::builtin_semantics_for_name(name).is_some()
-}
-
-fn builtin_min_inputs_for_last_arg_expansion(name: &str) -> Option<usize> {
-    match name {
-        // These call sites support "missing-argument filled by last argument expansion"
-        // when the final argument can supply a comma-list.
-        "max" | "min" | "cat" | "atan2" => Some(2),
-        _ => None,
-    }
-}
-
-fn builtin_can_supply_requested_outputs(name: &str, requested: usize) -> bool {
-    if requested <= 1 {
-        return true;
-    }
-    matches!(
-        name,
-        "size"
-            | "max"
-            | "min"
-            | "sort"
-            | "unique"
-            | "find"
-            | "union"
-            | "ismember"
-            | "sortrows"
-            | "chol"
-            | "lu"
-            | "qr"
-            | "svd"
-            | "eig"
-    )
 }
 
 fn unary_op(op: UnOp) -> OperatorKind {

@@ -377,7 +377,7 @@ fn multi_output_assignment_records_requested_outputs_and_discard() {
 }
 
 #[test]
-fn variadic_builtin_missing_args_request_outputs_from_last_call_argument() {
+fn ordinary_builtin_args_do_not_infer_outputs_from_last_call_argument() {
     let result = lower_result(
         r#"
 function [a,b] = pair(x)
@@ -391,7 +391,7 @@ r = max(pair(3));
     assert!(
         result.hir_index.calls.iter().any(|call| {
             call.name.0[0].0 == "pair"
-                && matches!(call.requested_outputs, RequestedOutputCount::Exactly(2))
+                && matches!(call.requested_outputs, RequestedOutputCount::One)
         }),
         "calls: {:?}",
         result
@@ -404,7 +404,7 @@ r = max(pair(3));
 }
 
 #[test]
-fn variadic_builtin_cat_requests_minimum_outputs_from_last_call_argument() {
+fn variadic_builtin_cat_does_not_infer_outputs_from_last_call_argument() {
     let result = lower_result(
         r#"
 function varargout = g()
@@ -416,8 +416,7 @@ r = cat(g());
 
     assert!(
         result.hir_index.calls.iter().any(|call| {
-            call.name.0[0].0 == "g"
-                && matches!(call.requested_outputs, RequestedOutputCount::Exactly(2))
+            call.name.0[0].0 == "g" && matches!(call.requested_outputs, RequestedOutputCount::One)
         }),
         "calls: {:?}",
         result

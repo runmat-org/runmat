@@ -393,3 +393,27 @@ fn clc_emits_clear_screen_control_stream() {
         "expected clear-screen control event in execution streams"
     );
 }
+
+#[test]
+fn plotting_command_gap_repros_execute() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "figure; plot([1 2], [3 4]); axis off; axis on; axis manual; axis ij; axis xy; drawnow;",
+    )
+    .unwrap();
+    assert!(result.error.is_none());
+}
+
+#[test]
+fn warning_command_form_executes() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "warning off all; warning on all;",
+    )
+    .unwrap();
+    assert!(result.error.is_none());
+}

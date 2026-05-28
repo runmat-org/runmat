@@ -120,7 +120,7 @@ const AXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Mode token: 'equal'|'auto'|'tight'.",
+    description: "Mode token: 'equal'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
 }];
 const AXIS_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
@@ -438,6 +438,12 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             set_axis_limits(None, None);
             Ok(true)
         }
+        "manual" | "ij" | "xy" | "on" | "off" => {
+            // These MATLAB axis modes are accepted as command tokens for compatibility.
+            // The current plot scene model does not yet track axis visibility, direction,
+            // or manual limit-lock state separately from concrete limits.
+            Ok(true)
+        }
         other => Err(cmd_error_with_message(
             "axis",
             format!(
@@ -637,6 +643,15 @@ mod tests {
         let zlim = get_builtin(vec![Value::Num(ax), Value::String("ZLim".into())]).unwrap();
         let zlim = Tensor::try_from(&zlim).unwrap();
         assert_eq!(zlim.data, vec![4.0, 5.0]);
+    }
+
+    #[test]
+    fn axis_accepts_common_command_modes() {
+        let _guard = setup();
+        for mode in ["equal", "auto", "tight", "manual", "ij", "xy", "on", "off"] {
+            axis_builtin(vec![Value::String(mode.into())])
+                .unwrap_or_else(|err| panic!("axis {mode} should be accepted: {err:?}"));
+        }
     }
 
     #[test]

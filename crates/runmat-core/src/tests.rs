@@ -2019,6 +2019,31 @@ fn builtin_call_with_cell_expansion_uses_semantic_vm() {
 }
 
 #[test]
+fn builtin_call_with_paren_index_argument_does_not_infer_expansion() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "T = [1, 2; 3, 4]; y = max(T(:));";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile builtin call with paren-index argument");
+    assert!(
+        !prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(_, _))),
+        "paren indexing on a bound value must not be rewritten to dynamic feval"
+    );
+
+    execute_text_request(&mut session, source).expect("exec succeeds");
+    let outcome = execute_text_request(&mut session, "y").expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "4");
+}
+
+#[test]
 fn builtin_call_with_cell_end_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {1, 2}; y = plus(C{end}, 1);";

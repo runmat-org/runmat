@@ -239,8 +239,7 @@ impl WebRenderer {
                 .await
                 .ok_or(WebRendererError::AdapterUnavailable)?;
             let adapter = Arc::new(adapter_raw);
-            let limits =
-                wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
+            let limits = adapter.limits();
             let (device_raw, queue_raw) = adapter
                 .request_device(
                     &wgpu::DeviceDescriptor {
