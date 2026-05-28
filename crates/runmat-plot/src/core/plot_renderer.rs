@@ -78,6 +78,8 @@ pub struct PlotRenderer {
     /// Per-axes 2D camera ownership. True means the user has interacted and automatic 2D refits
     /// should not overwrite the camera during ordinary figure updates.
     axes_2d_camera_user_controlled: Vec<bool>,
+    /// Last script-owned `view(...)` revision applied to each axes camera.
+    axes_applied_view_revisions: Vec<Option<u64>>,
     /// Per-node GPU buffer cache for stable interactive redraws.
     scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
 }
@@ -266,6 +268,7 @@ impl PlotRenderer {
             last_axes_plot_sizes_px: None,
             camera_auto_fit: true,
             axes_2d_camera_user_controlled: vec![false],
+            axes_applied_view_revisions: vec![None],
             scene_buffer_cache: RefCell::new(HashMap::new()),
         })
     }
@@ -356,6 +359,7 @@ impl PlotRenderer {
             self.axes_cameras
                 .resize_with(num_axes, Self::create_default_camera);
             self.axes_2d_camera_user_controlled.resize(num_axes, false);
+            self.axes_applied_view_revisions.resize(num_axes, None);
             self.camera_auto_fit = true;
         }
 
@@ -378,6 +382,9 @@ impl PlotRenderer {
                     Self::create_default_camera()
                 };
                 self.clear_axes_camera_interaction(axes_index);
+                if let Some(revision) = self.axes_applied_view_revisions.get_mut(axes_index) {
+                    *revision = None;
+                }
                 self.camera_auto_fit = true;
             }
         }
@@ -625,7 +632,17 @@ impl PlotRenderer {
             }
             if let Some(meta) = fig.axes_metadata(idx) {
                 if let (Some(az), Some(el)) = (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                    if self.axes_applied_view_revisions.get(idx).copied().flatten()
+                        == Some(meta.view_revision)
+                    {
+                        continue;
+                    }
                     cam.set_view_angles_deg(az, el);
+                    if let Some(revision) = self.axes_applied_view_revisions.get_mut(idx) {
+                        *revision = Some(meta.view_revision);
+                    }
+                } else if let Some(revision) = self.axes_applied_view_revisions.get_mut(idx) {
+                    *revision = None;
                 }
             }
         }

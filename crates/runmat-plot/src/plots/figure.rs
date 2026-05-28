@@ -135,6 +135,7 @@ pub struct AxesMetadata {
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
     pub view_elevation_deg: Option<f32>,
+    pub view_revision: u64,
     pub grid_enabled: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
@@ -608,6 +609,7 @@ impl Figure {
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.view_azimuth_deg = Some(azimuth_deg);
             meta.view_elevation_deg = Some(elevation_deg);
+            meta.view_revision = meta.view_revision.wrapping_add(1);
         }
         self.dirty = true;
     }
@@ -2163,6 +2165,19 @@ mod tests {
             figure.axes_metadata(1).unwrap().view_elevation_deg,
             Some(20.0)
         );
+    }
+
+    #[test]
+    fn axes_view_revision_advances_for_each_explicit_view_update() {
+        let mut figure = Figure::new();
+
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 0);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 1);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 2);
     }
 
     #[test]
