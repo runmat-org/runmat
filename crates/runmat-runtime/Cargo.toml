@@ -78,13 +78,6 @@ plot-core = ["dep:runmat-plot"]
 # GUI plotting support
 gui = ["plot-core", "runmat-plot/gui", "runmat-plot/static"]
 
-# Jupyter notebook integration
-jupyter = [
-    "plot-core",
-    "runmat-plot/jupyter",
-    "runmat-plot/static",
-]
-
 # WebGPU plotting (used by wasm builds)
 plot-web = [
     "plot-core",
@@ -121,7 +114,6 @@ tempfile = "3.10"
 serde = { version = "1.0", features = ["derive"] }
 pollster = "0.3"
 wgpu = "0.19"
-ctor = "0.2"
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

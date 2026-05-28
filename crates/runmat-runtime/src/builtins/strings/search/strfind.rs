@@ -1,8 +1,13 @@
 //! MATLAB-compatible `strfind` builtin for RunMat.
 
-use runmat_builtins::{CellArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
@@ -45,6 +50,161 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "strfind";
 
+const STRFIND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "idx",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Match start indices as a numeric row vector or cell array of row vectors.",
+}];
+
+const STRFIND_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+];
+
+const STRFIND_INPUTS_FORCE_CELL_PAIR: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ForceCellOutput\""),
+        description: "Option name (`\"ForceCellOutput\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Logical-ish option value controlling forced cell output.",
+    },
+];
+
+const STRFIND_INPUTS_OPTION_PAIRS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs (`\"ForceCellOutput\"`, value).",
+    },
+];
+
+const STRFIND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "idx = strfind(str, pat)",
+        inputs: &STRFIND_INPUTS_BASE,
+        outputs: &STRFIND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "idx = strfind(str, pat, \"ForceCellOutput\", value)",
+        inputs: &STRFIND_INPUTS_FORCE_CELL_PAIR,
+        outputs: &STRFIND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "idx = strfind(str, pat, nameValuePairs...)",
+        inputs: &STRFIND_INPUTS_OPTION_PAIRS,
+        outputs: &STRFIND_OUTPUT,
+    },
+];
+
+const STRFIND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRFIND.INVALID_INPUT",
+    identifier: Some("RunMat:strfind:InvalidInput"),
+    when: "Text or pattern input is not a supported text container.",
+    message: "strfind: text and pattern inputs must be text values",
+};
+
+const STRFIND_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRFIND.INVALID_OPTION",
+    identifier: Some("RunMat:strfind:InvalidOption"),
+    when: "ForceCellOutput option arguments are invalid or malformed.",
+    message: "strfind: invalid option arguments",
+};
+
+const STRFIND_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRFIND.SHAPE_MISMATCH",
+    identifier: Some("RunMat:strfind:ShapeMismatch"),
+    when: "Text and pattern inputs are not broadcast-compatible.",
+    message: "strfind: input sizes are not broadcast-compatible",
+};
+
+const STRFIND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRFIND.INTERNAL",
+    identifier: Some("RunMat:strfind:InternalError"),
+    when: "Internal output assembly failed.",
+    message: "strfind: internal error",
+};
+
+const STRFIND_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    STRFIND_ERROR_INVALID_INPUT,
+    STRFIND_ERROR_INVALID_OPTION,
+    STRFIND_ERROR_SHAPE_MISMATCH,
+    STRFIND_ERROR_INTERNAL,
+];
+
+pub const STRFIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRFIND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRFIND_ERRORS,
+};
+
+fn strfind_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_strfind_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
 #[runtime_builtin(
     name = "strfind",
     category = "strings/search",
@@ -52,6 +212,7 @@ const BUILTIN_NAME: &str = "strfind";
     keywords = "strfind,substring,index,positions,string search",
     accel = "sink",
     type_resolver(text_search_indices_type),
+    descriptor(crate::builtins::strings::search::strfind::STRFIND_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
 async fn strfind_builtin(
@@ -59,12 +220,22 @@ async fn strfind_builtin(
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text).await?;
-    let pattern = gather_if_needed_async(&pattern).await?;
-    let force_cell_output = parse_force_cell_output(&rest)?;
+    let text = gather_if_needed_async(&text)
+        .await
+        .map_err(remap_strfind_flow)?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(remap_strfind_flow)?;
+    let force_cell_output = parse_force_cell_output(&rest).map_err(|err| {
+        strfind_error_with_message(err.message().to_string(), &STRFIND_ERROR_INVALID_OPTION)
+    })?;
 
-    let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
-    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
+    let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
+        strfind_error_with_message(err.message().to_string(), &STRFIND_ERROR_INVALID_INPUT)
+    })?;
+    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern).map_err(|err| {
+        strfind_error_with_message(err.message().to_string(), &STRFIND_ERROR_INVALID_INPUT)
+    })?;
 
     evaluate_strfind(&subject, &patterns, force_cell_output)
 }
@@ -74,8 +245,8 @@ fn evaluate_strfind(
     patterns: &TextCollection,
     force_cell_output: bool,
 ) -> BuiltinResult<Value> {
-    let output_shape =
-        broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape).map_err(strfind_error)?;
+    let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
+        .map_err(|err| strfind_error_with_message(err, &STRFIND_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&output_shape);
     let return_cell = force_cell_output || subject.is_cell || patterns.is_cell || total != 1;
 
@@ -136,7 +307,9 @@ fn indices_to_numeric_value(indices: &[usize]) -> BuiltinResult<Value> {
     let cols = indices.len();
     Tensor::new(data, vec![1, cols])
         .map(Value::Tensor)
-        .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            strfind_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRFIND_ERROR_INTERNAL)
+        })
 }
 
 fn indices_to_tensor(indices: &[usize]) -> BuiltinResult<Value> {
@@ -145,7 +318,9 @@ fn indices_to_tensor(indices: &[usize]) -> BuiltinResult<Value> {
         vec![1, indices.len()],
     )
     .map(Value::Tensor)
-    .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")))
+    .map_err(|e| {
+        strfind_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRFIND_ERROR_INTERNAL)
+    })
 }
 
 fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> BuiltinResult<Value> {
@@ -154,13 +329,16 @@ fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> BuiltinResult<V
         let (rows, cols) = shape_to_rows_cols(shape);
         return CellArray::new(Vec::new(), rows, cols)
             .map(Value::Cell)
-            .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")));
+            .map_err(|e| {
+                strfind_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRFIND_ERROR_INTERNAL)
+            });
     }
 
     let (rows, cols) = shape_to_rows_cols(shape);
     if rows * cols != total {
-        return Err(strfind_error(
+        return Err(strfind_error_with_message(
             "strfind: internal size mismatch while constructing cell output",
+            &STRFIND_ERROR_INTERNAL,
         ));
     }
 
@@ -168,9 +346,12 @@ fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> BuiltinResult<V
     for row in 0..rows {
         for col in 0..cols {
             let column_major_idx = row + rows * col;
-            let indices = matches
-                .get(column_major_idx)
-                .ok_or_else(|| strfind_error("strfind: internal indexing error"))?;
+            let indices = matches.get(column_major_idx).ok_or_else(|| {
+                strfind_error_with_message(
+                    "strfind: internal indexing error",
+                    &STRFIND_ERROR_INTERNAL,
+                )
+            })?;
             let cell_value = indices_to_tensor(indices)?;
             values.push(cell_value);
         }
@@ -178,7 +359,9 @@ fn indices_to_cell(matches: Vec<Vec<usize>>, shape: &[usize]) -> BuiltinResult<V
 
     CellArray::new(values, rows, cols)
         .map(Value::Cell)
-        .map_err(|e| strfind_error(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            strfind_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRFIND_ERROR_INTERNAL)
+        })
 }
 
 fn shape_to_rows_cols(shape: &[usize]) -> (usize, usize) {
@@ -196,37 +379,38 @@ fn shape_to_rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn strfind_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
-
 fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
     if !rest.len().is_multiple_of(2) {
-        return Err(strfind_error(
+        return Err(strfind_error_with_message(
             "strfind: expected name-value pairs after the pattern (e.g., 'ForceCellOutput', true)",
+            &STRFIND_ERROR_INVALID_OPTION,
         ));
     }
 
     let mut force_cell = None;
     for pair in rest.chunks(2) {
-        let name = value_to_owned_string(&pair[0])
-            .ok_or_else(|| strfind_error("strfind: option names must be text scalars"))?;
+        let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
+            strfind_error_with_message(
+                "strfind: option names must be text scalars",
+                &STRFIND_ERROR_INVALID_OPTION,
+            )
+        })?;
         if !name.eq_ignore_ascii_case("forcecelloutput") {
-            return Err(strfind_error(format!(
-                "strfind: unknown option '{name}'; supported option is 'ForceCellOutput'"
-            )));
+            return Err(strfind_error_with_message(
+                format!("strfind: unknown option '{name}'; supported option is 'ForceCellOutput'"),
+                &STRFIND_ERROR_INVALID_OPTION,
+            ));
         }
         let value = parse_bool_like(&pair[1])?;
         force_cell = Some(value);
     }
     force_cell.ok_or_else(|| {
-        strfind_error(
+        strfind_error_with_message(
             "strfind: expected 'ForceCellOutput' option when providing name-value arguments",
+            &STRFIND_ERROR_INVALID_OPTION,
         )
     })
 }
@@ -237,8 +421,9 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
         Value::Int(i) => Ok(!i.is_zero()),
         Value::Num(n) => {
             if !n.is_finite() {
-                Err(strfind_error(
+                Err(strfind_error_with_message(
                     "strfind: option values must be finite numeric scalars",
+                    &STRFIND_ERROR_INVALID_OPTION,
                 ))
             } else {
                 Ok(*n != 0.0)
@@ -246,23 +431,30 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
-                Err(strfind_error(format!(
-                    "strfind: option values must be scalar logicals (received {} elements)",
-                    array.data.len()
-                )))
+                Err(strfind_error_with_message(
+                    format!(
+                        "strfind: option values must be scalar logicals (received {} elements)",
+                        array.data.len()
+                    ),
+                    &STRFIND_ERROR_INVALID_OPTION,
+                ))
             } else {
                 Ok(array.data[0] != 0)
             }
         }
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                Err(strfind_error(format!(
-                    "strfind: option values must be scalar numeric values (received {} elements)",
-                    tensor.data.len()
-                )))
+                Err(strfind_error_with_message(
+                    format!(
+                        "strfind: option values must be scalar numeric values (received {} elements)",
+                        tensor.data.len()
+                    ),
+                    &STRFIND_ERROR_INVALID_OPTION,
+                ))
             } else if !tensor.data[0].is_finite() {
-                Err(strfind_error(
+                Err(strfind_error_with_message(
                     "strfind: option values must be finite numeric scalars",
+                    &STRFIND_ERROR_INVALID_OPTION,
                 ))
             } else {
                 Ok(tensor.data[0] != 0.0)
@@ -270,14 +462,20 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
         }
         other => value_to_owned_string(other)
             .ok_or_else(|| {
-                strfind_error("strfind: option values must be logical or numeric scalars")
+                strfind_error_with_message(
+                    "strfind: option values must be logical or numeric scalars",
+                    &STRFIND_ERROR_INVALID_OPTION,
+                )
             })
             .and_then(|text| match text.trim().to_ascii_lowercase().as_str() {
                 "true" | "on" | "1" => Ok(true),
                 "false" | "off" | "0" => Ok(false),
-                _ => Err(strfind_error(format!(
-                    "strfind: invalid value '{text}' for 'ForceCellOutput'; expected true or false"
-                ))),
+                _ => Err(strfind_error_with_message(
+                    format!(
+                        "strfind: invalid value '{text}' for 'ForceCellOutput'; expected true or false"
+                    ),
+                    &STRFIND_ERROR_INVALID_OPTION,
+                )),
             }),
     }
 }

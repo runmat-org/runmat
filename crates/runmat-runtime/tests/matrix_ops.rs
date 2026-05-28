@@ -1,7 +1,11 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use runmat_builtins::{builtin_functions, Tensor as Matrix, Value};
-use runmat_runtime::{call_builtin, comparison::*, indexing::*, matrix::*};
+use runmat_runtime::{
+    builtins::common::{indexing::*, matrix::*},
+    call_builtin,
+    comparison::*,
+};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -126,9 +130,9 @@ fn test_builtin_functions() {
     // Test that our new built-in functions are registered
     let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
 
-    assert!(names.contains(&"matrix_zeros"));
-    assert!(names.contains(&"matrix_ones"));
-    assert!(names.contains(&"matrix_eye"));
+    assert!(names.contains(&"zeros"));
+    assert!(names.contains(&"ones"));
+    assert!(names.contains(&"eye"));
     assert!(names.contains(&"transpose"));
     assert!(names.contains(&"gt"));
     assert!(names.contains(&"lt"));
@@ -140,7 +144,7 @@ fn test_builtin_functions() {
 fn test_builtin_dispatch() {
     // Test zeros function
     let result = call_builtin(
-        "matrix_zeros",
+        "zeros",
         &[
             Value::Int(runmat_builtins::IntValue::I32(2)),
             Value::Int(runmat_builtins::IntValue::I32(3)),
@@ -156,11 +160,7 @@ fn test_builtin_dispatch() {
     }
 
     // Test eye function
-    let result = call_builtin(
-        "matrix_eye",
-        &[Value::Int(runmat_builtins::IntValue::I32(2))],
-    )
-    .unwrap();
+    let result = call_builtin("eye", &[Value::Int(runmat_builtins::IntValue::I32(2))]).unwrap();
     if let Value::Tensor(m) = result {
         assert_eq!(m.data, vec![1.0, 0.0, 0.0, 1.0]);
     } else {

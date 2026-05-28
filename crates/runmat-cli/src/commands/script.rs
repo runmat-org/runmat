@@ -1,8 +1,13 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
-use runmat_config::RunMatConfig;
+use runmat_config::project::{resolve_project_source_input_from, ResolveProjectSourceInputError};
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_core::{
-    runtime_error_telemetry_failure_info, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
+    abi::{
+        DiagnosticSeverity, ExecutionOutcome, ExecutionRequest, HostExecutionPolicy, RuntimeFlow,
+        SourceInput,
+    },
+    TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
 use runmat_time::Instant;
 use std::fs;
@@ -22,7 +27,7 @@ pub async fn execute_script(
     script: PathBuf,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
 }
@@ -32,14 +37,34 @@ pub async fn execute_script_with_args(
     _args: Vec<String>,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
+    let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
-    let content = fs::read_to_string(&script)
-        .with_context(|| format!("Failed to read script file: {script:?}"))?;
+    if let Some(path) = &emit_bytecode_path {
+        let content = fs::read_to_string(&script)
+            .with_context(|| format!("Failed to read script file: {script:?}"))?;
+        let output = emit_bytecode(&content, config, Some(script.to_string_lossy().as_ref()))
+            .with_context(|| format!("Failed to emit bytecode for {script:?}"))?;
+        write_bytecode_output(path, &output)?;
+        return Ok(());
+    }
 
-    execute_script_contents(script, content, emit_bytecode_path, cli, config).await
+    execute_script_path(script, cli, config).await
+}
+
+fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
+    resolve_project_source_input_from(&cwd, &script).map_err(|err| match err {
+        ResolveProjectSourceInputError::EntrypointResolve { .. } => {
+            anyhow::anyhow!(
+                "failed to resolve script target '{}': {}",
+                script.display(),
+                err
+            )
+        }
+    })
 }
 
 pub(crate) async fn execute_script_contents(
@@ -47,17 +72,47 @@ pub(crate) async fn execute_script_contents(
     content: String,
     emit_bytecode_path: Option<PathBuf>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     info!("Executing script source: {script:?}");
 
     if let Some(path) = &emit_bytecode_path {
-        let output = emit_bytecode(&content, config)
+        let output = emit_bytecode(&content, config, Some(script.to_string_lossy().as_ref()))
             .with_context(|| format!("Failed to emit bytecode for {script:?}"))?;
         write_bytecode_output(path, &output)?;
         return Ok(());
     }
 
+    let source_name = script.to_string_lossy().to_string();
+    execute_script_request(
+        script,
+        SourceInput::Text {
+            name: source_name,
+            text: content.clone(),
+        },
+        Some(content),
+        cli,
+        config,
+    )
+    .await
+}
+
+async fn execute_script_path(
+    script: PathBuf,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+) -> Result<()> {
+    let source_name = script.to_string_lossy().to_string();
+    execute_script_request(script, SourceInput::Path(source_name), None, cli, config).await
+}
+
+async fn execute_script_request(
+    script: PathBuf,
+    request_source: SourceInput,
+    diagnostic_source_text: Option<String>,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+) -> Result<()> {
     let enable_jit = config.jit.enabled;
     let mut engine = create_session(
         enable_jit,
@@ -66,15 +121,20 @@ pub(crate) async fn execute_script_contents(
         config,
         "Failed to create execution engine",
     )?;
-    engine.set_source_name_override(Some(script.to_string_lossy().to_string()));
     let mut script_run = engine.telemetry_run(TelemetryRunConfig {
         kind: TelemetryRunKind::Script,
         jit_enabled: config.jit.enabled,
         accelerate_enabled: config.accelerate.enabled,
     });
     let start_time = Instant::now();
-    let result = match engine.execute(&content).await {
-        Ok(result) => result,
+    let request = ExecutionRequest::for_source(
+        request_source,
+        crate::diagnostics::parser_compat(config.language.compat),
+        HostExecutionPolicy::default(),
+        engine.workspace_handle(),
+    );
+    let outcome = match engine.execute_request(request).await {
+        Ok(outcome) => outcome,
         Err(err) => {
             let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
@@ -89,8 +149,11 @@ pub(crate) async fn execute_script_contents(
                     provider: capture_provider_snapshot(),
                 });
             }
+            let source_name = script.to_string_lossy().to_string();
+            let content_for_diagnostics = diagnostic_source_text
+                .unwrap_or_else(|| fs::read_to_string(&script).unwrap_or_default());
             if let Some(diag) =
-                format_frontend_error(&err, script.to_string_lossy().as_ref(), &content)
+                format_frontend_error(&err, source_name.as_str(), &content_for_diagnostics)
             {
                 eprintln!("{diag}");
             } else {
@@ -101,26 +164,17 @@ pub(crate) async fn execute_script_contents(
     };
 
     let execution_time = start_time.elapsed();
-    emit_execution_streams(&result.streams);
+    emit_execution_streams(&outcome.streams);
 
     let provider_snapshot = capture_provider_snapshot();
-    let failure = result
-        .error
-        .as_ref()
-        .map(runtime_error_telemetry_failure_info);
-    let error_payload = result
-        .error
-        .as_ref()
-        .and_then(|err| err.identifier().map(|value| value.to_string()))
-        .or_else(|| failure.as_ref().map(|info| info.code.clone()))
-        .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
+    let error_payload = outcome_error_code(&outcome);
     let success = error_payload.is_none();
 
     if let Some(artifacts_plan) = ScriptArtifactsPlan::from_cli(cli)? {
         if let Err(err) = write_script_artifacts(
             &artifacts_plan,
             &script,
-            &result,
+            &outcome,
             execution_time,
             success,
             error_payload.as_deref(),
@@ -136,43 +190,34 @@ pub(crate) async fn execute_script_contents(
         run.finish(TelemetryRunFinish {
             duration: Some(execution_time),
             success,
-            jit_used: result.used_jit,
+            jit_used: outcome.used_jit,
             error: error_payload.clone(),
-            failure,
+            failure: None,
             host: Some(TelemetryHost::Cli),
             counters: None,
             provider: provider_snapshot,
         });
     }
 
-    if let Some(error) = result.error.as_ref() {
-        eprintln!(
-            "{}",
-            error.format_diagnostic_with_source(
-                Some(script.to_string_lossy().as_ref()),
-                Some(&content),
-            )
-        );
-        return Err(AlreadyReportedCliError.into());
-    } else if let Some(error) = error_payload {
+    if let Some(error) = error_payload {
         eprintln!("{error}");
         return Err(AlreadyReportedCliError.into());
     } else {
-        if result.used_jit {
+        if outcome.used_jit {
             info!("Script executed successfully in {:?} (JIT)", execution_time);
         } else {
             info!("Script executed successfully in {:?}", execution_time);
         }
-        if let Some(value) = result.value {
+        if let RuntimeFlow::Single(value) = outcome.flow {
             if config.runtime.verbose {
                 println!("{value:?}");
+            } else {
+                println!("{value}");
             }
         }
     }
 
-    engine.set_source_name_override(None);
     dump_provider_telemetry_if_requested();
-
     Ok(())
 }
 
@@ -223,7 +268,7 @@ fn normalize_manifest_parent(parent: &Path) -> PathBuf {
 async fn write_script_artifacts(
     plan: &ScriptArtifactsPlan,
     script: &Path,
-    result: &runmat_core::ExecutionResult,
+    outcome: &ExecutionOutcome,
     execution_time: Duration,
     success: bool,
     error_identifier: Option<&str>,
@@ -235,11 +280,11 @@ async fn write_script_artifacts(
         )
     })?;
 
-    let figure_exports = export_touched_figures(plan, &result.figures_touched).await;
+    let figure_exports = export_touched_figures(plan, &outcome.figures_touched).await;
 
     let mut stdout_bytes: usize = 0;
     let mut stderr_bytes: usize = 0;
-    for stream in &result.streams {
+    for stream in &outcome.streams {
         match stream.stream {
             runmat_core::ExecutionStreamKind::Stdout => stdout_bytes += stream.text.len(),
             runmat_core::ExecutionStreamKind::Stderr => stderr_bytes += stream.text.len(),
@@ -252,12 +297,12 @@ async fn write_script_artifacts(
         "script": script.to_string_lossy(),
         "success": success,
         "execution_time_ms": execution_time.as_millis() as u64,
-        "used_jit": result.used_jit,
+        "used_jit": outcome.used_jit,
         "error_identifier": error_identifier,
-        "figures_touched": result.figures_touched,
+        "figures_touched": outcome.figures_touched,
         "figure_exports": figure_exports,
         "stream_summary": {
-            "entry_count": result.streams.len(),
+            "entry_count": outcome.streams.len(),
             "stdout_bytes": stdout_bytes,
             "stderr_bytes": stderr_bytes,
         },
@@ -364,4 +409,130 @@ async fn export_touched_figures(
     }
 
     exports
+}
+
+fn outcome_error_code(outcome: &ExecutionOutcome) -> Option<String> {
+    outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.code.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_script_input;
+    use crate::test_support::ScopedCurrentDir;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn resolves_named_entrypoint_to_manifest_path_target() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[entrypoints.main]
+path = "src/main"
+"#,
+        )
+        .unwrap();
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let resolved = resolve_script_input(PathBuf::from("main")).expect("resolve entrypoint");
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().join("src/main.m").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_script_input_infers_m_extension_for_relative_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+
+        let resolved =
+            resolve_script_input(PathBuf::from("src/main")).expect("should infer .m extension");
+
+        assert_eq!(resolved, PathBuf::from("src/main.m"));
+    }
+
+    #[test]
+    fn resolves_module_function_entrypoint_to_source_root_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src/app")).unwrap();
+        fs::write(
+            tmp.path().join("src/app/server.m"),
+            "function y = main(); y = 1; end",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[entrypoints.server]
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let resolved = resolve_script_input(PathBuf::from("server"))
+            .expect("module/function entrypoint should resolve to module file");
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().join("src/app/server.m").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn module_function_entrypoint_errors_when_module_file_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[entrypoints.server]
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let err = resolve_script_input(PathBuf::from("server"))
+            .expect_err("missing module file should return explicit error");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("module/function target")
+                || message.contains("did not resolve under configured source roots"),
+            "unexpected error message: {message}"
+        );
+    }
 }

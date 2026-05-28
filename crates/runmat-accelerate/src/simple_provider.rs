@@ -1272,6 +1272,11 @@ impl AccelProvider for InProcessProvider {
     fn device_id(&self) -> u32 {
         0
     }
+
+    fn spawn_handle_concurrency(&self) -> runmat_accelerate_api::SpawnHandleConcurrency {
+        runmat_accelerate_api::SpawnHandleConcurrency::SynchronizedMutation
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

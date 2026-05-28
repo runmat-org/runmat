@@ -5,7 +5,11 @@ use std::collections::{HashSet, VecDeque};
 
 use log::debug;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, ResolveContext, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -58,8 +62,68 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "symrcm";
 
-fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
+const SYMRCM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Permutation row vector (1-based indices) from reverse Cuthill-McKee ordering.",
+}];
+
+const SYMRCM_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const SYMRCM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "p = symrcm(A)",
+    inputs: &SYMRCM_INPUTS,
+    outputs: &SYMRCM_OUTPUT,
+}];
+
+const SYMRCM_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SYMRCM.INVALID_INPUT",
+    identifier: Some("RunMat:symrcm:InvalidInput"),
+    when: "Input shape/type cannot be interpreted as a numeric or logical square matrix.",
+    message: "symrcm: invalid input",
+};
+
+const SYMRCM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SYMRCM.INTERNAL",
+    identifier: Some("RunMat:symrcm:Internal"),
+    when: "Runtime fails while constructing intermediate tensors or adjacency structures.",
+    message: "symrcm: internal runtime failure",
+};
+
+const SYMRCM_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SYMRCM_ERROR_INVALID_INPUT, SYMRCM_ERROR_INTERNAL];
+
+pub const SYMRCM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SYMRCM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SYMRCM_ERRORS,
+};
+
+fn symrcm_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn symrcm_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    symrcm_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 #[runtime_builtin(
@@ -69,6 +133,7 @@ fn runtime_error(name: &str, message: impl Into<String>) -> RuntimeError {
     keywords = "symrcm,reverse cuthill-mckee,bandwidth reduction,gpu",
     accel = "graph",
     type_resolver(symrcm_type),
+    descriptor(crate::builtins::math::linalg::structure::symrcm::SYMRCM_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]
 async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
@@ -79,47 +144,47 @@ async fn symrcm_builtin(matrix: Value) -> crate::BuiltinResult<Value> {
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+                .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e))?;
             let ordering = symrcm_host_complex_tensor(&tensor)?;
             Ok(permutation_to_value(&ordering)?)
         }
         Value::GpuTensor(handle) => symrcm_gpu(handle).await,
         other => {
-            let tensor = value_into_tensor_for(BUILTIN_NAME, other)?;
+            let tensor = value_into_tensor_for(other)?;
             let ordering = symrcm_host_real_tensor(&tensor)?;
             Ok(permutation_to_value(&ordering)?)
         }
     }
 }
 
-fn value_into_tensor_for(name: &str, value: Value) -> BuiltinResult<Tensor> {
+fn value_into_tensor_for(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t),
-        Value::LogicalArray(logical) => logical_to_tensor(name, &logical),
+        Value::LogicalArray(logical) => logical_to_tensor(&logical),
         Value::Num(n) => Tensor::new(vec![n], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+            .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e)),
         Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
+            .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e)),
         Value::Bool(b) => Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-            .map_err(|e| runtime_error(name, format!("{name}: {e}"))),
-        other => Err(runtime_error(
-            name,
+            .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e)),
+        other => Err(symrcm_error_with_detail(
+            &SYMRCM_ERROR_INVALID_INPUT,
             format!(
-                "{name}: unsupported input type {:?}; expected numeric or logical values",
+                "unsupported input type {:?}; expected numeric or logical values",
                 other
             ),
         )),
     }
 }
 
-fn logical_to_tensor(name: &str, logical: &LogicalArray) -> BuiltinResult<Tensor> {
+fn logical_to_tensor(logical: &LogicalArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = logical
         .data
         .iter()
         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
         .collect();
     Tensor::new(data, logical.shape.clone())
-        .map_err(|e| runtime_error(name, format!("{name}: {e}")))
+        .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e))
 }
 
 async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
@@ -175,9 +240,9 @@ fn adjacency_from_complex_data(
 fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
     let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape)?;
     if rows != cols {
-        return Err(runtime_error(
-            BUILTIN_NAME,
-            "symrcm: input matrix must be square",
+        return Err(symrcm_error_with_detail(
+            &SYMRCM_ERROR_INVALID_INPUT,
+            "input matrix must be square",
         ));
     }
     Ok(rows)
@@ -197,15 +262,15 @@ where
     }
 
     let expected = rows.checked_mul(cols).ok_or_else(|| {
-        runtime_error(
-            BUILTIN_NAME,
-            "symrcm: matrix dimensions overflow when computing adjacency",
+        symrcm_error_with_detail(
+            &SYMRCM_ERROR_INTERNAL,
+            "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if data.len() < expected {
-        return Err(runtime_error(
-            BUILTIN_NAME,
-            "symrcm: data does not match matrix dimensions",
+        return Err(symrcm_error_with_detail(
+            &SYMRCM_ERROR_INVALID_INPUT,
+            "data does not match matrix dimensions",
         ));
     }
 
@@ -305,7 +370,7 @@ fn permutation_to_value(ordering: &[usize]) -> BuiltinResult<Value> {
     }
     let shape = if n == 0 { vec![1, 0] } else { vec![1, n] };
     let tensor = Tensor::new(data, shape)
-        .map_err(|e| runtime_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {e}")))?;
+        .map_err(|e| symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -353,6 +418,27 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(4)])
             }
         );
+    }
+
+    #[test]
+    fn symrcm_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SYMRCM_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"p = symrcm(A)"));
+    }
+
+    #[test]
+    fn symrcm_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = SYMRCM_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.SYMRCM.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.SYMRCM.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -532,6 +618,7 @@ pub(crate) mod tests {
     #[test]
     fn symrcm_rejects_unsupported_type() {
         let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
+        assert_eq!(err.identifier(), SYMRCM_ERROR_INVALID_INPUT.identifier);
         let message = err.to_string();
         assert!(
             message.contains("unsupported"),

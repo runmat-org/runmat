@@ -1,7 +1,11 @@
 //! MATLAB-compatible `impulse` response builtin for supported control models.
 
 use nalgebra::DMatrix;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -17,6 +21,135 @@ const TF_CLASS: &str = "tf";
 const EPS: f64 = 1.0e-12;
 const DEFAULT_POINTS: usize = 100;
 const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
+
+const IMPULSE_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Impulse response samples (column vector).",
+}];
+const IMPULSE_OUTPUT_Y_T: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Impulse response samples (column vector).",
+    },
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Time samples (column vector).",
+    },
+];
+const IMPULSE_INPUTS_SYS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sys",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "SISO tf model.",
+}];
+const IMPULSE_INPUTS_SYS_TIME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "sys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "SISO tf model.",
+    },
+    BuiltinParamDescriptor {
+        name: "time",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Final time scalar or explicit time vector.",
+    },
+];
+const IMPULSE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "y = impulse(sys)",
+        inputs: &IMPULSE_INPUTS_SYS,
+        outputs: &IMPULSE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = impulse(sys, tFinal)",
+        inputs: &IMPULSE_INPUTS_SYS_TIME,
+        outputs: &IMPULSE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = impulse(sys, t)",
+        inputs: &IMPULSE_INPUTS_SYS_TIME,
+        outputs: &IMPULSE_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y,t] = impulse(sys)",
+        inputs: &IMPULSE_INPUTS_SYS,
+        outputs: &IMPULSE_OUTPUT_Y_T,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y,t] = impulse(sys, tFinal)",
+        inputs: &IMPULSE_INPUTS_SYS_TIME,
+        outputs: &IMPULSE_OUTPUT_Y_T,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y,t] = impulse(sys, t)",
+        inputs: &IMPULSE_INPUTS_SYS_TIME,
+        outputs: &IMPULSE_OUTPUT_Y_T,
+    },
+];
+const IMPULSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:impulse:InvalidArgument"),
+    when: "Inputs do not match supported impulse invocation forms.",
+    message: "impulse: invalid argument",
+};
+const IMPULSE_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.INVALID_MODEL",
+    identifier: Some("RunMat:impulse:InvalidModel"),
+    when: "Input system is not a supported tf object with valid required metadata.",
+    message: "impulse: invalid model",
+};
+const IMPULSE_ERROR_INVALID_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.INVALID_TIME",
+    identifier: Some("RunMat:impulse:InvalidTime"),
+    when: "Time argument is invalid for the model class or sampling mode.",
+    message: "impulse: invalid time input",
+};
+const IMPULSE_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.UNSUPPORTED_MODEL",
+    identifier: Some("RunMat:impulse:UnsupportedModel"),
+    when: "Model is well-formed but unsupported by the current impulse implementation.",
+    message: "impulse: unsupported model",
+};
+const IMPULSE_ERROR_DISCRETE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.DISCRETE_LIMIT",
+    identifier: Some("RunMat:impulse:DiscreteLimit"),
+    when: "Discrete simulation would exceed platform or configured sample limits.",
+    message: "impulse: discrete simulation limit exceeded",
+};
+const IMPULSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMPULSE.INTERNAL",
+    identifier: Some("RunMat:impulse:Internal"),
+    when: "Internal response assembly failed.",
+    message: "impulse: internal error",
+};
+const IMPULSE_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    IMPULSE_ERROR_INVALID_ARGUMENT,
+    IMPULSE_ERROR_INVALID_MODEL,
+    IMPULSE_ERROR_INVALID_TIME,
+    IMPULSE_ERROR_UNSUPPORTED_MODEL,
+    IMPULSE_ERROR_DISCRETE_LIMIT,
+    IMPULSE_ERROR_INTERNAL,
+];
+pub const IMPULSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IMPULSE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IMPULSE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::impulse")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -45,10 +178,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Impulse-response simulation materialises host-side time and output vectors and terminates fusion chains.",
 };
 
-fn impulse_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn impulse_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    impulse_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn impulse_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -57,6 +202,7 @@ fn impulse_error(message: impl Into<String>) -> RuntimeError {
     summary = "Compute or plot the impulse response of a supported dynamic system model.",
     keywords = "impulse,control system,transfer function,response,tf",
     type_resolver(impulse_type),
+    descriptor(crate::builtins::control::impulse::IMPULSE_DESCRIPTOR),
     builtin_path = "crate::builtins::control::impulse"
 )]
 async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -66,6 +212,7 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
+            emit_impulse_plot(&response).await?;
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
@@ -78,10 +225,28 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     }
 
     if crate::output_context::requested_output_count() == Some(0) {
-        return render_impulse_plot(&response).await;
+        emit_impulse_plot(&response).await?;
+        return Ok(Value::OutputList(Vec::new()));
     }
 
     response.y_value()
+}
+
+async fn emit_impulse_plot(response: &ImpulseResponse) -> BuiltinResult<()> {
+    if let Err(err) = render_impulse_plot(response).await {
+        if is_nonfatal_plot_setup_error(&err) {
+            return Ok(());
+        }
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
+    let lower = err.message().to_ascii_lowercase();
+    lower.contains("plotting is unavailable")
+        || lower.contains("non-main thread")
+        || lower.contains("interactive plotting failed")
 }
 
 #[derive(Clone, Debug)]
@@ -95,15 +260,19 @@ impl TfSystem {
     async fn parse(value: Value) -> BuiltinResult<Self> {
         let gathered = crate::dispatcher::gather_if_needed_async(&value).await?;
         let Value::Object(object) = gathered else {
-            return Err(impulse_error(format!(
-                "impulse: expected a dynamic system model, got {gathered:?}"
-            )));
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_MODEL,
+                format!("expected a dynamic system model, got {gathered:?}"),
+            ));
         };
         if object.class_name != TF_CLASS {
-            return Err(impulse_error(format!(
-                "impulse: unsupported model class '{}'; only SISO tf objects are currently supported",
-                object.class_name
-            )));
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_UNSUPPORTED_MODEL,
+                format!(
+                    "unsupported model class '{}'; only SISO tf objects are currently supported",
+                    object.class_name
+                ),
+            ));
         }
 
         let numerator = real_coefficients(property(&object, "Numerator")?, "Numerator")?;
@@ -112,31 +281,36 @@ impl TfSystem {
         let input_delay = scalar_property(property(&object, "InputDelay")?, "InputDelay")?;
         let output_delay = scalar_property(property(&object, "OutputDelay")?, "OutputDelay")?;
         if !sample_time.is_finite() || sample_time < 0.0 {
-            return Err(impulse_error(format!(
-                "impulse: Ts must be a finite non-negative scalar, got {sample_time}"
-            )));
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_MODEL,
+                format!("Ts must be a finite non-negative scalar, got {sample_time}"),
+            ));
         }
         if !input_delay.is_finite() || input_delay < 0.0 {
-            return Err(impulse_error(format!(
-                "impulse: InputDelay must be a finite non-negative scalar, got {input_delay}"
-            )));
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_MODEL,
+                format!("InputDelay must be a finite non-negative scalar, got {input_delay}"),
+            ));
         }
         if !output_delay.is_finite() || output_delay < 0.0 {
-            return Err(impulse_error(format!(
-                "impulse: OutputDelay must be a finite non-negative scalar, got {output_delay}"
-            )));
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_MODEL,
+                format!("OutputDelay must be a finite non-negative scalar, got {output_delay}"),
+            ));
         }
         if input_delay.abs() > EPS || output_delay.abs() > EPS {
-            return Err(impulse_error(
-                "impulse: transfer functions with input or output delays are not supported yet",
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_UNSUPPORTED_MODEL,
+                "transfer functions with input or output delays are not supported yet",
             ));
         }
 
         let numerator = trim_leading_zeros(numerator);
         let denominator = trim_leading_zeros(denominator);
         if denominator.is_empty() {
-            return Err(impulse_error(
-                "impulse: denominator coefficients cannot be empty",
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_MODEL,
+                "denominator coefficients cannot be empty",
             ));
         }
         if numerator.is_empty() {
@@ -147,13 +321,15 @@ impl TfSystem {
             });
         }
         if denominator.len() <= 1 {
-            return Err(impulse_error(
-                "impulse: static-gain transfer functions do not have a finite impulse-response vector",
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_UNSUPPORTED_MODEL,
+                "static-gain transfer functions do not have a finite impulse-response vector",
             ));
         }
         if numerator.len() >= denominator.len() {
-            return Err(impulse_error(
-                "impulse: only strictly proper SISO tf models are currently supported",
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_UNSUPPORTED_MODEL,
+                "only strictly proper SISO tf models are currently supported",
             ));
         }
 
@@ -173,10 +349,12 @@ fn property<'a>(
     object: &'a runmat_builtins::ObjectInstance,
     name: &str,
 ) -> BuiltinResult<&'a Value> {
-    object
-        .properties
-        .get(name)
-        .ok_or_else(|| impulse_error(format!("impulse: tf object is missing {name} property")))
+    object.properties.get(name).ok_or_else(|| {
+        impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_MODEL,
+            format!("tf object is missing {name} property"),
+        )
+    })
 }
 
 fn real_coefficients(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
@@ -199,20 +377,23 @@ fn real_coefficients(value: &Value, label: &str) -> BuiltinResult<Vec<f64>> {
                     .collect(),
             )
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(impulse_error(
-            "impulse: complex-coefficient tf models are not supported yet",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_UNSUPPORTED_MODEL,
+            "complex-coefficient tf models are not supported yet",
         )),
-        other => Err(impulse_error(format!(
-            "impulse: {label} must be a real numeric coefficient vector, got {other:?}"
-        ))),
+        other => Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_MODEL,
+            format!("{label} must be a real numeric coefficient vector, got {other:?}"),
+        )),
     }
 }
 
 fn finite_values(label: &str, values: Vec<f64>) -> BuiltinResult<Vec<f64>> {
     if values.iter().any(|value| !value.is_finite()) {
-        return Err(impulse_error(format!(
-            "impulse: {label} coefficients must be finite"
-        )));
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_MODEL,
+            format!("{label} coefficients must be finite"),
+        ));
     }
     Ok(values)
 }
@@ -222,9 +403,10 @@ fn ensure_vector(label: &str, shape: &[usize]) -> BuiltinResult<()> {
     if non_unit <= 1 {
         Ok(())
     } else {
-        Err(impulse_error(format!(
-            "impulse: {label} coefficients must be a vector"
-        )))
+        Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_MODEL,
+            format!("{label} coefficients must be a vector"),
+        ))
     }
 }
 
@@ -234,9 +416,10 @@ fn scalar_property(value: &Value, label: &str) -> BuiltinResult<f64> {
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0]),
-        other => Err(impulse_error(format!(
-            "impulse: {label} must be a real scalar, got {other:?}"
-        ))),
+        other => Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_MODEL,
+            format!("{label} must be a real scalar, got {other:?}"),
+        )),
     }
 }
 
@@ -268,8 +451,9 @@ impl TimeSpec {
                 validate_time_vector(system, &vector)?;
                 Ok(Self::Values(vector))
             }
-            _ => Err(impulse_error(
-                "impulse: expected impulse(sys), impulse(sys, tFinal), or impulse(sys, t)",
+            _ => Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_ARGUMENT,
+                "expected impulse(sys), impulse(sys, tFinal), or impulse(sys, t)",
             )),
         }
     }
@@ -301,8 +485,9 @@ fn default_time_vector(system: &TfSystem) -> Vec<f64> {
 
 fn time_vector_from_final_time(system: &TfSystem, final_time: f64) -> BuiltinResult<Vec<f64>> {
     if !final_time.is_finite() || final_time < 0.0 {
-        return Err(impulse_error(
-            "impulse: final time must be a finite non-negative scalar",
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_TIME,
+            "final time must be a finite non-negative scalar",
         ));
     }
     if system.is_discrete() {
@@ -320,16 +505,18 @@ fn time_vector_from_final_time(system: &TfSystem, final_time: f64) -> BuiltinRes
 fn checked_discrete_sample_count(system: &TfSystem, final_time: f64) -> BuiltinResult<usize> {
     let samples = final_time / system.sample_time;
     if !samples.is_finite() {
-        return Err(impulse_error(
-            "impulse: discrete sample count exceeds platform limits",
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_DISCRETE_LIMIT,
+            "discrete sample count exceeds platform limits",
         ));
     }
 
     let count = samples.floor() + 1.0;
     if count > usize::MAX as f64 || count > MAX_DISCRETE_SAMPLES as f64 {
-        return Err(impulse_error(format!(
-            "impulse: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
-        )));
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_DISCRETE_LIMIT,
+            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
+        ));
     }
     Ok(count as usize)
 }
@@ -338,14 +525,16 @@ fn checked_discrete_sample_index(system: &TfSystem, time: f64) -> BuiltinResult<
     let samples = time / system.sample_time;
     let index = samples.round();
     if !index.is_finite() || index > usize::MAX as f64 {
-        return Err(impulse_error(
-            "impulse: discrete sample index exceeds platform limits",
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_DISCRETE_LIMIT,
+            "discrete sample index exceeds platform limits",
         ));
     }
     if index >= MAX_DISCRETE_SAMPLES as f64 {
-        return Err(impulse_error(format!(
-            "impulse: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
-        )));
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_DISCRETE_LIMIT,
+            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
+        ));
     }
     Ok(index as usize)
 }
@@ -359,11 +548,18 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
 }
 
 fn time_vector_from_value(value: Value) -> BuiltinResult<Vec<f64>> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| impulse_error(format!("impulse: time vector must be numeric: {err}")))?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(|err| {
+        impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_TIME,
+            format!("time vector must be numeric: {err}"),
+        )
+    })?;
     ensure_vector("time", &tensor.shape)?;
     if tensor.data.is_empty() {
-        return Err(impulse_error("impulse: time vector cannot be empty"));
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_TIME,
+            "time vector cannot be empty",
+        ));
     }
     Ok(tensor.data)
 }
@@ -373,21 +569,24 @@ fn validate_time_vector(system: &TfSystem, values: &[f64]) -> BuiltinResult<()> 
         .iter()
         .any(|value| !value.is_finite() || *value < 0.0)
     {
-        return Err(impulse_error(
-            "impulse: time vector values must be finite and non-negative",
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_TIME,
+            "time vector values must be finite and non-negative",
         ));
     }
     if values.windows(2).any(|pair| pair[1] <= pair[0]) {
-        return Err(impulse_error(
-            "impulse: time vector values must be strictly increasing",
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_INVALID_TIME,
+            "time vector values must be strictly increasing",
         ));
     }
     if system.is_discrete() {
         for &value in values {
             let samples = value / system.sample_time;
             if (samples - samples.round()).abs() > 1.0e-8 {
-                return Err(impulse_error(
-                    "impulse: discrete-time vectors must use integer multiples of the sample time",
+                return Err(impulse_error_with_detail(
+                    &IMPULSE_ERROR_INVALID_TIME,
+                    "discrete-time vectors must use integer multiples of the sample time",
                 ));
             }
         }
@@ -404,14 +603,22 @@ struct ImpulseResponse {
 
 impl ImpulseResponse {
     fn y_value(&self) -> BuiltinResult<Value> {
-        let tensor = Tensor::new(self.y.clone(), vec![self.y.len(), 1])
-            .map_err(|err| impulse_error(format!("impulse: {err}")))?;
+        let tensor = Tensor::new(self.y.clone(), vec![self.y.len(), 1]).map_err(|err| {
+            impulse_error_with_detail(
+                &IMPULSE_ERROR_INTERNAL,
+                format!("failed to build response tensor: {err}"),
+            )
+        })?;
         Ok(Value::Tensor(tensor))
     }
 
     fn t_value(&self) -> BuiltinResult<Value> {
-        let tensor = Tensor::new(self.t.clone(), vec![self.t.len(), 1])
-            .map_err(|err| impulse_error(format!("impulse: {err}")))?;
+        let tensor = Tensor::new(self.t.clone(), vec![self.t.len(), 1]).map_err(|err| {
+            impulse_error_with_detail(
+                &IMPULSE_ERROR_INTERNAL,
+                format!("failed to build time tensor: {err}"),
+            )
+        })?;
         Ok(Value::Tensor(tensor))
     }
 }
@@ -448,8 +655,9 @@ impl Realization {
         }
         let leading = system.denominator[0];
         if leading.abs() <= EPS {
-            return Err(impulse_error(
-                "impulse: denominator leading coefficient must be non-zero",
+            return Err(impulse_error_with_detail(
+                &IMPULSE_ERROR_INVALID_MODEL,
+                "denominator leading coefficient must be non-zero",
             ));
         }
         let denominator: Vec<f64> = system
@@ -494,9 +702,10 @@ fn discrete_response(
     t: &[f64],
 ) -> BuiltinResult<Vec<f64>> {
     if t.len() > MAX_DISCRETE_SAMPLES {
-        return Err(impulse_error(format!(
-            "impulse: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
-        )));
+        return Err(impulse_error_with_detail(
+            &IMPULSE_ERROR_DISCRETE_LIMIT,
+            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
+        ));
     }
     let sample_indices: Vec<usize> = t
         .iter()
@@ -504,9 +713,12 @@ fn discrete_response(
         .collect::<BuiltinResult<_>>()?;
     let max_index = sample_indices.iter().copied().max().unwrap_or(0);
     let order = realization.c.len();
-    let value_count = max_index
-        .checked_add(1)
-        .ok_or_else(|| impulse_error("impulse: discrete sample index exceeds platform limits"))?;
+    let value_count = max_index.checked_add(1).ok_or_else(|| {
+        impulse_error_with_detail(
+            &IMPULSE_ERROR_DISCRETE_LIMIT,
+            "discrete sample index exceeds platform limits",
+        )
+    })?;
     let mut values = vec![0.0; value_count];
     if order == 0 {
         return Ok(sample_indices.into_iter().map(|idx| values[idx]).collect());
@@ -653,6 +865,21 @@ mod tests {
     }
 
     #[test]
+    fn impulse_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = IMPULSE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"y = impulse(sys)"));
+        assert!(labels.contains(&"y = impulse(sys, tFinal)"));
+        assert!(labels.contains(&"y = impulse(sys, t)"));
+        assert!(labels.contains(&"[y,t] = impulse(sys)"));
+        assert!(labels.contains(&"[y,t] = impulse(sys, tFinal)"));
+        assert!(labels.contains(&"[y,t] = impulse(sys, t)"));
+    }
+
+    #[test]
     fn impulse_first_order_continuous_explicit_time() {
         let sys = tf_object(vec![20.0], vec![1.0, 5.0], 0.0);
         let t = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2], vec![1, 3]).unwrap());
@@ -698,6 +925,28 @@ mod tests {
     }
 
     #[test]
+    fn impulse_zero_output_count_emits_no_values() {
+        let _guard = crate::output_count::push_output_count(Some(0));
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let result = run_impulse(sys, Vec::new()).expect("impulse");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn impulse_requested_zero_outputs_emits_no_values() {
+        let _guard = crate::output_context::push_output_count(0);
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let result = run_impulse(sys, Vec::new()).expect("impulse");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert!(outputs.is_empty());
+    }
+
+    #[test]
     fn impulse_discrete_siso_response() {
         let sys = tf_object(vec![1.0], vec![1.0, -0.5], 0.1);
         let t = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2, 0.3], vec![1, 4]).unwrap());
@@ -714,6 +963,7 @@ mod tests {
         let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0e-6);
         let err = run_impulse(sys, vec![Value::Num(2.0)]).expect_err("should fail");
         assert!(err.message().contains("more than 1000000 samples"));
+        assert_eq!(err.identifier(), IMPULSE_ERROR_DISCRETE_LIMIT.identifier);
     }
 
     #[test]
@@ -730,6 +980,7 @@ mod tests {
         let object = ObjectInstance::new("ss".to_string());
         let err = run_impulse(Value::Object(object), Vec::new()).expect_err("should fail");
         assert!(err.message().contains("unsupported model class"));
+        assert_eq!(err.identifier(), IMPULSE_ERROR_UNSUPPORTED_MODEL.identifier);
     }
 
     #[test]

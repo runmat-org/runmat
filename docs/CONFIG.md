@@ -1,379 +1,291 @@
 # RunMat Configuration
 
-RunMat provides a modern, explicit configuration system designed for clarity
-and portability. It supports multiple file formats, sane defaults, rich
-environment variable overrides, and precise CLI flag precedence — a major step
-up from legacy largely process-flag driven approach.
+This document is the reference for `runmat.toml` / `runmat.json`.
 
-This document is the definitive reference for all configuration options.
+## Config Resolution
 
-**Applicability:** Configuration files, environment variables, and the `runmat config` subcommands apply to the **CLI** and to tools that use the config loader (e.g. the LSP). The **browser sandbox** does not read `.runmat` or env vars; it uses built-in defaults. Use the CLI or desktop app for file-based and environment-based configuration.
+RunMat loads configuration in this order:
 
-## Overview
+1. Built-in defaults
+2. Config file:
+   - `RUNMAT_CONFIG` (explicit path)
+   - nearest `runmat.toml` / `runmat.json` by walking up from cwd
+   - user config at `~/.config/runmat/config.toml` / `~/.config/runmat/config.json`
+3. CLI flags
 
-Configuration sources (highest to lowest precedence):
-1. Command-line flags
-2. Environment variables (`RUNMAT_*`)
-3. Configuration files (`.runmat`, `.runmat.yaml`, `runmat.config.json`, …)
-4. Built-in defaults
+CLI flags override file values.
 
-Loading follows `runmat_config::ConfigLoader::load()` (in the `runmat-config` crate) which:
-- Searches for a config file (see discovery paths below)
-- Loads and parses it (YAML/JSON/TOML)
-- Applies environment variable overrides
-- CLI flags are applied by `runmat` after loading
+## File Contract
 
-## Discovery paths
+- Supported extensions: `.toml`, `.json`
+- A single file can contain both project and runtime config.
+- Unknown keys are rejected for runtime config sections.
 
-Checked in order; first existing file is loaded:
+## Project Reference
 
-1. Explicit path via `RUNMAT_CONFIG`
-2. Current directory candidates:
-   - `.runmat` (preferred; TOML syntax)
-   - `.runmat.yaml`, `.runmat.yml`, `.runmat.json`, `.runmat.toml`
-   - `runmat.config.yaml`, `runmat.config.yml`, `runmat.config.json`, `runmat.config.toml`
-3. Home directory:
-   - `~/.runmat`, `~/.runmat.yaml`, `~/.runmat.yml`, `~/.runmat.json`
-   - `~/.config/runmat/config.yaml`, `config.yml`, `config.json`
-4. System-wide (Unix):
-   - `/etc/runmat/config.yaml`, `config.yml`, `config.json`
+Project sections describe package identity, source layout, dependencies, and named entrypoints.
 
-If nothing exists, defaults are used.
+### `[package]`
 
-## File formats
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `name` | string | required | Package identifier. |
+| `version` | string | unset | Package version metadata. |
+| `runmat-version` | string | unset | Minimum RunMat version gate. Accepts `>=x.y.z` or `x.y.z`. |
 
-RunMat supports YAML, JSON and TOML. Examples below encode the same config.
+### `[sources]`
 
-### TOML (.runmat)
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `roots` | string[] | required | Source root directories, relative to the config file directory. |
+
+### `[dependencies]`
+
+Each dependency is keyed by alias.
+
 ```toml
-[runtime]
-timeout = 600
-verbose = true
-snapshot_path = "./stdlib.snapshot"
+[dependencies]
+utils = { path = "../utils", version = "0.1.0" }
+```
 
-[jit]
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | string | unset | Local dependency path. Required for local composition today. |
+| `version` | string | unset | Version metadata for dependency declaration. |
+
+### `[entrypoints.<name>]`
+
+Define named targets that can be executed from CLI.
+
+```toml
+[entrypoints.main]
+module = "app.main"
+function = "main"
+```
+
+```toml
+[entrypoints.batch]
+path = "scripts/run_batch.m"
+```
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `path` | string | unset | File target (`.m` extension inferred if omitted). |
+| `module` | string | unset | Module path under source roots. |
+| `function` | string | unset | Function name for module target. |
+
+Exactly one target mode is required: `path` or `module + function`.
+
+Entrypoint CLI examples:
+
+```bash
+runmat run main
+runmat benchmark main --iterations 25 --jit
+```
+
+## Runtime Reference
+
+All runtime settings are under `[runtime]`.
+
+### `[runtime]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `callstack_limit` | integer | `200` | Max retained call stack frames for diagnostics. |
+| `error_namespace` | string | `""` | Error ID namespace. Empty value is normalized at startup by language compatibility mode. |
+| `verbose` | boolean | `false` | Enables verbose execution output. |
+| `snapshot_path` | string | unset | Optional snapshot file to preload. |
+
+### `[runtime.language]`
+
+| Key | Type | Default | Allowed values | Notes |
+| --- | --- | --- | --- | --- |
+| `compat` | string | `"runmat"` | `runmat`, `matlab`, `strict` | Language compatibility mode. |
+
+### `[runtime.jit]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables JIT compilation. |
+| `threshold` | integer | `10` | Executions before JIT tiering triggers. |
+| `optimization_level` | string | `"speed"` | `none`, `size`, `speed`, `aggressive`. |
+
+### `[runtime.gc]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `preset` | string | unset | `low-latency`, `high-throughput`, `low-memory`, `debug`. |
+| `young_size_mb` | integer | unset | Young generation size override (MB). |
+| `threads` | integer | unset | GC worker thread override. |
+| `collect_stats` | boolean | `false` | Enables GC statistics collection. |
+
+### `[runtime.accelerate]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables acceleration subsystem. |
+| `provider` | string | `"wgpu"` | `auto`, `wgpu`, `inprocess`. |
+| `allow_inprocess_fallback` | boolean | `true` | Falls back to in-process provider if hardware provider fails. |
+| `wgpu_power_preference` | string | `"auto"` | `auto`, `high-performance`, `low-power`. |
+| `wgpu_force_fallback_adapter` | boolean | `false` | Forces WGPU fallback adapter selection. |
+
+#### `[runtime.accelerate.auto_offload]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables auto-offload planner. |
+| `calibrate` | boolean | `true` | Enables calibration mode for planner profile generation. |
+| `profile_path` | string | unset | Optional profile cache path. |
+| `log_level` | string | `"trace"` | `off`, `info`, `trace`. |
+
+### `[runtime.plotting]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `mode` | string | `"auto"` | `auto`, `gui`, `headless`. |
+| `force_headless` | boolean | `false` | Forces non-interactive rendering behavior. |
+| `backend` | string | `"auto"` | `auto`, `wgpu`, `static`, `web`. |
+| `scatter_target_points` | integer | unset | Optional scatter decimation target. |
+| `surface_vertex_budget` | integer | unset | Optional surface vertex LOD budget. |
+
+#### `[runtime.plotting.gui]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `width` | integer | `1200` | Default GUI window width. |
+| `height` | integer | `800` | Default GUI window height. |
+| `vsync` | boolean | `true` | Enables VSync. |
+| `maximized` | boolean | `false` | Starts window maximized. |
+
+#### `[runtime.plotting.export]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `format` | string | `"png"` | `png`, `svg`, `pdf`, `html`. |
+| `dpi` | integer | `300` | Raster export DPI. |
+| `output_dir` | string | unset | Default export output directory. |
+
+### `[runtime.telemetry]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true` | Enables telemetry client. |
+| `show_payloads` | boolean | `false` | Echoes serialized payloads to stdout. |
+| `http_endpoint` | string | unset | Optional HTTP override. When unset, runtime uses built-in collector endpoint. |
+| `udp_endpoint` | string | `"udp.telemetry.runmat.com:7846"` | UDP collector endpoint. |
+| `queue_size` | integer | `256` | Async telemetry queue size (minimum bounded internally). |
+| `sync_mode` | boolean | `false` | Sends telemetry synchronously on caller thread. |
+| `drain_mode` | string | `"all"` | `none`, `all`. |
+| `drain_timeout_ms` | integer | `50` | Max drain wait on shutdown (capped internally). |
+| `require_ingestion_key` | boolean | `true` | Disables telemetry if key is required but unavailable. |
+
+### `[runtime.logging]`
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `level` | string | `"warn"` | `error`, `warn`, `info`, `debug`, `trace`. |
+| `debug` | boolean | `false` | Forces debug logging path. |
+| `file` | string | unset | Reserved log file path option (runtime currently logs to process logger). |
+
+## Environment Variables
+
+### Config Selection
+
+- `RUNMAT_CONFIG`: absolute or relative path to `runmat.toml` / `runmat.json`
+
+### Service/Auth
+
+- `RUNMAT_API_KEY`
+- `RUNMAT_SERVER_URL`
+- `RUNMAT_ORG_ID`
+- `RUNMAT_PROJECT_ID`
+
+### Telemetry
+
+- `RUNMAT_TELEMETRY_KEY` (ingestion key override)
+
+## Full Example (`runmat.toml`)
+
+```toml
+[package]
+name = "image-pipeline"
+version = "0.1.0"
+runmat-version = ">=0.4.0"
+
+[sources]
+roots = ["src", "lib"]
+
+[dependencies]
+utils = { path = "../utils", version = "0.1.0" }
+
+[entrypoints.main]
+module = "app.main"
+function = "main"
+
+[entrypoints.batch]
+path = "scripts/run_batch.m"
+
+[runtime]
+callstack_limit = 200
+error_namespace = "RunMat"
+verbose = false
+
+[runtime.language]
+compat = "runmat"
+
+[runtime.jit]
 enabled = true
-threshold = 25
+threshold = 10
 optimization_level = "speed"
 
-[gc]
+[runtime.gc]
 preset = "low-latency"
-young_size_mb = 64
-threads = 4
-collect_stats = true
+young_size_mb = 128
+threads = 8
+collect_stats = false
 
-[kernel]
-ip = "127.0.0.1"
+[runtime.accelerate]
+enabled = true
+provider = "wgpu"
+allow_inprocess_fallback = true
+wgpu_power_preference = "auto"
+wgpu_force_fallback_adapter = false
 
-[logging]
-level = "warn"
-debug = false
+[runtime.accelerate.auto_offload]
+enabled = true
+calibrate = true
+profile_path = ".runmat/auto_offload.json"
+log_level = "trace"
 
-[plotting]
+[runtime.plotting]
 mode = "auto"
 force_headless = false
 backend = "auto"
-```
+scatter_target_points = 250000
+surface_vertex_budget = 400000
 
-## Language configuration
-
-Language-specific toggles live under the `[language]` table. Today it exposes the compatibility mode that controls whether MATLAB command syntax (`hold on`, `grid on`, etc.) is accepted:
-
-```toml
-[language]
-compat = "matlab" # default
-# compat = "strict"
-```
-
-- `matlab`: allows the curated set of command-style verbs documented in `/docs/language`, rewriting them into explicit calls before parsing.
-- `strict`: disables command syntax entirely; scripts must call functions explicitly (e.g., `hold("on")`). Recommended for new codebases.
-
-The CLI (`runmat`), native runtime, WASM runtime, and both LSP implementations read this setting automatically. Hosts can still override it via environment variables or LSP initialization options, but `.runmat` is treated as the source of truth.
-
-### YAML (.runmat.yaml)
-```yaml
-runtime:
-  timeout: 600
-  verbose: true
-  snapshot_path: ./stdlib.snapshot
-
-jit:
-  enabled: true
-  threshold: 25
-  optimization_level: speed
-
-gc:
-  preset: low-latency
-  young_size_mb: 64
-  threads: 4
-  collect_stats: true
-
-kernel:
-  ip: 127.0.0.1
-  key: null
-  ports: null
-
-logging:
-  level: info
-  debug: false
-  file: null
-
-plotting:
-  mode: auto
-  force_headless: false
-  backend: auto
-  gui:
-    width: 1280
-    height: 800
-    vsync: true
-    maximized: false
-  export:
-    format: png
-    dpi: 200
-    output_dir: ./plots
-```
-
-### JSON (runmat.config.json)
-```json
-{
-  "runtime": {"timeout": 600, "verbose": true, "snapshot_path": "./stdlib.snapshot"},
-  "jit": {"enabled": true, "threshold": 25, "optimization_level": "speed"},
-  "gc": {"preset": "low-latency", "young_size_mb": 64, "threads": 4, "collect_stats": true},
-  "logging": {"level": "info", "debug": false, "file": null},
-  "plotting": {
-    "mode": "auto", "force_headless": false, "backend": "auto",
-    "gui": {"width": 1280, "height": 800, "vsync": true, "maximized": false},
-    "export": {
-      "format": "png", "dpi": 200, "output_dir": "./plots"
-    }
-  }
-}
-```
-
-### TOML (runmat.config.toml)
-```toml
-[runtime]
-timeout = 600
-verbose = true
-snapshot_path = "./stdlib.snapshot"
-
-[jit]
-enabled = true
-threshold = 25
-optimization_level = "speed"
-
-[gc]
-preset = "low-latency"
-young_size_mb = 64
-threads = 4
-collect_stats = true
-
-[logging]
-level = "warn"
-debug = false
-
-[plotting]
-mode = "auto"
-force_headless = false
-backend = "auto"
-
-[plotting.gui]
-width = 1280
+[runtime.plotting.gui]
+width = 1200
 height = 800
 vsync = true
 maximized = false
 
-[plotting.export]
+[runtime.plotting.export]
 format = "png"
-dpi = 200
-output_dir = "./plots"
+dpi = 300
+output_dir = "artifacts/figures"
 
+[runtime.telemetry]
+enabled = true
+show_payloads = false
+udp_endpoint = "udp.telemetry.runmat.com:7846"
+queue_size = 256
+sync_mode = false
+drain_mode = "all"
+drain_timeout_ms = 50
+require_ingestion_key = true
+
+[runtime.logging]
+level = "warn"
+debug = false
 ```
-
-## Configuration schema (by module)
-
-Below reflects the Rust types in `crates/runmat-config/src/lib.rs`. Defaults shown in
-parentheses.
-
-### runtime
-- `timeout: u64` (300)
-- `verbose: bool` (false)
-- `snapshot_path: Path` (none)
-
-### jit
-- `enabled: bool` (true)
-- `threshold: u32` (10)
-- `optimization_level: one of {none,size,speed,aggressive}` (speed)
-
-### gc
-- `preset: one of {low-latency,high-throughput,low-memory,debug}` (none)
-- `young_size_mb: usize` (none)
-- `threads: usize` (none)
-- `collect_stats: bool` (false)
-
-### logging
-- `level: one of {error,warn,info,debug,trace}` (info)
-- `debug: bool` (false)
-- `file: Path` (none)
-
-### plotting
-- `mode: one of {auto,gui,headless}` (auto)
-- `force_headless: bool` (false)
-- `backend: one of {auto,wgpu,static,web}` (auto)
-- `gui` (optional):
-  - `width: u32` (1200)
-  - `height: u32` (800)
-  - `vsync: bool` (true)
-  - `maximized: bool` (false)
-- `export` (optional):
-  - `format: one of {png,svg,pdf,html}` (png)
-  - `dpi: u32` (300)
-  - `output_dir: Path` (none)
-
-## Environment variables (overrides)
-
-All `RUNMAT_*` variables map onto the above fields. Notable ones:
-
-- Runtime: `RUNMAT_TIMEOUT`, `RUNMAT_VERBOSE`, `RUNMAT_SNAPSHOT_PATH`
-- JIT: `RUNMAT_JIT_ENABLE`, `RUNMAT_JIT_DISABLE`, `RUNMAT_JIT_THRESHOLD`, `RUNMAT_JIT_OPT_LEVEL`
-- GC: `RUNMAT_GC_PRESET`, `RUNMAT_GC_YOUNG_SIZE`, `RUNMAT_GC_THREADS`, `RUNMAT_GC_STATS`
-- Plotting: `RUNMAT_PLOT_MODE`, `RUNMAT_PLOT_HEADLESS`, `RUNMAT_PLOT_BACKEND`
-- Logging: `RUNMAT_DEBUG`, `RUNMAT_LOG_LEVEL`
-
-Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable`.
-
-### Acceleration provider (RunMat Accelerate)
-
-Provider-specific env vars are read by the WGPU backend and fusion code:
-
-- `RUNMAT_WG` (u32)
-  - Global compute workgroup size used in WGSL at module creation.
-    Applies to elementwise kernels and fused kernels. Default: `512`.
-- `RUNMAT_MATMUL_TILE` (u32)
-  - Square tile size used by matmul kernels.
-    Default: `16`.
-- `RUNMAT_REDUCTION_WG` (u32)
-  - Default reduction workgroup size when call sites opt into provider defaults
-    (passing `0`). Default: `512`.
-- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
-  - Controls when two-pass reductions are used (per-slice length threshold).
-  - Default: `1024`.
-- `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
-  - If set, provider may compile pipelines and skip buffer/dispatch paths to
-    isolate driver issues during development.
-- `RUNMAT_PIPELINE_CACHE_DIR` (path)
-  - Overrides the on-disk pipeline cache directory. Defaults to the OS cache
-    directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
-    falling back to `target/tmp/wgpu-pipeline-cache-<device>`.
-
-> **Note:** `RUNMAT_WG`, `RUNMAT_MATMUL_TILE`, and `RUNMAT_REDUCTION_WG` are
-> automatically clamped to the adapter's compute limits
-> (`max_compute_workgroup_size_*`, `max_compute_invocations_per_workgroup`) to
-> prevent invalid pipelines on DX12/Metal/Vulkan backends. The adjusted values
-> are logged during provider initialization.
-
-## Precedence & merging
-
-1. Start from built-in defaults.
-2. Merge config file if found (full or partial trees are fine).
-3. Apply environment variables per field.
-4. Apply CLI flags (final say).
-
-Any field not specified remains at its previous value (default or earlier layer).
-
-## Generating and validating configs
-
-```sh
-# Print a sample config to stdout
-runmat --generate-config
-
-# Write a sample config to file
-runmat config generate -o .runmat.yaml
-
-# Validate a config file
-runmat config validate .runmat.yaml
-
-# Show the current effective configuration (human-readable YAML)
-runmat config show
-```
-
-## Practical examples
-
-### 1) Developer laptop (fast iteration)
-```yaml
-# .runmat.yaml
-jit:
-  enabled: true
-  threshold: 10
-  optimization_level: speed
-gc:
-  preset: low-latency
-plotting:
-  mode: auto
-  gui: { width: 1280, height: 800, vsync: true }
-logging:
-  level: info
-```
-
-```sh
-runmat repl --verbose
-```
-
-### 2) CI / headless server
-```yaml
-plotting:
-  mode: headless
-gc:
-  collect_stats: true
-logging:
-  level: warn
-```
-
-```sh
-RUNMAT_JIT_DISABLE=1 runmat run tests/current_feature_test.m
-```
-
-### 3) Teaching lab machines
-```yaml
-runtime:
-  timeout: 120
-jit:
-  enabled: true
-  threshold: 5
-gc:
-  preset: low-memory
-```
-
-```matlab
-% simple_intro.m
-x = 1 + 2
-A = [1, 2; 3, 4]
-```
-
-```sh
-runmat run simple_intro.m
-```
-
-## Why this is better than MATLAB's configuration model
-
-- Multiple file formats (YAML/JSON/TOML) with the same schema.
-- Clear, documented precedence (flags > env > files > defaults).
-- Explicit, typed configuration with sensible defaults and enums.
-- First-class plotting/JIT/GC settings in config (not only runtime flags).
-- Built-in generators/validators and human-readable dumps via `config show`.
-- Portable configs you can commit, review, and diff.
-
-## Troubleshooting
-
-- Use `runmat config paths` to see where files are searched.
-- Use `runmat info` to view effective configuration and environment.
-- If a config file fails to parse, the CLI prints a precise error with file
-  path and format (YAML/JSON/TOML) context.
-
----
-
-## Related
-
-- [CLI Reference](/docs/cli) -- commands, flags, environment variables, and examples.
-- [Browser Guide](/docs/desktop-browser-guide) -- the browser-based sandbox IDE.
-- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- GPU residency rules and acceleration environment variables.

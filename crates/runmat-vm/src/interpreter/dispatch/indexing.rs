@@ -1,29 +1,520 @@
-use crate::bytecode::{EndExpr, UserFunction};
+use crate::bytecode::EndExpr;
+use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+use crate::call::shared::{
+    call_object_index_descriptor_method, class_defines_member_subsasgn,
+    class_defines_member_subsref, expand_brace_values, ObjectIndexDescriptor, ObjectIndexOp,
+    ObjectParenExprSelectorSpec,
+};
 use crate::indexing::end_expr as idx_end_expr;
-use crate::indexing::plan as idx_plan;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::selectors::build_slice_selectors;
-use crate::indexing::selectors::index_scalar_from_value;
+use crate::indexing::selectors::{
+    build_cell_scalar_selectors, build_slice_selectors, index_scalar_from_value, SliceSelector,
+};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
-use runmat_builtins::Value;
-use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
+use crate::interpreter::dispatch::calls::normalize_requested_outputs;
+use runmat_builtins::{CellArray, Value};
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 use std::pin::Pin;
 
 fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
-    format!("{context}: {}", err.message()).into()
+    let mut builder = build_runtime_error(format!("{context}: {}", err.message()));
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    builder.build()
 }
 
-fn total_len_from_shape(shape: &[usize]) -> usize {
-    if runmat_runtime::builtins::common::shape::is_scalar_shape(shape) {
-        1
+fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
+}
+
+fn logical_value_from_tensor(t: runmat_builtins::Tensor) -> Result<Value, RuntimeError> {
+    let logical_data: Vec<u8> = t
+        .data
+        .iter()
+        .map(|&v| if v != 0.0 { 1 } else { 0 })
+        .collect();
+    if logical_data.len() <= 1 {
+        Ok(Value::Bool(logical_data.first().copied().unwrap_or(0) != 0))
     } else {
-        shape.iter().copied().product()
+        let logical = runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
+            .map_err(|e| map_slice_shape_error("slice assign", e))?;
+        Ok(Value::LogicalArray(logical))
     }
+}
+
+fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
+    match err.identifier() {
+        Some("RunMat:ScalarIndexRequired") => {
+            crate::interpreter::errors::mex("CellIndexType", "Unsupported cell index type")
+        }
+        Some("RunMat:IndexOutOfBounds") => {
+            crate::interpreter::errors::mex("CellIndexOutOfBounds", "Cell index out of bounds")
+        }
+        _ => err,
+    }
+}
+
+fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
+    let class_name = match base {
+        Value::Object(obj) => obj.class_name.as_str(),
+        Value::HandleObject(handle) => handle.class_name.as_str(),
+        _ => return None,
+    };
+    let class = runmat_builtins::get_class(class_name)?;
+    let supported = match op {
+        ObjectIndexOp::Subsref => class_defines_member_subsref(&class),
+        ObjectIndexOp::Subsasgn => class_defines_member_subsasgn(&class),
+    };
+    if supported {
+        return None;
+    }
+    match op {
+        ObjectIndexOp::Subsref => Some(crate::interpreter::errors::mex(
+            "MissingSubsref",
+            "class does not define subsref for indexing operation",
+        )),
+        ObjectIndexOp::Subsasgn => Some(crate::interpreter::errors::mex(
+            "MissingSubsasgn",
+            "class does not define subsasgn for indexed assignment",
+        )),
+    }
+}
+
+async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        let mut index_value = value.clone();
+        if matches!(index_value, Value::GpuTensor(_)) {
+            index_value = runmat_runtime::dispatcher::gather_if_needed_async(&index_value).await?;
+        }
+        let index_val = index_scalar_from_value(&index_value)
+            .await?
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "UnsupportedIndexType",
+                    &format!("Unsupported index type: expected numeric scalar, got {value:?}"),
+                )
+            })?;
+        out.push(index_val as f64);
+    }
+    Ok(out)
+}
+
+async fn range_selector_scalar_to_f64(value: &Value) -> Result<f64, RuntimeError> {
+    let mut scalar = value.clone();
+    if matches!(scalar, Value::GpuTensor(_)) {
+        scalar = runmat_runtime::dispatcher::gather_if_needed_async(&scalar).await?;
+    }
+    match scalar {
+        Value::Num(n) => Ok(n),
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Tensor(t)
+            if t.data.len() == 1
+                && runmat_runtime::builtins::common::shape::is_scalar_shape(&t.shape) =>
+        {
+            Ok(t.data[0])
+        }
+        _ => Err(crate::interpreter::errors::mex(
+            "UnsupportedIndexType",
+            "Range selector operands must be numeric scalars",
+        )),
+    }
+}
+
+fn validate_expr_range_step_metadata(
+    range_dims: &[usize],
+    range_has_step: &[bool],
+) -> Result<(), RuntimeError> {
+    if range_dims.len() != range_has_step.len() {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidRangeSelectorPlan",
+            "inconsistent range step metadata",
+        ));
+    }
+    Ok(())
+}
+
+fn assign_scalar_struct_index(
+    _base: runmat_builtins::StructValue,
+    indices: &[usize],
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    match indices {
+        [1] | [1, 1] => Ok(rhs),
+        _ => Err(crate::interpreter::errors::mex(
+            "IndexOutOfBounds",
+            "Struct subscript out of bounds",
+        )),
+    }
+}
+
+async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
+    let selectors = build_cell_scalar_selectors(values)
+        .await
+        .map_err(map_cell_scalar_selector_error)?;
+    let mut indices = Vec::with_capacity(selectors.len());
+    for selector in selectors {
+        match selector {
+            SliceSelector::Scalar(index) => indices.push(index),
+            _ => {
+                return Err(crate::interpreter::errors::mex(
+                    "CellIndexType",
+                    "Unsupported cell index type",
+                ))
+            }
+        }
+    }
+    Ok(indices)
+}
+
+fn apply_cell_end_offsets_for_base(
+    base: &Value,
+    raw_indices: &[Value],
+    end_offsets: &[(usize, isize)],
+    allow_end_plus_one_growth: bool,
+) -> Result<Vec<Value>, RuntimeError> {
+    if end_offsets.is_empty() {
+        return Ok(raw_indices.to_vec());
+    }
+    let Value::Cell(ca) = base else {
+        return Ok(raw_indices.to_vec());
+    };
+    let mut seen = vec![false; raw_indices.len()];
+    for (position, _) in end_offsets {
+        if *position >= raw_indices.len() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position is out of bounds",
+            ));
+        }
+        if std::mem::replace(&mut seen[*position], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position appears more than once",
+            ));
+        }
+    }
+    let mut adjusted = raw_indices.to_vec();
+    for (position, offset) in end_offsets {
+        if *position >= adjusted.len() {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell end selector position is out of bounds",
+            ));
+        }
+        let len = if adjusted.len() == 1 {
+            ca.rows * ca.cols
+        } else if *position == 0 {
+            ca.rows
+        } else {
+            ca.cols
+        };
+        let resolved = (len as isize) + *offset;
+        if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > len) {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell index out of bounds",
+            ));
+        }
+        adjusted[*position] = Value::Num(resolved as f64);
+    }
+    Ok(adjusted)
+}
+
+async fn apply_cell_end_exprs_for_base(
+    base: &Value,
+    raw_indices: &[Value],
+    end_exprs: &[(usize, EndExpr)],
+    vars: &mut [Value],
+    allow_end_plus_one_growth: bool,
+) -> Result<Vec<Value>, RuntimeError> {
+    if end_exprs.is_empty() {
+        return Ok(raw_indices.to_vec());
+    }
+    let Value::Cell(ca) = base else {
+        return Ok(raw_indices.to_vec());
+    };
+    let mut seen = vec![false; raw_indices.len()];
+    for (position, _) in end_exprs {
+        if *position >= raw_indices.len() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position is out of bounds",
+            ));
+        }
+        if std::mem::replace(&mut seen[*position], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "cell end-selector position appears more than once",
+            ));
+        }
+    }
+    let mut adjusted = raw_indices.to_vec();
+    for (position, end_expr) in end_exprs {
+        if *position >= adjusted.len() {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell end selector position is out of bounds",
+            ));
+        }
+        let dim_len = if adjusted.len() == 1 {
+            ca.rows * ca.cols
+        } else if *position == 0 {
+            ca.rows
+        } else {
+            ca.cols
+        };
+        let resolved = resolve_end_expr_index(dim_len, end_expr, vars).await?;
+        if resolved < 1 || (!allow_end_plus_one_growth && (resolved as usize) > dim_len) {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell index out of bounds",
+            ));
+        }
+        adjusted[*position] = Value::Num(resolved as f64);
+    }
+    Ok(adjusted)
+}
+
+fn gather_cell_with_plan(
+    ca: &CellArray,
+    plan: &crate::indexing::plan::IndexPlan,
+) -> Result<Value, RuntimeError> {
+    let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
+    crate::ops::cells::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
+}
+
+fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?;
+        values.push(value);
+    }
+    values.reverse();
+    Ok(values)
+}
+
+fn pop_index_base(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {
+    stack.pop().ok_or(crate::interpreter::errors::mex(
+        "StackUnderflow",
+        "stack underflow",
+    ))
+}
+
+enum BraceIndexOperation {
+    ReadSingle,
+    Expand { out_count: usize },
+    List,
+    Store { rhs: Value },
+}
+
+enum BraceIndexOutcome {
+    Value(Value),
+    Expanded(Vec<Value>),
+}
+
+enum BraceOutcomeExpectation {
+    SingleValue { invalid_message: &'static str },
+    ExpandedValues { invalid_message: &'static str },
+}
+
+async fn execute_brace_operation(
+    base: Value,
+    raw_indices: &[Value],
+    operation: BraceIndexOperation,
+) -> Result<BraceIndexOutcome, RuntimeError> {
+    if matches!(
+        base,
+        Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. }
+            | Value::Closure(_)
+    ) {
+        return Err(crate::interpreter::errors::mex(
+            "UnsupportedFunctionHandleSelector",
+            "Function handle call does not support brace selector syntax",
+        ));
+    }
+    match operation {
+        BraceIndexOperation::ReadSingle => {
+            let value = match base {
+                Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                        Value::Object(obj),
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.to_vec(),
+                        },
+                    ))
+                    .await?
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                        Value::HandleObject(handle),
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.to_vec(),
+                        },
+                    ))
+                    .await?
+                }
+                Value::Cell(ca) => {
+                    let indices = resolve_cell_indices(raw_indices).await?;
+                    crate::ops::cells::index_cell_value(&ca, &indices)?
+                }
+                _ => {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellIndexingOnNonCell",
+                        "Cell indexing on non-cell",
+                    ))
+                }
+            };
+            Ok(BraceIndexOutcome::Value(value))
+        }
+        BraceIndexOperation::Expand { out_count } => {
+            let values = expand_brace_values(base, raw_indices, Some(out_count)).await?;
+            Ok(BraceIndexOutcome::Expanded(values))
+        }
+        BraceIndexOperation::List => {
+            if !matches!(
+                base,
+                Value::Cell(_) | Value::Object(_) | Value::HandleObject(_)
+            ) {
+                return Err(crate::interpreter::errors::mex(
+                    "CellIndexingOnNonCell",
+                    "Cell indexing on non-cell",
+                ));
+            }
+            let values = expand_brace_values(base, raw_indices, None).await?;
+            let value = if values.len() == 1 {
+                values.into_iter().next().unwrap_or(Value::Num(0.0))
+            } else {
+                Value::OutputList(values)
+            };
+            Ok(BraceIndexOutcome::Value(value))
+        }
+        BraceIndexOperation::Store { rhs } => {
+            let value = match base {
+                Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
+                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
+                        Value::Object(obj),
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.to_vec(),
+                        },
+                        rhs,
+                    ))
+                    .await?
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
+                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
+                        Value::HandleObject(handle),
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.to_vec(),
+                        },
+                        rhs,
+                    ))
+                    .await?
+                }
+                Value::Cell(ca) => {
+                    let indices = resolve_cell_indices(raw_indices).await?;
+                    crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
+                        runmat_gc::gc_record_write(oldv, newv);
+                    })?
+                }
+                _ => {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellAssignmentOnNonCell",
+                        "Cell assignment on non-cell",
+                    ))
+                }
+            };
+            Ok(BraceIndexOutcome::Value(value))
+        }
+    }
+}
+
+async fn execute_brace_operation_from_stack(
+    stack: &mut Vec<Value>,
+    num_indices: usize,
+    end_offsets: &[(usize, isize)],
+    end_exprs: &[(usize, EndExpr)],
+    vars: &mut [Value],
+    operation: BraceIndexOperation,
+    expectation: BraceOutcomeExpectation,
+) -> Result<(), RuntimeError> {
+    let raw_indices = pop_index_values(stack, num_indices)?;
+    let base = pop_index_base(stack)?;
+    let allow_end_plus_one_growth = matches!(operation, BraceIndexOperation::Store { .. });
+    let adjusted_end_exprs = apply_cell_end_exprs_for_base(
+        &base,
+        &raw_indices,
+        end_exprs,
+        vars,
+        allow_end_plus_one_growth,
+    )
+    .await?;
+    let adjusted_indices = apply_cell_end_offsets_for_base(
+        &base,
+        &adjusted_end_exprs,
+        end_offsets,
+        allow_end_plus_one_growth,
+    )?;
+    let outcome = execute_brace_operation(base, &adjusted_indices, operation).await?;
+    match (outcome, expectation) {
+        (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
+            stack.push(value)
+        }
+        (BraceIndexOutcome::Expanded(values), BraceOutcomeExpectation::ExpandedValues { .. }) => {
+            for value in values {
+                stack.push(value);
+            }
+        }
+        (
+            BraceIndexOutcome::Value(_),
+            BraceOutcomeExpectation::ExpandedValues { invalid_message },
+        )
+        | (
+            BraceIndexOutcome::Expanded(_),
+            BraceOutcomeExpectation::SingleValue { invalid_message },
+        ) => {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidBraceIndexOutcome",
+                invalid_message,
+            ))
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -31,15 +522,23 @@ struct IndexContext<'a> {
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
+    range_dims: &'a [usize],
     base_shape: &'a [usize],
 }
 
 impl<'a> IndexContext<'a> {
-    fn new(dims: usize, colon_mask: u32, end_mask: u32, base_shape: &'a [usize]) -> Self {
+    fn new(
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: &'a [usize],
+        base_shape: &'a [usize],
+    ) -> Self {
         Self {
             dims,
             colon_mask,
             end_mask,
+            range_dims,
             base_shape,
         }
     }
@@ -48,9 +547,10 @@ impl<'a> IndexContext<'a> {
         let mut seen_numeric = 0usize;
         let mut dim_for_pos = 0usize;
         for d in 0..self.dims {
-            let is_colon = (self.colon_mask & (1u32 << d)) != 0;
-            let is_end = (self.end_mask & (1u32 << d)) != 0;
-            if is_colon || is_end {
+            let is_colon = selector_mask_has_dim(self.colon_mask, d);
+            let is_end = selector_mask_has_dim(self.end_mask, d);
+            let is_range = self.range_dims.contains(&d);
+            if is_colon || is_end || is_range {
                 continue;
             }
             if seen_numeric == numeric_position {
@@ -68,72 +568,99 @@ impl<'a> IndexContext<'a> {
     }
 }
 
-fn apply_end_offsets_to_numeric<'a, F>(
-    numeric: &'a [Value],
-    ctx: IndexContext<'a>,
-    end_offsets: &'a [(usize, EndExpr)],
-    vars: &'a mut [Value],
-    functions: &'a HashMap<String, UserFunction>,
-    call_user: F,
-) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>> + 'a>>
-where
-    F: Fn(
-            &'a str,
-            Vec<Value>,
-            &'a HashMap<String, UserFunction>,
-            &'a [Value],
-        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
-        + Copy
-        + 'a,
-{
-    Box::pin(async move {
-        let mut adjusted = numeric.to_vec();
-        for (position, end_expr) in end_offsets {
-            if let Some(value) = adjusted.get_mut(*position) {
-                let dim_len = ctx.dim_len_for_numeric_position(*position);
-                let idx_val =
-                    resolve_range_end_index(dim_len, end_expr, vars, functions, call_user).await?;
-                *value = Value::Num(idx_val as f64);
-            }
-        }
-        Ok(adjusted)
-    })
+fn selector_mask_has_dim(mask: u32, dim: usize) -> bool {
+    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
 }
 
-async fn resolve_range_end_index<'a, F>(
+fn validate_index_context_plan(ctx: IndexContext<'_>) -> Result<(), RuntimeError> {
+    if ctx.dims > u32::BITS as usize {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidRangeSelectorPlan",
+            "selector dimension metadata exceeds mask width",
+        ));
+    }
+    let mut seen = vec![false; ctx.dims];
+    for &dim in ctx.range_dims {
+        if dim >= ctx.dims {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorDim",
+                "range selector dimension is out of bounds",
+            ));
+        }
+        if std::mem::replace(&mut seen[dim], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorPlan",
+                "range selector dimension appears more than once",
+            ));
+        }
+        if selector_mask_has_dim(ctx.colon_mask, dim) || selector_mask_has_dim(ctx.end_mask, dim) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorPlan",
+                "range selector conflicts with colon/end selector masks",
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn apply_end_offsets_to_numeric(
+    numeric: &[Value],
+    ctx: IndexContext<'_>,
+    end_offsets: &[(usize, EndExpr)],
+    vars: &mut [Value],
+) -> Result<Vec<Value>, RuntimeError> {
+    validate_index_context_plan(ctx)?;
+    let mut seen = vec![false; numeric.len()];
+    for (position, _) in end_offsets {
+        if *position >= numeric.len() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "end-selector position is out of bounds",
+            ));
+        }
+        if std::mem::replace(&mut seen[*position], true) {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "end-selector position appears more than once",
+            ));
+        }
+    }
+
+    let mut adjusted = numeric.to_vec();
+    for (position, end_expr) in end_offsets {
+        if let Some(value) = adjusted.get_mut(*position) {
+            let dim_len = ctx.dim_len_for_numeric_position(*position);
+            let idx_val = resolve_end_expr_value(dim_len, end_expr, vars).await?;
+            *value = Value::Num(idx_val);
+        }
+    }
+    Ok(adjusted)
+}
+
+fn exact_index_from_f64(value: f64) -> Option<i64> {
+    if !value.is_finite() {
+        return None;
+    }
+    let rounded = value.round();
+    if (rounded - value).abs() > f64::EPSILON {
+        return None;
+    }
+    if rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+        return None;
+    }
+    Some(rounded as i64)
+}
+
+async fn resolve_end_expr_value(
     dim_len: usize,
-    end_expr: &'a EndExpr,
-    vars: &'a [Value],
-    functions: &'a HashMap<String, UserFunction>,
-    call_user: F,
-) -> Result<i64, RuntimeError>
-where
-    F: Fn(
-            &'a str,
-            Vec<Value>,
-            &'a HashMap<String, UserFunction>,
-            &'a [Value],
-        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
-        + Copy
-        + 'a,
-{
-    fn eval_end_expr_value<'a, F>(
+    end_expr: &EndExpr,
+    vars: &[Value],
+) -> Result<f64, RuntimeError> {
+    fn eval_end_expr_value<'a>(
         expr: &'a EndExpr,
         end_value: f64,
         vars: &'a [Value],
-        functions: &'a HashMap<String, UserFunction>,
-        call_user: F,
-    ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>>
-    where
-        F: Fn(
-                &'a str,
-                Vec<Value>,
-                &'a HashMap<String, UserFunction>,
-                &'a [Value],
-            ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
-            + Copy
-            + 'a,
-    {
+    ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>> {
         Box::pin(async move {
             match expr {
                 EndExpr::End => Ok(end_value),
@@ -150,25 +677,27 @@ where
                         "end expression must be numeric",
                     )
                 }),
-                EndExpr::Call(name, args) => {
+                EndExpr::ResolvedCall {
+                    identity,
+                    fallback_policy,
+                    args,
+                } => {
                     let mut argv: Vec<Value> = Vec::with_capacity(args.len());
                     for a in args {
-                        let val =
-                            eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                        let val = eval_end_expr_value(a, end_value, vars).await?;
                         argv.push(Value::Num(val));
                     }
-                    let v = match runmat_runtime::call_builtin_async(name, &argv).await {
-                        Ok(v) => v,
-                        Err(_) if functions.contains_key(name) => {
-                            call_user(name, argv, functions, vars).await?
-                        }
-                        Err(_) => {
-                            return Err(crate::interpreter::errors::mex(
-                                "UndefinedFunction",
-                                &format!("Undefined function in end expression: {name}"),
-                            ))
-                        }
-                    };
+                    let descriptor = CallableDescriptor::resolved(
+                        identity.clone(),
+                        argv,
+                        1,
+                        *fallback_policy,
+                        CallableCallKind::EndExpr,
+                    );
+                    let v = normalize_requested_outputs(
+                        execute_callable_descriptor(descriptor).await?,
+                        1,
+                    );
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
                             "UnsupportedIndexType",
@@ -176,627 +705,369 @@ where
                         )
                     })
                 }
-                EndExpr::Add(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                    + eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
-                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                    - eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
-                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                    * eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
+                EndExpr::Add(a, b) => Ok(eval_end_expr_value(a, end_value, vars).await?
+                    + eval_end_expr_value(b, end_value, vars).await?),
+                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(a, end_value, vars).await?
+                    - eval_end_expr_value(b, end_value, vars).await?),
+                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(a, end_value, vars).await?
+                    * eval_end_expr_value(b, end_value, vars).await?),
                 EndExpr::Div(a, b) => {
-                    let denom =
-                        eval_end_expr_value(b, end_value, vars, functions, call_user).await?;
+                    let denom = eval_end_expr_value(b, end_value, vars).await?;
                     if denom == 0.0 {
                         return Err(crate::interpreter::errors::mex(
                             "IndexOutOfBounds",
                             "Index out of bounds",
                         ));
                     }
-                    Ok(
-                        eval_end_expr_value(a, end_value, vars, functions, call_user).await?
-                            / denom,
-                    )
+                    Ok(eval_end_expr_value(a, end_value, vars).await? / denom)
                 }
                 EndExpr::LeftDiv(a, b) => {
-                    let denom =
-                        eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                    let denom = eval_end_expr_value(a, end_value, vars).await?;
                     if denom == 0.0 {
                         return Err(crate::interpreter::errors::mex(
                             "IndexOutOfBounds",
                             "Index out of bounds",
                         ));
                     }
-                    Ok(
-                        eval_end_expr_value(b, end_value, vars, functions, call_user).await?
-                            / denom,
-                    )
+                    Ok(eval_end_expr_value(b, end_value, vars).await? / denom)
                 }
-                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .powf(eval_end_expr_value(b, end_value, vars, functions, call_user).await?)),
-                EndExpr::Neg(a) => {
-                    Ok(-eval_end_expr_value(a, end_value, vars, functions, call_user).await?)
-                }
-                EndExpr::Pos(a) => {
-                    Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?)
-                }
-                EndExpr::Floor(a) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .floor()),
-                EndExpr::Ceil(a) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .ceil()),
-                EndExpr::Round(a) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .round()),
+                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(a, end_value, vars)
+                    .await?
+                    .powf(eval_end_expr_value(b, end_value, vars).await?)),
+                EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars).await?),
+                EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars).await?),
+                EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars).await?.floor()),
+                EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars).await?.ceil()),
+                EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars).await?.round()),
                 EndExpr::Fix(a) => {
-                    let v = eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                    let v = eval_end_expr_value(a, end_value, vars).await?;
                     Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
                 }
             }
         })
     }
 
-    Ok(
-        eval_end_expr_value(end_expr, dim_len as f64, vars, functions, call_user)
-            .await?
-            .floor() as i64,
-    )
+    eval_end_expr_value(end_expr, dim_len as f64, vars).await
 }
 
-fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
-    fn mk_cell(items: Vec<Value>) -> Result<Value, RuntimeError> {
-        let cols = items.len();
-        let cell = runmat_builtins::CellArray::new(items, 1, cols)
-            .map_err(|e| format!("end expression encoding: {e}"))?;
-        Ok(Value::Cell(cell))
-    }
-
-    match expr {
-        EndExpr::End => Ok(Value::String("end".to_string())),
-        EndExpr::Const(v) => Ok(Value::Num(*v)),
-        EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
-        EndExpr::Call(name, args) => {
-            let mut items = vec![
-                Value::String("call".to_string()),
-                Value::String(name.clone()),
-            ];
-            for a in args {
-                items.push(encode_end_expr_value(a)?);
-            }
-            mk_cell(items)
-        }
-        EndExpr::Add(a, b) => mk_cell(vec![
-            Value::String("+".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Sub(a, b) => mk_cell(vec![
-            Value::String("-".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Mul(a, b) => mk_cell(vec![
-            Value::String("*".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Div(a, b) => mk_cell(vec![
-            Value::String("/".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::LeftDiv(a, b) => mk_cell(vec![
-            Value::String("\\".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Pow(a, b) => mk_cell(vec![
-            Value::String("^".to_string()),
-            encode_end_expr_value(a)?,
-            encode_end_expr_value(b)?,
-        ]),
-        EndExpr::Neg(a) => mk_cell(vec![
-            Value::String("neg".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Pos(a) => mk_cell(vec![
-            Value::String("pos".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Floor(a) => mk_cell(vec![
-            Value::String("floor".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Ceil(a) => mk_cell(vec![
-            Value::String("ceil".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Round(a) => mk_cell(vec![
-            Value::String("round".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-        EndExpr::Fix(a) => mk_cell(vec![
-            Value::String("fix".to_string()),
-            encode_end_expr_value(a)?,
-        ]),
-    }
-}
-
-fn build_end_range_descriptor(
-    start: Value,
-    step: Value,
+async fn resolve_end_expr_index(
+    dim_len: usize,
     end_expr: &EndExpr,
-) -> Result<Value, RuntimeError> {
-    let encoded_end = encode_end_expr_value(end_expr)?;
-    let cell = runmat_builtins::CellArray::new(
-        vec![
-            start,
-            step,
-            Value::String("end_expr".to_string()),
-            encoded_end,
-        ],
-        1,
-        4,
-    )
-    .map_err(|e| format!("obj range: {e}"))?;
-    Ok(Value::Cell(cell))
+    vars: &[Value],
+) -> Result<i64, RuntimeError> {
+    let value = resolve_end_expr_value(dim_len, end_expr, vars).await?;
+    exact_index_from_f64(value).ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "UnsupportedIndexType",
+            "Index values must be positive integers or logical values",
+        )
+    })
 }
 
-pub async fn dispatch_indexing<F>(
+async fn resolve_range_end_value(
+    dim_len: usize,
+    end_expr: &EndExpr,
+    vars: &[Value],
+) -> Result<f64, RuntimeError> {
+    resolve_end_expr_value(dim_len, end_expr, vars).await
+}
+
+async fn build_expr_slice_plan(
+    spec: ExprPlanSpec<'_>,
+    vars: &[Value],
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    build_expr_index_plan(spec, |dim_len, expr| {
+        let expr = expr.clone();
+        async move { resolve_range_end_value(dim_len, &expr, vars).await }
+    })
+    .await
+}
+
+pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
-    functions: &HashMap<String, UserFunction>,
+    vars: &mut [Value],
+    function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
-    mut clear_value_residency: impl FnMut(&Value),
-    call_user: F,
-) -> Result<bool, RuntimeError>
-where
-    F: for<'b> Fn(
-            &'b str,
-            Vec<Value>,
-            &'b HashMap<String, UserFunction>,
-            &'b [Value],
-        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
-        + Copy,
-{
+    _clear_value_residency: impl FnMut(&Value),
+) -> Result<bool, RuntimeError> {
     match instr {
         crate::bytecode::Instr::Index(num_indices) => {
-            let numeric = idx_read_linear::collect_linear_indices(stack, *num_indices).await?;
+            let mut raw_indices = Vec::with_capacity(*num_indices);
+            for _ in 0..*num_indices {
+                raw_indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?);
+            }
+            raw_indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
-                    let cell = idx_read_linear::build_object_subsref_cell(&numeric)?;
-                    let args = vec![
+                    if let Some(err) =
+                        missing_member_index_overload_error(&base, ObjectIndexOp::Subsref)
+                    {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren(
                         base,
-                        Value::String("subsref".to_string()),
-                        Value::String("()".to_string()),
-                        cell,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.clone(),
+                        },
+                    );
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::Cell(ca) => {
+                    let selectors = build_cell_scalar_selectors(&raw_indices).await?;
+                    let plan = build_index_plan(&selectors, raw_indices.len(), &ca.shape)?;
+                    stack.push(gather_cell_with_plan(ca, &plan)?);
+                }
+                Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
+                | Value::BoundFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    let args = raw_indices;
+                    match crate::call::feval::execute_feval(base, args, 1, function_registry)
+                        .await?
+                    {
+                        crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
+                    }
                 }
                 _ => {
+                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     stack.push(idx_read_linear::generic_index(&base, &numeric).await?);
                 }
             }
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCell(num_indices) => {
-            let mut indices = Vec::with_capacity(*num_indices);
-            for _ in 0..*num_indices {
-                let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?)
-                    .try_into()?;
-                indices.push(v as usize);
-            }
-            indices.reverse();
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Object(obj) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
-                }
-                Value::HandleObject(handle) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    let args = vec![
-                        Value::HandleObject(handle),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
-                }
-                Value::Cell(ca) => stack.push(crate::ops::cells::index_cell_value(&ca, &indices)?),
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexingOnNonCell",
-                        "Cell indexing on non-cell",
-                    ))
-                }
-            }
+        crate::bytecode::Instr::IndexCell {
+            num_indices,
+            end_offsets,
+            end_exprs,
+        } => {
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
+                end_exprs,
+                vars,
+                BraceIndexOperation::ReadSingle,
+                BraceOutcomeExpectation::SingleValue {
+                    invalid_message: "IndexCell expected a single value outcome",
+                },
+            )
+            .await?;
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCellExpand(num_indices, out_count) => {
-            let mut indices = Vec::with_capacity(*num_indices);
-            if *num_indices > 0 {
-                for _ in 0..*num_indices {
-                    let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
-                        "StackUnderflow",
-                        "stack underflow",
-                    ))?)
-                        .try_into()?;
-                    indices.push(v as usize);
-                }
-                indices.reverse();
-            }
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Cell(ca) => {
-                    let values = crate::ops::cells::expand_cell_values(&ca, &indices, *out_count)?;
-                    for v in values {
-                        stack.push(v);
-                    }
-                }
-                Value::Object(obj) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    stack.push(v);
-                    for _ in 1..*out_count {
-                        stack.push(Value::Num(0.0));
-                    }
-                }
-                Value::HandleObject(handle) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    let args = vec![
-                        Value::HandleObject(handle),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    stack.push(v);
-                    for _ in 1..*out_count {
-                        stack.push(Value::Num(0.0));
-                    }
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellExpansionOnNonCell",
-                        "Cell expansion on non-cell",
-                    ))
-                }
-            }
+        crate::bytecode::Instr::IndexCellExpand {
+            num_indices,
+            out_count,
+            end_offsets,
+            end_exprs,
+        } => {
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
+                end_exprs,
+                vars,
+                BraceIndexOperation::Expand {
+                    out_count: *out_count,
+                },
+                BraceOutcomeExpectation::ExpandedValues {
+                    invalid_message: "IndexCellExpand expected an expanded value list",
+                },
+            )
+            .await?;
             Ok(true)
         }
-        crate::bytecode::Instr::StoreIndexCell(num_indices) => {
-            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            let mut indices = Vec::new();
-            for _ in 0..*num_indices {
-                let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?)
-                    .try_into()?;
-                indices.push(v as usize);
-            }
-            indices.reverse();
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Object(obj) => {
-                    let cell = runmat_builtins::CellArray::new(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        1,
-                        indices.len(),
-                    )
-                    .map_err(|e| format!("subsasgn build error: {e}"))?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("{}".to_string()),
-                        Value::Cell(cell),
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
-                }
-                Value::HandleObject(handle) => {
-                    let cell = runmat_builtins::CellArray::new(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        1,
-                        indices.len(),
-                    )
-                    .map_err(|e| format!("subsasgn build error: {e}"))?;
-                    let args = vec![
-                        Value::HandleObject(handle),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("{}".to_string()),
-                        Value::Cell(cell),
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
-                }
-                Value::Cell(ca) => {
-                    let updated =
-                        crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
-                            runmat_gc::gc_record_write(oldv, newv);
-                        })?;
-                    stack.push(updated);
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellAssignmentOnNonCell",
-                        "Cell assignment on non-cell",
-                    ))
-                }
-            }
+        crate::bytecode::Instr::IndexCellList {
+            num_indices,
+            end_offsets,
+            end_exprs,
+        } => {
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
+                end_exprs,
+                vars,
+                BraceIndexOperation::List,
+                BraceOutcomeExpectation::SingleValue {
+                    invalid_message: "IndexCellList expected a single list value",
+                },
+            )
+            .await?;
             Ok(true)
         }
-        crate::bytecode::Instr::StoreIndex(num_indices) => {
-            if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                let snap = stack
-                    .iter()
-                    .rev()
-                    .take(6)
-                    .map(|v| match v {
-                        Value::Object(_) => "Object",
-                        Value::HandleObject(_) => "HandleObject",
-                        Value::Tensor(t) => {
-                            log::debug!("[vm] StoreIndex pre-snap tensor shape={:?}", t.shape);
-                            "Tensor"
-                        }
-                        Value::GpuTensor(h) => {
-                            log::debug!("[vm] StoreIndex pre-snap GPU tensor shape={:?}", h.shape);
-                            "GpuTensor"
-                        }
-                        Value::Num(_) => "Num",
-                        Value::Int(_) => "Int",
-                        Value::String(_) => "String",
-                        Value::Cell(_) => "Cell",
-                        _ => "Other",
-                    })
-                    .collect::<Vec<_>>();
-                log::debug!(
-                    "[vm] StoreIndex pre-snap pc={} stack_top_types={:?}",
-                    pc,
-                    snap
-                );
-            }
-            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            let assignable = |v: &Value| {
-                matches!(
-                    v,
-                    Value::Object(_)
-                        | Value::HandleObject(_)
-                        | Value::Tensor(_)
-                        | Value::ComplexTensor(_)
-                        | Value::GpuTensor(_)
-                )
-            };
-            let base_idx_opt = (0..stack.len()).rev().find(|&j| assignable(&stack[j]));
-            let base_pos = if let Some(j) = base_idx_opt {
-                j
-            } else {
+        crate::bytecode::Instr::StoreIndexCell {
+            num_indices,
+            end_offsets,
+            end_exprs,
+        }
+        | crate::bytecode::Instr::StoreIndexCellDelete {
+            num_indices,
+            end_offsets,
+            end_exprs,
+        } => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreIndexCellDelete { .. });
+            if delete {
                 return Err(crate::interpreter::errors::mex(
-                    "IndexAssignmentUnsupportedBase",
-                    "Index assignment only for tensors",
+                    "UnsupportedCellBraceDeletion",
+                    "Cell brace assignment does not support deletion",
                 ));
-            };
-            let base = stack.remove(base_pos);
-            clear_value_residency(&base);
+            }
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
+                end_exprs,
+                vars,
+                BraceIndexOperation::Store { rhs },
+                BraceOutcomeExpectation::SingleValue {
+                    invalid_message: "StoreIndexCell expected a single base value",
+                },
+            )
+            .await?;
+            Ok(true)
+        }
+        crate::bytecode::Instr::StoreIndex(num_indices)
+        | crate::bytecode::Instr::StoreIndexDelete(num_indices) => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreIndexDelete(_));
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             let mut indices: Vec<usize> = Vec::new();
-            if *num_indices > 0 {
-                let mut contiguous_ok = true;
-                if base_pos + *num_indices > stack.len() {
-                    contiguous_ok = false;
-                } else {
-                    for k in 0..*num_indices {
-                        let idx_pos = base_pos + k;
-                        let idx_val = match index_scalar_from_value(&stack[idx_pos]).await {
-                            Ok(Some(val)) => val,
-                            Ok(None) => {
-                                contiguous_ok = false;
-                                indices.clear();
-                                break;
-                            }
-                            Err(err) => return Err(err),
-                        };
-                        let idx_val = if idx_val <= 0 { 0 } else { idx_val as usize };
-                        indices.push(idx_val);
-                    }
+            for _ in 0..*num_indices {
+                let value = stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?;
+                let idx_val = index_scalar_from_value(&value).await?.ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "ScalarIndexRequired",
+                        "StoreIndex requires scalar indices; use StoreSlice for vector, range, or logical indices",
+                    )
+                })?;
+                if idx_val < 1 {
+                    return Err(crate::interpreter::errors::mex(
+                        "IndexOutOfBounds",
+                        "Index out of bounds",
+                    ));
                 }
-                if contiguous_ok {
-                    for k in (0..*num_indices).rev() {
-                        stack.remove(base_pos + k);
-                    }
-                } else {
-                    indices.clear();
-                }
+                indices.push(idx_val as usize);
             }
-            let (rows_opt, cols_opt) = match &base {
-                Value::Tensor(t) => (Some(t.rows()), Some(t.cols())),
-                Value::GpuTensor(h) => (
-                    Some(h.shape.first().copied().unwrap_or(1).max(1)),
-                    Some(h.shape.get(1).copied().unwrap_or(1).max(1)),
-                ),
-                _ => (None, None),
-            };
-            if indices.is_empty() {
-                let mut numeric_above: Vec<(usize, usize)> = Vec::new();
-                let mut scan_limit = 12usize;
-                let mut kk = stack.len();
-                while kk > 0 && scan_limit > 0 {
-                    let idx = kk - 1;
-                    if assignable(&stack[idx]) {
-                        break;
-                    }
-                    if let Some(v) = index_scalar_from_value(&stack[idx]).await? {
-                        let v = if v <= 0 { 0 } else { v as usize };
-                        numeric_above.push((idx, v));
-                    }
-                    kk -= 1;
-                    scan_limit -= 1;
-                }
-                if numeric_above.len() >= 2 {
-                    let mut picked: Option<((usize, usize), (usize, usize))> = None;
-                    for w in (1..numeric_above.len()).rev() {
-                        let (j_idx, j_val) = numeric_above[w];
-                        let (i_idx, i_val) = numeric_above[w - 1];
-                        let fits = match (rows_opt, cols_opt) {
-                            (Some(r), Some(c)) => {
-                                i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c
-                            }
-                            _ => true,
-                        };
-                        if fits {
-                            picked = Some(((i_idx, i_val), (j_idx, j_val)));
-                            break;
-                        }
-                    }
-                    if let Some(((i_idx, i_val), (j_idx, j_val))) = picked {
-                        let mut to_remove = [i_idx, j_idx];
-                        to_remove.sort_unstable();
-                        stack.remove(to_remove[1]);
-                        stack.remove(to_remove[0]);
-                        indices = vec![i_val, j_val];
-                    }
-                } else if numeric_above.len() == 1 {
-                    let (k_idx, k_val) = numeric_above[0];
-                    stack.remove(k_idx);
-                    indices = vec![k_val];
-                }
-            }
-            if indices.is_empty() {
-                return Err(crate::interpreter::errors::mex(
-                    "IndexAssignmentUnsupportedBase",
-                    "Index assignment only for tensors",
-                ));
-            }
+            indices.reverse();
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             match base {
                 Value::Object(obj) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    let args = vec![
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren(
                         Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("()".to_string()),
-                        cell,
+                        crate::call::shared::ObjectIndexSelector::ScalarIndices { indices },
                         rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    );
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
-                    let args = vec![
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren(
                         Value::HandleObject(handle),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("()".to_string()),
-                        cell,
+                        crate::call::shared::ObjectIndexSelector::ScalarIndices { indices },
                         rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    );
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
-                Value::Tensor(t) => {
-                    stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?)
+                Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
+                | Value::BoundFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "UnsupportedFunctionHandleSelector",
+                        "Function handle call does not support assignment selector syntax",
+                    ));
                 }
-                Value::ComplexTensor(t) => {
-                    stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?)
+                Value::Tensor(t) => stack
+                    .push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs, delete).await?),
+                Value::ComplexTensor(t) => stack.push(
+                    idx_write_linear::assign_complex_scalar(t, &indices, &rhs, delete).await?,
+                ),
+                Value::Num(n) => {
+                    let scalar = runmat_builtins::Tensor::new(vec![n], vec![1, 1])
+                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    stack.push(
+                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
+                            .await?,
+                    );
                 }
-                Value::GpuTensor(h) => {
-                    stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?)
+                Value::Int(i) => {
+                    let scalar = runmat_builtins::Tensor::new(vec![i.to_f64()], vec![1, 1])
+                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    stack.push(
+                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
+                            .await?,
+                    );
                 }
+                Value::Bool(b) => {
+                    let scalar =
+                        runmat_builtins::Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
+                            .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    stack.push(
+                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
+                            .await?,
+                    );
+                }
+                Value::StringArray(mut sa) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
+                    let selectors: Vec<SliceSelector> =
+                        indices.iter().copied().map(SliceSelector::Scalar).collect();
+                    let plan = build_index_plan(&selectors, indices.len(), &sa.shape)?;
+                    if !plan.indices.is_empty() {
+                        let rhs_view =
+                            idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
+                        idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)?;
+                    }
+                    stack.push(Value::StringArray(sa));
+                }
+                Value::Cell(ca) => stack.push(crate::ops::cells::assign_cell_paren_with_policy(
+                    ca, &indices, &rhs, delete,
+                )?),
+                Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
+                Value::GpuTensor(h) => stack
+                    .push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs, delete).await?),
                 _ => {
                     if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                         let kind = |v: &Value| match v {
                             Value::Object(_) => "Object",
+                            Value::Struct(_) => "Struct",
                             Value::Tensor(_) => "Tensor",
                             Value::GpuTensor(_) => "GpuTensor",
                             Value::Num(_) => "Num",
@@ -842,19 +1113,62 @@ where
                         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                         .collect();
                     let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
-                        .map_err(|e| format!("slice: {e}"))?;
+                        .map_err(|e| map_slice_shape_error("slice", e))?;
                     Value::Tensor(tensor)
                 }
                 other => other,
             };
             match base {
-                Value::Object(obj) => stack.push(
-                    idx_read_slice::object_subsref_paren(Value::Object(obj), &numeric).await?,
-                ),
-                Value::HandleObject(handle) => stack.push(
-                    idx_read_slice::object_subsref_paren(Value::HandleObject(handle), &numeric)
-                        .await?,
-                ),
+                Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+                        Value::Object(obj),
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+                        Value::HandleObject(handle),
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
+                | Value::BoundFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    if *colon_mask != 0 || *end_mask != 0 {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedFunctionHandleSelector",
+                            "Function handle call does not support colon or end selector syntax",
+                        ));
+                    }
+                    let args = numeric;
+                    match crate::call::feval::execute_feval(base, args, 1, function_registry)
+                        .await?
+                    {
+                        crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
+                    }
+                }
                 Value::Tensor(t) => {
                     if *dims == 1 {
                         stack.push(
@@ -887,8 +1201,7 @@ where
                         *end_mask,
                         &numeric,
                     )
-                    .await
-                    .map_err(|e| format!("slice: {e}"))?,
+                    .await?,
                 ),
                 Value::GpuTensor(handle) => stack.push(
                     idx_read_slice::read_gpu_slice(
@@ -898,33 +1211,46 @@ where
                         *end_mask,
                         &numeric,
                     )
-                    .await
-                    .map_err(|e| format!("slice: {e}"))?,
+                    .await?,
                 ),
                 Value::StringArray(sa) => stack.push(
                     idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric)
                         .await?,
                 ),
+                Value::Cell(ca) => {
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)
+                            .await?;
+                    let plan = build_index_plan(&selectors, *dims, &ca.shape)?;
+                    stack.push(gather_cell_with_plan(&ca, &plan)?);
+                }
                 other => {
                     if *dims == 1 {
-                        let is_colon = (*colon_mask & 1u32) != 0;
-                        let is_end = (*end_mask & 1u32) != 0;
-                        if is_colon {
+                        if (*colon_mask & 1u32) != 0 {
                             return Err(crate::interpreter::errors::mex(
                                 "SliceNonTensor",
                                 "Slicing only supported on tensors",
                             ));
                         }
-                        let idx_val: f64 = if is_end {
-                            1.0
-                        } else {
-                            match numeric.first() {
-                                Some(Value::Num(n)) => *n,
-                                Some(Value::Int(i)) => i.to_f64(),
-                                _ => 1.0,
+                        let selectors =
+                            build_slice_selectors(1, *colon_mask, *end_mask, &numeric, &[1usize])
+                                .await?;
+                        let linear_indices: Vec<f64> = match selectors.first() {
+                            Some(SliceSelector::Scalar(index)) => vec![*index as f64],
+                            Some(SliceSelector::Indices(indices)) => {
+                                indices.iter().map(|&index| index as f64).collect()
+                            }
+                            Some(SliceSelector::LinearIndices { values, .. }) => {
+                                values.iter().map(|&index| index as f64).collect()
+                            }
+                            Some(SliceSelector::Colon) | None => {
+                                return Err(crate::interpreter::errors::mex(
+                                    "SliceNonTensor",
+                                    "Slicing only supported on tensors",
+                                ));
                             }
                         };
-                        let v = runmat_runtime::perform_indexing(&other, &[idx_val])
+                        let v = runmat_runtime::perform_indexing(&other, &linear_indices)
                             .await
                             .map_err(|_| {
                                 crate::interpreter::errors::mex(
@@ -975,7 +1301,9 @@ where
             }
             Ok(true)
         }
-        crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) => {
+        crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask)
+        | crate::bytecode::Instr::StoreSliceDelete(dims, numeric_count, colon_mask, end_mask) => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreSliceDelete(_, _, _, _));
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -994,42 +1322,88 @@ where
             ))?;
             match base {
                 Value::Object(obj) => {
-                    match idx_write_slice::object_subsasgn_paren(
-                        Value::Object(obj.clone()),
-                        &numeric,
-                        rhs.clone(),
-                    )
-                    .await
-                    {
-                        Ok(v) => stack.push(v),
-                        Err(_e) => {
-                            let qualified = format!("{}.subsasgn", obj.class_name);
-                            let cell = idx_write_slice::build_subsasgn_paren_cell(&numeric)?;
-                            let args = vec![
-                                Value::Object(obj),
-                                Value::String("()".to_string()),
-                                cell,
-                                rhs,
-                            ];
-                            stack
-                                .push(runmat_runtime::call_builtin_async(&qualified, &args).await?);
-                        }
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
                     }
-                }
-                Value::HandleObject(handle) => stack.push(
-                    idx_write_slice::object_subsasgn_paren(
-                        Value::HandleObject(handle),
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
+                        Value::Object(obj),
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
                         &numeric,
                         rhs,
-                    )
-                    .await?,
-                ),
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
+                        Value::HandleObject(handle),
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        rhs,
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::MethodFunctionHandle(_)
+                | Value::BoundFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "UnsupportedFunctionHandleSelector",
+                        "Function handle call does not support assignment selector syntax",
+                    ));
+                }
                 Value::Tensor(t) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &t.shape)
                             .await?;
                     let plan = build_index_plan(&selectors, *dims, &t.shape)?;
-                    stack.push(idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?);
+                    stack.push(if delete {
+                        idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
+                    });
+                }
+                Value::LogicalArray(la) => {
+                    let data: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
+                    let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
+                        .map_err(|e| map_slice_shape_error("slice assign", e))?;
+                    let selectors = build_slice_selectors(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        &tensor.shape,
+                    )
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, &tensor.shape)?;
+                    let updated = if delete {
+                        idx_write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_tensor_with_plan(tensor, &plan, &rhs).await?
+                    };
+                    stack.push(match updated {
+                        Value::Tensor(t) => logical_value_from_tensor(t)?,
+                        Value::Bool(_) | Value::LogicalArray(_) => updated,
+                        Value::Num(n) => Value::Bool(n != 0.0),
+                        other => other,
+                    });
                 }
                 Value::GpuTensor(handle) => stack.push({
                     let selectors = build_slice_selectors(
@@ -1041,31 +1415,60 @@ where
                     )
                     .await?;
                     let plan = build_index_plan(&selectors, *dims, &handle.shape)?;
-                    idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                    if delete {
+                        idx_write_slice::delete_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                    } else {
+                        idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                    }
                 }),
                 Value::ComplexTensor(mut ct) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     let plan = build_index_plan(&selectors, *dims, &ct.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
+                    if delete {
+                        stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);
+                        return Ok(true);
+                    }
                     if plan.indices.is_empty() {
                         stack.push(Value::ComplexTensor(ct));
                         return Ok(true);
                     }
                     let rhs_view =
                         idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     idx_write_slice::scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     stack.push(Value::ComplexTensor(ct));
                 }
+                Value::Cell(ca) => {
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)
+                            .await
+                            .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
+                    let plan = build_index_plan(&selectors, *dims, &ca.shape)
+                        .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
+                    let selected: Vec<usize> =
+                        plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
+                    stack.push(
+                        crate::ops::cells::assign_cell_paren_linear_indices_with_policy(
+                            ca, &selected, &rhs, delete,
+                        )?,
+                    );
+                }
                 Value::StringArray(mut sa) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
                             .await
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     let plan = build_index_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
@@ -1074,9 +1477,9 @@ where
                     }
                     let rhs_view =
                         idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     stack.push(Value::StringArray(sa));
                 }
                 other => {
@@ -1087,11 +1490,10 @@ where
                         numeric,
                         rhs
                     );
-                    return Err(
-                        "Slicing assignment only supported on tensors or string arrays"
-                            .to_string()
-                            .into(),
-                    );
+                    return Err(crate::interpreter::errors::mex(
+                        "SliceNonTensor",
+                        "Slicing assignment only supported on tensors or string arrays",
+                    ));
                 }
             }
             Ok(true)
@@ -1108,6 +1510,7 @@ where
             range_end_exprs,
             end_numeric_exprs,
         } => {
+            validate_expr_range_step_metadata(range_dims, range_has_step)?;
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
                 numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
@@ -1124,12 +1527,7 @@ where
                         "StackUnderflow",
                         "stack underflow",
                     ))?;
-                    match v {
-                        Value::Num(n) => n,
-                        Value::Int(i) => i.to_f64(),
-                        Value::Tensor(t) if !t.data.is_empty() => t.data[0],
-                        _ => 1.0,
-                    }
+                    range_selector_scalar_to_f64(&v).await?
                 } else {
                     1.0
                 };
@@ -1137,12 +1535,7 @@ where
                     "StackUnderflow",
                     "stack underflow",
                 ))?;
-                let start = match v {
-                    Value::Num(n) => n,
-                    Value::Int(i) => i.to_f64(),
-                    Value::Tensor(t) if !t.data.is_empty() => t.data[0],
-                    _ => 1.0,
-                };
+                let start = range_selector_scalar_to_f64(&v).await?;
                 range_params.push((start, step));
             }
             range_params.reverse();
@@ -1150,39 +1543,56 @@ where
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            clear_value_residency(&base);
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
                     Value::GpuTensor(handle) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
+                            IndexContext::new(
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                range_dims,
+                                &handle.shape,
+                            ),
                             end_numeric_exprs,
                             vars,
-                            functions,
-                            call_user,
                         )
                         .await?
                     }
                     Value::Tensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
-                            call_user,
                         )
                         .await?
                     }
                     Value::ComplexTensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
-                            call_user,
+                        )
+                        .await?
+                    }
+                    Value::StringArray(sa) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &sa.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::Cell(ca) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &ca.shape),
+                            end_numeric_exprs,
+                            vars,
                         )
                         .await?
                     }
@@ -1190,233 +1600,26 @@ where
                 };
             }
             if let Value::GpuTensor(handle) = &base {
-                let attempt = async {
-                    let rank = handle.shape.len();
-                    #[derive(Clone)]
-                    enum Sel {
-                        Colon,
-                        Scalar(usize),
-                        Indices(Vec<usize>),
-                        Range {
-                            start: i64,
-                            step: i64,
-                            end_off: EndExpr,
-                        },
-                    }
-                    let full_shape: Vec<usize> = if *dims == 1 {
-                        vec![total_len_from_shape(&handle.shape)]
-                    } else if rank < *dims {
-                        let mut s = handle.shape.clone();
-                        s.resize(*dims, 1);
-                        s
-                    } else {
-                        handle.shape.clone()
-                    };
-                    let mut selectors: Vec<Sel> = Vec::with_capacity(*dims);
-                    let mut num_iter = 0usize;
-                    let mut rp_iter = 0usize;
-                    for d in 0..*dims {
-                        let is_colon = (*colon_mask & (1u32 << d)) != 0;
-                        let is_end = (*end_mask & (1u32 << d)) != 0;
-                        if is_colon {
-                            selectors.push(Sel::Colon);
-                        } else if is_end {
-                            selectors.push(Sel::Scalar(*full_shape.get(d).unwrap_or(&1)));
-                        } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                            let (raw_st, raw_sp) = range_params[rp_iter];
-                            let dim_len = *full_shape.get(d).unwrap_or(&1);
-                            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user)
-                                    .await? as f64
-                            } else {
-                                raw_st
-                            };
-                            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user)
-                                    .await? as f64
-                            } else {
-                                raw_sp
-                            };
-                            rp_iter += 1;
-                            let off = range_end_exprs[pos].clone();
-                            selectors.push(Sel::Range {
-                                start: st as i64,
-                                step: if sp >= 0.0 {
-                                    sp as i64
-                                } else {
-                                    -(sp.abs() as i64)
-                                },
-                                end_off: off,
-                            });
-                        } else {
-                            let v =
-                                numeric
-                                    .get(num_iter)
-                                    .ok_or(crate::interpreter::errors::mex(
-                                        "MissingNumericIndex",
-                                        "missing numeric index",
-                                    ))?;
-                            num_iter += 1;
-                            if let Value::Int(idx_val) = v {
-                                let idx = idx_val.to_i64();
-                                if idx < 1 {
-                                    return Err(crate::interpreter::errors::mex(
-                                        "IndexOutOfBounds",
-                                        "Index out of bounds",
-                                    ));
-                                }
-                                selectors.push(Sel::Scalar(idx as usize));
-                            } else {
-                                match v {
-                                    Value::Tensor(idx_t) => {
-                                        let dim_len = *full_shape.get(d).unwrap_or(&1);
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == dim_len {
-                                            let mut vv = Vec::new();
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    vv.push(i + 1);
-                                                }
-                                            }
-                                            selectors.push(Sel::Indices(vv));
-                                        } else {
-                                            let mut vv = Vec::with_capacity(len);
-                                            for &val in &idx_t.data {
-                                                let idx = val as isize;
-                                                if idx < 1 {
-                                                    return Err(crate::interpreter::errors::mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds",
-                                                    ));
-                                                }
-                                                vv.push(idx as usize);
-                                            }
-                                            selectors.push(Sel::Indices(vv));
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(crate::interpreter::errors::mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type",
-                                        ))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(*dims);
-                    for (d, sel) in selectors.iter().enumerate().take(*dims) {
-                        let dim_len = *full_shape.get(d).unwrap_or(&1) as i64;
-                        let idxs: Vec<usize> = match sel {
-                            Sel::Colon => (1..=dim_len as usize).collect(),
-                            Sel::Scalar(i) => vec![*i],
-                            Sel::Indices(v) => v.clone(),
-                            Sel::Range {
-                                start,
-                                step,
-                                end_off,
-                            } => {
-                                let mut vv = Vec::new();
-                                let mut cur = *start;
-                                let end_i = resolve_range_end_index(
-                                    dim_len as usize,
-                                    end_off,
-                                    &*vars,
-                                    functions,
-                                    call_user,
-                                )
-                                .await?;
-                                if *step == 0 {
-                                    return Err(crate::interpreter::errors::mex(
-                                        "IndexStepZero",
-                                        "Index step cannot be zero",
-                                    ));
-                                }
-                                if *step > 0 {
-                                    while cur <= end_i {
-                                        if cur < 1 || cur > dim_len {
-                                            break;
-                                        }
-                                        vv.push(cur as usize);
-                                        cur += *step;
-                                    }
-                                } else {
-                                    while cur >= end_i {
-                                        if cur < 1 || cur > dim_len {
-                                            break;
-                                        }
-                                        vv.push(cur as usize);
-                                        cur += *step;
-                                    }
-                                }
-                                vv
-                            }
-                        };
-                        if idxs.iter().any(|&i| i == 0 || i > dim_len as usize) {
-                            return Err(crate::interpreter::errors::mex(
-                                "IndexOutOfBounds",
-                                "Index out of bounds",
-                            ));
-                        }
-                        per_dim_indices.push(idxs);
-                    }
-                    let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-                    if total_out == 0 {
-                        return Ok((Vec::new(), vec![0, 0]));
-                    }
-                    let mut strides: Vec<usize> = vec![0; *dims];
-                    let mut acc = 1usize;
-                    for (d, stride) in strides.iter_mut().enumerate().take(*dims) {
-                        *stride = acc;
-                        acc *= full_shape[d];
-                    }
-                    let mut indices: Vec<u32> = Vec::with_capacity(total_out);
-                    let mut idx = vec![0usize; *dims];
-                    loop {
-                        let mut lin = 0usize;
-                        for d in 0..*dims {
-                            let i0 = per_dim_indices[d][idx[d]] - 1;
-                            lin += i0 * strides[d];
-                        }
-                        indices.push(lin as u32);
-                        let mut d = 0usize;
-                        while d < *dims {
-                            idx[d] += 1;
-                            if idx[d] < per_dim_indices[d].len() {
-                                break;
-                            }
-                            idx[d] = 0;
-                            d += 1;
-                        }
-                        if d == *dims {
-                            break;
-                        }
-                    }
-                    let output_shape = if *dims == 1 {
-                        if total_out <= 1 {
-                            vec![1, 1]
-                        } else {
-                            vec![total_out, 1]
-                        }
-                    } else {
-                        per_dim_indices.iter().map(|v| v.len().max(1)).collect()
-                    };
-                    Ok((indices, output_shape))
-                }
-                .await;
+                let vm_plan = build_expr_slice_plan(
+                    ExprPlanSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        numeric: &numeric,
+                        shape: &handle.shape,
+                    },
+                    vars,
+                )
+                .await?;
 
-                if let Ok((indices, output_shape)) = attempt {
-                    let vm_plan = idx_plan::IndexPlan::new(
-                        indices,
-                        output_shape,
-                        Vec::new(),
-                        *dims,
-                        handle.shape.clone(),
-                    );
-                    if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan) {
-                        stack.push(result);
-                        return Ok(true);
-                    }
+                if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan) {
+                    stack.push(result);
+                    return Ok(true);
                 }
 
                 let provider = runmat_accelerate_api::provider().ok_or_else(|| {
@@ -1425,17 +1628,67 @@ where
                         "No acceleration provider registered",
                     )
                 })?;
-                let host = provider
-                    .download(handle)
-                    .await
-                    .map_err(|e| format!("slice: {e}"))?;
+                let host = provider.download(handle).await.map_err(|e| {
+                    crate::interpreter::errors::mex(
+                        "AccelerationOperationFailed",
+                        &format!("slice: {e}"),
+                    )
+                })?;
                 let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
-                    .map_err(|e| format!("slice: {e}"))?;
+                    .map_err(|e| map_slice_shape_error("slice", e))?;
                 base = Value::Tensor(tensor);
             }
             match base {
+                Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
+                        Value::Object(obj),
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_expr_slice(
+                        Value::HandleObject(handle),
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
                 Value::ComplexTensor(t) => {
-                    let vm_plan = build_expr_index_plan(
+                    let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
@@ -1448,31 +1701,13 @@ where
                             numeric: &numeric,
                             shape: &t.shape,
                         },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            let functions_ref = functions;
-                            let call_user_ref = call_user;
-                            async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user_ref,
-                                )
-                                .await
-                            }
-                        },
+                        vars,
                     )
                     .await?;
-                    stack.push(
-                        idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)
-                            .map_err(|e| format!("Slice error: {e}"))?,
-                    );
+                    stack.push(idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)?);
                 }
                 Value::Tensor(t) => {
-                    let vm_plan = build_expr_index_plan(
+                    let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
@@ -1485,40 +1720,48 @@ where
                             numeric: &numeric,
                             shape: &t.shape,
                         },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            let functions_ref = functions;
-                            let call_user_ref = call_user;
-                            async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user_ref,
-                                )
-                                .await
-                            }
-                        },
+                        vars,
                     )
                     .await?;
-                    stack.push(
-                        idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)
-                            .map_err(|e| format!("Slice error: {e}"))?,
-                    );
+                    stack.push(idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)?);
                 }
                 Value::StringArray(sa) => {
-                    let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
-                            .await
-                            .map_err(|e| format!("slice: {e}"))?;
-                    let plan = build_index_plan(&selectors, *dims, &sa.shape)
-                        .map_err(|e| map_slice_plan_error("slice", e))?;
-                    stack.push(
-                        idx_read_slice::gather_string_slice(&sa, &plan)
-                            .map_err(|e| format!("slice: {e}"))?,
-                    );
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &sa.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    stack.push(idx_read_slice::gather_string_slice(&sa, &vm_plan)?);
+                }
+                Value::Cell(ca) => {
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &ca.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    stack.push(gather_cell_with_plan(&ca, &vm_plan)?);
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
@@ -1540,8 +1783,22 @@ where
             range_step_exprs,
             range_end_exprs,
             end_numeric_exprs,
+        }
+        | crate::bytecode::Instr::StoreSliceExprDelete {
+            dims,
+            numeric_count,
+            colon_mask,
+            end_mask,
+            range_dims,
+            range_has_step,
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
         } => {
-            let mut rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+            validate_expr_range_step_metadata(range_dims, range_has_step)?;
+            let delete = matches!(instr, crate::bytecode::Instr::StoreSliceExprDelete { .. });
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
@@ -1549,20 +1806,19 @@ where
             for i in (0..range_dims.len()).rev() {
                 let has = range_has_step[i];
                 let step = if has {
-                    let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
                         "StackUnderflow",
                         "stack underflow",
-                    ))?)
-                        .try_into()?;
-                    v
+                    ))?;
+                    range_selector_scalar_to_f64(&v).await?
                 } else {
                     1.0
                 };
-                let st: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                let st = stack.pop().ok_or(crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "stack underflow",
-                ))?)
-                    .try_into()?;
+                ))?;
+                let st = range_selector_scalar_to_f64(&st).await?;
                 range_params.push((st, step));
             }
             range_params.reverse();
@@ -1574,58 +1830,60 @@ where
                 ))?);
             }
             numeric.reverse();
-            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex(
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            clear_value_residency(&base);
-            let base_assignable = matches!(
-                base,
-                Value::Object(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::GpuTensor(_)
-            );
-            if !base_assignable
-                && matches!(
-                    rhs,
-                    Value::Object(_)
-                        | Value::Tensor(_)
-                        | Value::ComplexTensor(_)
-                        | Value::GpuTensor(_)
-                )
-            {
-                std::mem::swap(&mut base, &mut rhs);
-            }
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
                     Value::GpuTensor(handle) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
+                            IndexContext::new(
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                range_dims,
+                                &handle.shape,
+                            ),
                             end_numeric_exprs,
                             vars,
-                            functions,
-                            call_user,
                         )
                         .await?
                     }
                     Value::Tensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
-                            call_user,
                         )
                         .await?
                     }
                     Value::ComplexTensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
-                            call_user,
+                        )
+                        .await?
+                    }
+                    Value::StringArray(sa) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &sa.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::Cell(ca) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &ca.shape),
+                            end_numeric_exprs,
+                            vars,
                         )
                         .await?
                     }
@@ -1634,7 +1892,7 @@ where
             }
             match base {
                 Value::ComplexTensor(mut t) => {
-                    let vm_plan = build_expr_index_plan(
+                    let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
@@ -1647,36 +1905,26 @@ where
                             numeric: &numeric,
                             shape: &t.shape,
                         },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            let functions_ref = functions;
-                            async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user,
-                                )
-                                .await
-                            }
-                        },
+                        vars,
                     )
                     .await?;
+                    if delete {
+                        stack.push(idx_write_slice::delete_complex_with_plan(
+                            t, &vm_plan, &rhs,
+                        )?);
+                        return Ok(true);
+                    }
                     if !vm_plan.indices.is_empty() {
                         let rhs_view = idx_write_slice::build_complex_rhs_view(
                             &rhs,
                             &vm_plan.selection_lengths,
-                        )
-                        .map_err(|e| format!("slice assign: {e}"))?;
-                        idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                        )?;
+                        idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)?;
                     }
                     stack.push(Value::ComplexTensor(t));
                 }
                 Value::Tensor(t) => {
-                    let vm_plan = build_expr_index_plan(
+                    let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
@@ -1689,27 +1937,17 @@ where
                             numeric: &numeric,
                             shape: &t.shape,
                         },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            let functions_ref = functions;
-                            async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user,
-                                )
-                                .await
-                            }
-                        },
+                        vars,
                     )
                     .await?;
-                    stack.push(idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?);
+                    stack.push(if delete {
+                        idx_write_slice::delete_tensor_with_plan(t, &vm_plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?
+                    });
                 }
                 Value::GpuTensor(h) => {
-                    let vm_plan = build_expr_index_plan(
+                    let vm_plan = build_expr_slice_plan(
                         ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
@@ -1722,98 +1960,341 @@ where
                             numeric: &numeric,
                             shape: &h.shape,
                         },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            let functions_ref = functions;
-                            async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user,
-                                )
-                                .await
-                            }
-                        },
+                        vars,
                     )
                     .await?;
-                    let updated =
-                        idx_write_slice::assign_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?;
+                    let updated = if delete {
+                        idx_write_slice::delete_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?
+                    } else {
+                        idx_write_slice::assign_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?
+                    };
                     stack.push(updated);
                 }
                 Value::Object(obj) => {
-                    let mut idx_values: Vec<Value> = Vec::with_capacity(*dims);
-                    let mut num_iter = 0usize;
-                    let mut rp_iter = 0usize;
-                    for d in 0..*dims {
-                        let is_colon = (*colon_mask & (1u32 << d)) != 0;
-                        let is_end = (*end_mask & (1u32 << d)) != 0;
-                        if is_colon {
-                            idx_values.push(Value::String(":".to_string()));
-                            continue;
-                        }
-                        if is_end {
-                            idx_values.push(Value::String("end".to_string()));
-                            continue;
-                        }
-                        if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                            let (raw_st, raw_sp) = range_params[rp_iter];
-                            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                encode_end_expr_value(expr)?
-                            } else {
-                                Value::Num(raw_st)
-                            };
-                            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                encode_end_expr_value(expr)?
-                            } else {
-                                Value::Num(raw_sp)
-                            };
-                            rp_iter += 1;
-                            let off = range_end_exprs[pos].clone();
-                            idx_values.push(build_end_range_descriptor(st, sp, &off)?);
-                        } else {
-                            let v =
-                                numeric
-                                    .get(num_iter)
-                                    .ok_or(crate::interpreter::errors::mex(
-                                        "MissingNumericIndex",
-                                        "missing numeric index",
-                                    ))?;
-                            num_iter += 1;
-                            match v {
-                                Value::Num(n) => idx_values.push(Value::Num(*n)),
-                                Value::Int(i) => idx_values.push(Value::Num(i.to_f64())),
-                                Value::Tensor(t) => idx_values.push(Value::Tensor(t.clone())),
-                                other => {
-                                    return Err(format!(
-                                        "Unsupported index type for object: {other:?}"
-                                    )
-                                    .into())
-                                }
-                            }
-                        }
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
                     }
-                    let cell = runmat_builtins::CellArray::new(idx_values, 1, *dims)
-                        .map_err(|e| format!("subsasgn build error: {e}"))?;
-                    let args = vec![
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
                         Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("()".to_string()),
-                        Value::Cell(cell),
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
                         rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
+                        Value::HandleObject(handle),
+                        ObjectParenExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            end_numeric_exprs,
+                            numeric: &numeric,
+                        },
+                        rhs,
+                    )?;
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::StringArray(mut sa) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &sa.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    if !vm_plan.indices.is_empty() {
+                        let rhs_view = idx_write_slice::build_string_rhs_view(
+                            &rhs,
+                            &vm_plan.selection_lengths,
+                        )?;
+                        idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)?;
+                    }
+                    stack.push(Value::StringArray(sa));
+                }
+                Value::Cell(ca) => {
+                    let vm_plan = build_expr_slice_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &ca.shape,
+                        },
+                        vars,
+                    )
+                    .await?;
+                    let selected: Vec<usize> = vm_plan
+                        .indices
+                        .iter()
+                        .map(|idx| (*idx as usize) + 1)
+                        .collect();
+                    stack.push(
+                        crate::ops::cells::assign_cell_paren_linear_indices_with_policy(
+                            ca, &selected, &rhs, delete,
+                        )?,
+                    );
                 }
                 _ => {
-                    return Err("StoreSliceExpr only supports tensors currently"
-                        .to_string()
-                        .into())
+                    return Err(crate::interpreter::errors::mex(
+                        "SliceNonTensor",
+                        "StoreSliceExpr only supports tensors, cells, and string arrays currently",
+                    ));
                 }
             }
             Ok(true)
         }
         _ => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
+        apply_end_offsets_to_numeric, map_slice_plan_error, range_selector_scalar_to_f64,
+        validate_expr_range_step_metadata, IndexContext,
+    };
+    use crate::bytecode::EndExpr;
+    use futures::executor::block_on;
+    use runmat_builtins::{CellArray, Value};
+
+    #[test]
+    fn map_slice_plan_error_preserves_identifier_and_adds_context() {
+        let err = crate::interpreter::errors::mex("ShapeMismatch", "shape mismatch");
+        let mapped = map_slice_plan_error("slice assign", err);
+        assert_eq!(mapped.identifier(), Some("RunMat:ShapeMismatch"));
+        assert_eq!(mapped.message(), "slice assign: shape mismatch");
+    }
+
+    #[test]
+    fn map_slice_plan_error_keeps_identifier_absent_when_missing() {
+        let err = runmat_runtime::build_runtime_error("plain error").build();
+        let mapped = map_slice_plan_error("slice assign", err);
+        assert_eq!(mapped.identifier(), None);
+        assert_eq!(mapped.message(), "slice assign: plain error");
+    }
+
+    #[test]
+    fn validate_expr_range_step_metadata_rejects_mismatched_arity() {
+        let err = validate_expr_range_step_metadata(&[0, 1], &[true])
+            .expect_err("mismatched range step metadata should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn range_selector_scalar_to_f64_rejects_non_numeric_scalar() {
+        let err = block_on(range_selector_scalar_to_f64(&Value::String(
+            "x".to_string(),
+        )))
+        .expect_err("non-numeric range selector scalar should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_out_of_bounds_positions() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(1, 0, 0, &[], &[5]),
+            &[(1, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("out-of-bounds end-selector position should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_duplicate_positions() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(1, 0, 0, &[], &[5]),
+            &[(0, EndExpr::End), (0, EndExpr::Const(2.0))],
+            &mut vars,
+        ))
+        .expect_err("duplicate end-selector positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_duplicate_range_dims_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0, 0, &[1, 1], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("duplicate range dims should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_out_of_bounds_range_dims_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0, 0, &[2], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("out-of-bounds range dims should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_range_dim_conflicting_with_colon_mask_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0b01, 0, &[0], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("range/colon conflict should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_range_dim_conflicting_with_end_mask_in_context() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(2, 0, 0b10, &[1], &[5, 5]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("range/end conflict should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_end_offsets_rejects_context_rank_exceeding_mask_width() {
+        let mut vars = vec![];
+        let err = block_on(apply_end_offsets_to_numeric(
+            &[Value::Num(1.0)],
+            IndexContext::new(33, 0, 0, &[], &[1; 33]),
+            &[(0, EndExpr::End)],
+            &mut vars,
+        ))
+        .expect_err("selector rank beyond mask width should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_offsets_rejects_duplicate_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let err =
+            apply_cell_end_offsets_for_base(&base, &[Value::Num(1.0)], &[(0, 0), (0, 1)], false)
+                .expect_err("duplicate cell end-offset positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_offsets_rejects_out_of_bounds_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let err = apply_cell_end_offsets_for_base(&base, &[Value::Num(1.0)], &[(1, 0)], false)
+            .expect_err("out-of-bounds cell end-offset positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_exprs_rejects_duplicate_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let mut vars = vec![];
+        let err = block_on(apply_cell_end_exprs_for_base(
+            &base,
+            &[Value::Num(1.0)],
+            &[(0, EndExpr::End), (0, EndExpr::Const(1.0))],
+            &mut vars,
+            false,
+        ))
+        .expect_err("duplicate cell end-expression positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn apply_cell_end_exprs_rejects_out_of_bounds_positions() {
+        let base = Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell base"));
+        let mut vars = vec![];
+        let err = block_on(apply_cell_end_exprs_for_base(
+            &base,
+            &[Value::Num(1.0)],
+            &[(1, EndExpr::End)],
+            &mut vars,
+            false,
+        ))
+        .expect_err("out-of-bounds cell end-expression positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn resolve_cell_indices_rejects_fractional_values() {
+        let err = block_on(super::resolve_cell_indices(&[Value::Num(1.5)]))
+            .expect_err("fractional cell index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+    }
+
+    #[test]
+    fn resolve_cell_indices_rejects_zero_values() {
+        let err = block_on(super::resolve_cell_indices(&[Value::Num(0.0)]))
+            .expect_err("zero cell index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+    }
+
+    #[test]
+    fn resolve_cell_indices_accepts_scalar_tensor_values() {
+        let scalar = Value::Tensor(
+            runmat_builtins::Tensor::new(vec![2.0], vec![1, 1]).expect("scalar tensor"),
+        );
+        let indices = block_on(super::resolve_cell_indices(&[scalar]))
+            .expect("scalar tensor index should pass");
+        assert_eq!(indices, vec![2]);
     }
 }

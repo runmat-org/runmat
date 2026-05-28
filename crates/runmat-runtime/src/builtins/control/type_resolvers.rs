@@ -33,7 +33,7 @@ pub fn tf_type(_args: &[Type], _context: &ResolveContext) -> Type {
 }
 
 pub fn impulse_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
+    Type::tensor()
 }
 
 pub fn nyquist_type(_args: &[Type], _context: &ResolveContext) -> Type {

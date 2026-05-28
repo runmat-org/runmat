@@ -1,6 +1,10 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
-use runmat_plot::gpu::errorbar::{ErrorBarGpuInputs, ErrorBarGpuParams};
+use runmat_plot::gpu::errorbar::ErrorBarGpuInputs;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
 };
@@ -12,6 +16,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
 
 use super::common::numeric_pair;
 use super::gpu_helpers::gpu_errorbar_bounds;
@@ -31,6 +36,230 @@ type ErrorBarArgs = (
     Value,
     Vec<Value>,
 );
+
+const ERRORBAR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created error bar series.",
+}];
+
+const ERRORBAR_INPUTS_Y_ERR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Data values.",
+    },
+    BuiltinParamDescriptor {
+        name: "E",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Symmetric Y error magnitudes.",
+    },
+];
+
+const ERRORBAR_INPUTS_X_Y_ERR: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "E",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Symmetric Y error magnitudes.",
+    },
+];
+
+const ERRORBAR_INPUTS_X_Y_YNEG_YPOS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "YNeg",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Negative Y error magnitudes.",
+    },
+    BuiltinParamDescriptor {
+        name: "YPos",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive Y error magnitudes.",
+    },
+];
+
+const ERRORBAR_INPUTS_X_Y_XNEG_XPOS_YNEG_YPOS: [BuiltinParamDescriptor; 6] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "XNeg",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Negative X error magnitudes.",
+    },
+    BuiltinParamDescriptor {
+        name: "XPos",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive X error magnitudes.",
+    },
+    BuiltinParamDescriptor {
+        name: "YNeg",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Negative Y error magnitudes.",
+    },
+    BuiltinParamDescriptor {
+        name: "YPos",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Positive Y error magnitudes.",
+    },
+];
+
+const ERRORBAR_INPUTS_AX_DATA_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Errorbar positional data arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Style and name/value properties.",
+    },
+];
+
+const ERRORBAR_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "h = errorbar(Y, E)",
+        inputs: &ERRORBAR_INPUTS_Y_ERR,
+        outputs: &ERRORBAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = errorbar(X, Y, E)",
+        inputs: &ERRORBAR_INPUTS_X_Y_ERR,
+        outputs: &ERRORBAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = errorbar(X, Y, YNeg, YPos)",
+        inputs: &ERRORBAR_INPUTS_X_Y_YNEG_YPOS,
+        outputs: &ERRORBAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = errorbar(X, Y, XNeg, XPos, YNeg, YPos)",
+        inputs: &ERRORBAR_INPUTS_X_Y_XNEG_XPOS_YNEG_YPOS,
+        outputs: &ERRORBAR_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = errorbar(ax, ...)",
+        inputs: &ERRORBAR_INPUTS_AX_DATA_PROPS,
+        outputs: &ERRORBAR_OUTPUT_HANDLE,
+    },
+];
+
+const ERRORBAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERRORBAR.INVALID_ARGUMENT",
+    identifier: Some("RunMat:errorbar:InvalidArgument"),
+    when: "Input vectors, error vectors, style arguments, or axes-target forms are malformed.",
+    message: "errorbar: invalid argument",
+};
+
+const ERRORBAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ERRORBAR.INTERNAL",
+    identifier: Some("RunMat:errorbar:Internal"),
+    when: "Internal render preparation or GPU vertex generation fails.",
+    message: "errorbar: internal operation failed",
+};
+
+const ERRORBAR_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [ERRORBAR_ERROR_INVALID_ARGUMENT, ERRORBAR_ERROR_INTERNAL];
+
+pub const ERRORBAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ERRORBAR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ERRORBAR_ERRORS,
+};
+
+fn errorbar_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_errorbar_invalid(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    errorbar_error_with_detail(&ERRORBAR_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn errorbar_invalid(detail: impl AsRef<str>) -> RuntimeError {
+    errorbar_error_with_detail(&ERRORBAR_ERROR_INVALID_ARGUMENT, detail)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::errorbar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -67,21 +296,27 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::errorbar::ERRORBAR_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::errorbar"
 )]
 pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (target_axes, x, y, x_neg, x_pos, y_neg, y_pos, rest) = parse_errorbar_args(args)?;
-    let parsed = parse_errorbar_style_args(&rest)?;
-    let mut x_in = Some(NumericInput::from_value(x, BUILTIN_NAME)?);
-    let mut y_in = Some(NumericInput::from_value(y, BUILTIN_NAME)?);
+    let (target_axes, x, y, x_neg, x_pos, y_neg, y_pos, rest) =
+        parse_errorbar_args(args).map_err(map_errorbar_invalid)?;
+    let parsed = parse_errorbar_style_args(&rest).map_err(map_errorbar_invalid)?;
+    let mut x_in = Some(NumericInput::from_value(x, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
+    let mut y_in = Some(NumericInput::from_value(y, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
     let mut xn_in = x_neg
         .map(|v| NumericInput::from_value(v, BUILTIN_NAME))
-        .transpose()?;
+        .transpose()
+        .map_err(map_errorbar_invalid)?;
     let mut xp_in = x_pos
         .map(|v| NumericInput::from_value(v, BUILTIN_NAME))
-        .transpose()?;
-    let mut n_in = Some(NumericInput::from_value(y_neg, BUILTIN_NAME)?);
-    let mut p_in = Some(NumericInput::from_value(y_pos, BUILTIN_NAME)?);
+        .transpose()
+        .map_err(map_errorbar_invalid)?;
+    let mut n_in =
+        Some(NumericInput::from_value(y_neg, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
+    let mut p_in =
+        Some(NumericInput::from_value(y_pos, BUILTIN_NAME).map_err(map_errorbar_invalid)?);
     let opts = PlotRenderOptions {
         title: "Error Bars",
         x_label: "X",
@@ -123,27 +358,37 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 Err(err) => log::warn!("errorbar GPU path unavailable: {err}"),
             }
         }
-        let x = x_arg.into_tensor(BUILTIN_NAME)?;
-        let y = y_arg.into_tensor(BUILTIN_NAME)?;
+        let x = x_arg
+            .into_tensor(BUILTIN_NAME)
+            .map_err(map_errorbar_invalid)?;
+        let y = y_arg
+            .into_tensor(BUILTIN_NAME)
+            .map_err(map_errorbar_invalid)?;
         let xn = xn_in
             .take()
             .map(|v| v.into_tensor(BUILTIN_NAME))
-            .transpose()?;
+            .transpose()
+            .map_err(map_errorbar_invalid)?;
         let xp = xp_in
             .take()
             .map(|v| v.into_tensor(BUILTIN_NAME))
-            .transpose()?;
-        let yn = yn_arg.into_tensor(BUILTIN_NAME)?;
-        let yp = yp_arg.into_tensor(BUILTIN_NAME)?;
-        let (x, y) = numeric_pair(x, y, BUILTIN_NAME)?;
-        let (yn, yp) = numeric_pair(yn, yp, BUILTIN_NAME)?;
+            .transpose()
+            .map_err(map_errorbar_invalid)?;
+        let yn = yn_arg
+            .into_tensor(BUILTIN_NAME)
+            .map_err(map_errorbar_invalid)?;
+        let yp = yp_arg
+            .into_tensor(BUILTIN_NAME)
+            .map_err(map_errorbar_invalid)?;
+        let (x, y) = numeric_pair(x, y, BUILTIN_NAME).map_err(map_errorbar_invalid)?;
+        let (yn, yp) = numeric_pair(yn, yp, BUILTIN_NAME).map_err(map_errorbar_invalid)?;
         let mut plot = if let (Some(xn), Some(xp)) = (xn, xp) {
-            let (xn, xp) = numeric_pair(xn, xp, BUILTIN_NAME)?;
+            let (xn, xp) = numeric_pair(xn, xp, BUILTIN_NAME).map_err(map_errorbar_invalid)?;
             ErrorBar::new_both(x, y, xn, xp, yn, yp)
         } else {
             ErrorBar::new_vertical(x, y, yn, yp)
         }
-        .map_err(|e| plotting_error(BUILTIN_NAME, format!("errorbar: {e}")))?
+        .map_err(|e| errorbar_invalid(&e))?
         .with_style(
             parsed.color,
             parsed.line_width,
@@ -168,7 +413,7 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_errorbar_invalid(err));
     }
     Ok(handle)
 }
@@ -245,32 +490,17 @@ fn build_errorbar_gpu_plot(
     } else {
         gpu_errorbar_bounds(x, y, y_neg, y_pos, name)?
     };
-    let gpu_vertices = runmat_plot::gpu::errorbar::pack_vertical_vertices(
-        &context.device,
-        &context.queue,
-        &ErrorBarGpuInputs {
-            x_buffer: x_ref.buffer.clone(),
-            y_buffer: y_ref.buffer.clone(),
-            x_neg_buffer: xn_ref.as_ref().map(|r| r.buffer.clone()),
-            x_pos_buffer: xp_ref.as_ref().map(|r| r.buffer.clone()),
-            y_neg_buffer: yn_ref.buffer.clone(),
-            y_pos_buffer: yp_ref.buffer.clone(),
-            len: x_ref.len as u32,
-            scalar,
-        },
-        &ErrorBarGpuParams {
-            color: parsed.color,
-            cap_size_data: parsed.cap_size * 0.01,
-            line_style: parsed.line_style,
-            orientation: if x_neg.is_some() && x_pos.is_some() {
-                2
-            } else {
-                0
-            },
-        },
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
-    let mut plot = ErrorBar::from_gpu_buffer(
+    let inputs = ErrorBarGpuInputs {
+        x_buffer: x_ref.buffer.clone(),
+        y_buffer: y_ref.buffer.clone(),
+        x_neg_buffer: xn_ref.as_ref().map(|r| r.buffer.clone()),
+        x_pos_buffer: xp_ref.as_ref().map(|r| r.buffer.clone()),
+        y_neg_buffer: yn_ref.buffer.clone(),
+        y_pos_buffer: yp_ref.buffer.clone(),
+        len: x_ref.len as u32,
+        scalar,
+    };
+    let mut plot = ErrorBar::from_gpu_inputs(
         parsed.color,
         parsed.line_width,
         parsed.line_style,
@@ -280,8 +510,7 @@ fn build_errorbar_gpu_plot(
         } else {
             runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical
         },
-        gpu_vertices,
-        x_ref.len as usize * 6,
+        inputs,
         bounds,
     )
     .with_label(label);
@@ -297,8 +526,13 @@ fn build_errorbar_gpu_plot(
             },
             &MarkerGpuParams {
                 color: marker.face_color,
-                half_width_data: 0.0,
-                thick: false,
+                half_width_px: 0.0,
+                viewport_width_px: 1.0,
+                viewport_height_px: 1.0,
+                x_min: 0.0,
+                x_span: 1.0,
+                y_min: 0.0,
+                y_span: 1.0,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },
@@ -778,5 +1012,24 @@ mod tests {
         };
         assert_eq!(plot.x, vec![1.0]);
         assert_eq!(plot.y, vec![2.0]);
+    }
+
+    #[test]
+    fn errorbar_descriptor_includes_core_signatures() {
+        let labels: Vec<&str> = ERRORBAR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = errorbar(Y, E)"));
+        assert!(labels.contains(&"h = errorbar(X, Y, E)"));
+        assert!(labels.contains(&"h = errorbar(X, Y, XNeg, XPos, YNeg, YPos)"));
+    }
+
+    #[test]
+    fn errorbar_missing_data_uses_stable_identifier() {
+        let err = errorbar_builtin(vec![Value::Num(1.0)])
+            .expect_err("expected errorbar argument validation error");
+        assert_eq!(err.identifier(), ERRORBAR_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

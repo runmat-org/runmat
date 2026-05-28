@@ -11,7 +11,7 @@ This is the **working plan** for implementing the async/futures architecture des
 - Use **async/await** instead of control‑flow enums.
 - Keep crates layered: no Tokio/JS deps leaking into VM/runtime crates.
 - Keep MATLAB‑compat “sync code” fast.
-- Builtins remain **language‑synchronous**; concurrency is explicit via tasks + `await`.
+- Builtins remain **language‑synchronous**; concurrency is explicit via futures, `spawn`, and `await`.
 
 ---
 
@@ -70,12 +70,24 @@ This is the **working plan** for implementing the async/futures architecture des
 **Goal**: add RunMat language constructs.
 
 - Parser/AST/HIR additions for:
-  - `async @() do ... end`
-  - `await(expr)` intrinsic
+  - async functions and async blocks that produce lazy futures
+  - `await(expr)` as an explicit suspension point
+  - `spawn(expr)` as the explicit scheduling/concurrency boundary
 - Bytecode opcodes:
-  - `ASYNC_CREATE`, `AWAIT`
+  - `FUTURE_CREATE`, `SPAWN`, `AWAIT`
 - Value representation:
-  - `Value::Task(TaskHandle)` and/or `Value::Awaitable(...)`
+  - `Value::Future(...)`
+  - `Value::Task(TaskHandle)`
+  - optionally `Value::Awaitable(...)` for native/internal awaitables
+
+Semantics:
+- creating a future does not execute user code
+- `await` polls a future/task to completion
+- `spawn` starts concurrent execution and returns a task handle
+- ordinary MATLAB-style code remains sequential and language-synchronous
+- direct `await` without `spawn` does not introduce concurrency
+- `spawn` requires spawn-safe captures and values
+- mutable lexical captures from the spawning frame are rejected unless wrapped in explicit synchronized/runtime-managed handles
 
 **Exit criteria**
 - Minimal async programs run deterministically.
@@ -104,7 +116,7 @@ This is the **working plan** for implementing the async/futures architecture des
 
 ## Open questions (keep updated)
 
-- **Lazy vs eager tasks**: default to lazy? (`async` creates suspended task; `spawn` starts)
-- **Top‑level await**: allowed in REPL? in scripts?
+- **Top-level await policy**: REPL, notebook, and script-like entrypoints should permit it by default; confirm whether batch/function-file entry modes need additional host policy.
 - **GC rooting API**: best representation for cross‑await handles
+- **Spawn-safe shared handles**: exact user-facing synchronized/runtime-managed objects for intentional shared mutable state.
 - **Cancellation semantics**: how to expose and integrate with host cancel

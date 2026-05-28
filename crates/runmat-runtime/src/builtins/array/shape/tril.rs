@@ -14,8 +14,14 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "tril";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::tril")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -77,8 +83,107 @@ fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-fn tril_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("tril").build()
+const TRIL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Lower triangular output array with preserved shape/type domain.",
+}];
+
+const TRIL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, matrix, or paged matrix array.",
+}];
+
+const TRIL_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar, matrix, or paged matrix array.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal offset for the preserved lower triangle.",
+    },
+];
+
+const TRIL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = tril(A)",
+        inputs: &TRIL_INPUTS_A,
+        outputs: &TRIL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = tril(A, k)",
+        inputs: &TRIL_INPUTS_A_K,
+        outputs: &TRIL_OUTPUT,
+    },
+];
+
+const TRIL_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIL.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:tril:TooManyInputs"),
+    when: "More than one optional argument is supplied after A.",
+    message: "tril: too many input arguments",
+};
+
+const TRIL_ERROR_INVALID_OFFSET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIL.INVALID_OFFSET",
+    identifier: Some("RunMat:tril:InvalidOffset"),
+    when: "Diagonal offset is not a finite integer scalar value.",
+    message: "tril: invalid diagonal offset",
+};
+
+const TRIL_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIL.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:tril:UnsupportedInput"),
+    when: "Input value is not supported by tril.",
+    message: "tril: unsupported input type",
+};
+
+const TRIL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRIL.INTERNAL",
+    identifier: Some("RunMat:tril:Internal"),
+    when: "Internal masking/upload path fails.",
+    message: "tril: internal operation failed",
+};
+
+const TRIL_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    TRIL_ERROR_TOO_MANY_INPUTS,
+    TRIL_ERROR_INVALID_OFFSET,
+    TRIL_ERROR_UNSUPPORTED_INPUT,
+    TRIL_ERROR_INTERNAL,
+];
+
+pub const TRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TRIL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRIL_ERRORS,
+};
+
+fn tril_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    tril_error_with_message(error.message, error)
+}
+
+fn tril_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -88,11 +193,12 @@ fn tril_error(message: impl Into<String>) -> RuntimeError {
     keywords = "tril,lower triangular,matrix,diagonal,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),
+    descriptor(crate::builtins::array::shape::tril::TRIL_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::tril"
 )]
 async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(tril_error("tril: too many input arguments"));
+        return Err(tril_error(&TRIL_ERROR_TOO_MANY_INPUTS));
     }
     let offset = parse_diagonal_offset(&rest).await?;
     match value {
@@ -105,44 +211,51 @@ async fn tril_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| tril_error(format!("tril: {e}")))?;
+                .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
             Ok(tril_complex_tensor(tensor, offset).map(complex_tensor_into_value)?)
         }
         Value::Num(n) => {
-            let tensor =
-                tensor::value_into_tensor_for("tril", Value::Num(n)).map_err(|e| tril_error(e))?;
+            let tensor = tensor::value_into_tensor_for("tril", Value::Num(n))
+                .map_err(|e| tril_error_with_message(e, &TRIL_ERROR_INTERNAL))?;
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("tril", Value::Int(i.clone()))
-                .map_err(|e| tril_error(e))?;
+                .map_err(|e| tril_error_with_message(e, &TRIL_ERROR_INTERNAL))?;
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("tril", Value::Bool(flag))
-                .map_err(|e| tril_error(e))?;
+                .map_err(|e| tril_error_with_message(e, &TRIL_ERROR_INTERNAL))?;
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| tril_error(format!("tril: {e}")))?;
+                .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
             Ok(tril_tensor(tensor, offset).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(tril_gpu(handle, offset).await?),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(tril_error("tril: string arrays are not supported"))
-        }
-        Value::Cell(_) => Err(tril_error("tril: cell arrays are not supported")),
+        Value::String(_) | Value::StringArray(_) => Err(tril_error_with_message(
+            "tril: string arrays are not supported",
+            &TRIL_ERROR_UNSUPPORTED_INPUT,
+        )),
+        Value::Cell(_) => Err(tril_error_with_message(
+            "tril: cell arrays are not supported",
+            &TRIL_ERROR_UNSUPPORTED_INPUT,
+        )),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(tril_error("tril: unsupported input type")),
+        | Value::OutputList(_) => Err(tril_error(&TRIL_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
@@ -152,7 +265,7 @@ async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
     }
     let gathered = crate::dispatcher::gather_if_needed_async(&args[0])
         .await
-        .map_err(|e| tril_error(format!("tril: {e}")))?;
+        .map_err(|e| tril_error_with_message(format!("tril: {e}"), &TRIL_ERROR_INTERNAL))?;
     scalar_to_isize(&gathered, "tril")
 }
 
@@ -161,15 +274,17 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
         Value::Int(i) => Ok(i.to_i64() as isize),
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(tril_error(format!(
-                    "{name}: diagonal offset must be finite"
-                )));
+                return Err(tril_error_with_message(
+                    format!("{name}: diagonal offset must be finite"),
+                    &TRIL_ERROR_INVALID_OFFSET,
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(tril_error(format!(
-                    "{name}: diagonal offset must be an integer"
-                )));
+                return Err(tril_error_with_message(
+                    format!("{name}: diagonal offset must be an integer"),
+                    &TRIL_ERROR_INVALID_OFFSET,
+                ));
             }
             Ok(rounded as isize)
         }
@@ -178,9 +293,10 @@ fn scalar_to_isize(value: &Value, name: &str) -> crate::BuiltinResult<isize> {
             scalar_to_isize(&Value::Num(val), name)
         }
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
-        other => Err(tril_error(format!(
-            "{name}: diagonal offset must be a scalar numeric value, got {other:?}"
-        ))),
+        other => Err(tril_error_with_message(
+            format!("{name}: diagonal offset must be a scalar numeric value, got {other:?}"),
+            &TRIL_ERROR_INVALID_OFFSET,
+        )),
     }
 }
 
@@ -227,9 +343,12 @@ async fn tril_gpu(handle: GpuTensorHandle, offset: isize) -> crate::BuiltinResul
             data: &result.data,
             shape: &result.shape,
         };
-        let uploaded = provider
-            .upload(&view)
-            .map_err(|e| tril_error(format!("tril: failed to upload fallback result: {e}")))?;
+        let uploaded = provider.upload(&view).map_err(|e| {
+            tril_error_with_message(
+                format!("tril: failed to upload fallback result: {e}"),
+                &TRIL_ERROR_INTERNAL,
+            )
+        })?;
         Ok(Value::GpuTensor(uploaded))
     } else {
         let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -260,11 +379,14 @@ where
     if plane == 0 || pages == 0 {
         return Ok(());
     }
-    let expected = plane
-        .checked_mul(pages)
-        .ok_or_else(|| tril_error("tril: dimension product overflow"))?;
+    let expected = plane.checked_mul(pages).ok_or_else(|| {
+        tril_error_with_message("tril: dimension product overflow", &TRIL_ERROR_INTERNAL)
+    })?;
     if expected != data.len() {
-        return Err(tril_error("tril: tensor data length mismatch"));
+        return Err(tril_error_with_message(
+            "tril: tensor data length mismatch",
+            &TRIL_ERROR_INTERNAL,
+        ));
     }
     for page in 0..pages {
         let base = page * plane;
@@ -397,6 +519,26 @@ pub(crate) mod tests {
             Value::Num(result) => assert_eq!(result, 0.0),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tril_rejects_string_offset_with_stable_identifier() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let err = tril_builtin(Value::Tensor(tensor), vec![Value::from("diagonal")]).unwrap_err();
+        assert_eq!(err.identifier(), TRIL_ERROR_INVALID_OFFSET.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tril_rejects_extra_arguments_with_stable_identifier() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let err = tril_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), TRIL_ERROR_TOO_MANY_INPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -13,6 +13,10 @@ pub enum Token {
     // Keywords
     #[token("function")]
     Function,
+    #[token("isolated")]
+    Isolated,
+    #[token("async")]
+    Async,
     #[token("if")]
     If,
     #[token("else")]

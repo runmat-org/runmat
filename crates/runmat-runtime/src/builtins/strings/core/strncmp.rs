@@ -1,6 +1,9 @@
 //! MATLAB-compatible `strncmp` builtin for RunMat.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -15,6 +18,86 @@ use crate::builtins::strings::type_resolvers::logical_text_match_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const FN_NAME: &str = "strncmp";
+
+const STRNCMP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical prefix-comparison result.",
+}];
+
+const STRNCMP_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prefix length to compare.",
+    },
+];
+
+const STRNCMP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = strncmp(A, B, N)",
+    inputs: &STRNCMP_INPUTS,
+    outputs: &STRNCMP_OUTPUT,
+}];
+
+const STRNCMP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRNCMP.INVALID_INPUT",
+    identifier: Some("RunMat:strncmp:InvalidInput"),
+    when: "At least one text input is not a supported text container.",
+    message: "strncmp: text inputs must be string/char/cell/string-array values",
+};
+
+const STRNCMP_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRNCMP.SHAPE_MISMATCH",
+    identifier: Some("RunMat:strncmp:ShapeMismatch"),
+    when: "Text inputs are not broadcast-compatible.",
+    message: "strncmp: input sizes are not broadcast-compatible",
+};
+
+const STRNCMP_ERROR_INVALID_PREFIX_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRNCMP.INVALID_PREFIX_LENGTH",
+    identifier: Some("RunMat:strncmp:InvalidPrefixLength"),
+    when: "Prefix length argument is not a finite nonnegative integer scalar.",
+    message: "strncmp: prefix length must be a finite nonnegative integer scalar",
+};
+
+const STRNCMP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRNCMP.INTERNAL",
+    identifier: Some("RunMat:strncmp:InternalError"),
+    when: "Internal logical result assembly failed.",
+    message: "strncmp: internal error",
+};
+
+const STRNCMP_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    STRNCMP_ERROR_INVALID_INPUT,
+    STRNCMP_ERROR_SHAPE_MISMATCH,
+    STRNCMP_ERROR_INVALID_PREFIX_LENGTH,
+    STRNCMP_ERROR_INTERNAL,
+];
+
+pub const STRNCMP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRNCMP_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRNCMP_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::strncmp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -43,8 +126,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results and is not eligible for GPU fusion.",
 };
 
-fn strncmp_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(FN_NAME).build()
+fn strncmp_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strncmp_error_with_message(error.message, error)
+}
+
+fn strncmp_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(FN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
@@ -58,6 +152,7 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
     keywords = "strncmp,string compare,prefix,text equality",
     accel = "sink",
     type_resolver(logical_text_match_type),
+    descriptor(crate::builtins::strings::core::strncmp::STRNCMP_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::strncmp"
 )]
 async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<Value> {
@@ -72,8 +167,10 @@ async fn strncmp_builtin(a: Value, b: Value, n: Value) -> crate::BuiltinResult<V
         .map_err(remap_strncmp_flow)?;
 
     let limit = parse_prefix_length(n)?;
-    let left = TextCollection::from_argument(FN_NAME, a, "first argument")?;
-    let right = TextCollection::from_argument(FN_NAME, b, "second argument")?;
+    let left = TextCollection::from_argument(FN_NAME, a, "first argument")
+        .map_err(|_| strncmp_error(&STRNCMP_ERROR_INVALID_INPUT))?;
+    let right = TextCollection::from_argument(FN_NAME, b, "second argument")
+        .map_err(|_| strncmp_error(&STRNCMP_ERROR_INVALID_INPUT))?;
     evaluate_strncmp(&left, &right, limit)
 }
 
@@ -82,10 +179,12 @@ fn evaluate_strncmp(
     right: &TextCollection,
     limit: usize,
 ) -> BuiltinResult<Value> {
-    let shape = broadcast_shapes(FN_NAME, &left.shape, &right.shape)?;
+    let shape = broadcast_shapes(FN_NAME, &left.shape, &right.shape)
+        .map_err(|_| strncmp_error(&STRNCMP_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
-        return logical_result(FN_NAME, Vec::new(), shape);
+        return logical_result(FN_NAME, Vec::new(), shape)
+            .map_err(|_| strncmp_error(&STRNCMP_ERROR_INTERNAL));
     }
 
     let left_strides = compute_strides(&left.shape);
@@ -106,7 +205,7 @@ fn evaluate_strncmp(
         data.push(if equal { 1 } else { 0 });
     }
 
-    logical_result(FN_NAME, data, shape)
+    logical_result(FN_NAME, data, shape).map_err(|_| strncmp_error(&STRNCMP_ERROR_INTERNAL))
 }
 
 fn prefix_equal(lhs: &str, rhs: &str, limit: usize) -> bool {
@@ -144,9 +243,7 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(strncmp_flow(format!(
-                    "{FN_NAME}: prefix length must be a nonnegative integer"
-                )));
+                return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
             Ok(raw as usize)
         }
@@ -154,47 +251,33 @@ fn parse_prefix_length(value: Value) -> BuiltinResult<usize> {
         Value::Bool(b) => Ok(if b { 1 } else { 0 }),
         Value::Tensor(tensor) => {
             if tensor.data.len() != 1 {
-                return Err(strncmp_flow(format!(
-                    "{FN_NAME}: prefix length must be a nonnegative integer scalar"
-                )));
+                return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
             parse_prefix_length_from_float(tensor.data[0])
         }
         Value::LogicalArray(array) => {
             if array.data.len() != 1 {
-                return Err(strncmp_flow(format!(
-                    "{FN_NAME}: prefix length must be a nonnegative integer scalar"
-                )));
+                return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
             }
             Ok(if array.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(strncmp_flow(format!(
-            "{FN_NAME}: prefix length must be a nonnegative integer scalar, received {other:?}"
-        ))),
+        _ => Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH)),
     }
 }
 
 fn parse_prefix_length_from_float(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(strncmp_flow(format!(
-            "{FN_NAME}: prefix length must be a finite nonnegative integer"
-        )));
+        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     if value < 0.0 {
-        return Err(strncmp_flow(format!(
-            "{FN_NAME}: prefix length must be a nonnegative integer"
-        )));
+        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(strncmp_flow(format!(
-            "{FN_NAME}: prefix length must be a nonnegative integer"
-        )));
+        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     if rounded > (usize::MAX as f64) {
-        return Err(strncmp_flow(format!(
-            "{FN_NAME}: prefix length exceeds the maximum supported size"
-        )));
+        return Err(strncmp_error(&STRNCMP_ERROR_INVALID_PREFIX_LENGTH));
     }
     Ok(rounded as usize)
 }
@@ -213,7 +296,7 @@ pub(crate) mod tests {
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
+        err.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -427,7 +510,7 @@ pub(crate) mod tests {
             )
             .expect_err("size mismatch"),
         );
-        assert!(err.contains("size mismatch"));
+        assert!(err.contains(STRNCMP_ERROR_SHAPE_MISMATCH.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

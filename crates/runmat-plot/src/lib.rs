@@ -10,6 +10,7 @@ pub mod context;
 pub mod core;
 pub mod data;
 pub mod event;
+pub mod geometry;
 pub mod gpu;
 
 // High-level plot types and figures
@@ -31,10 +32,6 @@ pub mod overlay;
 // WASM/WebGPU bridge
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
 pub mod web;
-
-// Jupyter integration
-#[cfg(feature = "jupyter")]
-pub mod jupyter;
 
 // Styling and themes
 pub mod styling;
@@ -72,7 +69,7 @@ pub use gui::{
 
 // Export functionality
 // Explicitly export image exporter to avoid collision with plots::image
-pub use export::{image::*, vector::*};
+pub use export::image::*;
 
 // ===== UNIFIED PLOTTING FUNCTIONS =====
 
@@ -116,7 +113,7 @@ pub fn show_plot_unified(
                 #[cfg(target_os = "macos")]
                 {
                     if !is_main_thread() {
-                        return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUNMAT_PLOT_MODE=headless for exports.".to_string());
+                        return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread, or use file export APIs for headless rendering.".to_string());
                     }
                 }
                 show_plot_sequential(figure)
@@ -327,7 +324,7 @@ pub fn render_interactive_with_handle(
         #[cfg(target_os = "macos")]
         {
             if !is_main_thread() {
-                return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread or set RUNMAT_PLOT_MODE=headless for exports.".to_string());
+                return Err("Interactive plotting is unavailable on macOS when called from a non-main thread. Launch RunMat from the main thread, or use file export APIs for headless rendering.".to_string());
             }
         }
         if handle == 0 {

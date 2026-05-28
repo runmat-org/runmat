@@ -1,6 +1,6 @@
 use crossbeam_channel::{bounded, Sender};
-use runmat_config::TelemetryConfig as RuntimeTelemetryConfig;
-use runmat_config::TelemetryDrainMode as RuntimeTelemetryDrainMode;
+use runmat_config::runtime::TelemetryConfig as RuntimeTelemetryConfig;
+use runmat_config::runtime::TelemetryDrainMode as RuntimeTelemetryDrainMode;
 use runmat_core::TelemetrySink;
 use runmat_time::Instant;
 use std::sync::atomic::{AtomicUsize, Ordering};

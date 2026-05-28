@@ -20,4 +20,3 @@ runmat-builtins = { workspace = true }
 
 [dev-dependencies]
 trybuild = "1"
-runmat-async = { workspace = true }

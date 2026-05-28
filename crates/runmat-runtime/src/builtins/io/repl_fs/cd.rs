@@ -5,7 +5,11 @@ use runmat_filesystem as vfs;
 use std::env;
 use std::path::{Path, PathBuf};
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -44,10 +48,91 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "cd";
 
+const CD_OUTPUT_PREVIOUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Previous working folder before any directory change.",
+}];
+const CD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const CD_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Target folder path.",
+}];
+const CD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "folder = cd()",
+        inputs: &CD_INPUTS_NONE,
+        outputs: &CD_OUTPUT_PREVIOUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "folder = cd(folder)",
+        inputs: &CD_INPUTS_FOLDER,
+        outputs: &CD_OUTPUT_PREVIOUS,
+    },
+];
+
+const CD_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CD.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than one positional argument is provided.",
+    message: "cd: too many input arguments",
+};
+const CD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CD.INVALID_INPUT",
+    identifier: None,
+    when: "Folder argument is not a character vector or string scalar.",
+    message: "cd: folder name must be a character vector or string scalar",
+};
+const CD_ERROR_EMPTY_FOLDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CD.EMPTY_FOLDER",
+    identifier: None,
+    when: "Folder argument resolves to an empty string.",
+    message: "cd: folder name must not be empty",
+};
+const CD_ERROR_CHANGE_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CD.CHANGE_FAILED",
+    identifier: None,
+    when: "Target directory cannot be entered.",
+    message: "cd: unable to change directory",
+};
+const CD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CD.INTERNAL",
+    identifier: None,
+    when: "Current working directory cannot be resolved.",
+    message: "cd: unable to determine current directory",
+};
+const CD_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    CD_ERROR_TOO_MANY_INPUTS,
+    CD_ERROR_INVALID_INPUT,
+    CD_ERROR_EMPTY_FOLDER,
+    CD_ERROR_CHANGE_FAILED,
+    CD_ERROR_INTERNAL,
+];
+pub const CD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CD_ERRORS,
+};
+
 fn cd_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn cd_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("cd: ").unwrap_or(detail);
+    cd_error(format!("{}: {}", error.message, detail))
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -69,6 +154,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::cd_type),
+    descriptor(crate::builtins::io::repl_fs::cd::CD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::cd"
 )]
 async fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -76,30 +162,43 @@ async fn cd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match gathered.len() {
         0 => current_directory_value(),
         1 => change_directory(&gathered[0]),
-        _ => Err(cd_error("cd: too many input arguments")),
+        _ => Err(cd_error(CD_ERROR_TOO_MANY_INPUTS.message)),
     }
 }
 
 fn current_directory_value() -> BuiltinResult<Value> {
-    let current = vfs::current_dir()
-        .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
+    let current = vfs::current_dir().map_err(|err| {
+        cd_error_with_detail(
+            &CD_ERROR_INTERNAL,
+            format!("cd: unable to determine current directory ({err})"),
+        )
+    })?;
     Ok(path_to_value(&current))
 }
 
 fn change_directory(value: &Value) -> BuiltinResult<Value> {
     let target_raw = extract_path(value)?;
     let target = expand_path(&target_raw)?;
-    let previous = vfs::current_dir()
-        .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
-
-    vfs::set_current_dir(&target).map_err(|err| {
-        cd_error(format!(
-            "cd: unable to change directory to '{target_raw}' ({err})"
-        ))
+    let previous = vfs::current_dir().map_err(|err| {
+        cd_error_with_detail(
+            &CD_ERROR_INTERNAL,
+            format!("cd: unable to determine current directory ({err})"),
+        )
     })?;
 
-    let _new_path = vfs::current_dir()
-        .map_err(|err| cd_error(format!("cd: unable to determine current directory ({err})")))?;
+    vfs::set_current_dir(&target).map_err(|err| {
+        cd_error_with_detail(
+            &CD_ERROR_CHANGE_FAILED,
+            format!("cd: unable to change directory to '{target_raw}' ({err})"),
+        )
+    })?;
+
+    let _new_path = vfs::current_dir().map_err(|err| {
+        cd_error_with_detail(
+            &CD_ERROR_INTERNAL,
+            format!("cd: unable to determine current directory ({err})"),
+        )
+    })?;
     Ok(path_to_value(&previous))
 }
 
@@ -107,40 +206,34 @@ fn extract_path(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => {
             if text.is_empty() {
-                Err(cd_error("cd: folder name must not be empty"))
+                Err(cd_error(CD_ERROR_EMPTY_FOLDER.message))
             } else {
                 Ok(text.clone())
             }
         }
         Value::StringArray(array) => {
             if array.data.len() != 1 {
-                return Err(cd_error(
-                    "cd: folder name must be a character vector or string scalar",
-                ));
+                return Err(cd_error(CD_ERROR_INVALID_INPUT.message));
             }
             let text = array.data[0].clone();
             if text.is_empty() {
-                Err(cd_error("cd: folder name must not be empty"))
+                Err(cd_error(CD_ERROR_EMPTY_FOLDER.message))
             } else {
                 Ok(text)
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(cd_error(
-                    "cd: folder name must be a character vector or string scalar",
-                ));
+                return Err(cd_error(CD_ERROR_INVALID_INPUT.message));
             }
             let text: String = chars.data.iter().collect();
             if text.is_empty() {
-                Err(cd_error("cd: folder name must not be empty"))
+                Err(cd_error(CD_ERROR_EMPTY_FOLDER.message))
             } else {
                 Ok(text)
             }
         }
-        _ => Err(cd_error(
-            "cd: folder name must be a character vector or string scalar",
-        )),
+        _ => Err(cd_error(CD_ERROR_INVALID_INPUT.message)),
     }
 }
 
@@ -186,6 +279,18 @@ pub(crate) mod tests {
 
     fn cd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::cd_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cd_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"folder = cd()"));
+        assert!(labels.contains(&"folder = cd(folder)"));
     }
 
     fn canonical_path(path: &Path) -> PathBuf {
@@ -278,7 +383,7 @@ pub(crate) mod tests {
 
         let missing = Value::from("this-directory-does-not-exist".to_string());
         let err = cd_builtin(vec![missing]).expect_err("error");
-        assert!(err.message().contains("cd: unable to change directory"));
+        assert!(err.message().contains(CD_ERROR_CHANGE_FAILED.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -312,7 +417,7 @@ pub(crate) mod tests {
         let _guard = DirGuard::new();
 
         let err = cd_builtin(vec![Value::from("".to_string())]).expect_err("empty string error");
-        assert_eq!(err.message(), "cd: folder name must not be empty");
+        assert_eq!(err.message(), CD_ERROR_EMPTY_FOLDER.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -326,10 +431,7 @@ pub(crate) mod tests {
         let strings =
             StringArray::new(vec!["foo".to_string(), "bar".to_string()], vec![2]).expect("array");
         let err = cd_builtin(vec![Value::StringArray(strings)]).expect_err("string array error");
-        assert_eq!(
-            err.message(),
-            "cd: folder name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), CD_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -342,10 +444,7 @@ pub(crate) mod tests {
 
         let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
         let err = cd_builtin(vec![Value::CharArray(chars)]).expect_err("char array error");
-        assert_eq!(
-            err.message(),
-            "cd: folder name must be a character vector or string scalar"
-        );
+        assert_eq!(err.message(), CD_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

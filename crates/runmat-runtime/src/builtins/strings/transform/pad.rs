@@ -1,6 +1,10 @@
 //! MATLAB-compatible `pad` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -40,24 +44,312 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "pad";
-const ARG_TYPE_ERROR: &str =
-    "pad: first argument must be a string array, character array, or cell array of character vectors";
-const LENGTH_ERROR: &str = "pad: target length must be a non-negative integer scalar";
-const DIRECTION_ERROR: &str = "pad: direction must be 'left', 'right', or 'both'";
-const PAD_CHAR_ERROR: &str =
-    "pad: padding character must be a string scalar or character vector containing one character";
-const CELL_ELEMENT_ERROR: &str =
-    "pad: cell array elements must be string scalars or character vectors";
-const ARGUMENT_CONFIG_ERROR: &str = "pad: unable to interpret input arguments";
+const PAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Padded text preserving input container kind and shape.",
+}];
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const PAD_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input text (string/char/cell).",
+}];
+
+const PAD_INPUTS_LENGTH: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "len",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target length (non-negative integer).",
+    },
+];
+
+const PAD_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"right\""),
+        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
+    },
+];
+
+const PAD_INPUTS_PADCHAR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "padCharacter",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\" \""),
+        description: "Single-character padding value.",
+    },
+];
+
+const PAD_INPUTS_LENGTH_DIRECTION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "len",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target length (non-negative integer).",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"right\""),
+        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
+    },
+];
+
+const PAD_INPUTS_LENGTH_PADCHAR: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "len",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target length (non-negative integer).",
+    },
+    BuiltinParamDescriptor {
+        name: "padCharacter",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\" \""),
+        description: "Single-character padding value.",
+    },
+];
+
+const PAD_INPUTS_DIRECTION_PADCHAR: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"right\""),
+        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "padCharacter",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\" \""),
+        description: "Single-character padding value.",
+    },
+];
+
+const PAD_INPUTS_LENGTH_DIRECTION_PADCHAR: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "len",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target length (non-negative integer).",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"right\""),
+        description: "Padding direction (`\"left\"|\"right\"|\"both\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "padCharacter",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\" \""),
+        description: "Single-character padding value.",
+    },
+];
+
+const PAD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str)",
+        inputs: &PAD_INPUTS_BASE,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, len)",
+        inputs: &PAD_INPUTS_LENGTH,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, direction)",
+        inputs: &PAD_INPUTS_DIRECTION,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, padCharacter)",
+        inputs: &PAD_INPUTS_PADCHAR,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, len, direction)",
+        inputs: &PAD_INPUTS_LENGTH_DIRECTION,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, len, padCharacter)",
+        inputs: &PAD_INPUTS_LENGTH_PADCHAR,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, direction, padCharacter)",
+        inputs: &PAD_INPUTS_DIRECTION_PADCHAR,
+        outputs: &PAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "out = pad(str, len, direction, padCharacter)",
+        inputs: &PAD_INPUTS_LENGTH_DIRECTION_PADCHAR,
+        outputs: &PAD_OUTPUT,
+    },
+];
+
+const PAD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.INVALID_INPUT",
+    identifier: Some("RunMat:pad:InvalidInput"),
+    when: "First argument is not a string array, char array, or cell array of text scalars.",
+    message:
+        "pad: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const PAD_ERROR_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.LENGTH",
+    identifier: Some("RunMat:pad:Length"),
+    when: "Length argument is not a non-negative integer scalar.",
+    message: "pad: target length must be a non-negative integer scalar",
+};
+
+const PAD_ERROR_DIRECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.DIRECTION",
+    identifier: Some("RunMat:pad:Direction"),
+    when: "Direction argument is not one of left/right/both.",
+    message: "pad: direction must be 'left', 'right', or 'both'",
+};
+
+const PAD_ERROR_PAD_CHAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.PAD_CHAR",
+    identifier: Some("RunMat:pad:PadChar"),
+    when: "Padding character is not a single-character string/char scalar.",
+    message:
+        "pad: padding character must be a string scalar or character vector containing one character",
+};
+
+const PAD_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.CELL_ELEMENT",
+    identifier: Some("RunMat:pad:CellElement"),
+    when: "Cell arrays contain non-text elements or non-row char arrays.",
+    message: "pad: cell array elements must be string scalars or character vectors",
+};
+
+const PAD_ERROR_ARGUMENT_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.ARGUMENT_CONFIG",
+    identifier: Some("RunMat:pad:ArgumentConfig"),
+    when: "Second/third arguments cannot be interpreted as valid pad argument combinations.",
+    message: "pad: unable to interpret input arguments",
+};
+
+const PAD_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.ARG_COUNT",
+    identifier: Some("RunMat:pad:ArgCount"),
+    when: "More than four total arguments are supplied.",
+    message: "pad: too many input arguments",
+};
+
+const PAD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PAD.INTERNAL",
+    identifier: Some("RunMat:pad:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "pad: internal error",
+};
+
+const PAD_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    PAD_ERROR_INVALID_INPUT,
+    PAD_ERROR_LENGTH,
+    PAD_ERROR_DIRECTION,
+    PAD_ERROR_PAD_CHAR,
+    PAD_ERROR_CELL_ELEMENT,
+    PAD_ERROR_ARGUMENT_CONFIG,
+    PAD_ERROR_ARG_COUNT,
+    PAD_ERROR_INTERNAL,
+];
+
+pub const PAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PAD_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn pad_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn pad_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    pad_error_with_message(error.message, error)
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -106,6 +398,7 @@ impl PadOptions {
     keywords = "pad,align,strings,character array",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::pad::PAD_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::pad"
 )]
 async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -116,7 +409,7 @@ async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         Value::StringArray(array) => pad_string_array(array, options),
         Value::CharArray(array) => pad_char_array(array, options),
         Value::Cell(cell) => pad_cell_array(cell, options).await,
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(pad_error(&PAD_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -154,7 +447,7 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
         padded.push(new_text);
     }
     let result = StringArray::new(padded, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+        .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))?;
     Ok(Value::StringArray(result))
 }
 
@@ -194,7 +487,7 @@ fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value>
 
     CharArray::new(new_data, rows, final_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))
 }
 
 async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<Value> {
@@ -250,8 +543,8 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                     is_missing: false,
                 }
             }
-            Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-            _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+            Value::CharArray(_) => return Err(pad_error(&PAD_ERROR_CELL_ELEMENT)),
+            _ => return Err(pad_error(&PAD_ERROR_CELL_ELEMENT)),
         };
         items.push(item);
     }
@@ -270,14 +563,16 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
             CellKind::Char { rows } => {
                 let chars: Vec<char> = padded.chars().collect();
                 let cols = chars.len();
-                let array = CharArray::new(chars, rows, cols)
-                    .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+                let array = CharArray::new(chars, rows, cols).map_err(|e| {
+                    pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL)
+                })?;
                 results.push(Value::CharArray(array));
             }
         }
     }
 
-    make_cell(results, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(results, rows, cols)
+        .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))
 }
 
 #[derive(Clone)]
@@ -319,7 +614,7 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<PadOptions> {
                 } else {
                     match parse_pad_char(&args[1]) {
                         Ok(pad_char) => options.pad_char = pad_char,
-                        Err(_) => return Err(runtime_error_for(DIRECTION_ERROR)),
+                        Err(_) => return Err(pad_error(&PAD_ERROR_DIRECTION)),
                     }
                 }
                 Ok(options)
@@ -329,20 +624,20 @@ fn parse_arguments(args: &[Value]) -> BuiltinResult<PadOptions> {
                 options.pad_char = pad_char;
                 Ok(options)
             } else {
-                Err(runtime_error_for(ARGUMENT_CONFIG_ERROR))
+                Err(pad_error(&PAD_ERROR_ARGUMENT_CONFIG))
             }
         }
         3 => {
-            let length = parse_length(&args[0])?.ok_or_else(|| runtime_error_for(LENGTH_ERROR))?;
+            let length = parse_length(&args[0])?.ok_or_else(|| pad_error(&PAD_ERROR_LENGTH))?;
             let direction = try_parse_direction(&args[1], true)?
-                .ok_or_else(|| runtime_error_for(DIRECTION_ERROR))?;
+                .ok_or_else(|| pad_error(&PAD_ERROR_DIRECTION))?;
             let pad_char = parse_pad_char(&args[2])?;
             options.target = PadTarget::Length(length);
             options.direction = direction;
             options.pad_char = pad_char;
             Ok(options)
         }
-        _ => Err(runtime_error_for("pad: too many input arguments")),
+        _ => Err(pad_error(&PAD_ERROR_ARG_COUNT)),
     }
 }
 
@@ -350,17 +645,17 @@ fn parse_length(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Num(n) => {
             if !n.is_finite() || *n < 0.0 {
-                return Err(runtime_error_for(LENGTH_ERROR));
+                return Err(pad_error(&PAD_ERROR_LENGTH));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err(runtime_error_for(LENGTH_ERROR));
+                return Err(pad_error(&PAD_ERROR_LENGTH));
             }
             Ok(Some(*n as usize))
         }
         Value::Int(i) => {
             let val = i.to_i64();
             if val < 0 {
-                return Err(runtime_error_for(LENGTH_ERROR));
+                return Err(pad_error(&PAD_ERROR_LENGTH));
             }
             Ok(Some(val as usize))
         }
@@ -371,7 +666,7 @@ fn parse_length(value: &Value) -> BuiltinResult<Option<usize>> {
 fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadDirection>> {
     let Some(text) = value_to_single_string(value) else {
         return if strict {
-            Err(runtime_error_for(DIRECTION_ERROR))
+            Err(pad_error(&PAD_ERROR_DIRECTION))
         } else {
             Ok(None)
         };
@@ -379,7 +674,7 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadD
     let lowered = text.trim().to_ascii_lowercase();
     if lowered.is_empty() {
         return if strict {
-            Err(runtime_error_for(DIRECTION_ERROR))
+            Err(pad_error(&PAD_ERROR_DIRECTION))
         } else {
             Ok(None)
         };
@@ -390,7 +685,7 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadD
         "both" => PadDirection::Both,
         _ => {
             return if strict {
-                Err(runtime_error_for(DIRECTION_ERROR))
+                Err(pad_error(&PAD_ERROR_DIRECTION))
             } else {
                 Ok(None)
             };
@@ -400,13 +695,13 @@ fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<PadD
 }
 
 fn parse_pad_char(value: &Value) -> BuiltinResult<char> {
-    let text = value_to_single_string(value).ok_or_else(|| runtime_error_for(PAD_CHAR_ERROR))?;
+    let text = value_to_single_string(value).ok_or_else(|| pad_error(&PAD_ERROR_PAD_CHAR))?;
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
-        return Err(runtime_error_for(PAD_CHAR_ERROR));
+        return Err(pad_error(&PAD_ERROR_PAD_CHAR));
     };
     if chars.next().is_some() {
-        return Err(runtime_error_for(PAD_CHAR_ERROR));
+        return Err(pad_error(&PAD_ERROR_PAD_CHAR));
     }
     Ok(first)
 }
@@ -657,14 +952,14 @@ pub(crate) mod tests {
     #[test]
     fn pad_errors_on_invalid_input_type() {
         let err = pad_builtin(Value::Num(1.0), Vec::new()).unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), PAD_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn pad_errors_on_negative_length() {
         let err = pad_builtin(Value::String("data".into()), vec![Value::Num(-1.0)]).unwrap_err();
-        assert_eq!(err.to_string(), LENGTH_ERROR);
+        assert_eq!(err.to_string(), PAD_ERROR_LENGTH.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -675,7 +970,7 @@ pub(crate) mod tests {
             vec![Value::Num(6.0), Value::String("around".into())],
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), DIRECTION_ERROR);
+        assert_eq!(err.to_string(), PAD_ERROR_DIRECTION.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -686,7 +981,7 @@ pub(crate) mod tests {
             vec![Value::String("left".into()), Value::String("##".into())],
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), PAD_CHAR_ERROR);
+        assert_eq!(err.to_string(), PAD_ERROR_PAD_CHAR.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `randi` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -51,6 +55,319 @@ fn randi_type(args: &[Type], ctx: &ResolveContext) -> Type {
     tensor_type_from_rank(rest, &rest_ctx)
 }
 
+const RANDI_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Uniform random integers.",
+}];
+
+const RANDI_SIG_IMAX_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "imax",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Upper bound; lower bound defaults to 1.",
+}];
+
+const RANDI_SIG_BOUNDS_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "bounds",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Two-element bounds vector [imin imax].",
+}];
+
+const RANDI_SIG_IMAX_N_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "imax",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound; lower bound defaults to 1.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Square size.",
+    },
+];
+
+const RANDI_SIG_BOUNDS_N_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bounds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element bounds vector [imin imax].",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Square size.",
+    },
+];
+
+const RANDI_SIG_IMAX_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "imax",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound; lower bound defaults to 1.",
+    },
+    BuiltinParamDescriptor {
+        name: "size_vector",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Size vector defining output dimensions.",
+    },
+];
+
+const RANDI_SIG_BOUNDS_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bounds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element bounds vector [imin imax].",
+    },
+    BuiltinParamDescriptor {
+        name: "size_vector",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Size vector defining output dimensions.",
+    },
+];
+
+const RANDI_SIG_IMAX_DIMS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "imax",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound; lower bound defaults to 1.",
+    },
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+];
+
+const RANDI_SIG_BOUNDS_DIMS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bounds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element bounds vector [imin imax].",
+    },
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+];
+
+const RANDI_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bounds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound scalar or two-element bounds vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class override ('double'|'logical').",
+    },
+];
+
+const RANDI_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "bounds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound scalar or two-element bounds vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const RANDI_SIG_BOUNDS_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "bounds",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound scalar or two-element bounds vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value when no numeric dimension arguments are provided.",
+    },
+];
+
+const RANDI_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
+    BuiltinSignatureDescriptor {
+        label: "R = randi(imax)",
+        inputs: &RANDI_SIG_IMAX_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi([imin imax])",
+        inputs: &RANDI_SIG_BOUNDS_VECTOR_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi(imax, n)",
+        inputs: &RANDI_SIG_IMAX_N_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi([imin imax], n)",
+        inputs: &RANDI_SIG_BOUNDS_N_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi(imax, size_vector)",
+        inputs: &RANDI_SIG_IMAX_SIZE_VECTOR_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi([imin imax], size_vector)",
+        inputs: &RANDI_SIG_BOUNDS_SIZE_VECTOR_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi(imax, m, n, ...)",
+        inputs: &RANDI_SIG_IMAX_DIMS_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi([imin imax], m, n, ...)",
+        inputs: &RANDI_SIG_BOUNDS_DIMS_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi(..., typename)",
+        inputs: &RANDI_SIG_CLASS_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi(..., \"like\", prototype)",
+        inputs: &RANDI_SIG_LIKE_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = randi(bounds, prototype)",
+        inputs: &RANDI_SIG_BOUNDS_PROTOTYPE_INPUTS,
+        outputs: &RANDI_OUTPUT,
+    },
+];
+
+const RANDI_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.MISSING_BOUNDS",
+        identifier: None,
+        when: "No bounds argument is provided.",
+        message: "randi: requires at least one input argument",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.INVALID_BOUNDS",
+        identifier: None,
+        when: "Bounds are invalid or unsupported (empty, non-finite, non-integer, or malformed).",
+        message: "randi: bounds must be numeric scalars or vectors",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.BOUNDS_ORDER",
+        identifier: None,
+        when: "Lower bound exceeds upper bound.",
+        message: "randi: lower bound must be <= upper bound",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "randi: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.MULTIPLE_LIKE",
+        identifier: None,
+        when: "The 'like' keyword is provided multiple times.",
+        message: "randi: multiple 'like' specifications are not supported",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.CLASS_CONFLICT",
+        identifier: None,
+        when: "A class keyword and a 'like' prototype are both provided.",
+        message: "randi: cannot combine 'like' with class specifiers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.UNSUPPORTED_CLASS",
+        identifier: None,
+        when: "An unsupported output class is requested.",
+        message: "randi: output class is not implemented",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not recognized.",
+        message: "randi: unrecognised option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDI.INVALID_DIMS",
+        identifier: None,
+        when: "Dimension arguments fail numeric/shape parsing.",
+        message: "randi: dimension arguments must be numeric and nonnegative",
+    },
+];
+
+pub const RANDI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RANDI_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RANDI_ERRORS,
+};
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randi",
@@ -69,6 +386,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "randi,random,integer,gpu,like",
     accel = "array_construct",
     type_resolver(randi_type),
+    descriptor(crate::builtins::array::creation::randi::RANDI_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::randi"
 )]
 async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

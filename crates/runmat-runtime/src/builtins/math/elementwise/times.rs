@@ -2,7 +2,11 @@
 
 use async_recursion::async_recursion;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -62,10 +66,141 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "times";
 
+const TIMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise product result.",
+}];
+
+const TIMES_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical operand.",
+    },
+];
+
+const TIMES_INPUTS_A_B_LIKE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const TIMES_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = times(A, B)",
+        inputs: &TIMES_INPUTS_A_B,
+        outputs: &TIMES_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = times(A, B, \"like\", prototype)",
+        inputs: &TIMES_INPUTS_A_B_LIKE,
+        outputs: &TIMES_OUTPUT,
+    },
+];
+
+const TIMES_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.INVALID_ARGUMENT",
+    identifier: Some("RunMat:times:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "times: invalid argument",
+};
+
+const TIMES_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.INVALID_INPUT",
+    identifier: Some("RunMat:times:InvalidInput"),
+    when: "Operands or prototypes cannot be converted into supported numeric/logical forms.",
+    message: "times: invalid input",
+};
+
+const TIMES_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.SIZE_MISMATCH",
+    identifier: Some("RunMat:times:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "times: array sizes are not compatible for broadcasting",
+};
+
+const TIMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.INTERNAL",
+    identifier: Some("RunMat:times:Internal"),
+    when: "Provider interaction, gather/upload, or internal tensor construction failed.",
+    message: "times: internal error",
+};
+
+const TIMES_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    TIMES_ERROR_INVALID_ARGUMENT,
+    TIMES_ERROR_INVALID_INPUT,
+    TIMES_ERROR_SIZE_MISMATCH,
+    TIMES_ERROR_INTERNAL,
+];
+
+pub const TIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIMES_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TIMES_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn times_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn times_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -75,6 +210,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "times,element-wise multiply,gpu,.*",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::times::TIMES_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::times"
 )]
 async fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -100,21 +236,29 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err(builtin_error("times: expected prototype after 'like'"));
+            return Err(times_error_with_detail(
+                &TIMES_ERROR_INVALID_ARGUMENT,
+                "expected prototype after 'like'",
+            ));
         }
-        return Err(builtin_error(
-            "times: unsupported option; only 'like' is accepted",
+        return Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err(builtin_error(
-            "times: unsupported option; only 'like' is accepted",
+        return Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
-    Err(builtin_error("times: too many input arguments"))
+    Err(times_error_with_detail(
+        &TIMES_ERROR_INVALID_ARGUMENT,
+        "too many input arguments",
+    ))
 }
 
 async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
@@ -175,8 +319,9 @@ async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(builtin_error(
-            "times: GPU output requested via 'like' but no acceleration provider is active",
+        return Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            "GPU output requested via 'like' but no acceleration provider is active",
         ));
     };
     match value {
@@ -207,21 +352,29 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "times: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
-            builtin_error("times: unsupported prototype conversion to GPU output"),
-        ),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
+            Err(times_error_with_detail(
+                &TIMES_ERROR_INVALID_ARGUMENT,
+                "unsupported prototype conversion to GPU output",
+            ))
+        }
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(builtin_error(
-            "times: unsupported prototype conversion to GPU output",
+        | Value::OutputList(_) => Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
         )),
     }
 }
@@ -266,9 +419,10 @@ async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(builtin_error(format!(
-            "times: unsupported prototype for 'like' ({value:?})"
-        ))),
+        _ => Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_ARGUMENT,
+            format!("unsupported prototype for 'like' ({value:?})"),
+        )),
     }
 }
 
@@ -298,9 +452,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
                 .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
             real_to_complex(gathered).await
         }
-        other => Err(builtin_error(format!(
-            "times: cannot convert value {other:?} to complex output"
-        ))),
+        other => Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_INPUT,
+            format!("cannot convert value {other:?} to complex output"),
+        )),
     }
 }
 
@@ -476,7 +631,7 @@ fn times_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("times: {err}")))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     let dtype = real_result_dtype(lhs, rhs);
     if plan.is_empty() {
         let mut tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
@@ -496,7 +651,7 @@ fn times_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("times: {err}")))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -517,7 +672,7 @@ fn times_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 
 fn times_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("times: {err}")))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -561,7 +716,7 @@ fn apply_result_dtype(tensor: &mut Tensor, dtype: NumericDType) {
 
 fn times_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("times: {err}")))?;
+        .map_err(|err| times_error_with_detail(&TIMES_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("times: {e}")))?;
@@ -607,11 +762,14 @@ fn classify_operand(value: Value) -> BuiltinResult<TimesOperand> {
                 .map_err(|e| builtin_error(format!("times: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(TimesOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error("times: internal error converting GPU value")),
-        other => Err(builtin_error(format!(
-            "times: unsupported operand type {:?}; expected numeric or logical data",
-            other
-        ))),
+        Value::GpuTensor(_) => Err(times_error(&TIMES_ERROR_INTERNAL)),
+        other => Err(times_error_with_detail(
+            &TIMES_ERROR_INVALID_INPUT,
+            format!(
+                "unsupported operand type {:?}; expected numeric or logical data",
+                other
+            ),
+        )),
     }
 }
 
@@ -663,6 +821,24 @@ pub(crate) mod tests {
 
     fn times_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::times_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn times_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TIMES_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = times(A, B)"));
+        assert!(labels.contains(&"C = times(A, B, \"like\", prototype)"));
+    }
+
+    #[test]
+    fn times_parser_error_has_stable_identifier() {
+        let err = times_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
+            .expect_err("expected parser error");
+        assert_eq!(err.identifier(), TIMES_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

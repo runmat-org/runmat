@@ -1,7 +1,11 @@
 //! MATLAB-compatible `mean` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+};
 const NAME: &str = "mean";
 
 use runmat_builtins::ResolveContext;
@@ -28,6 +32,245 @@ use crate::builtins::common::{
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::dispatcher;
 
+const MEAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Mean reduction result.",
+}];
+
+const MEAN_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const MEAN_INPUTS_A_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const MEAN_INPUTS_A_ALL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "all",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"all\""),
+        description: "Reduce across all dimensions.",
+    },
+];
+
+const MEAN_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const MEAN_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "outtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+    },
+];
+
+const MEAN_INPUTS_A_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const MEAN_INPUTS_A_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const MEAN_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"like\""),
+        description: "Prototype keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value controlling output class/device.",
+    },
+];
+
+const MEAN_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A)",
+        inputs: &MEAN_INPUTS_A,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, dim)",
+        inputs: &MEAN_INPUTS_A_DIM,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, \"all\")",
+        inputs: &MEAN_INPUTS_A_ALL,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, nanflag)",
+        inputs: &MEAN_INPUTS_A_NANFLAG,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, outtype)",
+        inputs: &MEAN_INPUTS_A_OUTTYPE,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, dim, nanflag)",
+        inputs: &MEAN_INPUTS_A_DIM_NANFLAG,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, nanflag, dim)",
+        inputs: &MEAN_INPUTS_A_NANFLAG_DIM,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, \"like\", prototype)",
+        inputs: &MEAN_INPUTS_A_LIKE,
+        outputs: &MEAN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mean(A, vecdim)",
+        inputs: &MEAN_INPUTS_A_DIM,
+        outputs: &MEAN_OUTPUT,
+    },
+];
+
+const MEAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEAN.INVALID_ARGUMENT",
+    identifier: Some("RunMat:mean:InvalidArgument"),
+    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    message: "mean: invalid argument",
+};
+
+const MEAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEAN.INVALID_INPUT",
+    identifier: Some("RunMat:mean:InvalidInput"),
+    when: "Input values cannot be converted to supported mean reduction domains.",
+    message: "mean: invalid input",
+};
+
+const MEAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MEAN.INTERNAL",
+    identifier: Some("RunMat:mean:Internal"),
+    when:
+        "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
+    message: "mean: internal reduction failure",
+};
+
+const MEAN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    MEAN_ERROR_INVALID_ARGUMENT,
+    MEAN_ERROR_INVALID_INPUT,
+    MEAN_ERROR_INTERNAL,
+];
+
+pub const MEAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MEAN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MEAN_ERRORS,
+};
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::mean")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mean",
@@ -51,8 +294,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can specialise mean reductions; omitnan currently falls back to the host.",
 };
 
-fn mean_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn mean_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn mean_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    mean_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn mean_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    mean_descriptor_error_with_detail(&MEAN_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn mean_invalid_input(detail: impl AsRef<str>) -> RuntimeError {
+    mean_descriptor_error_with_detail(&MEAN_ERROR_INVALID_INPUT, detail)
+}
+
+fn mean_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    mean_descriptor_error_with_detail(&MEAN_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::mean")]
@@ -174,13 +443,13 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(mean_error(
+            return Err(mean_internal_error(
                 "mean: cannot represent NaN as an integer output",
             ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(mean_error(
+            return Err(mean_internal_error(
                 "mean: integer output overflowed the target type",
             ));
         }
@@ -212,6 +481,7 @@ enum MeanAxes {
     keywords = "mean,average,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(mean_type),
+    descriptor(crate::builtins::math::reduction::mean::MEAN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
 async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -288,7 +558,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, MeanAxes::Default) {
-                        return Err(mean_error(
+                        return Err(mean_invalid_argument(
                             "mean: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -314,7 +584,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, MeanAxes::Default) {
-                        return Err(mean_error(
+                        return Err(mean_invalid_argument(
                             "mean: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -325,7 +595,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(mean_error(
+                        return Err(mean_invalid_argument(
                             "mean: multiple output class specifications provided",
                         ));
                     }
@@ -336,7 +606,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(mean_error(
+                        return Err(mean_invalid_argument(
                             "mean: multiple output class specifications provided",
                         ));
                     }
@@ -347,17 +617,21 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(mean_error(
+                        return Err(mean_invalid_argument(
                             "mean: cannot combine 'like' with another output class specifier",
                         ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(mean_error("mean: expected prototype after 'like'"));
+                        return Err(mean_invalid_argument(
+                            "mean: expected prototype after 'like'",
+                        ));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err(mean_error("mean: 'like' must be the final argument"));
+                        return Err(mean_invalid_argument(
+                            "mean: 'like' must be the final argument",
+                        ));
                     }
                     break;
                 }
@@ -371,7 +645,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     && axes_set
                     && !matches!(axes, MeanAxes::Default)
                 {
-                    return Err(mean_error(
+                    return Err(mean_invalid_argument(
                         "mean: 'all' cannot be combined with an explicit dimension",
                     ));
                 }
@@ -385,17 +659,19 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         if axes_set && !matches!(axes, MeanAxes::Default) {
             if let Some(selection) = parse_axes(arg).await? {
                 if matches!(selection, MeanAxes::All) {
-                    return Err(mean_error(
+                    return Err(mean_invalid_argument(
                         "mean: 'all' cannot be combined with an explicit dimension",
                     ));
                 }
-                return Err(mean_error(
+                return Err(mean_invalid_argument(
                     "mean: multiple dimension specifications provided",
                 ));
             }
         }
 
-        return Err(mean_error(format!("mean: unrecognised argument {arg:?}")));
+        return Err(mean_invalid_argument(format!(
+            "mean: unrecognised argument {arg:?}"
+        )));
     }
 
     Ok(ParsedArguments {
@@ -411,7 +687,9 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         return match lowered.as_str() {
             "all" => Ok(Some(MeanAxes::All)),
             "omitnan" | "includenan" | "double" | "native" | "default" | "like" => Ok(None),
-            "" => Err(mean_error("mean: dimension string must not be empty")),
+            "" => Err(mean_invalid_argument(
+                "mean: dimension string must not be empty",
+            )),
             _ => Ok(None),
         };
     }
@@ -435,7 +713,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
-            return Err(mean_error("mean: dimension must be numeric"));
+            return Err(mean_invalid_argument("mean: dimension must be numeric"));
         }
         _ => return Ok(None),
     };
@@ -449,7 +727,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
     if dims.len() == 1 {
         let dim = dims[0];
         if dim < 1 {
-            return Err(mean_error("mean: dimension must be >= 1"));
+            return Err(mean_invalid_argument("mean: dimension must be >= 1"));
         }
         return Ok(Some(MeanAxes::Dim(dim)));
     }
@@ -458,7 +736,9 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
             *dim = 1;
         }
         if *dim < 1 {
-            return Err(mean_error("mean: dimension entries must be >= 1"));
+            return Err(mean_invalid_argument(
+                "mean: dimension entries must be >= 1",
+            ));
         }
     }
     Ok(Some(MeanAxes::Vec(dims)))
@@ -476,30 +756,30 @@ fn value_as_str(value: &Value) -> Option<String> {
 fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
     if message.contains("non-negative") {
         if scalar {
-            return mean_error("mean: dimension must be >= 1");
+            return mean_invalid_argument("mean: dimension must be >= 1");
         }
-        return mean_error("mean: dimension entries must be >= 1");
+        return mean_invalid_argument("mean: dimension entries must be >= 1");
     }
     if scalar {
         if message.contains("finite") {
-            return mean_error("mean: dimension must be finite");
+            return mean_invalid_argument("mean: dimension must be finite");
         }
         if message.contains("integer") {
-            return mean_error("mean: dimension must be an integer");
+            return mean_invalid_argument("mean: dimension must be an integer");
         }
     }
-    mean_error("mean: dimension entries must be finite integers")
+    mean_invalid_argument("mean: dimension entries must be finite integers")
 }
 
 fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("mean", value).map_err(mean_error)?;
+    let tensor = tensor::value_into_tensor_for("mean", value).map_err(mean_invalid_input)?;
     let reduced = mean_tensor(tensor, args.axes.clone(), args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
 
 fn mean_host_complex_scalar(re: f64, im: f64, args: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-        .map_err(|e| mean_error(format!("mean: {e}")))?;
+        .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
     mean_host_complex_tensor(tensor, args)
 }
 
@@ -820,7 +1100,7 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Ten
         .fold(1usize, |acc, dim| acc.saturating_mul(dim));
     if total_elems == 0 || tensor.data.is_empty() {
         return Tensor::new(vec![f64::NAN], vec![1, 1])
-            .map_err(|e| mean_error(format!("mean: {e}")));
+            .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
     let mut sum = 0.0f64;
     let mut count = 0usize;
@@ -839,7 +1119,8 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Ten
             } else {
                 sum / (total_elems as f64)
             };
-            Tensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")))
+            Tensor::new(vec![result], vec![1, 1])
+                .map_err(|e| mean_internal_error(format!("mean: {e}")))
         }
         ReductionNaN::Omit => {
             for &value in &tensor.data {
@@ -854,7 +1135,8 @@ fn mean_tensor_all(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<Ten
             } else {
                 sum / (count as f64)
             };
-            Tensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")))
+            Tensor::new(vec![result], vec![1, 1])
+                .map_err(|e| mean_internal_error(format!("mean: {e}")))
         }
     }
 }
@@ -865,7 +1147,7 @@ fn reduce_tensor_mean_dim(
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err(mean_error("mean: dimension must be >= 1"));
+        return Err(mean_internal_error("mean: dimension must be >= 1"));
     }
 
     if is_scalar_shape(&tensor.shape) {
@@ -880,7 +1162,8 @@ fn reduce_tensor_mean_dim(
                 }
             }
         };
-        return Tensor::new(vec![result], vec![1, 1]).map_err(|e| mean_error(format!("mean: {e}")));
+        return Tensor::new(vec![result], vec![1, 1])
+            .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
 
     let Some(output_shape) = reduction_shape(&tensor.shape, dim) else {
@@ -889,7 +1172,8 @@ fn reduce_tensor_mean_dim(
 
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; tensor::element_count(&output_shape)];
-        return Tensor::new(fill, output_shape).map_err(|e| mean_error(format!("mean: {e}")));
+        return Tensor::new(fill, output_shape)
+            .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
 
     let dim_index = dim - 1;
@@ -946,7 +1230,7 @@ fn reduce_tensor_mean_dim(
         }
     }
 
-    Tensor::new(output, output_shape).map_err(|e| mean_error(format!("mean: {e}")))
+    Tensor::new(output, output_shape).map_err(|e| mean_internal_error(format!("mean: {e}")))
 }
 
 fn mean_complex_tensor(
@@ -990,7 +1274,7 @@ fn reduce_complex_tensor_mean_dim(
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<ComplexTensor> {
     if dim == 0 {
-        return Err(mean_error("mean: dimension must be >= 1"));
+        return Err(mean_internal_error("mean: dimension must be >= 1"));
     }
 
     let shape = if is_scalar_shape(&tensor.shape) {
@@ -1012,7 +1296,7 @@ fn reduce_complex_tensor_mean_dim(
             }
         };
         return ComplexTensor::new(vec![result], canonical_scalar_shape())
-            .map_err(|e| mean_error(format!("mean: {e}")));
+            .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
 
     let Some(output_shape) = reduction_shape(&shape, dim) else {
@@ -1022,7 +1306,7 @@ fn reduce_complex_tensor_mean_dim(
     if tensor.data.is_empty() {
         let fill = vec![(f64::NAN, f64::NAN); tensor::element_count(&output_shape)];
         return ComplexTensor::new(fill, output_shape)
-            .map_err(|e| mean_error(format!("mean: {e}")));
+            .map_err(|e| mean_internal_error(format!("mean: {e}")));
     }
 
     let dim_index = dim - 1;
@@ -1087,7 +1371,7 @@ fn reduce_complex_tensor_mean_dim(
         }
     }
 
-    ComplexTensor::new(output, output_shape).map_err(|e| mean_error(format!("mean: {e}")))
+    ComplexTensor::new(output, output_shape).map_err(|e| mean_internal_error(format!("mean: {e}")))
 }
 
 fn reduction_shape(shape: &[usize], dim: usize) -> Option<Vec<usize>> {
@@ -1171,13 +1455,13 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
             }
             Value::Num(n) => {
                 let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| mean_error(format!("{NAME}: {e}")))?;
+                    .map_err(|e| mean_internal_error(format!("{NAME}: {e}")))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| mean_error(format!("{NAME}: {e}")))?;
+                    .map_err(|e| mean_internal_error(format!("{NAME}: {e}")))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
@@ -1205,14 +1489,14 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
                 let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| mean_error(format!("mean: {e}")))?;
+                    .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(mean_invalid_input)?;
                 upload_tensor(tensor)
             }
-            other => Err(mean_error(format!(
+            other => Err(mean_invalid_input(format!(
                 "mean: cannot place value {other:?} on the GPU"
             ))),
         },
@@ -1221,7 +1505,7 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(mean_error(
+        return Err(mean_internal_error(
             "mean: no acceleration provider available to honour GPU output",
         ));
     };
@@ -1231,7 +1515,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| mean_error(format!("mean: failed to upload GPU result: {e}")))?;
+        .map_err(|e| mean_internal_error(format!("mean: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -1256,14 +1540,14 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
             let tensor = ComplexTensor::new(data, t.shape.clone())
-                .map_err(|e| mean_error(format!("mean: {e}")))?;
+                .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(mean_invalid_input)?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(mean_error(format!(
+        other => Err(mean_invalid_input(format!(
             "mean: cannot convert value {other:?} to a complex result"
         ))),
     }
@@ -1301,7 +1585,7 @@ async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
         other => {
             let gathered = dispatcher::gather_if_needed_async(other)
                 .await
-                .map_err(|e| mean_error(format!("mean: {e}")))?;
+                .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
             analyse_like_prototype(&gathered).await
         }
     }
@@ -1332,6 +1616,40 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(4)])
             }
         );
+    }
+
+    #[test]
+    fn mean_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MEAN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"M = mean(A)"));
+        assert!(labels.contains(&"M = mean(A, dim)"));
+        assert!(labels.contains(&"M = mean(A, \"all\")"));
+        assert!(labels.contains(&"M = mean(A, nanflag)"));
+        assert!(labels.contains(&"M = mean(A, outtype)"));
+        assert!(labels.contains(&"M = mean(A, dim, nanflag)"));
+        assert!(labels.contains(&"M = mean(A, nanflag, dim)"));
+        assert!(labels.contains(&"M = mean(A, \"like\", prototype)"));
+        assert!(labels.contains(&"M = mean(A, vecdim)"));
+    }
+
+    #[test]
+    fn mean_descriptor_errors_have_stable_codes() {
+        assert!(MEAN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MEAN_ERROR_INVALID_ARGUMENT.code));
+        assert!(MEAN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MEAN_ERROR_INVALID_INPUT.code));
+        assert!(MEAN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == MEAN_ERROR_INTERNAL.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1452,7 +1770,17 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = mean_builtin(Value::Tensor(tensor), vec![Value::from("like")])
             .expect_err("expected error");
+        assert_eq!(err.identifier(), MEAN_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("prototype"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mean_invalid_dim_identifier_is_descriptor_backed() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = mean_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))])
+            .expect_err("mean");
+        assert_eq!(err.identifier(), MEAN_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

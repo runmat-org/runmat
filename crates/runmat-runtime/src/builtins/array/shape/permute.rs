@@ -13,6 +13,8 @@ use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
 use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -84,6 +86,71 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     build_runtime_error(message).with_builtin(builtin).build()
 }
 
+const PERMUTE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array with dimensions reordered by order.",
+}];
+
+const PERMUTE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array/value.",
+    },
+    BuiltinParamDescriptor {
+        name: "order",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row/column vector containing a permutation of 1:ndims(A).",
+    },
+];
+
+const PERMUTE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = permute(A, order)",
+    inputs: &PERMUTE_INPUTS,
+    outputs: &PERMUTE_OUTPUT,
+}];
+
+const PERMUTE_ERROR_INVALID_ORDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PERMUTE.INVALID_ORDER",
+    identifier: Some("RunMat:permute:InvalidOrder"),
+    when: "order is non-numeric, non-vector, empty, non-integer, out of range, or duplicated.",
+    message: "permute: invalid order vector",
+};
+
+const PERMUTE_ERROR_RANK_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PERMUTE.RANK_MISMATCH",
+    identifier: Some("RunMat:permute:RankMismatch"),
+    when: "order length is less than ndims(A).",
+    message: "permute: order length must be at least ndims(A)",
+};
+
+const PERMUTE_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PERMUTE.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:permute:UnsupportedInput"),
+    when: "A has unsupported type for permute.",
+    message: "permute: unsupported input type",
+};
+
+const PERMUTE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    PERMUTE_ERROR_INVALID_ORDER,
+    PERMUTE_ERROR_RANK_MISMATCH,
+    PERMUTE_ERROR_UNSUPPORTED_INPUT,
+];
+
+pub const PERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PERMUTE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PERMUTE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "permute",
     category = "array/shape",
@@ -91,6 +158,7 @@ fn permute_error(builtin: &'static str, message: impl Into<String>) -> RuntimeEr
     keywords = "permute,dimension reorder,swap axes,gpu",
     accel = "custom",
     type_resolver(permute_type),
+    descriptor(crate::builtins::array::shape::permute::PERMUTE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::permute"
 )]
 async fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

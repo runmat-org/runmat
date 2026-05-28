@@ -1,6 +1,10 @@
 //! MATLAB-compatible `cell2mat` builtin implemented for the modern RunMat runtime.
 
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::cells::type_resolvers::cell2mat_type;
@@ -45,21 +49,81 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion sink; fusion planner stops GPU fusion before calling cell2mat.",
 };
 
-const IDENT_INVALID_INPUT: &str = "RunMat:cell2mat:InvalidInput";
-const IDENT_INVALID_CONTENTS: &str = "RunMat:cell2mat:InvalidContents";
-const IDENT_SIZE_LIMIT: &str = "RunMat:cell2mat:SizeExceeded";
+const BUILTIN_NAME: &str = "cell2mat";
 
-fn cell2mat_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cell2mat")
-        .build()
-}
+const CELL2MAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dense array assembled from cell contents.",
+}];
 
-fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("cell2mat")
-        .with_identifier(identifier)
-        .build()
+const CELL2MAT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input cell array.",
+}];
+
+const CELL2MAT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "A = cell2mat(C)",
+    inputs: &CELL2MAT_INPUTS,
+    outputs: &CELL2MAT_OUTPUT,
+}];
+
+const CELL2MAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL2MAT.INVALID_INPUT",
+    identifier: Some("RunMat:cell2mat:InvalidInput"),
+    when: "The input is not a cell array.",
+    message: "cell2mat: expected a cell array input",
+};
+
+const CELL2MAT_ERROR_INVALID_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL2MAT.INVALID_CONTENTS",
+    identifier: Some("RunMat:cell2mat:InvalidContents"),
+    when: "Cell contents cannot be concatenated to a dense array.",
+    message: "cell2mat: cell contents are not compatible for concatenation",
+};
+
+const CELL2MAT_ERROR_SIZE_EXCEEDED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL2MAT.SIZE_EXCEEDED",
+    identifier: Some("RunMat:cell2mat:SizeExceeded"),
+    when: "Resulting output exceeds supported platform limits.",
+    message: "cell2mat: resulting matrix exceeds platform limits",
+};
+
+const CELL2MAT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELL2MAT.INTERNAL",
+    identifier: None,
+    when: "Internal cell2mat allocation or conversion failed.",
+    message: "cell2mat: internal error",
+};
+
+const CELL2MAT_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    CELL2MAT_ERROR_INVALID_INPUT,
+    CELL2MAT_ERROR_INVALID_CONTENTS,
+    CELL2MAT_ERROR_SIZE_EXCEEDED,
+    CELL2MAT_ERROR_INTERNAL,
+];
+
+pub const CELL2MAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CELL2MAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CELL2MAT_ERRORS,
+};
+
+fn cell2mat_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -69,14 +133,15 @@ fn cell2mat_error_with_identifier(message: impl Into<String>, identifier: &str) 
     keywords = "cell2mat,cell,matrix,concatenation",
     accel = "gather",
     type_resolver(cell2mat_type),
+    descriptor(crate::builtins::cells::core::cell2mat::CELL2MAT_DESCRIPTOR),
     builtin_path = "crate::builtins::cells::core::cell2mat"
 )]
 async fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::Cell(ca) => cell_array_to_matrix(&ca).await,
-        other => Err(cell2mat_error_with_identifier(
-            format!("cell2mat: expected a cell array input, got {other:?}"),
-            IDENT_INVALID_INPUT,
+        other => Err(cell2mat_error_with_message(
+            format!("{}, got {other:?}", CELL2MAT_ERROR_INVALID_INPUT.message),
+            &CELL2MAT_ERROR_INVALID_INPUT,
         )),
     }
 }
@@ -124,8 +189,9 @@ impl CellEntry {
 async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         // Mirror MATLAB's behaviour: empty cell array -> 0x0 double matrix.
-        let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| {
+            cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+        })?;
         return Ok(Value::Tensor(tensor));
     }
 
@@ -140,9 +206,9 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
         let entry = parse_cell_entry(gathered)?;
         if let Some(kind) = detected_kind {
             if kind != entry.kind {
-                return Err(cell2mat_error_with_identifier(
+                return Err(cell2mat_error_with_message(
                     "cell2mat: all cell contents must share the same fundamental type",
-                    IDENT_INVALID_CONTENTS,
+                    &CELL2MAT_ERROR_INVALID_CONTENTS,
                 ));
             }
         } else {
@@ -172,17 +238,17 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
                 .get_mut(dim)
                 .and_then(|v| v.get_mut(indices[dim]))
             else {
-                return Err(cell2mat_error_with_identifier(
+                return Err(cell2mat_error_with_message(
                     "cell2mat: cell index is out of bounds for the provided shape",
-                    IDENT_INVALID_CONTENTS,
+                    &CELL2MAT_ERROR_INVALID_CONTENTS,
                 ));
             };
             if *slot == 0 {
                 *slot = size;
             } else if *slot != size {
-                return Err(cell2mat_error_with_identifier(
+                return Err(cell2mat_error_with_message(
                     "cell2mat: all cells in the same row and column must agree on block sizes",
-                    IDENT_INVALID_CONTENTS,
+                    &CELL2MAT_ERROR_INVALID_CONTENTS,
                 ));
             }
         }
@@ -196,9 +262,9 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
             if existing.len() != entry_extra.len()
                 || existing.iter().zip(&entry_extra).any(|(a, b)| *a != *b)
             {
-                return Err(cell2mat_error_with_identifier(
+                return Err(cell2mat_error_with_message(
                     "cell2mat: higher-dimensional extents must match across all cells",
-                    IDENT_INVALID_CONTENTS,
+                    &CELL2MAT_ERROR_INVALID_CONTENTS,
                 ));
             }
         } else {
@@ -213,9 +279,9 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
             .iter()
             .try_fold(0usize, |acc, &v| acc.checked_add(v))
             .ok_or_else(|| {
-                cell2mat_error_with_identifier(
+                cell2mat_error_with_message(
                     "cell2mat: resulting matrix is too large to represent on this platform",
-                    IDENT_SIZE_LIMIT,
+                    &CELL2MAT_ERROR_SIZE_EXCEEDED,
                 )
             })?;
         result_shape.push(sum);
@@ -227,16 +293,16 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
     }
 
     if element_kind == ElementKind::Char && result_shape.len() > 2 {
-        return Err(cell2mat_error_with_identifier(
+        return Err(cell2mat_error_with_message(
             "cell2mat: character cell contents must form a 2-D character array",
-            IDENT_INVALID_CONTENTS,
+            &CELL2MAT_ERROR_INVALID_CONTENTS,
         ));
     }
 
     let total_elems = total_len(&result_shape).ok_or_else(|| {
-        cell2mat_error_with_identifier(
+        cell2mat_error_with_message(
             "cell2mat: resulting matrix is too large to represent on this platform",
-            IDENT_SIZE_LIMIT,
+            &CELL2MAT_ERROR_SIZE_EXCEEDED,
         )
     })?;
 
@@ -254,8 +320,9 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
                 rank,
                 &mut data,
             )?;
-            let tensor = Tensor::new(data, result_shape)
-                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let tensor = Tensor::new(data, result_shape).map_err(|e| {
+                cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+            })?;
             Ok(Value::Tensor(tensor))
         }
         ElementKind::Complex => {
@@ -268,8 +335,9 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
                 rank,
                 &mut data,
             )?;
-            let tensor = ComplexTensor::new(data, result_shape)
-                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let tensor = ComplexTensor::new(data, result_shape).map_err(|e| {
+                cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+            })?;
             Ok(Value::ComplexTensor(tensor))
         }
         ElementKind::Logical => {
@@ -282,16 +350,18 @@ async fn cell_array_to_matrix(ca: &runmat_builtins::CellArray) -> BuiltinResult<
                 rank,
                 &mut data,
             )?;
-            let logical = LogicalArray::new(data, result_shape)
-                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let logical = LogicalArray::new(data, result_shape).map_err(|e| {
+                cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+            })?;
             Ok(Value::LogicalArray(logical))
         }
         ElementKind::Char => {
             let rows = result_shape.first().copied().unwrap_or(0);
             let cols = result_shape.get(1).copied().unwrap_or(1);
             let char_data = copy_chars(&entries, &multi_indices, rows, cols, &block_sizes)?;
-            let array = CharArray::new(char_data, rows, cols)
-                .map_err(|e| cell2mat_error(format!("cell2mat: {e}")))?;
+            let array = CharArray::new(char_data, rows, cols).map_err(|e| {
+                cell2mat_error_with_message(format!("cell2mat: {e}"), &CELL2MAT_ERROR_INTERNAL)
+            })?;
             Ok(Value::CharArray(array))
         }
     }
@@ -303,9 +373,9 @@ fn validate_entry_kinds(entries: &[CellEntry], expected: ElementKind) -> Builtin
             continue;
         }
         if entry.kind != expected {
-            return Err(cell2mat_error_with_identifier(
+            return Err(cell2mat_error_with_message(
                 "cell2mat: all non-empty cell contents must share the same fundamental type",
-                IDENT_INVALID_CONTENTS,
+                &CELL2MAT_ERROR_INVALID_CONTENTS,
             ));
         }
     }
@@ -339,9 +409,9 @@ fn copy_numeric(
             if let Some(slot) = output.get_mut(dest_linear) {
                 *slot = *value;
             } else {
-                return Err(cell2mat_error_with_identifier(
+                return Err(cell2mat_error_with_message(
                     "cell2mat: resulting character array exceeds supported size",
-                    IDENT_SIZE_LIMIT,
+                    &CELL2MAT_ERROR_SIZE_EXCEEDED,
                 ));
             }
         }
@@ -451,9 +521,9 @@ fn copy_chars(
                 .checked_mul(cols)
                 .and_then(|v| v.checked_add(dest_col))
                 .ok_or_else(|| {
-                    cell2mat_error_with_identifier(
+                    cell2mat_error_with_message(
                         "cell2mat: resulting character array exceeds supported size",
-                        IDENT_SIZE_LIMIT,
+                        &CELL2MAT_ERROR_SIZE_EXCEEDED,
                     )
                 })?;
             output[dest_linear] = *value;
@@ -473,9 +543,9 @@ fn compute_base_offsets(
     for dim in 0..rank.min(prefix_offsets.len()) {
         let idx = multi.get(dim).copied().unwrap_or(0);
         let offset = prefix_offsets[dim].get(idx).copied().ok_or_else(|| {
-            cell2mat_error_with_identifier(
+            cell2mat_error_with_message(
                 "cell2mat: internal offset calculation failed",
-                IDENT_SIZE_LIMIT,
+                &CELL2MAT_ERROR_SIZE_EXCEEDED,
             )
         })?;
         base[dim] = offset;
@@ -525,21 +595,21 @@ fn parse_cell_entry(value: Value) -> BuiltinResult<CellEntry> {
             shape: vec![ca.rows, ca.cols],
             data: EntryData::Char(ca.data.clone()),
         }),
-        Value::Cell(_) => Err(cell2mat_error_with_identifier(
+        Value::Cell(_) => Err(cell2mat_error_with_message(
             "cell2mat: nested cell arrays are not supported",
-            IDENT_INVALID_CONTENTS,
+            &CELL2MAT_ERROR_INVALID_CONTENTS,
         )),
-        Value::String(_) | Value::StringArray(_) => Err(cell2mat_error_with_identifier(
+        Value::String(_) | Value::StringArray(_) => Err(cell2mat_error_with_message(
             "cell2mat: string inputs are not supported; convert to char arrays first",
-            IDENT_INVALID_CONTENTS,
+            &CELL2MAT_ERROR_INVALID_CONTENTS,
         )),
-        Value::GpuTensor(_) => Err(cell2mat_error_with_identifier(
+        Value::GpuTensor(_) => Err(cell2mat_error_with_message(
             "cell2mat: unexpected GPU tensor after gather; please report this issue",
-            IDENT_INVALID_CONTENTS,
+            &CELL2MAT_ERROR_INVALID_CONTENTS,
         )),
-        other => Err(cell2mat_error_with_identifier(
+        other => Err(cell2mat_error_with_message(
             format!("cell2mat: unsupported cell element type: {other:?}"),
-            IDENT_INVALID_CONTENTS,
+            &CELL2MAT_ERROR_INVALID_CONTENTS,
         )),
     }
 }
@@ -636,6 +706,17 @@ pub(crate) mod tests {
 
     fn cell2mat_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cell2mat_builtin(value))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn descriptor_signatures_cover_cell2mat_forms() {
+        let labels: Vec<&str> = CELL2MAT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert_eq!(labels, vec!["A = cell2mat(C)"]);
     }
 
     fn scalar_cell(values: &[f64], rows: usize, cols: usize) -> Value {

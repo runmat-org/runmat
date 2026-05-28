@@ -8,7 +8,7 @@ fn command_form_with_escaped_double_quotes_and_end() {
     // Double-quoted string with doubled "" escapes and an end token as arg
     let program = parse("echo \"he said \"\"hi\"\"\" end").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "echo");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::String(ref s, _) if s.contains("he said \"\"hi\"\"")));
@@ -27,7 +27,7 @@ fn command_form_with_ellipsis_and_end_then_ident() {
     // Ellipsis continues the command-form list; end and identifier come on next line
     let program = parse("foo 'a' ...\n end bar").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "foo");
             assert_eq!(args.len(), 3);
             assert!(matches!(args[0], Expr::String(_, _)));
@@ -75,12 +75,10 @@ fn imports_and_nested_metaclass_on_one_line() {
 }
 
 #[test]
-fn stress_dynamic_member_with_surrounding_tokens_errors() {
-    // This should not be accepted; dynamic member in middle of token stream
-    let res1 = parse("foo 'a' s.(1)");
-    assert!(res1.is_err());
-    let res2 = parse("before s.(x) after");
-    assert!(res2.is_err());
-    let res3 = parse("cmd ...\n s.(x)");
-    assert!(res3.is_err());
+fn stress_dynamic_member_with_surrounding_tokens_parses() {
+    // Dynamic member expressions are valid in expression position.
+    assert!(parse("foo 'a' s.(1)").is_ok());
+    // These token streams remain invalid in command-form position.
+    assert!(parse("before s.(x) after").is_err());
+    assert!(parse("cmd ...\n s.(x)").is_err());
 }

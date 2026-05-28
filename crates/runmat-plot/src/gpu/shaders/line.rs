@@ -7,9 +7,16 @@ struct VertexRaw {
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    half_width_data: f32,
     line_style: u32,
-    thick: u32,
+    half_width_px: f32,
+    _pad0: f32,
+    viewport_width_px: f32,
+    viewport_height_px: f32,
+    x_min: f32,
+    x_span: f32,
+    y_min: f32,
+    y_span: f32,
+    _pad1: vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -54,6 +61,20 @@ fn write_vertex(index: u32, pos: vec2<f32>, color: vec4<f32>) {
     out_vertices[index] = vertex;
 }
 
+fn data_to_px(p: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        (p.x - params.x_min) * (params.viewport_width_px / max(params.x_span, 1e-12)),
+        (p.y - params.y_min) * (params.viewport_height_px / max(params.y_span, 1e-12))
+    );
+}
+
+fn px_to_data(p: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        params.x_min + p.x * (max(params.x_span, 1e-12) / params.viewport_width_px),
+        params.y_min + p.y * (max(params.y_span, 1e-12) / params.viewport_height_px)
+    );
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (params.count < 2u) {
@@ -65,22 +86,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let p0 = vec2<f32>(buf_x[idx], buf_y[idx]);
-    let p1 = vec2<f32>(buf_x[idx + 1u], buf_y[idx + 1u]);
+    let p0_data = vec2<f32>(buf_x[idx], buf_y[idx]);
+    let p1_data = vec2<f32>(buf_x[idx + 1u], buf_y[idx + 1u]);
+    let p0 = data_to_px(p0_data);
+    let p1 = data_to_px(p1_data);
     let delta = p1 - p0;
     let len = length(delta);
     let draw = should_draw(idx, params.line_style) && (len != 0.0);
     var color = params.color;
     if (!draw) {
         color.w = 0.0;
-    }
-
-    let thick = params.thick != 0u;
-    if (!thick) {
-        let base = idx * 2u;
-        write_vertex(base + 0u, p0, color);
-        write_vertex(base + 1u, p1, color);
-        return;
     }
 
     if (!draw) {
@@ -95,7 +110,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var half_width = params.half_width_data;
+    var half_width = params.half_width_px;
     if (half_width < 0.0001) {
         half_width = 0.0001;
     }
@@ -108,12 +123,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v3 = p0 - offset;
 
     let base = idx * 6u;
-    write_vertex(base + 0u, v0, params.color);
-    write_vertex(base + 1u, v1, params.color);
-    write_vertex(base + 2u, v2, params.color);
-    write_vertex(base + 3u, v0, params.color);
-    write_vertex(base + 4u, v2, params.color);
-    write_vertex(base + 5u, v3, params.color);
+    write_vertex(base + 0u, px_to_data(v0), params.color);
+    write_vertex(base + 1u, px_to_data(v1), params.color);
+    write_vertex(base + 2u, px_to_data(v2), params.color);
+    write_vertex(base + 3u, px_to_data(v0), params.color);
+    write_vertex(base + 4u, px_to_data(v2), params.color);
+    write_vertex(base + 5u, px_to_data(v3), params.color);
 }
 "#;
 
@@ -126,9 +141,16 @@ struct VertexRaw {
 struct LineParams {
     color: vec4<f32>,
     count: u32,
-    half_width_data: f32,
     line_style: u32,
-    thick: u32,
+    half_width_px: f32,
+    _pad0: f32,
+    viewport_width_px: f32,
+    viewport_height_px: f32,
+    x_min: f32,
+    x_span: f32,
+    y_min: f32,
+    y_span: f32,
+    _pad1: vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -173,6 +195,20 @@ fn write_vertex(index: u32, pos: vec2<f32>, color: vec4<f32>) {
     out_vertices[index] = vertex;
 }
 
+fn data_to_px(p: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        (p.x - params.x_min) * (params.viewport_width_px / max(params.x_span, 1e-12)),
+        (p.y - params.y_min) * (params.viewport_height_px / max(params.y_span, 1e-12))
+    );
+}
+
+fn px_to_data(p: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(
+        params.x_min + p.x * (max(params.x_span, 1e-12) / params.viewport_width_px),
+        params.y_min + p.y * (max(params.y_span, 1e-12) / params.viewport_height_px)
+    );
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (params.count < 2u) {
@@ -184,22 +220,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    let p0 = vec2<f32>(f32(buf_x[idx]), f32(buf_y[idx]));
-    let p1 = vec2<f32>(f32(buf_x[idx + 1u]), f32(buf_y[idx + 1u]));
+    let p0_data = vec2<f32>(f32(buf_x[idx]), f32(buf_y[idx]));
+    let p1_data = vec2<f32>(f32(buf_x[idx + 1u]), f32(buf_y[idx + 1u]));
+    let p0 = data_to_px(p0_data);
+    let p1 = data_to_px(p1_data);
     let delta = p1 - p0;
     let len = length(delta);
     let draw = should_draw(idx, params.line_style) && (len != 0.0);
     var color = params.color;
     if (!draw) {
         color.w = 0.0;
-    }
-
-    let thick = params.thick != 0u;
-    if (!thick) {
-        let base = idx * 2u;
-        write_vertex(base + 0u, p0, color);
-        write_vertex(base + 1u, p1, color);
-        return;
     }
 
     if (!draw) {
@@ -213,7 +243,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
 
-    var half_width = params.half_width_data;
+    var half_width = params.half_width_px;
     if (half_width < 0.0001) {
         half_width = 0.0001;
     }
@@ -226,12 +256,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let v3 = p0 - offset;
 
     let base = idx * 6u;
-    write_vertex(base + 0u, v0, params.color);
-    write_vertex(base + 1u, v1, params.color);
-    write_vertex(base + 2u, v2, params.color);
-    write_vertex(base + 3u, v0, params.color);
-    write_vertex(base + 4u, v2, params.color);
-    write_vertex(base + 5u, v3, params.color);
+    write_vertex(base + 0u, px_to_data(v0), params.color);
+    write_vertex(base + 1u, px_to_data(v1), params.color);
+    write_vertex(base + 2u, px_to_data(v2), params.color);
+    write_vertex(base + 3u, px_to_data(v0), params.color);
+    write_vertex(base + 4u, px_to_data(v2), params.color);
+    write_vertex(base + 5u, px_to_data(v3), params.color);
 }
 "#;
 

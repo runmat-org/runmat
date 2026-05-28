@@ -2,8 +2,7 @@
 mod test_helpers;
 
 use runmat_builtins::Value;
-use runmat_parser::parse;
-use test_helpers::{execute, lower};
+use test_helpers::execute_source;
 
 #[test]
 fn tf_constructs_object_through_vm_dispatch() {
@@ -13,8 +12,7 @@ fn tf_constructs_object_through_vm_dispatch() {
         n = H.Numerator;
         d = H.Denominator;
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(program).unwrap();
 
     assert!(vars
         .iter()
@@ -36,8 +34,7 @@ fn step_returns_siso_response_through_vm_dispatch() {
         H = tf(1, [1 1]);
         [y, t] = step(H, [0 1 2]);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(program).unwrap();
 
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
@@ -58,8 +55,7 @@ fn step_single_output_assignment_returns_response() {
         H = tf(1, [1 1]);
         y = step(H, 0:0.5:1);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(program).unwrap();
 
     assert!(vars.iter().any(|value| {
         matches!(value, Value::Tensor(tensor)
@@ -75,8 +71,7 @@ fn step_statement_form_plots_without_error() {
         H = tf(1, [1 1]);
         step(H);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    execute(&hir).unwrap();
+    execute_source(program).unwrap();
 }
 
 #[test]
@@ -88,21 +83,23 @@ fn impulse_returns_siso_response_through_vm_dispatch() {
         y2 = y(2);
         t3 = t(3);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(program).unwrap();
 
     assert!(vars
         .iter()
         .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
-    assert!(vars
-        .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 20.0).abs() < 1.0e-8)));
-    assert!(vars.iter().any(|value| {
-        matches!(value, Value::Num(n) if (*n - (20.0 * (-0.5f64).exp())).abs() < 1.0e-8)
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 20.0).abs() < 1.0e-8,
+        _ => false,
     }));
-    assert!(vars
-        .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 0.2).abs() < 1.0e-12)));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - (20.0 * (-0.5f64).exp())).abs() < 1.0e-8,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 0.2).abs() < 1.0e-12,
+        _ => false,
+    }));
 }
 
 #[test]
@@ -115,23 +112,34 @@ fn impulse_discrete_response_through_vm_dispatch() {
         y6 = y(6);
         t6 = t(6);
     "#;
-    let hir = lower(&parse(discrete).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(discrete).unwrap();
     assert!(vars
         .iter()
         .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![6, 1]) }));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if n.abs() < 1.0e-12)));
-    assert!(vars
-        .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 10.0).abs() < 1.0e-12)));
-    assert!(vars
-        .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 0.625).abs() < 1.0e-12)));
-    assert!(vars
-        .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 0.5).abs() < 1.0e-12)));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 10.0).abs() < 1.0e-12,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 0.625).abs() < 1.0e-12,
+        _ => false,
+    }));
+    assert!(vars.iter().any(|value| match value {
+        Value::Num(n) => (*n - 0.5).abs() < 1.0e-12,
+        _ => false,
+    }));
+}
+
+#[test]
+fn impulse_statement_form_plots_without_error() {
+    let program = r#"
+        H = tf(20, [1 5]);
+        impulse(H);
+    "#;
+    execute_source(program).unwrap();
 }
 
 #[test]
@@ -144,24 +152,23 @@ fn nyquist_returns_frequency_response_through_vm_dispatch() {
         im2 = im(2);
         w3 = w(3);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(program).unwrap();
 
     assert!(vars
         .iter()
         .any(|value| { matches!(value, Value::Tensor(tensor) if tensor.shape == vec![3, 1]) }));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < 1.0e-12)));
+        .any(|value| matches!(value, Value::Num(n) if (n - 1.0).abs() < 1.0e-12)));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 0.5).abs() < 1.0e-12)));
+        .any(|value| matches!(value, Value::Num(n) if (n - 0.5).abs() < 1.0e-12)));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n + 0.5).abs() < 1.0e-12)));
+        .any(|value| matches!(value, Value::Num(n) if (n + 0.5).abs() < 1.0e-12)));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Num(n) if (*n - 2.0).abs() < 1.0e-12)));
+        .any(|value| matches!(value, Value::Num(n) if (n - 2.0).abs() < 1.0e-12)));
 }
 
 #[test]
@@ -170,6 +177,5 @@ fn nyquist_statement_form_plots_without_error() {
         H = tf(1, [1 2 1]);
         nyquist(H);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    execute(&hir).unwrap();
+    execute_source(program).unwrap();
 }

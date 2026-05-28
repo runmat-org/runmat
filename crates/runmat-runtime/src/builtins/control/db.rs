@@ -1,6 +1,10 @@
 //! MATLAB-compatible `db` decibel conversion builtin for RunMat.
 
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -13,6 +17,108 @@ use crate::builtins::control::type_resolvers::db_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "db";
+const DB_OUTPUT_YDB: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "yDb",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Decibel-converted output.",
+}];
+const DB_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input signal magnitude or power quantity.",
+}];
+const DB_INPUTS_Y_MODE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input signal magnitude or power quantity.",
+    },
+    BuiltinParamDescriptor {
+        name: "modeOrR",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"voltage\""),
+        description: "Mode string ('voltage' or 'power') or resistance reference.",
+    },
+];
+const DB_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "yDb = db(y)",
+        inputs: &DB_INPUTS_Y,
+        outputs: &DB_OUTPUT_YDB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "yDb = db(y, \"voltage\")",
+        inputs: &DB_INPUTS_Y_MODE,
+        outputs: &DB_OUTPUT_YDB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "yDb = db(y, \"power\")",
+        inputs: &DB_INPUTS_Y_MODE,
+        outputs: &DB_OUTPUT_YDB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "yDb = db(y, R)",
+        inputs: &DB_INPUTS_Y_MODE,
+        outputs: &DB_OUTPUT_YDB,
+    },
+];
+const DB_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DB.INVALID_ARGUMENT",
+    identifier: Some("RunMat:db:InvalidArgument"),
+    when: "Inputs do not match supported db invocation forms.",
+    message: "db: invalid argument",
+};
+const DB_ERROR_INVALID_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DB.INVALID_MODE",
+    identifier: Some("RunMat:db:InvalidMode"),
+    when: "Mode string is not recognized or is not a scalar text value.",
+    message: "db: invalid mode",
+};
+const DB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DB.INVALID_INPUT",
+    identifier: Some("RunMat:db:InvalidInput"),
+    when: "Input signal cannot be interpreted as numeric magnitude data.",
+    message: "db: invalid input",
+};
+const DB_ERROR_INVALID_RESISTANCE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DB.INVALID_RESISTANCE",
+    identifier: Some("RunMat:db:InvalidResistance"),
+    when: "Resistance reference is non-numeric, complex, non-finite, or non-positive.",
+    message: "db: invalid resistance",
+};
+const DB_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DB.SIZE_MISMATCH",
+    identifier: Some("RunMat:db:SizeMismatch"),
+    when: "Signal and resistance inputs are not broadcast compatible.",
+    message: "db: array sizes are not compatible for broadcasting",
+};
+const DB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DB.INTERNAL",
+    identifier: Some("RunMat:db:Internal"),
+    when: "Internal tensor conversion or allocation failed.",
+    message: "db: internal error",
+};
+const DB_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    DB_ERROR_INVALID_ARGUMENT,
+    DB_ERROR_INVALID_MODE,
+    DB_ERROR_INVALID_INPUT,
+    DB_ERROR_INVALID_RESISTANCE,
+    DB_ERROR_SIZE_MISMATCH,
+    DB_ERROR_INTERNAL,
+];
+pub const DB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DB_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DB_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::db")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -41,10 +147,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "db is a compound element-wise conversion with string mode parsing and optional resistance input; it terminates fusion and executes on the host.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn db_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    db_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn db_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[derive(Clone, Debug)]
@@ -61,12 +179,14 @@ enum DbMode {
     keywords = "db,decibel,voltage,power,resistance,complex",
     accel = "metadata",
     type_resolver(db_type),
+    descriptor(crate::builtins::control::db::DB_DESCRIPTOR),
     builtin_path = "crate::builtins::control::db"
 )]
 async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error(
-            "db: expected db(y), db(y, 'voltage'), db(y, 'power'), or db(y, R)",
+        return Err(db_error_with_detail(
+            &DB_ERROR_INVALID_ARGUMENT,
+            "expected db(y), db(y, 'voltage'), db(y, 'power'), or db(y, R)",
         ));
     }
 
@@ -91,12 +211,18 @@ fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
     match value {
         Value::String(text) => parse_mode_string(&text),
         Value::StringArray(array) if array.data.len() == 1 => parse_mode_string(&array.data[0]),
-        Value::StringArray(_) => Err(builtin_error("db: mode must be a scalar string")),
+        Value::StringArray(_) => Err(db_error_with_detail(
+            &DB_ERROR_INVALID_MODE,
+            "mode must be a scalar string",
+        )),
         Value::CharArray(array) if array.rows == 1 => {
             let text = array.data.iter().collect::<String>();
             parse_mode_string(&text)
         }
-        Value::CharArray(_) => Err(builtin_error("db: mode must be a character row vector")),
+        Value::CharArray(_) => Err(db_error_with_detail(
+            &DB_ERROR_INVALID_MODE,
+            "mode must be a character row vector",
+        )),
         other => Ok(DbMode::Resistance(other)),
     }
 }
@@ -105,23 +231,28 @@ fn parse_mode_string(text: &str) -> BuiltinResult<DbMode> {
     match text.to_ascii_lowercase().as_str() {
         "voltage" => Ok(DbMode::Voltage),
         "power" => Ok(DbMode::Power),
-        _ => Err(builtin_error(format!(
-            "db: unknown mode '{text}', expected 'voltage' or 'power'"
-        ))),
+        _ => Err(db_error_with_detail(
+            &DB_ERROR_INVALID_MODE,
+            format!("unknown mode '{text}', expected 'voltage' or 'power'"),
+        )),
     }
 }
 
 fn magnitude_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Complex(re, im) => Tensor::new(vec![re.hypot(im)], vec![1, 1])
-            .map_err(|e| builtin_error(format!("db: {e}"))),
+        Value::Complex(re, im) => Tensor::new(vec![re.hypot(im)], vec![1, 1]).map_err(|e| {
+            db_error_with_detail(
+                &DB_ERROR_INTERNAL,
+                format!("failed to build scalar magnitude tensor: {e}"),
+            )
+        }),
         Value::ComplexTensor(tensor) => complex_magnitudes(tensor),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(builtin_error("db: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(
+            db_error_with_detail(&DB_ERROR_INVALID_INPUT, "expected numeric input"),
+        ),
         other => {
             let mut tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
-                .map_err(|e| builtin_error(format!("db: {e}")))?;
+                .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_INPUT, e))?;
             for value in &mut tensor.data {
                 *value = value.abs();
             }
@@ -136,24 +267,31 @@ fn complex_magnitudes(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&(re, im)| re.hypot(im))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape).map_err(|e| builtin_error(format!("db: {e}")))
+    Tensor::new(data, tensor.shape).map_err(|e| {
+        db_error_with_detail(
+            &DB_ERROR_INTERNAL,
+            format!("failed to build magnitude tensor: {e}"),
+        )
+    })
 }
 
 fn resistance_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(builtin_error("db: resistance must be real"))
-        }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(builtin_error("db: resistance must be numeric"))
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(db_error_with_detail(
+            &DB_ERROR_INVALID_RESISTANCE,
+            "resistance must be real",
+        )),
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(
+            db_error_with_detail(&DB_ERROR_INVALID_RESISTANCE, "resistance must be numeric"),
+        ),
         other => {
             let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, other)
-                .map_err(|e| builtin_error(format!("db: {e}")))?;
+                .map_err(|e| db_error_with_detail(&DB_ERROR_INVALID_RESISTANCE, e))?;
             for &resistance in &tensor.data {
                 if !resistance.is_finite() || resistance <= 0.0 {
-                    return Err(builtin_error(
-                        "db: resistance values must be finite and positive",
+                    return Err(db_error_with_detail(
+                        &DB_ERROR_INVALID_RESISTANCE,
+                        "resistance values must be finite and positive",
                     ));
                 }
             }
@@ -171,16 +309,25 @@ where
         .iter()
         .map(|&value| op(value))
         .collect::<Vec<_>>();
-    let tensor = Tensor::new(data, input.shape).map_err(|e| builtin_error(format!("db: {e}")))?;
+    let tensor = Tensor::new(data, input.shape).map_err(|e| {
+        db_error_with_detail(
+            &DB_ERROR_INTERNAL,
+            format!("failed to build output tensor: {e}"),
+        )
+    })?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
 fn db_with_resistance(magnitudes: &Tensor, reference: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&magnitudes.shape, &reference.shape)
-        .map_err(|err| builtin_error(format!("db: {err}")))?;
+        .map_err(|err| db_error_with_detail(&DB_ERROR_SIZE_MISMATCH, err))?;
     if plan.is_empty() {
-        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("db: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec()).map_err(|e| {
+            db_error_with_detail(
+                &DB_ERROR_INTERNAL,
+                format!("failed to build empty output tensor: {e}"),
+            )
+        })?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
@@ -190,8 +337,12 @@ fn db_with_resistance(magnitudes: &Tensor, reference: &Tensor) -> BuiltinResult<
         let resistance = reference.data[r_idx];
         data[out_idx] = 10.0 * ((magnitude * magnitude) / resistance).log10();
     }
-    let tensor = Tensor::new(data, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("db: {e}")))?;
+    let tensor = Tensor::new(data, plan.output_shape().to_vec()).map_err(|e| {
+        db_error_with_detail(
+            &DB_ERROR_INTERNAL,
+            format!("failed to build output tensor: {e}"),
+        )
+    })?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -234,6 +385,19 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn db_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DB_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"yDb = db(y)"));
+        assert!(labels.contains(&"yDb = db(y, \"voltage\")"));
+        assert!(labels.contains(&"yDb = db(y, \"power\")"));
+        assert!(labels.contains(&"yDb = db(y, R)"));
     }
 
     #[test]
@@ -434,6 +598,7 @@ pub(crate) mod tests {
         )
         .expect_err("invalid mode");
         assert!(err.message().contains("unknown mode"));
+        assert_eq!(err.identifier(), DB_ERROR_INVALID_MODE.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -442,6 +607,7 @@ pub(crate) mod tests {
         let err =
             db_builtin(Value::Num(1.0), vec![Value::Num(0.0)]).expect_err("invalid resistance");
         assert!(err.message().contains("finite and positive"));
+        assert_eq!(err.identifier(), DB_ERROR_INVALID_RESISTANCE.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -449,6 +615,7 @@ pub(crate) mod tests {
     fn db_rejects_nonnumeric_input() {
         let err = db_builtin(Value::from("hello"), Vec::new()).expect_err("invalid input");
         assert!(err.message().contains("expected numeric"));
+        assert_eq!(err.identifier(), DB_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

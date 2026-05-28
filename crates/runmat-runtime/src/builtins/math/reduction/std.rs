@@ -3,7 +3,11 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderNanMode, ProviderPrecision,
     ProviderStdNormalization,
 };
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+};
 const NAME: &str = "std";
 
 use runmat_builtins::ResolveContext;
@@ -11,6 +15,248 @@ use runmat_builtins::ResolveContext;
 fn std_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
 }
+
+const STD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Standard deviation reduction result.",
+}];
+
+const STD_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+};
+
+const STD_PARAM_W: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "w",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0"),
+    description: "Normalization flag or empty placeholder ([]).",
+};
+
+const STD_PARAM_AXES: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "axes",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("[]"),
+    description: "Dimension selector, vector of dimensions, or \"all\".",
+};
+
+const STD_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nanflag",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"includenan\""),
+    description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+};
+
+const STD_PARAM_OUTTYPE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "outtype",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"double\""),
+    description: "Output class: \"double\"/\"default\", \"native\", or \"like\".",
+};
+
+const STD_PARAM_LIKE_KEYWORD: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "like",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"like\""),
+    description: "Prototype keyword selecting output class/device.",
+};
+
+const STD_PARAM_PROTOTYPE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value controlling output class/device.",
+};
+
+const STD_INPUTS_A: [BuiltinParamDescriptor; 1] = [STD_PARAM_A];
+const STD_INPUTS_A_W: [BuiltinParamDescriptor; 2] = [STD_PARAM_A, STD_PARAM_W];
+const STD_INPUTS_A_W_AXES: [BuiltinParamDescriptor; 3] = [STD_PARAM_A, STD_PARAM_W, STD_PARAM_AXES];
+const STD_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [STD_PARAM_A, STD_PARAM_NANFLAG];
+const STD_INPUTS_A_W_NANFLAG: [BuiltinParamDescriptor; 3] =
+    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_NANFLAG];
+const STD_INPUTS_A_W_AXES_NANFLAG: [BuiltinParamDescriptor; 4] =
+    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_AXES, STD_PARAM_NANFLAG];
+const STD_INPUTS_A_W_NANFLAG_AXES: [BuiltinParamDescriptor; 4] =
+    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_NANFLAG, STD_PARAM_AXES];
+const STD_INPUTS_A_OUTTYPE: [BuiltinParamDescriptor; 2] = [STD_PARAM_A, STD_PARAM_OUTTYPE];
+const STD_INPUTS_A_W_OUTTYPE: [BuiltinParamDescriptor; 3] =
+    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_OUTTYPE];
+const STD_INPUTS_A_W_AXES_OUTTYPE: [BuiltinParamDescriptor; 4] =
+    [STD_PARAM_A, STD_PARAM_W, STD_PARAM_AXES, STD_PARAM_OUTTYPE];
+const STD_INPUTS_A_W_NANFLAG_OUTTYPE: [BuiltinParamDescriptor; 4] = [
+    STD_PARAM_A,
+    STD_PARAM_W,
+    STD_PARAM_NANFLAG,
+    STD_PARAM_OUTTYPE,
+];
+const STD_INPUTS_A_W_AXES_NANFLAG_OUTTYPE: [BuiltinParamDescriptor; 5] = [
+    STD_PARAM_A,
+    STD_PARAM_W,
+    STD_PARAM_AXES,
+    STD_PARAM_NANFLAG,
+    STD_PARAM_OUTTYPE,
+];
+const STD_INPUTS_A_W_NANFLAG_AXES_OUTTYPE: [BuiltinParamDescriptor; 5] = [
+    STD_PARAM_A,
+    STD_PARAM_W,
+    STD_PARAM_NANFLAG,
+    STD_PARAM_AXES,
+    STD_PARAM_OUTTYPE,
+];
+const STD_INPUTS_A_LIKE: [BuiltinParamDescriptor; 3] =
+    [STD_PARAM_A, STD_PARAM_LIKE_KEYWORD, STD_PARAM_PROTOTYPE];
+
+const STD_SIGNATURES: [BuiltinSignatureDescriptor; 19] = [
+    BuiltinSignatureDescriptor {
+        label: "S = std(A)",
+        inputs: &STD_INPUTS_A,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w)",
+        inputs: &STD_INPUTS_A_W,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, dim)",
+        inputs: &STD_INPUTS_A_W_AXES,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, vecdim)",
+        inputs: &STD_INPUTS_A_W_AXES,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, \"all\")",
+        inputs: &STD_INPUTS_A_W_AXES,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, nanflag)",
+        inputs: &STD_INPUTS_A_NANFLAG,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, nanflag)",
+        inputs: &STD_INPUTS_A_W_NANFLAG,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, dim, nanflag)",
+        inputs: &STD_INPUTS_A_W_AXES_NANFLAG,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, nanflag, dim)",
+        inputs: &STD_INPUTS_A_W_NANFLAG_AXES,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, outtype)",
+        inputs: &STD_INPUTS_A_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, outtype)",
+        inputs: &STD_INPUTS_A_W_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, dim, outtype)",
+        inputs: &STD_INPUTS_A_W_AXES_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, vecdim, outtype)",
+        inputs: &STD_INPUTS_A_W_AXES_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, \"all\", outtype)",
+        inputs: &STD_INPUTS_A_W_AXES_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, nanflag, outtype)",
+        inputs: &STD_INPUTS_A_W_NANFLAG_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, dim, nanflag, outtype)",
+        inputs: &STD_INPUTS_A_W_AXES_NANFLAG_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, nanflag, dim, outtype)",
+        inputs: &STD_INPUTS_A_W_NANFLAG_AXES_OUTTYPE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, \"like\", prototype)",
+        inputs: &STD_INPUTS_A_LIKE,
+        outputs: &STD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = std(A, w, [], nanflag)",
+        inputs: &STD_INPUTS_A_W_AXES_NANFLAG,
+        outputs: &STD_OUTPUT,
+    },
+];
+
+const STD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:std:InvalidArgument"),
+    when: "Argument grammar, dimensions, nanflags, or output template selectors are invalid.",
+    message: "std: invalid argument",
+};
+
+const STD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STD.INVALID_INPUT",
+    identifier: Some("RunMat:std:InvalidInput"),
+    when: "Input values cannot be converted to supported std reduction domains.",
+    message: "std: invalid input",
+};
+
+const STD_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STD.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:std:ComplexUnsupported"),
+    when: "Input value is complex for a path that currently supports only real reductions.",
+    message: "std: complex inputs are not supported yet",
+};
+
+const STD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STD.INTERNAL",
+    identifier: Some("RunMat:std:Internal"),
+    when: "Execution fails due to conversion, provider, upload, allocation, or fallback internals.",
+    message: "std: internal reduction failure",
+};
+
+const STD_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    STD_ERROR_INVALID_ARGUMENT,
+    STD_ERROR_INVALID_INPUT,
+    STD_ERROR_COMPLEX_UNSUPPORTED,
+    STD_ERROR_INTERNAL,
+];
+
+pub const STD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STD_ERRORS,
+};
 
 use runmat_macros::runtime_builtin;
 
@@ -52,8 +298,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may offer reduce_std_dim/reduce_std implementations; host fallback ensures correctness when they are unavailable.",
 };
 
-fn std_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn std_error_with_descriptor(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn std_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    std_error_with_descriptor(message, &STD_ERROR_INVALID_ARGUMENT)
+}
+
+fn std_invalid_input(message: impl Into<String>) -> RuntimeError {
+    std_error_with_descriptor(message, &STD_ERROR_INVALID_INPUT)
+}
+
+fn std_complex_unsupported_default() -> RuntimeError {
+    std_error_with_descriptor(
+        STD_ERROR_COMPLEX_UNSUPPORTED.message,
+        &STD_ERROR_COMPLEX_UNSUPPORTED,
+    )
+}
+
+fn std_internal_error(message: impl Into<String>) -> RuntimeError {
+    std_error_with_descriptor(message, &STD_ERROR_INTERNAL)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::std")]
@@ -190,11 +462,15 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(std_error("std: cannot represent NaN as an integer output"));
+            return Err(std_invalid_input(
+                "std: cannot represent NaN as an integer output",
+            ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(std_error("std: integer output overflowed the target type"));
+            return Err(std_invalid_input(
+                "std: integer output overflowed the target type",
+            ));
         }
         Ok(match self {
             IntClass::I8 => Value::Int(IntValue::I8(rounded as i8)),
@@ -222,6 +498,7 @@ enum NormParse {
     keywords = "std,standard deviation,statistics,gpu,omitnan,all,like,native",
     accel = "reduction",
     type_resolver(std_type),
+    descriptor(crate::builtins::math::reduction::std::STD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::std"
 )]
 async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -230,7 +507,7 @@ async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     let raw = match value {
         Value::GpuTensor(handle) => std_gpu(handle, &parsed).await?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err(std_error("std: complex inputs are not supported yet"));
+            return Err(std_complex_unsupported_default());
         }
         other => std_host(other, &parsed)?,
     };
@@ -264,7 +541,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, StdAxes::Default) {
-                        return Err(std_error(
+                        return Err(std_invalid_argument(
                             "std: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -290,7 +567,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(std_error(
+                        return Err(std_invalid_argument(
                             "std: multiple output class specifications provided",
                         ));
                     }
@@ -301,7 +578,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(std_error(
+                        return Err(std_invalid_argument(
                             "std: multiple output class specifications provided",
                         ));
                     }
@@ -312,23 +589,25 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(std_error(
+                        return Err(std_invalid_argument(
                             "std: cannot combine 'like' with another output class specifier",
                         ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(std_error("std: expected prototype after 'like'"));
+                        return Err(std_invalid_argument("std: expected prototype after 'like'"));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err(std_error("std: 'like' must be the final argument"));
+                        return Err(std_invalid_argument(
+                            "std: 'like' must be the final argument",
+                        ));
                     }
                     break;
                 }
                 "all" => {
                     if axes_set && !matches!(axes, StdAxes::Default) {
-                        return Err(std_error(
+                        return Err(std_invalid_argument(
                             "std: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -360,7 +639,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     && axes_set
                     && !matches!(axes, StdAxes::Default)
                 {
-                    return Err(std_error(
+                    return Err(std_invalid_argument(
                         "std: 'all' cannot be combined with an explicit dimension",
                     ));
                 }
@@ -371,14 +650,18 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
             }
         } else if let Some(selection) = parse_axes(arg).await? {
             if matches!(selection, StdAxes::All) {
-                return Err(std_error(
+                return Err(std_invalid_argument(
                     "std: 'all' cannot be combined with an explicit dimension",
                 ));
             }
-            return Err(std_error("std: multiple dimension specifications provided"));
+            return Err(std_invalid_argument(
+                "std: multiple dimension specifications provided",
+            ));
         }
 
-        return Err(std_error(format!("std: unrecognised argument {arg:?}")));
+        return Err(std_invalid_argument(format!(
+            "std: unrecognised argument {arg:?}"
+        )));
     }
 
     Ok(ParsedArguments {
@@ -421,14 +704,18 @@ fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
             _ => Ok(NormParse::NotMatched),
         },
         Value::Num(n) => parse_normalization_scalar(*n),
-        Value::GpuTensor(_) => Err(std_error("std: normalisation flag must reside on the host")),
+        Value::GpuTensor(_) => Err(std_invalid_argument(
+            "std: normalisation flag must reside on the host",
+        )),
         _ => Ok(NormParse::NotMatched),
     }
 }
 
 fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     if !value.is_finite() {
-        return Err(std_error("std: normalisation flag must be finite"));
+        return Err(std_invalid_argument(
+            "std: normalisation flag must be finite",
+        ));
     }
     if (value - 0.0).abs() < f64::EPSILON {
         return Ok(NormParse::Value(StdNormalization::Sample));
@@ -445,7 +732,9 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         return match lowered.as_str() {
             "all" => Ok(Some(StdAxes::All)),
             "omitnan" | "includenan" | "double" | "native" | "default" | "like" => Ok(None),
-            "" => Err(std_error("std: dimension string must not be empty")),
+            "" => Err(std_invalid_argument(
+                "std: dimension string must not be empty",
+            )),
             _ => Ok(None),
         };
     }
@@ -473,7 +762,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
             .await
             .map_err(|err| map_dims_error(err, scalar_hint))?,
         Value::Bool(_) => {
-            return Err(std_error("std: dimension must be numeric"));
+            return Err(std_invalid_argument("std: dimension must be numeric"));
         }
         _ => return Ok(None),
     };
@@ -482,18 +771,20 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         return Ok(None);
     };
     if dims.is_empty() {
-        return Err(std_error("std: dimension vector must not be empty"));
+        return Err(std_invalid_argument(
+            "std: dimension vector must not be empty",
+        ));
     }
     if dims.len() == 1 {
         let dim = dims[0];
         if dim < 1 {
-            return Err(std_error("std: dimension must be >= 1"));
+            return Err(std_invalid_argument("std: dimension must be >= 1"));
         }
         return Ok(Some(StdAxes::Dim(dim)));
     }
     for &dim in &dims {
         if dim < 1 {
-            return Err(std_error("std: dimension entries must be >= 1"));
+            return Err(std_invalid_argument("std: dimension entries must be >= 1"));
         }
     }
     Ok(Some(StdAxes::Vec(dims)))
@@ -511,27 +802,27 @@ fn value_as_str(value: &Value) -> Option<String> {
 fn map_dims_error(message: String, scalar: bool) -> RuntimeError {
     if message.contains("non-negative") {
         if scalar {
-            return std_error("std: dimension must be >= 1");
+            return std_invalid_argument("std: dimension must be >= 1");
         }
-        return std_error("std: dimension entries must be >= 1");
+        return std_invalid_argument("std: dimension entries must be >= 1");
     }
     if message.contains("finite") {
         if scalar {
-            return std_error("std: dimension must be finite");
+            return std_invalid_argument("std: dimension must be finite");
         }
-        return std_error("std: dimension entries must be finite integers");
+        return std_invalid_argument("std: dimension entries must be finite integers");
     }
     if message.contains("integer") {
         if scalar {
-            return std_error("std: dimension must be an integer");
+            return std_invalid_argument("std: dimension must be an integer");
         }
-        return std_error("std: dimension entries must be integers");
+        return std_invalid_argument("std: dimension entries must be integers");
     }
-    std_error(message)
+    std_invalid_argument(message)
 }
 
 fn std_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("std", value).map_err(std_error)?;
+    let tensor = tensor::value_into_tensor_for("std", value).map_err(std_invalid_input)?;
     let reduced = std_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -561,7 +852,7 @@ fn std_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<T
             ReductionNaN::Include | ReductionNaN::Omit => 0.0,
         }
     };
-    Tensor::new(vec![result], vec![1, 1]).map_err(|e| std_error(format!("std: {e}")))
+    Tensor::new(vec![result], vec![1, 1]).map_err(|e| std_internal_error(format!("std: {e}")))
 }
 
 fn std_tensor_reduce(
@@ -581,7 +872,8 @@ fn std_tensor_reduce(
     let out_len = tensor::element_count(&output_shape);
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape).map_err(|e| std_error(format!("std: {e}")));
+        return Tensor::new(fill, output_shape)
+            .map_err(|e| std_internal_error(format!("std: {e}")));
     }
 
     let mut counts = vec![0usize; out_len];
@@ -641,7 +933,7 @@ fn std_tensor_reduce(
             };
     }
 
-    Tensor::new(output, output_shape).map_err(|e| std_error(format!("std: {e}")))
+    Tensor::new(output, output_shape).map_err(|e| std_internal_error(format!("std: {e}")))
 }
 
 fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, bool)> {
@@ -661,7 +953,7 @@ fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, b
         }
         StdAxes::Dim(dim) => {
             if *dim == 0 {
-                return Err(std_error("std: dimension must be >= 1"));
+                return Err(std_invalid_argument("std: dimension must be >= 1"));
             }
             let zero = dim - 1;
             if zero < shape.len() {
@@ -677,7 +969,7 @@ fn resolve_axes(shape: &[usize], axes: &StdAxes) -> BuiltinResult<(Vec<usize>, b
             let mut out = Vec::with_capacity(dims.len());
             for &dim in dims {
                 if dim == 0 {
-                    return Err(std_error("std: dimension must be >= 1"));
+                    return Err(std_invalid_argument("std: dimension must be >= 1"));
                 }
                 let zero = dim - 1;
                 if zero < shape.len() {
@@ -879,13 +1171,13 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
             }
             Value::Num(n) => {
                 let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| std_error(format!("{NAME}: {e}")))?;
+                    .map_err(|e| std_internal_error(format!("{NAME}: {e}")))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| std_error(format!("{NAME}: {e}")))?;
+                    .map_err(|e| std_internal_error(format!("{NAME}: {e}")))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
@@ -912,15 +1204,15 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(tensor) => upload_tensor(tensor),
             Value::Num(n) => {
-                let tensor =
-                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| std_error(format!("std: {e}")))?;
+                let tensor = Tensor::new(vec![n], vec![1, 1])
+                    .map_err(|e| std_internal_error(format!("std: {e}")))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(std_error)?;
+                let tensor = tensor::logical_to_tensor(&logical).map_err(std_internal_error)?;
                 upload_tensor(tensor)
             }
-            other => Err(std_error(format!(
+            other => Err(std_invalid_input(format!(
                 "std: cannot place value {other:?} on the GPU"
             ))),
         },
@@ -929,7 +1221,7 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(std_error(
+        return Err(std_internal_error(
             "std: no acceleration provider available to honour GPU output",
         ));
     };
@@ -939,7 +1231,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| std_error(format!("std: failed to upload GPU result: {e}")))?;
+        .map_err(|e| std_internal_error(format!("std: failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -964,14 +1256,14 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Tensor(tensor) => {
             let data: Vec<(f64, f64)> = tensor.data.iter().map(|&v| (v, 0.0)).collect();
             let tensor = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| std_error(format!("std: {e}")))?;
+                .map_err(|e| std_internal_error(format!("std: {e}")))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(std_error)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(std_internal_error)?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(std_error(format!(
+        other => Err(std_invalid_input(format!(
             "std: cannot convert value {other:?} to a complex result"
         ))),
     }
@@ -1009,7 +1301,7 @@ async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
         other => {
             let gathered = dispatcher::gather_if_needed_async(other)
                 .await
-                .map_err(|e| std_error(format!("std: {e}")))?;
+                .map_err(|e| std_internal_error(format!("std: {e}")))?;
             analyse_like_prototype(&gathered).await
         }
     }
@@ -1042,6 +1334,36 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn std_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = STD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"S = std(A)"));
+        assert!(labels.contains(&"S = std(A, w)"));
+        assert!(labels.contains(&"S = std(A, w, dim)"));
+        assert!(labels.contains(&"S = std(A, w, vecdim)"));
+        assert!(labels.contains(&"S = std(A, w, \"all\")"));
+        assert!(labels.contains(&"S = std(A, nanflag)"));
+        assert!(labels.contains(&"S = std(A, w, nanflag)"));
+        assert!(labels.contains(&"S = std(A, w, dim, nanflag)"));
+        assert!(labels.contains(&"S = std(A, w, nanflag, dim)"));
+        assert!(labels.contains(&"S = std(A, outtype)"));
+        assert!(labels.contains(&"S = std(A, w, outtype)"));
+        assert!(labels.contains(&"S = std(A, \"like\", prototype)"));
+    }
+
+    #[test]
+    fn std_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = STD_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.STD.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.STD.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.STD.COMPLEX_UNSUPPORTED"));
+        assert!(codes.contains(&"RM.STD.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1198,6 +1520,7 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![0.2, 0.8], vec![1, 2]).unwrap();
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let err = std_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)]).unwrap_err();
+        assert_eq!(err.identifier(), STD_ERROR_INVALID_ARGUMENT.identifier);
         assert!(
             err.message()
                 .contains("std: dimension entries must be integers")
@@ -1206,6 +1529,20 @@ pub(crate) mod tests {
                     .contains("std: dimension vector must not be empty"),
             "unexpected error message: {err}"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn std_complex_identifier_is_stable() {
+        let err = std_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), STD_ERROR_COMPLEX_UNSUPPORTED.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn std_invalid_input_identifier_is_stable() {
+        let err = std_builtin(Value::String("abc".to_string()), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), STD_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -3,7 +3,11 @@
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderInvOptions};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -15,6 +19,51 @@ use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "inv";
+
+const INV_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Inverse of A.",
+}];
+
+const INV_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input square matrix.",
+}];
+
+const INV_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = inv(A)",
+    inputs: &INV_INPUTS,
+    outputs: &INV_OUTPUT,
+}];
+
+const INV_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INV.INVALID_INPUT",
+    identifier: Some("RunMat:inv:InvalidInput"),
+    when: "Input shape/type is unsupported or matrix is singular for inversion.",
+    message: "inv: invalid input",
+};
+
+const INV_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INV.INTERNAL",
+    identifier: Some("RunMat:inv:Internal"),
+    when: "Runtime fails while executing inversion or fallback/upload paths.",
+    message: "inv: internal runtime failure",
+};
+
+const INV_ERRORS: [BuiltinErrorDescriptor; 2] = [INV_ERROR_INVALID_INPUT, INV_ERROR_INTERNAL];
+
+pub const INV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INV_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INV_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,8 +81,19 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may implement a native inverse; the reference WGPU backend gathers to the host implementation and re-uploads the result.",
 };
 
-fn builtin_error(message: String) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn inv_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    inv_error_with_message(message, &INV_ERROR_INVALID_INPUT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -76,6 +136,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "inv,matrix inverse,linear solve,gpu",
     accel = "inv",
     type_resolver(matrix_unary_type),
+    descriptor(crate::builtins::math::linalg::solve::inv::INV_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::inv"
 )]
 async fn inv_builtin(value: Value) -> BuiltinResult<Value> {
@@ -282,6 +343,23 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn inv_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = INV_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"X = inv(A)"));
+    }
+
+    #[test]
+    fn inv_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = INV_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.INV.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.INV.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn inv_square_matrix() {
@@ -398,6 +476,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let err = unwrap_error(inv_builtin(Value::Tensor(tensor)).unwrap_err());
         assert!(err.message().contains("square matrix"), "{err}");
+        assert_eq!(err.identifier(), INV_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -406,6 +485,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let err = unwrap_error(inv_builtin(Value::Tensor(tensor)).unwrap_err());
         assert!(err.message().contains("singular"), "{err}");
+        assert_eq!(err.identifier(), INV_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

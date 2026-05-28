@@ -69,7 +69,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
     col = min(col, params.y_len - 1u);
-    let source_idx = col * params.x_len + row;
+    let source_idx = col + params.y_len * row;
 
     let px = buf_x[row];
     let py = buf_y[col];
@@ -174,7 +174,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
     col = min(col, params.y_len - 1u);
-    let source_idx = col * params.x_len + row;
+    let source_idx = col + params.y_len * row;
 
     let px = f32(buf_x[row]);
     let py = f32(buf_y[col]);

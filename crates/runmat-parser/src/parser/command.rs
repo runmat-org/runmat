@@ -45,7 +45,7 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "axis",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["auto", "manual", "tight", "equal", "ij", "xy"],
+            allowed: &["auto", "manual", "tight", "equal", "ij", "xy", "on", "off"],
             optional: false,
         },
     },
@@ -90,6 +90,18 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "clc",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "pause",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "drawnow",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },
@@ -99,6 +111,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     },
     CommandVerb {
         name: "clearvars",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "warning",
         arg_kind: CommandArgKind::StringifyWords,
     },
     CommandVerb {
@@ -128,7 +144,7 @@ impl Parser {
         let end = self.last_token_end();
         let span = self.span_from(name_token.position, end);
         Ok(crate::Stmt::ExprStmt(
-            Expr::FuncCall(name_token.lexeme, args, span),
+            Expr::CommandCall(name_token.lexeme, args, span),
             false,
             span,
         ))
@@ -150,6 +166,12 @@ impl Parser {
             command,
             Some(CommandVerb {
                 arg_kind: CommandArgKind::Keyword { optional: true, .. },
+                ..
+            })
+        ) || matches!(
+            command,
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::StringifyWords,
                 ..
             })
         );

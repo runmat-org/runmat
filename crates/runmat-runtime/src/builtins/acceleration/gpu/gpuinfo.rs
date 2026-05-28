@@ -1,13 +1,17 @@
 //! MATLAB-compatible `gpuInfo` builtin that formats the active GPU device metadata.
 
-use super::gpudevice::{self, active_device_struct};
+use super::gpudevice::{active_device_struct, GPU_DEVICE_ERROR_NO_PROVIDER};
 use crate::builtins::acceleration::gpu::type_resolvers::gpuinfo_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use runmat_builtins::{IntValue, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpuinfo")]
@@ -37,6 +41,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion—returns a host-resident string.",
 };
 
+const GPU_INFO_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "summary",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Formatted text summary for the active provider/device.",
+}];
+
+const GPU_INFO_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const GPU_INFO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "summary = gpuInfo()",
+    inputs: &GPU_INFO_INPUTS,
+    outputs: &GPU_INFO_OUTPUT,
+}];
+
+const GPU_INFO_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const GPU_INFO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GPU_INFO_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GPU_INFO_ERRORS,
+};
+
 #[runtime_builtin(
     name = "gpuInfo",
     category = "acceleration/gpu",
@@ -44,12 +73,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "gpu,gpuInfo,device,info,accelerate",
     examples = "disp(gpuInfo())",
     type_resolver(gpuinfo_type),
+    descriptor(crate::builtins::acceleration::gpu::gpuinfo::GPU_INFO_DESCRIPTOR),
     builtin_path = "crate::builtins::acceleration::gpu::gpuinfo"
 )]
 async fn gpu_info_builtin() -> crate::BuiltinResult<Value> {
     match active_device_struct() {
         Ok(info) => Ok(Value::String(format_summary(Some(&info)))),
-        Err(err) if err.message() == gpudevice::ERR_NO_PROVIDER => {
+        Err(err) if err.identifier() == GPU_DEVICE_ERROR_NO_PROVIDER.identifier => {
             Ok(Value::String(format_summary(None)))
         }
         Err(err) => Err(err),

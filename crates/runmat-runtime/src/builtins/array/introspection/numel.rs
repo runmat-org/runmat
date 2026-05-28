@@ -7,7 +7,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::numel")]
@@ -52,6 +56,104 @@ fn numel_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+const NUMEL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of elements selected from input.",
+}];
+
+const NUMEL_SIG_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const NUMEL_SIG_DIM_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input value to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension selectors (scalar or vector forms).",
+    },
+];
+
+const NUMEL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "n = numel(A)",
+        inputs: &NUMEL_SIG_INPUTS,
+        outputs: &NUMEL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "n = numel(A, dim, ...)",
+        inputs: &NUMEL_SIG_DIM_INPUTS,
+        outputs: &NUMEL_OUTPUT,
+    },
+];
+
+const NUMEL_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_ARG_TYPE",
+        identifier: None,
+        when: "Dimension arguments are not numeric scalars/vectors.",
+        message: "numel: dimension arguments must be numeric scalars or vectors",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_VECTOR_EMPTY",
+        identifier: None,
+        when: "Dimension vector argument has zero elements.",
+        message: "numel: dimension vector must contain at least one element",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_VECTOR_SHAPE",
+        identifier: None,
+        when: "Dimension vector argument is not vector-shaped.",
+        message: "numel: dimension vector must be a vector of positive integers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_NON_FINITE",
+        identifier: None,
+        when: "A dimension selector is non-finite.",
+        message: "numel: dimension must be finite",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_NON_INTEGER",
+        identifier: None,
+        when: "A dimension selector is non-integer.",
+        message: "numel: dimension must be an integer",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_LT_ONE",
+        identifier: None,
+        when: "A dimension selector is less than one.",
+        message: "numel: dimension must be >= 1",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.NUMEL.DIM_LIST_EMPTY",
+        identifier: None,
+        when: "No dimensions are provided after parsing.",
+        message: "numel: dimension list must contain at least one element",
+    },
+];
+
+pub const NUMEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NUMEL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NUMEL_ERRORS,
+};
+
 #[runtime_builtin(
     name = "numel",
     category = "array/introspection",
@@ -59,6 +161,7 @@ fn numel_type(args: &[Type], _context: &ResolveContext) -> Type {
     keywords = "numel,number of elements,array length,gpu metadata,dimensions",
     accel = "metadata",
     type_resolver(numel_type),
+    descriptor(crate::builtins::array::introspection::numel::NUMEL_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::numel"
 )]
 async fn numel_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

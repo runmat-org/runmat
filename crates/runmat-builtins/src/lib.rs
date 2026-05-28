@@ -96,6 +96,15 @@ pub enum Value {
     OutputList(Vec<Value>),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
+    // Function handle whose resolution must stay at the external boundary.
+    ExternalFunctionHandle(String),
+    // Function handle preserving typed method identity.
+    MethodFunctionHandle(String),
+    // Function handle with compiler/session semantic identity.
+    BoundFunctionHandle {
+        name: String,
+        function: usize,
+    },
     Closure(Closure),
     ClassRef(String),
     MException(MException),
@@ -977,27 +986,6 @@ pub enum Type {
     },
     /// Multiple return values captured as a list (internal destructuring helper)
     OutputList(Vec<Type>),
-    /// Dataset handle with optional compile-time schema information
-    DataDataset {
-        arrays: Option<std::collections::BTreeMap<String, DataArrayTypeInfo>>,
-    },
-    /// Data array handle with optional dtype/shape metadata
-    DataArray {
-        dtype: Option<String>,
-        shape: Option<Vec<Option<usize>>>,
-        chunk_shape: Option<Vec<Option<usize>>>,
-        codec: Option<String>,
-    },
-    /// Data transaction handle
-    DataTransaction,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
-pub struct DataArrayTypeInfo {
-    pub dtype: Option<String>,
-    pub shape: Option<Vec<Option<usize>>>,
-    pub chunk_shape: Option<Vec<Option<usize>>>,
-    pub codec: Option<String>,
 }
 
 impl Type {
@@ -1048,9 +1036,6 @@ impl Type {
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
             (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
             (Type::OutputList(a), Type::OutputList(b)) => a.len() == b.len(),
-            (Type::DataDataset { .. }, Type::DataDataset { .. }) => true,
-            (Type::DataArray { .. }, Type::DataArray { .. }) => true,
-            (Type::DataTransaction, Type::DataTransaction) => true,
             (a, b) => a == b,
         }
     }
@@ -1141,44 +1126,6 @@ impl Type {
                     Type::OutputList(vec![Type::Unknown; a.len().max(b.len())])
                 }
             }
-            (Type::DataDataset { arrays: a }, Type::DataDataset { arrays: b }) => {
-                let merged = match (a, b) {
-                    (None, None) => None,
-                    (Some(sa), None) | (None, Some(sa)) => Some(sa.clone()),
-                    (Some(sa), Some(sb)) => {
-                        let mut out = sa.clone();
-                        for (name, right) in sb {
-                            out.entry(name.clone())
-                                .and_modify(|left| {
-                                    *left = unify_array_type_info(left, right);
-                                })
-                                .or_insert_with(|| right.clone());
-                        }
-                        Some(out)
-                    }
-                };
-                Type::DataDataset { arrays: merged }
-            }
-            (
-                Type::DataArray {
-                    dtype: ad,
-                    shape: ashp,
-                    chunk_shape: ach,
-                    codec: ac,
-                },
-                Type::DataArray {
-                    dtype: bd,
-                    shape: bshp,
-                    chunk_shape: bch,
-                    codec: bc,
-                },
-            ) => Type::DataArray {
-                dtype: ad.clone().or_else(|| bd.clone()),
-                shape: unify_optional_dims(ashp, bshp),
-                chunk_shape: unify_optional_dims(ach, bch),
-                codec: ac.clone().or_else(|| bc.clone()),
-            },
-            (Type::DataTransaction, Type::DataTransaction) => Type::DataTransaction,
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -1224,7 +1171,10 @@ impl Type {
             Value::HandleObject(_) => Type::Unknown,
             Value::Listener(_) => Type::Unknown,
             Value::Struct(_) => Type::Struct { known_fields: None },
-            Value::FunctionHandle(_) => Type::Function {
+            Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::MethodFunctionHandle(_)
+            | Value::BoundFunctionHandle { .. } => Type::Function {
                 params: vec![Type::Unknown],
                 returns: Box::new(Type::Unknown),
             },
@@ -1248,36 +1198,10 @@ impl Type {
     }
 }
 
-fn unify_optional_dims(
-    lhs: &Option<Vec<Option<usize>>>,
-    rhs: &Option<Vec<Option<usize>>>,
-) -> Option<Vec<Option<usize>>> {
-    match (lhs, rhs) {
-        (None, None) => None,
-        (Some(a), None) | (None, Some(a)) => Some(a.clone()),
-        (Some(a), Some(b)) if a == b => Some(a.clone()),
-        (Some(a), Some(b)) if a.len() == b.len() => Some(
-            a.iter()
-                .zip(b.iter())
-                .map(|(x, y)| if x == y { *x } else { None })
-                .collect(),
-        ),
-        (Some(_), Some(_)) => None,
-    }
-}
-
-fn unify_array_type_info(lhs: &DataArrayTypeInfo, rhs: &DataArrayTypeInfo) -> DataArrayTypeInfo {
-    DataArrayTypeInfo {
-        dtype: lhs.dtype.clone().or_else(|| rhs.dtype.clone()),
-        shape: unify_optional_dims(&lhs.shape, &rhs.shape),
-        chunk_shape: unify_optional_dims(&lhs.chunk_shape, &rhs.chunk_shape),
-        codec: lhs.codec.clone().or_else(|| rhs.codec.clone()),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
     pub function_name: String,
+    pub bound_function: Option<usize>,
     pub captures: Vec<Value>,
 }
 
@@ -1461,16 +1385,84 @@ pub type TypeResolverWithContext = fn(args: &[Type], ctx: &ResolveContext) -> Ty
 
 #[derive(Clone, Copy, Debug)]
 pub enum TypeResolverKind {
-    Legacy(TypeResolver),
+    Simple(TypeResolver),
     WithContext(TypeResolverWithContext),
 }
 
 pub fn type_resolver_kind(resolver: TypeResolver) -> TypeResolverKind {
-    TypeResolverKind::Legacy(resolver)
+    TypeResolverKind::Simple(resolver)
 }
 
 pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolverKind {
     TypeResolverKind::WithContext(resolver)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinOutputMode {
+    Fixed,
+    ByRequestedOutputCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinCompletionPolicy {
+    Public,
+    MethodOnly,
+    HiddenInternal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinParamArity {
+    Required,
+    Optional,
+    Variadic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum BuiltinParamType {
+    Any,
+    NumericScalar,
+    IntegerScalar,
+    StringScalar,
+    NumericArray,
+    LogicalArray,
+    SizeArg,
+    LikePrototype,
+    AxesHandle,
+    StyleSpec,
+    PropertyName,
+    PropertyValue,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinParamDescriptor {
+    pub name: &'static str,
+    pub ty: BuiltinParamType,
+    pub arity: BuiltinParamArity,
+    pub default: Option<&'static str>,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinSignatureDescriptor {
+    pub label: &'static str,
+    pub inputs: &'static [BuiltinParamDescriptor],
+    pub outputs: &'static [BuiltinParamDescriptor],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinErrorDescriptor {
+    pub code: &'static str,
+    pub identifier: Option<&'static str>,
+    pub when: &'static str,
+    pub message: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuiltinDescriptor {
+    pub signatures: &'static [BuiltinSignatureDescriptor],
+    pub output_mode: BuiltinOutputMode,
+    pub completion_policy: BuiltinCompletionPolicy,
+    pub errors: &'static [BuiltinErrorDescriptor],
 }
 
 /// Simple builtin function definition using the unified type system
@@ -1488,6 +1480,7 @@ pub struct BuiltinFunction {
     pub accel_tags: &'static [AccelTag],
     pub is_sink: bool,
     pub suppress_auto_output: bool,
+    pub descriptor: Option<&'static BuiltinDescriptor>,
 }
 
 impl BuiltinFunction {
@@ -1519,7 +1512,21 @@ impl BuiltinFunction {
             accel_tags,
             is_sink,
             suppress_auto_output,
+            descriptor: None,
         }
+    }
+
+    pub fn with_descriptor(mut self, descriptor: &'static BuiltinDescriptor) -> Self {
+        self.descriptor = Some(descriptor);
+        self
+    }
+
+    pub fn with_descriptor_option(
+        mut self,
+        descriptor: Option<&'static BuiltinDescriptor>,
+    ) -> Self {
+        self.descriptor = descriptor;
+        self
     }
 
     pub fn infer_return_type(&self, args: &[Type]) -> Type {
@@ -1529,11 +1536,15 @@ impl BuiltinFunction {
     pub fn infer_return_type_with_context(&self, args: &[Type], ctx: &ResolveContext) -> Type {
         if let Some(resolver) = self.type_resolver {
             return match resolver {
-                TypeResolverKind::Legacy(resolver) => resolver(args),
+                TypeResolverKind::Simple(resolver) => resolver(args),
                 TypeResolverKind::WithContext(resolver) => resolver(args, ctx),
             };
         }
         self.return_type.clone()
+    }
+
+    pub fn semantics(&self) -> BuiltinSemantics {
+        semantics::builtin_semantics_for(self)
     }
 }
 
@@ -1544,7 +1555,14 @@ pub struct Constant {
     pub value: Value,
 }
 
+pub mod semantics;
 pub mod shape_rules;
+
+pub use semantics::{
+    builtin_semantics_for, builtin_semantics_for_name, BuiltinAsyncBehavior, BuiltinCompatibility,
+    BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics,
+    BuiltinWorkspaceEffect, ConcatKind, ShapeTransformKind,
+};
 
 impl std::fmt::Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1996,7 +2014,12 @@ impl fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::FunctionHandle(name) => write!(f, "@{name}"),
+            Value::FunctionHandle(name)
+            | Value::ExternalFunctionHandle(name)
+            | Value::MethodFunctionHandle(name) => {
+                write!(f, "@{name}")
+            }
+            Value::BoundFunctionHandle { name, .. } => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",
@@ -2300,6 +2323,7 @@ pub struct MethodDef {
     pub is_static: bool,
     pub access: Access,
     pub function_name: String, // bound runtime builtin/user func name
+    pub implicit_class_argument: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -2316,7 +2340,35 @@ static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::ne
 static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
-    CLASS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    CLASS_REGISTRY.get_or_init(|| Mutex::new(primitive_class_registry()))
+}
+
+fn primitive_class_registry() -> HashMap<String, ClassDef> {
+    ["double", "single", "logical"]
+        .into_iter()
+        .map(|class_name| {
+            let mut methods = HashMap::new();
+            methods.insert(
+                "zeros".to_string(),
+                MethodDef {
+                    name: "zeros".to_string(),
+                    is_static: true,
+                    access: Access::Public,
+                    function_name: "zeros".to_string(),
+                    implicit_class_argument: Some(class_name.to_string()),
+                },
+            );
+            (
+                class_name.to_string(),
+                ClassDef {
+                    name: class_name.to_string(),
+                    parent: None,
+                    properties: HashMap::new(),
+                    methods,
+                },
+            )
+        })
+        .collect()
 }
 
 pub fn register_class(def: ClassDef) {
@@ -2333,10 +2385,11 @@ pub fn get_class(name: &str) -> Option<ClassDef> {
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
-    let guard: Option<std::sync::MutexGuard<'_, std::collections::HashMap<String, ClassDef>>> =
-        None;
-    drop(guard);
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if let Some(cls) = reg.get(&name) {
             if let Some(p) = cls.properties.get(prop) {
                 return Some((p.clone(), name));
@@ -2354,7 +2407,11 @@ pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, Str
 pub fn lookup_method(class_name: &str, method: &str) -> Option<(MethodDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if let Some(cls) = reg.get(&name) {
             if let Some(m) = cls.methods.get(method) {
                 return Some((m.clone(), name));
@@ -2397,5 +2454,165 @@ pub fn set_static_property_value_in_owner(
         Ok(())
     } else {
         Err(format!("Unknown static property '{class_name}.{prop}'"))
+    }
+}
+
+#[cfg(test)]
+mod class_registry_tests {
+    use super::{
+        get_class, lookup_method, lookup_property, register_class, Access, ClassDef, MethodDef,
+        PropertyDef,
+    };
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn primitive_classes_expose_static_zeros_method_metadata() {
+        for class_name in ["double", "single", "logical"] {
+            let class_def = get_class(class_name).expect("primitive class should be registered");
+            let method = class_def
+                .methods
+                .get("zeros")
+                .expect("primitive class should expose zeros static method");
+            assert!(method.is_static, "zeros should be static on {class_name}");
+            assert_eq!(method.function_name, "zeros");
+            assert_eq!(method.implicit_class_argument.as_deref(), Some(class_name));
+
+            let (resolved, owner) =
+                lookup_method(class_name, "zeros").expect("lookup should find primitive zeros");
+            assert_eq!(owner, class_name);
+            assert_eq!(resolved.function_name, "zeros");
+            assert_eq!(
+                resolved.implicit_class_argument.as_deref(),
+                Some(class_name)
+            );
+        }
+    }
+
+    #[test]
+    fn method_lookup_uses_parent_class_metadata_chain() {
+        let parent_name = unique_class_name("plan6_parent");
+        let child_name = unique_class_name("plan6_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "parentOnly".to_string(),
+            MethodDef {
+                name: "parentOnly".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "parentOnly_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let (method, owner) = lookup_method(&child_name, "parentOnly")
+            .expect("child lookup should resolve inherited method through parent metadata");
+        assert_eq!(owner, parent_name);
+        assert_eq!(method.function_name, "parentOnly_impl");
+    }
+
+    #[test]
+    fn method_lookup_handles_parent_cycle() {
+        let class_a = unique_class_name("plan6_cycle_method_a");
+        let class_b = unique_class_name("plan6_cycle_method_b");
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert!(
+            lookup_method(&class_a, "missing").is_none(),
+            "cyclic parent metadata should terminate missing method lookup"
+        );
+    }
+
+    #[test]
+    fn property_lookup_uses_parent_class_metadata_chain() {
+        let parent_name = unique_class_name("plan6_property_parent");
+        let child_name = unique_class_name("plan6_property_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "parentFlag".to_string(),
+            PropertyDef {
+                name: "parentFlag".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let (property, owner) = lookup_property(&child_name, "parentFlag")
+            .expect("child property lookup should resolve inherited property through parent");
+        assert_eq!(owner, parent_name);
+        assert_eq!(property.name, "parentFlag");
+        assert!(!property.is_static);
+    }
+
+    #[test]
+    fn property_lookup_handles_parent_cycle() {
+        let class_a = unique_class_name("plan6_cycle_property_a");
+        let class_b = unique_class_name("plan6_cycle_property_b");
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert!(
+            lookup_property(&class_a, "missing").is_none(),
+            "cyclic parent metadata should terminate missing property lookup"
+        );
     }
 }

@@ -1,5 +1,5 @@
 use miette::{SourceOffset, SourceSpan};
-use runmat_hir::{SemanticError, Span};
+use runmat_hir::{HirError, Span};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 
 #[derive(Debug, Clone)]
@@ -49,8 +49,8 @@ impl From<&str> for CompileError {
     }
 }
 
-impl From<SemanticError> for CompileError {
-    fn from(value: SemanticError) -> Self {
+impl From<HirError> for CompileError {
+    fn from(value: HirError) -> Self {
         let mut err = CompileError::new(value.message);
         if let Some(span) = value.span {
             err = err.with_span(span);

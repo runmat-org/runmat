@@ -1,7 +1,11 @@
 //! MATLAB-compatible `gpuDevice` builtin with provider-aware semantics.
 
 use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
-use runmat_builtins::{IntValue, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::acceleration::gpu::type_resolvers::gpudevice_type;
@@ -11,17 +15,110 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-/// Error used when no acceleration provider is registered.
-pub(crate) const ERR_NO_PROVIDER: &str = "gpuDevice: no acceleration provider registered";
-const ERR_TOO_MANY_INPUTS: &str = "gpuDevice: too many input arguments";
-const ERR_UNSUPPORTED_ARGUMENT: &str = "gpuDevice: unsupported input argument";
-const ERR_RESET_NOT_SUPPORTED: &str = "gpuDevice: reset is not supported by the active provider";
-const ERR_INVALID_INDEX: &str = "gpuDevice: device index must be a positive integer";
+const BUILTIN_NAME: &str = "gpuDevice";
 
-fn gpu_device_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("gpuDevice")
-        .build()
+const GPU_DEVICE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "info",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct describing active GPU provider/device metadata.",
+}];
+
+const GPU_DEVICE_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
+
+const GPU_DEVICE_INPUTS_INDEX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "arg",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Device index selector or reset-like argument.",
+}];
+
+const GPU_DEVICE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "info = gpuDevice()",
+        inputs: &GPU_DEVICE_INPUTS_EMPTY,
+        outputs: &GPU_DEVICE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "info = gpuDevice(arg)",
+        inputs: &GPU_DEVICE_INPUTS_INDEX,
+        outputs: &GPU_DEVICE_OUTPUT,
+    },
+];
+
+pub(crate) const GPU_DEVICE_ERROR_NO_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_DEVICE.NO_PROVIDER",
+    identifier: Some("RunMat:gpuDevice:NoProvider"),
+    when: "No acceleration provider is registered.",
+    message: "gpuDevice: no acceleration provider registered",
+};
+
+const GPU_DEVICE_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_DEVICE.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:gpuDevice:TooManyInputs"),
+    when: "More than one input argument was supplied.",
+    message: "gpuDevice: too many input arguments",
+};
+
+const GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_DEVICE.UNSUPPORTED_ARGUMENT",
+    identifier: Some("RunMat:gpuDevice:UnsupportedArgument"),
+    when: "Argument does not map to a valid device selector/reset operation.",
+    message: "gpuDevice: unsupported input argument",
+};
+
+const GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_DEVICE.RESET_NOT_SUPPORTED",
+    identifier: Some("RunMat:gpuDevice:ResetNotSupported"),
+    when: "Reset was requested but active provider does not support reset.",
+    message: "gpuDevice: reset is not supported by the active provider",
+};
+
+const GPU_DEVICE_ERROR_INVALID_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_DEVICE.INVALID_INDEX",
+    identifier: Some("RunMat:gpuDevice:InvalidIndex"),
+    when: "Device index is not a positive integer scalar.",
+    message: "gpuDevice: device index must be a positive integer",
+};
+
+const GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GPU_DEVICE.DEVICE_NOT_AVAILABLE",
+    identifier: Some("RunMat:gpuDevice:DeviceNotAvailable"),
+    when: "Requested device index does not match the currently active provider index.",
+    message: "gpuDevice: requested device index is not available",
+};
+
+const GPU_DEVICE_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    GPU_DEVICE_ERROR_NO_PROVIDER,
+    GPU_DEVICE_ERROR_TOO_MANY_INPUTS,
+    GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT,
+    GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED,
+    GPU_DEVICE_ERROR_INVALID_INDEX,
+    GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE,
+];
+
+pub const GPU_DEVICE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GPU_DEVICE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GPU_DEVICE_ERRORS,
+};
+
+fn gpu_device_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    gpu_device_error_with_message(error.message, error)
+}
+
+fn gpu_device_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gpudevice")]
@@ -61,20 +158,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "gpu,gpuDevice,device,info,accelerate",
     examples = "info = gpuDevice();",
     type_resolver(gpudevice_type),
+    descriptor(crate::builtins::acceleration::gpu::gpudevice::GPU_DEVICE_DESCRIPTOR),
     builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
 )]
 async fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.as_slice() {
         [] => active_device_struct().map(Value::Struct),
         [arg] => handle_single_argument(arg),
-        _ => Err(gpu_device_error(ERR_TOO_MANY_INPUTS).into()),
+        _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_TOO_MANY_INPUTS).into()),
     }
 }
 
 /// Internal helper that queries the provider and returns a populated struct.
 pub(crate) fn active_device_struct() -> BuiltinResult<StructValue> {
-    let provider =
-        runmat_accelerate_api::provider().ok_or_else(|| gpu_device_error(ERR_NO_PROVIDER))?;
+    let provider = runmat_accelerate_api::provider()
+        .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_NO_PROVIDER))?;
     let info = provider.device_info_struct();
     let precision = provider.precision();
     Ok(build_struct(&info, precision))
@@ -125,7 +223,7 @@ fn is_keyword(value: &Value, keyword: &str) -> bool {
 
 fn handle_single_argument(arg: &Value) -> BuiltinResult<Value> {
     if is_reset_arg(arg) {
-        return Err(gpu_device_error(ERR_RESET_NOT_SUPPORTED).into());
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED).into());
     }
 
     match parse_device_index(arg)? {
@@ -135,14 +233,14 @@ fn handle_single_argument(arg: &Value) -> BuiltinResult<Value> {
             if index == current_index {
                 Ok(Value::Struct(info))
             } else {
-                Err(gpu_device_error(format!(
-                    "gpuDevice: GPU device with index {} not available",
-                    index
-                ))
+                Err(gpu_device_error_with_message(
+                    format!("gpuDevice: GPU device with index {} not available", index),
+                    &GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE,
+                )
                 .into())
             }
         }
-        None => Err(gpu_device_error(ERR_UNSUPPORTED_ARGUMENT).into()),
+        None => Err(gpu_device_error(&GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT).into()),
     }
 }
 
@@ -187,13 +285,13 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
             if *b {
                 Ok(Some(1))
             } else {
-                Err(gpu_device_error(ERR_INVALID_INDEX).into())
+                Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
             }
         }
         Value::Tensor(t) => match t.data.len() {
             0 => Ok(None),
             1 => num_to_index(t.data[0]),
-            _ => Err(gpu_device_error(ERR_INVALID_INDEX).into()),
+            _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into()),
         },
         Value::LogicalArray(la) => match la.data.len() {
             0 => Ok(None),
@@ -201,10 +299,10 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
                 if la.data[0] != 0 {
                     Ok(Some(1))
                 } else {
-                    Err(gpu_device_error(ERR_INVALID_INDEX).into())
+                    Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into())
                 }
             }
-            _ => Err(gpu_device_error(ERR_INVALID_INDEX).into()),
+            _ => Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into()),
         },
         _ => Ok(None),
     }
@@ -212,21 +310,21 @@ fn parse_device_index(value: &Value) -> BuiltinResult<Option<u32>> {
 
 fn int_to_index(raw: i64) -> BuiltinResult<Option<u32>> {
     if raw <= 0 {
-        return Err(gpu_device_error(ERR_INVALID_INDEX).into());
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     if raw > u32::MAX as i64 {
-        return Err(gpu_device_error(ERR_INVALID_INDEX).into());
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     Ok(Some(raw as u32))
 }
 
 fn num_to_index(raw: f64) -> BuiltinResult<Option<u32>> {
     if !raw.is_finite() {
-        return Err(gpu_device_error(ERR_INVALID_INDEX).into());
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > 1e-9 {
-        return Err(gpu_device_error(ERR_INVALID_INDEX).into());
+        return Err(gpu_device_error(&GPU_DEVICE_ERROR_INVALID_INDEX).into());
     }
     let idx = rounded as i64;
     int_to_index(idx)
@@ -299,8 +397,15 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_unsupported_argument_errors() {
         test_support::with_test_provider(|_| {
-            let err = call(vec![Value::from("status")]).unwrap_err().to_string();
-            assert_eq!(err, ERR_UNSUPPORTED_ARGUMENT);
+            let err = call(vec![Value::from("status")]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT.message
+            );
+            assert_eq!(
+                err.identifier(),
+                GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT.identifier
+            );
         });
     }
 
@@ -308,8 +413,15 @@ pub(crate) mod tests {
     #[test]
     fn gpu_device_reset_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
-            let err = call(vec![Value::from(" RESET ")]).unwrap_err().to_string();
-            assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
+            let err = call(vec![Value::from(" RESET ")]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED.message
+            );
+            assert_eq!(
+                err.identifier(),
+                GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED.identifier
+            );
         });
     }
 
@@ -318,8 +430,15 @@ pub(crate) mod tests {
     fn gpu_device_reset_char_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let chars = runmat_builtins::CharArray::new("reset".chars().collect(), 1, 5).unwrap();
-            let err = call(vec![Value::CharArray(chars)]).unwrap_err().to_string();
-            assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
+            let err = call(vec![Value::CharArray(chars)]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED.message
+            );
+            assert_eq!(
+                err.identifier(),
+                GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED.identifier
+            );
         });
     }
 
@@ -328,8 +447,15 @@ pub(crate) mod tests {
     fn gpu_device_empty_array_argument_reports_not_supported() {
         test_support::with_test_provider(|_| {
             let empty = runmat_builtins::Tensor::zeros(vec![0, 0]);
-            let err = call(vec![Value::Tensor(empty)]).unwrap_err().to_string();
-            assert_eq!(err, ERR_RESET_NOT_SUPPORTED);
+            let err = call(vec![Value::Tensor(empty)]).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED.message
+            );
+            assert_eq!(
+                err.identifier(),
+                GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED.identifier
+            );
         });
     }
 
@@ -350,7 +476,7 @@ pub(crate) mod tests {
             ];
             for case in cases {
                 let err = call(vec![case]).unwrap_err().to_string();
-                assert_eq!(err, ERR_INVALID_INDEX);
+                assert_eq!(err, GPU_DEVICE_ERROR_INVALID_INDEX.message);
             }
         });
     }

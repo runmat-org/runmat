@@ -10,10 +10,15 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{ComplexTensor, ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const LR_DIM: [usize; 1] = [2];
+const BUILTIN_NAME: &str = "fliplr";
 
 fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     let input = match args.first() {
@@ -80,7 +85,78 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 fn fliplr_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("fliplr").build()
+    fliplr_error_with_message(message, &FLIPLR_ERROR_INVALID_INPUT)
+}
+
+fn fliplr_error_descriptor(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    fliplr_error_with_message(error.message, error)
+}
+
+const FLIPLR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array mirrored left-to-right (dimension 2).",
+}];
+
+const FLIPLR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array/value to reverse along columns.",
+}];
+
+const FLIPLR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = fliplr(A)",
+    inputs: &FLIPLR_INPUTS,
+    outputs: &FLIPLR_OUTPUT,
+}];
+
+const FLIPLR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FLIPLR.INVALID_INPUT",
+    identifier: Some("RunMat:fliplr:InvalidInput"),
+    when: "Input type or conversion path is unsupported for fliplr.",
+    message: "fliplr: invalid input argument",
+};
+
+const FLIPLR_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FLIPLR.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:fliplr:UnsupportedInput"),
+    when: "Input type is unsupported for fliplr.",
+    message: "fliplr: unsupported input type",
+};
+
+const FLIPLR_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [FLIPLR_ERROR_INVALID_INPUT, FLIPLR_ERROR_UNSUPPORTED_INPUT];
+
+pub const FLIPLR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FLIPLR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FLIPLR_ERRORS,
+};
+
+fn fliplr_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_fliplr_error(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(err.message().to_string())
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = FLIPLR_ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -90,50 +166,66 @@ fn fliplr_error(message: impl Into<String>) -> RuntimeError {
     keywords = "fliplr,flip,horizontal,matrix,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),
+    descriptor(crate::builtins::array::shape::fliplr::FLIPLR_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
 async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => {
-            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM).map(tensor::tensor_into_value)?)
-        }
-        Value::LogicalArray(array) => {
-            Ok(flip_logical_array_with("fliplr", array, &LR_DIM).map(Value::LogicalArray)?)
-        }
-        Value::ComplexTensor(ct) => {
-            Ok(flip_complex_tensor_with("fliplr", ct, &LR_DIM).map(Value::ComplexTensor)?)
-        }
+        Value::Tensor(tensor) => Ok(flip_tensor_with("fliplr", tensor, &LR_DIM)
+            .map(tensor::tensor_into_value)
+            .map_err(remap_fliplr_error)?),
+        Value::LogicalArray(array) => Ok(flip_logical_array_with("fliplr", array, &LR_DIM)
+            .map(Value::LogicalArray)
+            .map_err(remap_fliplr_error)?),
+        Value::ComplexTensor(ct) => Ok(flip_complex_tensor_with("fliplr", ct, &LR_DIM)
+            .map(Value::ComplexTensor)
+            .map_err(remap_fliplr_error)?),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| fliplr_error(format!("fliplr: {e}")))?;
             Ok(flip_complex_tensor_with("fliplr", tensor, &LR_DIM)
-                .map(complex_tensor_into_value)?)
+                .map(complex_tensor_into_value)
+                .map_err(remap_fliplr_error)?)
         }
-        Value::StringArray(strings) => {
-            Ok(flip_string_array_with("fliplr", strings, &LR_DIM).map(Value::StringArray)?)
-        }
-        Value::CharArray(chars) => {
-            Ok(flip_char_array_with("fliplr", chars, &LR_DIM).map(Value::CharArray)?)
-        }
+        Value::StringArray(strings) => Ok(flip_string_array_with("fliplr", strings, &LR_DIM)
+            .map(Value::StringArray)
+            .map_err(remap_fliplr_error)?),
+        Value::CharArray(chars) => Ok(flip_char_array_with("fliplr", chars, &LR_DIM)
+            .map(Value::CharArray)
+            .map_err(remap_fliplr_error)?),
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Num(n))
                 .map_err(|e| fliplr_error(e))?;
-            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM).map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM)
+                .map(tensor::tensor_into_value)
+                .map_err(remap_fliplr_error)?)
         }
         Value::Int(i) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Int(i))
                 .map_err(|e| fliplr_error(e))?;
-            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM).map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM)
+                .map(tensor::tensor_into_value)
+                .map_err(remap_fliplr_error)?)
         }
         Value::Bool(flag) => {
             let tensor = tensor::value_into_tensor_for("fliplr", Value::Bool(flag))
                 .map_err(|e| fliplr_error(e))?;
-            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM).map(tensor::tensor_into_value)?)
+            Ok(flip_tensor_with("fliplr", tensor, &LR_DIM)
+                .map(tensor::tensor_into_value)
+                .map_err(remap_fliplr_error)?)
         }
-        Value::GpuTensor(handle) => Ok(flip_gpu_with("fliplr", handle, &LR_DIM).await?),
-        Value::Cell(_) => Err(fliplr_error("fliplr: cell arrays are not yet supported")),
+        Value::GpuTensor(handle) => Ok(flip_gpu_with("fliplr", handle, &LR_DIM)
+            .await
+            .map_err(remap_fliplr_error)?),
+        Value::Cell(_) => Err(fliplr_error_with_message(
+            "fliplr: cell arrays are not yet supported",
+            &FLIPLR_ERROR_UNSUPPORTED_INPUT,
+        )),
         Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)
@@ -141,7 +233,7 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(fliplr_error("fliplr: unsupported input type")),
+        | Value::OutputList(_) => Err(fliplr_error_descriptor(&FLIPLR_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 

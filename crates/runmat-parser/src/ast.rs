@@ -12,11 +12,14 @@ pub enum Expr {
     Binary(Box<Expr>, BinOp, Box<Expr>, Span),
     Tensor(Vec<Vec<Expr>>, Span),
     Cell(Vec<Vec<Expr>>, Span),
+    StructLiteral(Vec<(String, Expr)>, Span),
+    ObjectLiteral(String, Vec<(String, Expr)>, Span),
     Index(Box<Expr>, Vec<Expr>, Span),
     IndexCell(Box<Expr>, Vec<Expr>, Span),
     Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>, Span),
     Colon(Span),
     FuncCall(String, Vec<Expr>, Span),
+    CommandCall(String, Vec<Expr>, Span),
     Member(Box<Expr>, String, Span),
     // Dynamic field: s.(expr)
     MemberDynamic(Box<Expr>, Box<Expr>, Span),
@@ -42,11 +45,14 @@ impl Expr {
             | Expr::Binary(_, _, _, span)
             | Expr::Tensor(_, span)
             | Expr::Cell(_, span)
+            | Expr::StructLiteral(_, span)
+            | Expr::ObjectLiteral(_, _, span)
             | Expr::Index(_, _, span)
             | Expr::IndexCell(_, _, span)
             | Expr::Range(_, _, _, span)
             | Expr::Colon(span)
             | Expr::FuncCall(_, _, span)
+            | Expr::CommandCall(_, _, span)
             | Expr::Member(_, _, span)
             | Expr::MemberDynamic(_, _, span)
             | Expr::DottedInvoke(_, _, _, span)
@@ -67,11 +73,16 @@ impl Expr {
             Expr::Binary(lhs, op, rhs, _) => Expr::Binary(lhs, op, rhs, span),
             Expr::Tensor(rows, _) => Expr::Tensor(rows, span),
             Expr::Cell(rows, _) => Expr::Cell(rows, span),
+            Expr::StructLiteral(fields, _) => Expr::StructLiteral(fields, span),
+            Expr::ObjectLiteral(class_name, fields, _) => {
+                Expr::ObjectLiteral(class_name, fields, span)
+            }
             Expr::Index(base, indices, _) => Expr::Index(base, indices, span),
             Expr::IndexCell(base, indices, _) => Expr::IndexCell(base, indices, span),
             Expr::Range(start, step, end, _) => Expr::Range(start, step, end, span),
             Expr::Colon(_) => Expr::Colon(span),
             Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
+            Expr::CommandCall(name, args, _) => Expr::CommandCall(name, args, span),
             Expr::Member(base, name, _) => Expr::Member(base, name, span),
             Expr::MemberDynamic(base, name, _) => Expr::MemberDynamic(base, name, span),
             Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(base, name, args, span),
@@ -166,6 +177,8 @@ pub enum Stmt {
         params: Vec<String>,
         outputs: Vec<String>,
         body: Vec<Stmt>,
+        isolated: bool,
+        is_async: bool,
         span: Span,
     },
     Import {

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `pow2` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -61,10 +65,104 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "pow2";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const POW2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Binary power-of-two result.",
+}];
+
+const POW2_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Exponent input for 2.^X.",
+}];
+
+const POW2_INPUTS_F_E: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "F",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Mantissa input.",
+    },
+    BuiltinParamDescriptor {
+        name: "E",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Binary exponent input.",
+    },
+];
+
+const POW2_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = pow2(X)",
+        inputs: &POW2_INPUTS_X,
+        outputs: &POW2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = pow2(F, E)",
+        inputs: &POW2_INPUTS_F_E,
+        outputs: &POW2_OUTPUT,
+    },
+];
+
+const POW2_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POW2.INVALID_ARGUMENT",
+    identifier: Some("RunMat:pow2:InvalidArgument"),
+    when: "Argument arity is invalid.",
+    message: "pow2: invalid argument",
+};
+
+const POW2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POW2.INVALID_INPUT",
+    identifier: Some("RunMat:pow2:InvalidInput"),
+    when: "Input value cannot be converted to supported numeric form.",
+    message: "pow2: invalid input",
+};
+
+const POW2_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POW2.SIZE_MISMATCH",
+    identifier: Some("RunMat:pow2:SizeMismatch"),
+    when: "Binary operands are not broadcast-compatible.",
+    message: "pow2: size mismatch",
+};
+
+const POW2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POW2.INTERNAL",
+    identifier: Some("RunMat:pow2:Internal"),
+    when: "Internal gather/provider/tensor construction failed.",
+    message: "pow2: internal error",
+};
+
+const POW2_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    POW2_ERROR_INVALID_ARGUMENT,
+    POW2_ERROR_INVALID_INPUT,
+    POW2_ERROR_SIZE_MISMATCH,
+    POW2_ERROR_INTERNAL,
+];
+
+pub const POW2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &POW2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &POW2_ERRORS,
+};
+
+fn pow2_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -74,13 +172,17 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "pow2,ldexp,binary scaling,gpu",
     accel = "unary",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::pow2::POW2_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::pow2"
 )]
 async fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     match rest.len() {
         0 => pow2_unary(first).await,
         1 => pow2_binary(first, rest.into_iter().next().unwrap()).await,
-        _ => Err(builtin_error("pow2: expected at most two arguments")),
+        _ => Err(pow2_error_with_detail(
+            &POW2_ERROR_INVALID_ARGUMENT,
+            "expected at most two arguments",
+        )),
     }
 }
 
@@ -93,9 +195,10 @@ async fn pow2_unary(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(ct) => pow2_complex_tensor(ct),
         Value::CharArray(ca) => pow2_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("pow2: expected numeric input, got string"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(pow2_error_with_detail(
+            &POW2_ERROR_INVALID_INPUT,
+            "expected numeric input, got string",
+        )),
         other => pow2_real(other),
     }
 }
@@ -155,13 +258,14 @@ async fn pow2_gpu_scale(
 
 fn pow2_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("pow2", value)
-        .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+        .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INVALID_INPUT, e))?;
     Ok(tensor::tensor_into_value(pow2_tensor(tensor)?))
 }
 
 fn pow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = tensor.data.iter().map(|&v| v.exp2()).collect();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("pow2: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))
 }
 
 fn pow2_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -171,7 +275,7 @@ fn pow2_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| pow2_complex(re, im))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+        .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(tensor))
 }
 
@@ -182,7 +286,7 @@ fn pow2_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).exp2())
         .collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+        .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -193,15 +297,15 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
     let mantissa_array = value_into_numeric_array(mantissa, "pow2")?;
     let exponent_array = value_into_numeric_array(exponent, "pow2")?;
     let plan = BroadcastPlan::new(mantissa_array.shape(), exponent_array.shape())
-        .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+        .map_err(|e| pow2_error_with_detail(&POW2_ERROR_SIZE_MISMATCH, e))?;
     if plan.is_empty() {
         if mantissa_array.is_complex() || exponent_array.is_complex() {
             let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
-                .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             return Ok(Value::ComplexTensor(tensor));
         } else {
             let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-                .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             return Ok(tensor::tensor_into_value(tensor));
         }
     }
@@ -213,7 +317,7 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
                 out[idx_out] = m.data[idx_m] * scale;
             }
             let tensor = Tensor::new(out, plan.output_shape().to_vec())
-                .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(tensor::tensor_into_value(tensor))
         }
         (NumericArray::Real(m), NumericArray::Complex(e)) => {
@@ -224,7 +328,7 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
                 out[idx_out] = (scale * re_pow, scale * im_pow);
             }
             let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-                .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
         }
         (NumericArray::Complex(m), NumericArray::Real(e)) => {
@@ -235,7 +339,7 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
                 out[idx_out] = (re_m * scale, im_m * scale);
             }
             let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-                .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
         }
         (NumericArray::Complex(m), NumericArray::Complex(e)) => {
@@ -246,7 +350,7 @@ fn pow2_host_scale(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
                 out[idx_out] = complex_mul(re_m, im_m, re_pow, im_pow);
             }
             let tensor = ComplexTensor::new(out, plan.output_shape().to_vec())
-                .map_err(|e| builtin_error(format!("pow2: {e}")))?;
+                .map_err(|e| pow2_error_with_detail(&POW2_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(tensor))
         }
     }
@@ -312,26 +416,31 @@ fn complex_tensor_into_value(tensor: ComplexTensor) -> Value {
 fn value_into_numeric_array(value: Value, name: &str) -> BuiltinResult<NumericArray> {
     match value {
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
+                pow2_error_with_detail(&POW2_ERROR_INTERNAL, format!("{name}: {e}"))
+            })?;
             Ok(NumericArray::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(NumericArray::Complex(ct)),
         Value::CharArray(ca) => {
             let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
-            let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+            let tensor = Tensor::new(data, vec![ca.rows, ca.cols]).map_err(|e| {
+                pow2_error_with_detail(&POW2_ERROR_INTERNAL, format!("{name}: {e}"))
+            })?;
             Ok(NumericArray::Real(tensor))
         }
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
-            "{name}: expected numeric input, got string"
-        ))),
-        Value::GpuTensor(_) => Err(builtin_error(format!(
-            "{name}: internal error converting GPU tensor"
-        ))),
+        Value::String(_) | Value::StringArray(_) => Err(pow2_error_with_detail(
+            &POW2_ERROR_INVALID_INPUT,
+            format!("{name}: expected numeric input, got string"),
+        )),
+        Value::GpuTensor(_) => Err(pow2_error_with_detail(
+            &POW2_ERROR_INTERNAL,
+            format!("{name}: internal error converting GPU tensor"),
+        )),
         other => {
-            let tensor = tensor::value_into_tensor_for(name, other)
-                .map_err(|e| builtin_error(format!("{name}: {e}")))?;
+            let tensor = tensor::value_into_tensor_for(name, other).map_err(|e| {
+                pow2_error_with_detail(&POW2_ERROR_INVALID_INPUT, format!("{name}: {e}"))
+            })?;
             Ok(NumericArray::Real(tensor))
         }
     }
@@ -364,6 +473,23 @@ pub(crate) mod tests {
 
     fn pow2_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::pow2_builtin(first, rest))
+    }
+
+    #[test]
+    fn pow2_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = POW2_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = pow2(X)"));
+        assert!(labels.contains(&"Y = pow2(F, E)"));
+    }
+
+    #[test]
+    fn pow2_string_input_has_stable_identifier() {
+        let err = pow2_builtin(Value::from("bad"), vec![]).expect_err("expected error");
+        assert_eq!(err.identifier(), POW2_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]

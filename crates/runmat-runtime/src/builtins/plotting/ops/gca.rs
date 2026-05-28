@@ -1,5 +1,9 @@
 //! MATLAB-compatible `gca` builtin.
 
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
 
@@ -8,6 +12,61 @@ use super::state::{current_axes_state, encode_axes_handle, FigureAxesState};
 use super::style::value_as_string;
 use crate::builtins::plotting::type_resolvers::gca_type;
 
+const GCA_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ax",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Current axes handle.",
+}];
+
+const GCA_OUTPUT_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "s",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Axes state struct with handle/figure/rows/cols/index fields.",
+}];
+
+const GCA_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+
+const GCA_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Only 'struct' is supported.",
+}];
+
+const GCA_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "ax = gca()",
+        inputs: &GCA_INPUTS_NONE,
+        outputs: &GCA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "s = gca('struct')",
+        inputs: &GCA_INPUTS_MODE,
+        outputs: &GCA_OUTPUT_STRUCT,
+    },
+];
+
+const GCA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GCA.INVALID_ARGUMENT",
+    identifier: Some("RunMat:gca:InvalidArgument"),
+    when: "Unsupported arguments are provided.",
+    message: "gca: unsupported arguments",
+};
+
+const GCA_ERRORS: [BuiltinErrorDescriptor; 1] = [GCA_ERROR_INVALID_ARGUMENT];
+
+pub const GCA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GCA_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GCA_ERRORS,
+};
+
 #[runtime_builtin(
     name = "gca",
     category = "plotting",
@@ -15,6 +74,7 @@ use crate::builtins::plotting::type_resolvers::gca_type;
     keywords = "gca,axes,plotting",
     suppress_auto_output = true,
     type_resolver(gca_type),
+    descriptor(crate::builtins::plotting::gca::GCA_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::gca"
 )]
 pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -61,6 +121,18 @@ pub(crate) mod tests {
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn gca_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = GCA_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"ax = gca()"));
+        assert!(labels.contains(&"s = gca('struct')"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

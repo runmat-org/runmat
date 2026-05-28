@@ -37,9 +37,11 @@ impl Parser {
                 self.pos += 1;
                 Ok(Stmt::Return(self.span_from(token.position, token.end)))
             }
-            Some(Token::Function) => self.parse_function().map_err(|e| e.into()),
+            Some(Token::Function | Token::Isolated | Token::Async) => {
+                self.parse_function().map_err(|e| e.into())
+            }
             Some(Token::LBracket) => {
-                if matches!(self.peek_token_at(1), Some(Token::Ident | Token::Tilde)) {
+                if self.looks_like_multi_assign_lhs() {
                     match self.try_parse_multi_assign() {
                         Ok(stmt) => Ok(stmt),
                         Err(msg) => Err(self.error(&msg)),
@@ -104,6 +106,38 @@ impl Parser {
                     let span = expr.span();
                     Ok(Stmt::ExprStmt(expr, false, span))
                 }
+            }
+        }
+    }
+
+    fn looks_like_multi_assign_lhs(&self) -> bool {
+        if self.peek_token() != Some(&Token::LBracket) {
+            return false;
+        }
+        let mut i = self.pos + 1;
+        let mut expect_name = true;
+        loop {
+            let token = match self.tokens.get(i) {
+                Some(info) => &info.token,
+                None => return false,
+            };
+            match (expect_name, token) {
+                (true, Token::Ident | Token::Tilde) => {
+                    expect_name = false;
+                    i += 1;
+                }
+                (false, Token::Comma) => {
+                    expect_name = true;
+                    i += 1;
+                }
+                (false, Token::RBracket) => {
+                    i += 1;
+                    return matches!(
+                        self.tokens.get(i).map(|info| &info.token),
+                        Some(Token::Assign)
+                    );
+                }
+                _ => return false,
             }
         }
     }
@@ -178,6 +212,26 @@ impl Parser {
 
     fn parse_function(&mut self) -> Result<Stmt, String> {
         let start = self.tokens[self.pos].position;
+        let mut isolated = false;
+        let mut is_async = false;
+        loop {
+            if self.consume(&Token::Isolated) {
+                if isolated {
+                    return Err("duplicate 'isolated' function modifier".into());
+                }
+                isolated = true;
+            } else if self.consume(&Token::Async) {
+                if is_async {
+                    return Err("duplicate 'async' function modifier".into());
+                }
+                is_async = true;
+            } else {
+                break;
+            }
+        }
+        if (isolated || is_async) && self.peek_token() != Some(&Token::Function) {
+            return Err("expected 'function' after function modifier".into());
+        }
         self.consume(&Token::Function);
         let mut outputs = Vec::new();
         if self.consume(&Token::LBracket) {
@@ -260,6 +314,8 @@ impl Parser {
             params,
             outputs,
             body,
+            isolated,
+            is_async,
             span: self.span_from(start, end),
         })
     }

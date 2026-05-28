@@ -98,21 +98,21 @@ impl RunMatSession {
             jit_engine,
             verbose,
             stats: ExecutionStats::default(),
-            variables: HashMap::new(),
             variable_array: Vec::new(),
-            variable_names: HashMap::new(),
+            workspace_bindings: HashMap::new(),
             workspace_values: HashMap::new(),
-            function_definitions: HashMap::new(),
+            abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
+            active_source_identity: None,
+            function_registry: runmat_vm::FunctionRegistry::default(),
+            next_semantic_function_id: 0,
             source_pool: SourcePool::default(),
-            function_source_ids: HashMap::new(),
             snapshot,
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
             async_input_handler: None,
             callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
             error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
-            default_source_name: "<repl>".to_string(),
-            source_name_override: None,
+            active_source_name: "<repl>".to_string(),
             telemetry_consent: true,
             telemetry_client_id: None,
             telemetry_platform: TelemetryPlatformInfo::default(),
@@ -121,6 +121,7 @@ impl RunMatSession {
             workspace_version: 0,
             emit_fusion_plan: false,
             compat_mode: CompatMode::Matlab,
+            top_level_await_enabled: true,
             format_mode: runmat_builtins::FormatMode::default(),
         };
 
@@ -142,9 +143,7 @@ impl RunMatSession {
     }
 
     pub(crate) fn current_source_name(&self) -> &str {
-        self.source_name_override
-            .as_deref()
-            .unwrap_or(&self.default_source_name)
+        &self.active_source_name
     }
 
     #[cfg(target_arch = "wasm32")]

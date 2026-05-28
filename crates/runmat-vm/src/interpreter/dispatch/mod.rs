@@ -10,34 +10,27 @@ mod stack;
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::runtime::workspace::{
-    refresh_workspace_state, workspace_slot_assigned, workspace_state_available,
+    refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
 };
-use runmat_builtins::Value;
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::{IntValue, ObjectInstance, StructValue, Tensor, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::collections::{HashMap, HashSet};
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
 };
 pub use calls::{
-    build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
-    build_feval_expand_multi_args, build_user_function_expand_multi_args, handle_builtin_call,
-    handle_builtin_expand_at_call, handle_builtin_expand_last_call,
-    handle_builtin_expand_multi_call, handle_builtin_outcome, handle_create_closure,
-    handle_feval_dispatch, handle_load_method, handle_load_static_property, handle_method_call,
-    handle_method_or_member_index_call, handle_prepared_user_function_call, handle_register_class,
-    handle_static_method_call, handle_user_function_call, output_list_for_user_call,
-    prepare_named_user_dispatch, push_single_result, push_user_call_outputs,
-    unpack_prepared_user_call, BuiltinHandling, FevalHandling, MethodHandling,
-    PreparedUserDispatch, UserCallHandling,
+    build_builtin_expand_multi_args, build_feval_expand_multi_args,
+    build_user_function_expand_multi_args, handle_builtin_call_multi, handle_create_closure,
+    handle_create_semantic_closure, handle_load_method, handle_load_static_property,
+    handle_method_or_member_index_expand_multi_call, handle_method_or_member_index_multi_call,
+    handle_prepared_user_function_call, handle_register_class, handle_user_function_call,
+    BuiltinHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
-pub use exceptions::{
-    parse_exception, prepare_vm_error, redirect_exception_to_catch, ExceptionHandling,
-};
+pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
 pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,
@@ -49,58 +42,31 @@ pub enum DispatchHandled {
     Return(DispatchDecision),
 }
 
-pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
-        &'b str,
-        Vec<Value>,
-        &'b HashMap<String, crate::bytecode::UserFunction>,
-        &'b [Value],
-    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
-    + 'a;
-
-pub type BuiltinFallbackUserCall<'a> = dyn Fn(
-        String,
-        Vec<Value>,
-        usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>>>>
-    + 'a;
-
-pub type InterpretFunctionCounts<'a> = dyn Fn(
-        crate::bytecode::Bytecode,
-        Vec<Value>,
-        String,
-        usize,
-        usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>>>>
-    + 'a;
-
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
-    pub bytecode_functions: &'a HashMap<String, crate::bytecode::UserFunction>,
+    pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub call_counts: &'a [(usize, usize)],
     pub current_function_name: &'a str,
-    pub next_instr: Option<&'a Instr>,
 }
 
 pub struct DispatchState<'a> {
     pub stack: &'a mut Vec<Value>,
     pub vars: &'a mut Vec<Value>,
-    pub context: &'a mut crate::bytecode::ExecutionContext,
+    pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
     pub last_exception: &'a mut Option<runmat_builtins::MException>,
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
     pub global_aliases: &'a mut HashMap<usize, String>,
     pub persistent_aliases: &'a mut HashMap<usize, String>,
+    pub missing_input_slots: &'a mut HashSet<usize>,
     pub pc: &'a mut usize,
 }
 
 pub struct DispatchHooks<'a> {
     pub clear_value_residency: &'a mut dyn FnMut(&Value),
-    pub invoke_user_for_end_expr: &'a InvokeUserForEndExpr<'a>,
-    pub builtin_fallback_user_call: &'a BuiltinFallbackUserCall<'a>,
-    pub interpret_function_counts: &'a InterpretFunctionCounts<'a>,
     pub store_var_before_overwrite: &'a mut dyn FnMut(&Value, &Value),
     pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
@@ -142,6 +108,608 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
     }
 }
 
+fn for_each_gpu_handle_in_value(
+    value: &Value,
+    f: &mut impl FnMut(&GpuTensorHandle) -> Result<(), RuntimeError>,
+) -> Result<(), RuntimeError> {
+    let mut visited_handle_targets = HashSet::new();
+    for_each_gpu_handle_in_value_with_visited(value, f, &mut visited_handle_targets)
+}
+
+fn for_each_gpu_handle_in_value_with_visited(
+    value: &Value,
+    f: &mut impl FnMut(&GpuTensorHandle) -> Result<(), RuntimeError>,
+    visited_handle_targets: &mut HashSet<usize>,
+) -> Result<(), RuntimeError> {
+    match value {
+        Value::GpuTensor(handle) => f(handle),
+        Value::Cell(cell) => {
+            for elem in &cell.data {
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::Struct(struct_value) => {
+            for elem in struct_value.fields.values() {
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::Object(object_value) => {
+            for elem in object_value.properties.values() {
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::Closure(closure) => {
+            for capture in &closure.captures {
+                for_each_gpu_handle_in_value_with_visited(capture, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::OutputList(values) => {
+            for elem in values {
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::HandleObject(handle) => {
+            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            if visited_handle_targets.insert(raw_target) {
+                let target = unsafe { &*handle.target.as_raw() };
+                for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::Listener(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => Ok(()),
+    }
+}
+
+fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeError> {
+    for_each_gpu_handle_in_value(value, &mut |handle| {
+        let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "SpawnProviderUnavailable",
+                &format!(
+                    "spawn cannot capture GPU handle buffer {} (device {}) without an active provider",
+                    handle.buffer_id, handle.device_id
+                ),
+            )
+        })?;
+        let policy = provider.spawn_handle_concurrency();
+        if matches!(
+            policy,
+            runmat_accelerate_api::SpawnHandleConcurrency::Reject
+        ) {
+            return Err(crate::interpreter::errors::mex(
+                "SpawnGpuHandleUnsupported",
+                &format!(
+                    "spawn cannot capture GPU handle buffer {} on provider '{}' (spawn_handle_concurrency={})",
+                    handle.buffer_id,
+                    provider.device_info(),
+                    policy.as_str()
+                ),
+            ));
+        }
+        Ok(())
+    })
+}
+
+const SPAWN_TASK_KIND_FIELD: &str = "__runmat_spawn_kind";
+const SPAWN_TASK_ID_FIELD: &str = "__runmat_spawn_id";
+const SPAWN_TASK_PAYLOAD_FIELD: &str = "__runmat_spawn_payload";
+const SPAWN_TASK_KIND_VALUE: &str = "task";
+const FUTURE_KIND_FIELD: &str = "__runmat_future_kind";
+const FUTURE_FUNCTION_FIELD: &str = "__runmat_future_function";
+const FUTURE_REQUESTED_OUTPUTS_FIELD: &str = "__runmat_future_requested_outputs";
+const FUTURE_ARGS_FIELD: &str = "__runmat_future_args";
+const FUTURE_KIND_VALUE: &str = "async_future";
+
+fn allocate_spawn_task_id(context: &mut crate::bytecode::program::ExecutionContext) -> u64 {
+    loop {
+        let candidate = context.next_spawn_task_id;
+        context.next_spawn_task_id = context.next_spawn_task_id.wrapping_add(1);
+        if context.spawned_task_ids.insert(candidate) {
+            return candidate;
+        }
+    }
+}
+
+fn wrap_spawned_value(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: Value,
+) -> Value {
+    let task_id = allocate_spawn_task_id(context);
+    let mut task = StructValue::new();
+    task.fields.insert(
+        SPAWN_TASK_KIND_FIELD.to_string(),
+        Value::String(SPAWN_TASK_KIND_VALUE.to_string()),
+    );
+    task.fields.insert(
+        SPAWN_TASK_ID_FIELD.to_string(),
+        Value::Int(IntValue::U64(task_id)),
+    );
+    task.fields
+        .insert(SPAWN_TASK_PAYLOAD_FIELD.to_string(), value);
+    Value::Struct(task)
+}
+
+fn create_async_future_value(
+    function: runmat_hir::FunctionId,
+    requested_outputs: usize,
+    args: Vec<Value>,
+) -> Value {
+    let mut future = StructValue::new();
+    future.fields.insert(
+        FUTURE_KIND_FIELD.to_string(),
+        Value::String(FUTURE_KIND_VALUE.to_string()),
+    );
+    future.fields.insert(
+        FUTURE_FUNCTION_FIELD.to_string(),
+        Value::Int(IntValue::U64(function.0 as u64)),
+    );
+    future.fields.insert(
+        FUTURE_REQUESTED_OUTPUTS_FIELD.to_string(),
+        Value::Int(IntValue::U64(requested_outputs as u64)),
+    );
+    future
+        .fields
+        .insert(FUTURE_ARGS_FIELD.to_string(), Value::OutputList(args));
+    Value::Struct(future)
+}
+
+fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
+    if let Some(def) = runmat_builtins::get_class(class_name) {
+        let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        let mut visited = HashSet::new();
+        let mut cursor: Option<String> = Some(def.name.clone());
+        while let Some(name) = cursor {
+            if !visited.insert(name.clone()) {
+                break;
+            }
+            if let Some(class_def) = runmat_builtins::get_class(&name) {
+                chain.push(class_def.clone());
+                cursor = class_def.parent.clone();
+            } else {
+                break;
+            }
+        }
+        chain.reverse();
+        let mut object = ObjectInstance::new(def.name.clone());
+        for class_def in chain {
+            for (property_name, property_def) in class_def.properties {
+                if !property_def.is_static {
+                    if let Some(default_value) = property_def.default_value {
+                        object.properties.insert(property_name, default_value);
+                    }
+                }
+            }
+        }
+        object
+    } else {
+        ObjectInstance::new(class_name.to_string())
+    }
+}
+
+fn pop_aggregate_literal_values(
+    stack: &mut Vec<Value>,
+    field_count: usize,
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(field_count);
+    for _ in 0..field_count {
+        values.push(stack.pop().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow while building aggregate literal",
+            )
+        })?);
+    }
+    values.reverse();
+    Ok(values)
+}
+
+async fn resolve_semantic_future_value(value: Value) -> Result<Value, RuntimeError> {
+    let Value::Struct(future) = value else {
+        return Ok(value);
+    };
+    let is_future = matches!(
+        future.fields.get(FUTURE_KIND_FIELD),
+        Some(Value::String(kind)) if kind == FUTURE_KIND_VALUE
+    );
+    if !is_future {
+        return Ok(Value::Struct(future));
+    }
+    let function = match future.fields.get(FUTURE_FUNCTION_FIELD) {
+        Some(Value::Int(IntValue::U64(id))) => runmat_hir::FunctionId(*id as usize),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "future descriptor is missing a valid semantic function identifier",
+            ))
+        }
+    };
+    let requested_outputs = match future.fields.get(FUTURE_REQUESTED_OUTPUTS_FIELD) {
+        Some(Value::Int(IntValue::U64(count))) => *count as usize,
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "future descriptor is missing a valid requested output count",
+            ))
+        }
+    };
+    let args = match future.fields.get(FUTURE_ARGS_FIELD) {
+        Some(Value::OutputList(args)) => args.clone(),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "future descriptor is missing argument payload values",
+            ))
+        }
+    };
+
+    let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
+        runmat_hir::CallableIdentity::BoundFunction(function),
+        args,
+        requested_outputs,
+        runmat_hir::CallableFallbackPolicy::None,
+        crate::call::descriptor::CallableCallKind::Direct,
+    );
+    let value = crate::call::descriptor::execute_callable_descriptor(descriptor).await?;
+    Ok(calls::normalize_requested_outputs(value, requested_outputs))
+}
+
+fn unwrap_spawned_value(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: Value,
+) -> Result<Value, RuntimeError> {
+    let Value::Struct(task) = value else {
+        // Await preserves pass-through behavior for non-task values.
+        return Ok(value);
+    };
+    let is_spawn_task = matches!(
+        task.fields.get(SPAWN_TASK_KIND_FIELD),
+        Some(Value::String(kind)) if kind == SPAWN_TASK_KIND_VALUE
+    );
+    if !is_spawn_task {
+        return Ok(Value::Struct(task));
+    }
+    let task_id = match task.fields.get(SPAWN_TASK_ID_FIELD) {
+        Some(Value::Int(IntValue::U64(id))) => *id,
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "await task handle is missing a valid task identifier",
+            ))
+        }
+    };
+    if !context.spawned_task_ids.remove(&task_id) {
+        return Err(crate::interpreter::errors::mex(
+            "AwaitOperandInvalid",
+            "await task handle is stale or was already consumed",
+        ));
+    }
+    task.fields
+        .get(SPAWN_TASK_PAYLOAD_FIELD)
+        .cloned()
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "await task handle is missing payload value",
+            )
+        })
+}
+
+fn spawn_task_id_from_value(value: &Value) -> Option<u64> {
+    let Value::Struct(task) = value else {
+        return None;
+    };
+    let is_spawn_task = matches!(
+        task.fields.get(SPAWN_TASK_KIND_FIELD),
+        Some(Value::String(kind)) if kind == SPAWN_TASK_KIND_VALUE
+    );
+    if !is_spawn_task {
+        return None;
+    }
+    match task.fields.get(SPAWN_TASK_ID_FIELD) {
+        Some(Value::Int(IntValue::U64(id))) => Some(*id),
+        _ => None,
+    }
+}
+
+fn collect_spawn_task_ids_in_value(value: &Value, output: &mut HashSet<u64>) {
+    let mut visited_handle_targets = HashSet::new();
+    collect_spawn_task_ids_in_value_with_visited(value, output, &mut visited_handle_targets);
+}
+
+fn collect_spawn_task_ids_in_value_with_visited(
+    value: &Value,
+    output: &mut HashSet<u64>,
+    visited_handle_targets: &mut HashSet<usize>,
+) {
+    if let Some(task_id) = spawn_task_id_from_value(value) {
+        output.insert(task_id);
+    }
+    match value {
+        Value::Cell(cell) => {
+            for entry in &cell.data {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::Struct(struct_value) => {
+            for entry in struct_value.fields.values() {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::Object(object_value) => {
+            for entry in object_value.properties.values() {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::Closure(closure) => {
+            for entry in &closure.captures {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::OutputList(values) => {
+            for entry in values {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::HandleObject(handle) => {
+            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            if visited_handle_targets.insert(raw_target) {
+                let target = unsafe { &*handle.target.as_raw() };
+                collect_spawn_task_ids_in_value_with_visited(
+                    target,
+                    output,
+                    visited_handle_targets,
+                );
+            }
+        }
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::GpuTensor(_)
+        | Value::Listener(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => {}
+    }
+}
+
+fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
+    let mut visited_handle_targets = HashSet::new();
+    value_contains_spawn_task_id_with_visited(value, task_id, &mut visited_handle_targets)
+}
+
+fn value_contains_spawn_task_id_with_visited(
+    value: &Value,
+    task_id: u64,
+    visited_handle_targets: &mut HashSet<usize>,
+) -> bool {
+    if spawn_task_id_from_value(value) == Some(task_id) {
+        return true;
+    }
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::Struct(struct_value) => struct_value.fields.values().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::Object(object_value) => object_value.properties.values().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::Closure(closure) => closure.captures.iter().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::OutputList(values) => values.iter().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::HandleObject(handle) => {
+            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            if !visited_handle_targets.insert(raw_target) {
+                return false;
+            }
+            let target = unsafe { &*handle.target.as_raw() };
+            value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
+        }
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::GpuTensor(_)
+        | Value::Listener(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => false,
+    }
+}
+
+fn spawn_task_id_still_live(
+    task_id: u64,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+    excluded_var: Option<usize>,
+    excluded_local: Option<usize>,
+) -> bool {
+    if stack
+        .iter()
+        .any(|value| value_contains_spawn_task_id(value, task_id))
+    {
+        return true;
+    }
+    for (index, value) in vars.iter().enumerate() {
+        if excluded_var == Some(index) {
+            continue;
+        }
+        if value_contains_spawn_task_id(value, task_id) {
+            return true;
+        }
+    }
+    for (index, value) in context.locals.iter().enumerate() {
+        if excluded_local == Some(index) {
+            continue;
+        }
+        if value_contains_spawn_task_id(value, task_id) {
+            return true;
+        }
+    }
+    false
+}
+
+fn retire_spawn_task_id_if_dropped(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    excluded_var: Option<usize>,
+    excluded_local: Option<usize>,
+) {
+    let mut task_ids = HashSet::new();
+    collect_spawn_task_ids_in_value(value, &mut task_ids);
+    for id in task_ids {
+        if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local) {
+            context.spawned_task_ids.remove(&id);
+        }
+    }
+}
+
+fn retire_spawn_task_id_if_replaced(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    current: &Value,
+    incoming: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    excluded_var: Option<usize>,
+    excluded_local: Option<usize>,
+) {
+    let mut current_ids = HashSet::new();
+    collect_spawn_task_ids_in_value(current, &mut current_ids);
+    if current_ids.is_empty() {
+        return;
+    }
+    let mut incoming_ids = HashSet::new();
+    collect_spawn_task_ids_in_value(incoming, &mut incoming_ids);
+    for current_id in current_ids {
+        if incoming_ids.contains(&current_id) {
+            continue;
+        }
+        if !spawn_task_id_still_live(
+            current_id,
+            stack,
+            vars,
+            context,
+            excluded_var,
+            excluded_local,
+        ) {
+            context.spawned_task_ids.remove(&current_id);
+        }
+    }
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_popped_value_residency_excluding_live_values(
+    popped: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    live.extend(vars.iter().cloned());
+    live.extend(context.locals.iter().cloned());
+    crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live));
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_scope_value_residency_excluding_live_values(
+    dropped_local: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    live.extend(vars.iter().cloned());
+    live.extend(context.locals.iter().cloned());
+    crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live));
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_overwritten_var_residency_excluding_live_values(
+    overwritten: &Value,
+    overwritten_index: usize,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    for (idx, value) in vars.iter().enumerate() {
+        if idx != overwritten_index {
+            live.push(value.clone());
+        }
+    }
+    live.extend(context.locals.iter().cloned());
+    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_overwritten_local_residency_excluding_live_values(
+    overwritten: &Value,
+    overwritten_local_index: usize,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    live.extend(vars.iter().cloned());
+    for (idx, value) in context.locals.iter().enumerate() {
+        if idx != overwritten_local_index {
+            live.push(value.clone());
+        }
+    }
+    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+}
+
 pub async fn dispatch_instruction(
     meta: DispatchMeta<'_>,
     state: DispatchState<'_>,
@@ -150,12 +718,11 @@ pub async fn dispatch_instruction(
     let DispatchMeta {
         instr,
         var_names,
-        bytecode_functions,
+        function_registry,
         source_id,
         call_arg_spans,
         call_counts,
         current_function_name,
-        next_instr,
     } = meta;
     let DispatchState {
         stack,
@@ -166,13 +733,11 @@ pub async fn dispatch_instruction(
         imports,
         global_aliases,
         persistent_aliases,
+        missing_input_slots,
         pc,
     } = state;
     let DispatchHooks {
         clear_value_residency,
-        invoke_user_for_end_expr,
-        builtin_fallback_user_call,
-        interpret_function_counts,
         store_var_before_overwrite,
         store_var_after_store,
         store_local_before_local_overwrite,
@@ -184,10 +749,9 @@ pub async fn dispatch_instruction(
             instr,
             stack,
             vars,
-            &context.functions,
+            function_registry,
             *pc,
             &mut *clear_value_residency,
-            &invoke_user_for_end_expr,
         )
         .await? =>
         {
@@ -250,27 +814,58 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVar(index) => {
-            if call_counts.is_empty() {
-                if let Some(name) = var_names.get(index) {
-                    if workspace_state_available()
-                        && !matches!(workspace_slot_assigned(*index), Some(true))
-                    {
-                        return Err(crate::interpreter::errors::mex(
-                            "UndefinedVariable",
-                            &format!("Undefined variable: {name}"),
-                        ));
-                    }
+            if missing_input_slots.contains(index) {
+                return Err(crate::interpreter::errors::mex(
+                    "NotEnoughInputs",
+                    "Not enough input arguments.",
+                ));
+            }
+            if let (Some(false), Some(slot_name), Some(var_name)) = (
+                workspace_slot_assigned(*index),
+                workspace_slot_name(*index),
+                var_names.get(index),
+            ) {
+                if slot_name == *var_name {
+                    return Err(crate::interpreter::errors::mex(
+                        "UndefinedVariable",
+                        &format!("Undefined variable: {slot_name}"),
+                    ));
                 }
             }
-            if *index >= vars.len() {
-                let name = var_names
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_else(|| format!("#{index}"));
+            let value = vars[*index].clone();
+            debug::trace_load_var(*pc, *index, &value);
+            load_var(stack, vars, *index);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::LoadVarForIndexAssignment(index) => {
+            if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
-                    "UndefinedVariable",
-                    &format!("Undefined variable: {name}"),
+                    "NotEnoughInputs",
+                    "Not enough input arguments.",
                 ));
+            }
+            if let (Some(false), Some(slot_name), Some(var_name)) = (
+                workspace_slot_assigned(*index),
+                workspace_slot_name(*index),
+                var_names.get(index),
+            ) {
+                if slot_name == *var_name {
+                    let empty = Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
+                        crate::interpreter::errors::mex(
+                            "IndexAssignmentBaseInit",
+                            &format!(
+                                "failed to initialize undefined indexed-assignment base '{slot_name}': {err}"
+                            ),
+                        )
+                    })?;
+                    debug::trace_load_var(*pc, *index, &Value::Tensor(empty.clone()));
+                    stack.push(Value::Tensor(empty));
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::FallThrough,
+                    )));
+                }
             }
             let value = vars[*index].clone();
             debug::trace_load_var(*pc, *index, &value);
@@ -288,6 +883,25 @@ pub async fn dispatch_instruction(
                     "stack underflow",
                 ))?;
             debug::trace_store_var(*pc, *index, &preview);
+            if *index < vars.len() {
+                retire_spawn_task_id_if_replaced(
+                    context,
+                    &vars[*index],
+                    &preview,
+                    stack,
+                    vars,
+                    Some(*index),
+                    None,
+                );
+                #[cfg(feature = "native-accel")]
+                clear_overwritten_var_residency_excluding_live_values(
+                    &vars[*index],
+                    *index,
+                    stack,
+                    vars,
+                    context,
+                );
+            }
             store_var(
                 stack,
                 vars,
@@ -296,20 +910,78 @@ pub async fn dispatch_instruction(
                 store_var_before_overwrite,
                 store_var_after_store,
             )?;
+            missing_input_slots.remove(index);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::StoreLocal(offset) => {
-            store_local(
-                stack,
-                context,
-                vars,
-                *offset,
-                store_local_before_local_overwrite,
-                store_local_before_var_overwrite,
-                store_local_after_fallback_store,
-            )?;
+            if let Some(incoming) = stack.last().cloned() {
+                if let Some(current_frame) = context.call_stack.last() {
+                    let local_index = current_frame.locals_start + *offset;
+                    if local_index < context.locals.len() {
+                        let current_value = context.locals[local_index].clone();
+                        retire_spawn_task_id_if_replaced(
+                            context,
+                            &current_value,
+                            &incoming,
+                            stack,
+                            vars,
+                            None,
+                            Some(local_index),
+                        );
+                        #[cfg(feature = "native-accel")]
+                        clear_overwritten_local_residency_excluding_live_values(
+                            &current_value,
+                            local_index,
+                            stack,
+                            vars,
+                            context,
+                        );
+                    }
+                } else if *offset < vars.len() {
+                    retire_spawn_task_id_if_replaced(
+                        context,
+                        &vars[*offset],
+                        &incoming,
+                        stack,
+                        vars,
+                        Some(*offset),
+                        None,
+                    );
+                    #[cfg(feature = "native-accel")]
+                    clear_overwritten_var_residency_excluding_live_values(
+                        &vars[*offset],
+                        *offset,
+                        stack,
+                        vars,
+                        context,
+                    );
+                }
+            }
+            if context.call_stack.last().is_none() {
+                store_var(
+                    stack,
+                    vars,
+                    *offset,
+                    var_names,
+                    store_local_before_var_overwrite,
+                    |stored_index, stored_value| {
+                        store_local_after_fallback_store("<main>", stored_index, stored_value);
+                    },
+                )?;
+                missing_input_slots.remove(offset);
+            } else {
+                store_local(
+                    stack,
+                    context,
+                    vars,
+                    *offset,
+                    store_local_before_local_overwrite,
+                    store_local_before_var_overwrite,
+                    store_local_after_fallback_store,
+                )?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -321,17 +993,35 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::Pop => {
-            crate::ops::stack::pop(stack);
+            if let Some(value) = stack.pop() {
+                retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None);
+                #[cfg(feature = "native-accel")]
+                clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::AndAnd(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-            crate::ops::control_flow::and_and(stack, *target)?,
+            crate::ops::control_flow::and_and(
+                logical_truth_from_value(
+                    &crate::interpreter::stack::pop_value(stack)?,
+                    "short-circuit && condition",
+                )
+                .await?,
+                *target,
+            ),
             pc,
         )))),
         Instr::OrOr(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-            crate::ops::control_flow::or_or(stack, *target)?,
+            crate::ops::control_flow::or_or(
+                logical_truth_from_value(
+                    &crate::interpreter::stack::pop_value(stack)?,
+                    "short-circuit || condition",
+                )
+                .await?,
+                *target,
+            ),
             pc,
         )))),
         Instr::JumpIfFalse(target) => {
@@ -372,9 +1062,19 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::ExitScope(local_count) => {
-            crate::ops::control_flow::exit_scope(&mut context.locals, *local_count, |val| {
-                clear_value_residency(val);
-            });
+            for _ in 0..*local_count {
+                if let Some(value) = context.locals.pop() {
+                    if let Some(id) = spawn_task_id_from_value(&value) {
+                        if !spawn_task_id_still_live(id, stack, vars, context, None, None) {
+                            context.spawned_task_ids.remove(&id);
+                        }
+                    }
+                    #[cfg(feature = "native-accel")]
+                    clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
+                    #[cfg(not(feature = "native-accel"))]
+                    clear_value_residency(&value);
+                }
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -482,16 +1182,37 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallBuiltin(name, arg_count) => {
-            match handle_builtin_call(
+        Instr::CreateStructLiteral(fields) => {
+            let values = pop_aggregate_literal_values(stack, fields.len())?;
+            let mut struct_value = StructValue::new();
+            for (field, value) in fields.iter().zip(values) {
+                struct_value.fields.insert(field.clone(), value);
+            }
+            stack.push(Value::Struct(struct_value));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateObjectLiteral { class_name, fields } => {
+            let values = pop_aggregate_literal_values(stack, fields.len())?;
+            let mut object = initialize_object_with_defaults(class_name);
+            for (field, value) in fields.iter().zip(values) {
+                object.properties.insert(field.clone(), value);
+            }
+            stack.push(Value::Object(object));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallBuiltinMulti(name, arg_count, out_count) => {
+            match handle_builtin_call_multi(
                 calls::BuiltinCallContext {
                     stack,
                     name,
                     arg_count: *arg_count,
-                    next_instr,
                     source_id,
-                    call_arg_spans,
-                    imports,
+                    call_arg_spans: call_arg_spans.clone(),
+                    imports: imports.as_slice(),
                     call_counts,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
@@ -500,6 +1221,7 @@ pub async fn dispatch_instruction(
                         pc,
                     },
                 },
+                *out_count,
                 refresh_workspace_state,
             )
             .await?
@@ -516,245 +1238,166 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFeval(argc) => {
+        Instr::CallFevalMulti(argc, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match handle_feval_dispatch(
-                crate::call::feval::execute_feval(
-                    func_val,
-                    args,
-                    &context.functions,
-                    bytecode_functions,
-                )
-                .await,
-                stack,
-            )? {
-                FevalHandling::Completed => {}
-                FevalHandling::InvokeUser {
-                    name,
-                    args,
-                    functions,
-                } => {
-                    let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
-                    stack.push(value);
+            match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
+                .await?
+            {
+                crate::call::feval::FevalDispatch::Completed(result) => {
+                    stack.push(calls::normalize_requested_outputs(result, *out_count));
                 }
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFevalExpandMulti(specs) => {
+        Instr::CallFevalExpandMultiOutput(specs, out_count) => {
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match handle_feval_dispatch(
-                crate::call::feval::execute_feval(
-                    func_val,
-                    args,
-                    &context.functions,
-                    bytecode_functions,
+            match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
+                .await?
+            {
+                crate::call::feval::FevalDispatch::Completed(result) => {
+                    stack.push(calls::normalize_requested_outputs(result, *out_count));
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateSemanticFuture(function, arg_count, out_count) => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            stack.push(create_async_future_value(*function, *out_count, args));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            stack.push(create_async_future_value(*function, *out_count, args));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::Spawn => {
+            let value = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "spawn instruction expected a value on the stack",
                 )
-                .await,
-                stack,
-            )? {
-                FevalHandling::Completed => {}
-                FevalHandling::InvokeUser {
-                    name,
-                    args,
-                    functions,
-                } => {
-                    let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
-                    stack.push(value);
-                }
-            }
+            })?;
+            let value = resolve_semantic_future_value(value).await?;
+            enforce_spawn_value_concurrency_policy(&value)?;
+            stack.push(wrap_spawned_value(context, value));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFunction(name, arg_count) => {
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    name,
-                    out_count: 1,
-                    bytecode_functions,
-                    caller_functions: &mut context.functions,
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                *arg_count,
-                refresh_workspace_state,
-                builtin_fallback_user_call,
-                |bc, vars, name, out_count, in_count| {
-                    interpret_function_counts(bc, vars, name, out_count, in_count)
-                },
-            )
-            .await?
-            {
-                UserCallHandling::Completed => {}
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallFunctionMulti(name, arg_count, out_count) => {
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    name,
-                    out_count: *out_count,
-                    bytecode_functions,
-                    caller_functions: &mut context.functions,
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                *arg_count,
-                refresh_workspace_state,
-                builtin_fallback_user_call,
-                |bc, vars, name, out_count, in_count| {
-                    interpret_function_counts(bc, vars, name, out_count, in_count)
-                },
-            )
-            .await?
-            {
-                UserCallHandling::Completed => {}
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
-            handle_builtin_expand_last_call(
-                stack,
-                name,
-                *fixed_argc,
-                *num_indices,
-                next_instr,
-                |base, indices| async move {
-                    let obj = match base {
-                        Value::Object(obj) => obj,
-                        _ => unreachable!(),
-                    };
-                    let cell = crate::call::shared::subsref_paren_index_cell(&indices)?;
-                    let v = runmat_runtime::call_builtin_async(
-                        "call_method",
-                        &[
-                            Value::Object(obj),
-                            Value::String("subsref".to_string()),
-                            Value::String("()".to_string()),
-                            cell,
-                        ],
-                    )
-                    .await?;
-                    Ok(vec![v])
-                },
-            )
-            .await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
-            handle_builtin_expand_at_call(
-                stack,
-                name,
-                *before_count,
-                *num_indices,
-                *after_count,
-                next_instr,
-                |base, indices| async move {
-                    let obj = match base {
-                        Value::Object(obj) => obj,
-                        _ => unreachable!(),
-                    };
-                    let idx_vals =
-                        crate::call::shared::subsref_brace_numeric_index_values(&indices);
-                    let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
-                    let v = runmat_runtime::call_builtin_async(
-                        "call_method",
-                        &[
-                            Value::Object(obj),
-                            Value::String("subsref".to_string()),
-                            Value::String("{}".to_string()),
-                            cell,
-                        ],
-                    )
-                    .await?;
-                    Ok(vec![v])
-                },
-            )
-            .await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallBuiltinExpandMulti(name, specs) => {
-            handle_builtin_expand_multi_call(stack, name, specs, next_instr).await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
-            let args = build_builtin_expand_at_args(
-                stack,
-                *before_count,
-                *num_indices,
-                *after_count,
-                "CallFunctionExpandAt requires cell or object cell access",
-                |base, indices| async move {
-                    let obj = match base {
-                        Value::Object(obj) => obj,
-                        _ => unreachable!(),
-                    };
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let v = runmat_runtime::call_builtin_async(
-                        "call_method",
-                        &[
-                            Value::Object(obj),
-                            Value::String("subsref".to_string()),
-                            Value::String("{}".to_string()),
-                            cell,
-                        ],
-                    )
-                    .await?;
-                    Ok(vec![v])
-                },
-            )
-            .await?;
-            let value = invoke_user_for_end_expr(name, args, bytecode_functions, vars).await?;
+        Instr::Await => {
+            let value = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "await instruction expected a value on the stack",
+                )
+            })?;
+            let value = unwrap_spawned_value(context, value)?;
+            let value = resolve_semantic_future_value(value).await?;
             stack.push(value);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFunctionExpandMulti(name, specs) => {
+        Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
+            match handle_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
+                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                    out_count: *out_count,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallFunctionMulti {
+            identity,
+            fallback_policy,
+            arg_count,
+            out_count,
+        } => {
+            match handle_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count: *out_count,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
+            let args = build_builtin_expand_multi_args(stack, specs).await?;
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let result =
+                runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallFunctionExpandMultiOutput {
+            identity,
+            fallback_policy,
+            specs,
+            out_count,
+        } => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
-                    name,
-                    out_count: 1,
-                    bytecode_functions,
-                    caller_functions: &mut context.functions,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -764,10 +1407,6 @@ pub async fn dispatch_instruction(
                 },
                 args,
                 refresh_workspace_state,
-                builtin_fallback_user_call,
-                |bc, vars, name, out_count, in_count| {
-                    interpret_function_counts(bc, vars, name, out_count, in_count)
-                },
             )
             .await?
             {
@@ -783,14 +1422,70 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallMethod(name, arg_count) => {
-            handle_method_call(stack, name, *arg_count).await?;
+        Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_prepared_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
+                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                    out_count: *out_count,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallMethodOrMemberIndex(name, arg_count) => {
-            handle_method_or_member_index_call(stack, name.clone(), *arg_count).await?;
+        Instr::CallMethodOrMemberIndexMulti {
+            identity,
+            fallback_policy,
+            arg_count,
+            out_count,
+        } => {
+            handle_method_or_member_index_multi_call(
+                stack,
+                identity.clone(),
+                *fallback_policy,
+                *arg_count,
+                *out_count,
+            )
+            .await?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallMethodOrMemberIndexExpandMultiOutput {
+            identity,
+            fallback_policy,
+            specs,
+            out_count,
+        } => {
+            handle_method_or_member_index_expand_multi_call(
+                stack,
+                identity.clone(),
+                *fallback_policy,
+                specs,
+                *out_count,
+            )
+            .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -807,14 +1502,41 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::LoadStaticProperty(class_name, prop) => {
-            handle_load_static_property(stack, class_name, prop)?;
+        Instr::CreateSemanticClosure(function, display_name, capture_count) => {
+            handle_create_semantic_closure(stack, *function, display_name.clone(), *capture_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallStaticMethod(class_name, method, arg_count) => {
-            handle_static_method_call(stack, class_name, method, *arg_count).await?;
+        Instr::CreateFunctionHandle(name) => {
+            stack.push(Value::FunctionHandle(name.clone()));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateExternalFunctionHandle(name) => {
+            stack.push(Value::ExternalFunctionHandle(name.clone()));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateMethodFunctionHandle(name) => {
+            stack.push(Value::MethodFunctionHandle(name.clone()));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateBoundFunctionHandle(function, name) => {
+            stack.push(Value::BoundFunctionHandle {
+                name: name.clone(),
+                function: function.0,
+            });
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::LoadStaticProperty(class_name, prop) => {
+            handle_load_static_property(stack, class_name, prop)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -836,5 +1558,583 @@ pub async fn dispatch_instruction(
             )))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        enforce_spawn_value_concurrency_policy, unwrap_spawned_value, wrap_spawned_value,
+        SPAWN_TASK_ID_FIELD, SPAWN_TASK_KIND_FIELD, SPAWN_TASK_KIND_VALUE,
+        SPAWN_TASK_PAYLOAD_FIELD,
+    };
+    use crate::bytecode::program::ExecutionContext;
+    use runmat_accelerate_api::{
+        AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
+        SpawnHandleConcurrency, ThreadProviderGuard,
+    };
+    use runmat_builtins::{CellArray, HandleRef, IntValue, StructValue, Value};
+
+    struct RejectSpawnProvider;
+    static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
+
+    impl AccelProvider for RejectSpawnProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "reject-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            41
+        }
+    }
+
+    struct ShareSpawnProvider;
+    static SHARE_PROVIDER: ShareSpawnProvider = ShareSpawnProvider;
+
+    impl AccelProvider for ShareSpawnProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "share-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            42
+        }
+
+        fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+            SpawnHandleConcurrency::ImmutableShare
+        }
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_when_provider_disallows_sharing() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 41,
+            buffer_id: 7,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block spawn capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected explicit spawn GPU-handle policy error identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_allows_gpu_handles_when_provider_declares_immutable_share() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&SHARE_PROVIDER));
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 42,
+            buffer_id: 9,
+        });
+        enforce_spawn_value_concurrency_policy(&value)
+            .expect("immutable sharing policy should allow spawn capture");
+    }
+
+    #[test]
+    fn spawn_policy_rejects_nested_gpu_handles_in_cell_capture() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let nested_cell = CellArray::new(
+            vec![
+                Value::Num(1.0),
+                Value::GpuTensor(GpuTensorHandle {
+                    shape: vec![1],
+                    device_id: 41,
+                    buffer_id: 11,
+                }),
+            ],
+            1,
+            2,
+        )
+        .expect("construct test cell");
+        let value = Value::Cell(nested_cell);
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block nested GPU handle capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected nested capture rejection identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_reports_provider_unavailable_for_gpu_handles() {
+        let _provider_guard = ThreadProviderGuard::set(None);
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 99,
+            buffer_id: 13,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("missing provider should reject spawn GPU handle capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnProviderUnavailable"),
+            "expected missing-provider spawn capture identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_captured_by_closure_values() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let value = Value::Closure(runmat_builtins::Closure {
+            function_name: "worker".to_string(),
+            bound_function: None,
+            captures: vec![
+                Value::Num(2.0),
+                Value::GpuTensor(GpuTensorHandle {
+                    shape: vec![1],
+                    device_id: 41,
+                    buffer_id: 21,
+                }),
+            ],
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block closure-captured GPU handles");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected closure-capture spawn policy identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_nested_in_handle_object_target() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let mut payload = StructValue::new();
+        payload.fields.insert(
+            "nested".to_string(),
+            Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 41,
+                buffer_id: 31,
+            }),
+        );
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let value = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block handle-object nested GPU handle capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected handle-object nested capture rejection identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_value_wrap_roundtrips_through_await_unwrap() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(3.0));
+        let unwrapped =
+            unwrap_spawned_value(&mut context, wrapped).expect("await should unwrap spawn task");
+        assert_eq!(unwrapped, Value::Num(3.0));
+    }
+
+    #[test]
+    fn await_unwrap_passes_through_non_spawn_value() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let value = unwrap_spawned_value(&mut context, Value::Num(3.0))
+            .expect("await should pass through non-task value");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn spawn_wrapper_uses_explicit_task_fields() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(5.0));
+        let Value::Struct(task) = wrapped else {
+            panic!("spawn should produce a struct-backed task handle");
+        };
+        assert_eq!(
+            task.fields.get(SPAWN_TASK_KIND_FIELD),
+            Some(&Value::String(SPAWN_TASK_KIND_VALUE.to_string()))
+        );
+        assert_eq!(
+            task.fields.get(SPAWN_TASK_PAYLOAD_FIELD),
+            Some(&Value::Num(5.0))
+        );
+        assert_eq!(
+            task.fields.get(SPAWN_TASK_ID_FIELD),
+            Some(&Value::Int(IntValue::U64(0)))
+        );
+    }
+
+    #[test]
+    fn await_unwrap_rejects_stale_spawn_task_id() {
+        let mut wrap_context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut wrap_context, Value::Num(9.0));
+        let mut await_context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let err = unwrap_spawned_value(&mut await_context, wrapped)
+            .expect_err("await should reject stale/unregistered task ids");
+        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+    }
+
+    #[test]
+    fn dropped_spawn_task_handle_retires_task_id() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before drop"
+        );
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &[], None, None);
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "dropping a spawn task handle should retire its task id"
+        );
+    }
+
+    #[test]
+    fn spawn_task_id_extraction_ignores_non_task_structs() {
+        let mut non_task = StructValue::new();
+        non_task
+            .fields
+            .insert("x".to_string(), Value::Int(IntValue::U64(9)));
+        assert!(
+            super::spawn_task_id_from_value(&Value::Struct(non_task)).is_none(),
+            "only spawn task structs should expose task ids"
+        );
+    }
+
+    #[test]
+    fn replaced_spawn_task_id_is_retired_when_incoming_differs() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let current = wrap_spawned_value(&mut context, Value::Num(1.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before replacement"
+        );
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(2.0),
+            &[],
+            &[],
+            None,
+            None,
+        );
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "replacing task handle with a non-task value should retire its task id"
+        );
+    }
+
+    #[test]
+    fn replacing_with_same_spawn_task_keeps_id_registered() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let current = wrap_spawned_value(&mut context, Value::Num(3.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before self-replacement"
+        );
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &current,
+            &[],
+            &[],
+            None,
+            None,
+        );
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "replacing a task handle with itself should keep the task id live"
+        );
+    }
+
+    #[test]
+    fn dropped_spawn_task_handle_keeps_id_when_alias_still_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before alias drop"
+        );
+        let vars = vec![wrapped.clone()];
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &vars, None, None);
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "dropping one alias should keep task id when another alias remains live"
+        );
+    }
+
+    #[test]
+    fn dropped_nested_spawn_task_handle_in_handle_object_retires_task_id() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let nested = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before nested drop"
+        );
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &[], None, None);
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "dropping nested spawn task handle should retire its task id"
+        );
+    }
+
+    #[test]
+    fn dropped_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let nested = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        let vars = vec![wrapped.clone()];
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &vars, None, None);
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "dropping nested alias should keep task id when direct alias remains live"
+        );
+    }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_handle_object_retires_task_id_when_unaliased() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped);
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before nested replacement"
+        );
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &[],
+            None,
+            None,
+        );
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "replacing nested task handle with non-task value should retire its task id"
+        );
+    }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        let vars = vec![wrapped];
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &vars,
+            None,
+            None,
+        );
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "replacing nested alias should keep task id when a live alias remains"
+        );
+    }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_local_slot_retires_with_excluded_local() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped);
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        context.locals.push(current.clone());
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &[],
+            None,
+            Some(0),
+        );
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "local-slot replacement should retire nested task id when excluded local is the only alias"
+        );
+    }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_local_slot_keeps_id_when_other_local_alias_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        context.locals.push(current.clone());
+        context.locals.push(wrapped);
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &[],
+            None,
+            Some(0),
+        );
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "local-slot replacement should keep nested task id when another local alias remains live"
+        );
     }
 }

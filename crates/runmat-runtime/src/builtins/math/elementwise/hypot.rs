@@ -1,7 +1,11 @@
 //! MATLAB-compatible `hypot` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -54,10 +58,81 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "hypot";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const HYPOT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise Euclidean norm result.",
+}];
+
+const HYPOT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const HYPOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "R = hypot(X, Y)",
+    inputs: &HYPOT_INPUTS,
+    outputs: &HYPOT_OUTPUT,
+}];
+
+const HYPOT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HYPOT.INVALID_INPUT",
+    identifier: Some("RunMat:hypot:InvalidInput"),
+    when: "Input value cannot be converted to supported numeric form.",
+    message: "hypot: invalid input",
+};
+
+const HYPOT_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HYPOT.SIZE_MISMATCH",
+    identifier: Some("RunMat:hypot:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "hypot: size mismatch",
+};
+
+const HYPOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HYPOT.INTERNAL",
+    identifier: Some("RunMat:hypot:Internal"),
+    when: "Internal gather/provider/tensor construction failed.",
+    message: "hypot: internal error",
+};
+
+const HYPOT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    HYPOT_ERROR_INVALID_INPUT,
+    HYPOT_ERROR_SIZE_MISMATCH,
+    HYPOT_ERROR_INTERNAL,
+];
+
+pub const HYPOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HYPOT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HYPOT_ERRORS,
+};
+
+fn hypot_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -67,6 +142,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "hypot,euclidean norm,distance,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::hypot::HYPOT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::hypot"
 )]
 async fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -116,10 +192,10 @@ fn hypot_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&a.shape, &b.shape)
-        .map_err(|err| builtin_error(format!("hypot: {err}")))?;
+        .map_err(|err| hypot_error_with_detail(&HYPOT_ERROR_SIZE_MISMATCH, err))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| builtin_error(format!("hypot: {e}")))?;
+            .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let mut result = vec![0.0f64; plan.len()];
@@ -127,7 +203,7 @@ fn compute_hypot_tensor(a: &Tensor, b: &Tensor) -> BuiltinResult<Value> {
         result[out_idx] = a.data[idx_a].hypot(b.data[idx_b]);
     }
     let tensor = Tensor::new(result, plan.output_shape().to_vec())
-        .map_err(|e| builtin_error(format!("hypot: {e}")))?;
+        .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -136,20 +212,24 @@ fn value_into_hypot_tensor(value: Value) -> BuiltinResult<Tensor> {
         Value::CharArray(ca) => {
             let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
             Tensor::new(data, vec![ca.rows, ca.cols])
-                .map_err(|e| builtin_error(format!("hypot: {e}")))
+                .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))
         }
         Value::Complex(re, im) => Tensor::new(vec![complex_magnitude(re, im)], vec![1, 1])
-            .map_err(|e| builtin_error(format!("hypot: {e}"))),
+            .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e)),
         Value::ComplexTensor(ct) => {
             let data: Vec<f64> = ct.data.iter().map(|(re, im)| re.hypot(*im)).collect();
-            Tensor::new(data, ct.shape.clone()).map_err(|e| builtin_error(format!("hypot: {e}")))
+            Tensor::new(data, ct.shape.clone())
+                .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INTERNAL, e))
         }
         other => {
             if let Value::GpuTensor(_) = other {
-                return Err(builtin_error("hypot: internal error converting GPU tensor"));
+                return Err(hypot_error_with_detail(
+                    &HYPOT_ERROR_INTERNAL,
+                    "internal error converting GPU tensor",
+                ));
             }
             tensor::value_into_tensor_for("hypot", other)
-                .map_err(|e| builtin_error(format!("hypot: {e}")))
+                .map_err(|e| hypot_error_with_detail(&HYPOT_ERROR_INVALID_INPUT, e))
         }
     }
 }
@@ -187,6 +267,16 @@ pub(crate) mod tests {
 
     fn hypot_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         block_on(super::hypot_builtin(lhs, rhs))
+    }
+
+    #[test]
+    fn hypot_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = HYPOT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"R = hypot(X, Y)"));
     }
 
     #[test]
@@ -370,6 +460,13 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hypot_string_input_has_stable_identifier() {
+        let err = hypot_builtin(Value::from("bad"), Value::Num(1.0)).expect_err("expected error");
+        assert_eq!(err.identifier(), HYPOT_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

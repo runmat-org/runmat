@@ -1,6 +1,10 @@
 //! MATLAB-compatible `trapz` builtin for discrete trapezoidal integration.
 
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -10,14 +14,145 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::math::reduction::integration_common::{
     canonical_shape_complex, canonical_shape_tensor, default_dimension_from_shape, dim_product,
-    gather_host_value, integration_error, interval_width, is_dimension_candidate, is_scalar_like,
-    pad_shape_for_dim, parse_optional_dim, promote_real_value_to_gpu, spacing_from_value,
-    value_has_gpu_tensor, value_into_complex_tensor, SpacingSpec,
+    gather_host_value, interval_width, is_dimension_candidate, is_scalar_like, pad_shape_for_dim,
+    parse_optional_dim, promote_real_value_to_gpu, spacing_from_value, value_has_gpu_tensor,
+    value_into_complex_tensor, SpacingSpec,
 };
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "trapz";
+
+const TRAPZ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Q",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Trapezoidal integral output.",
+}];
+
+const TRAPZ_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sample values.",
+}];
+
+const TRAPZ_INPUTS_Y_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integration dimension.",
+    },
+];
+
+const TRAPZ_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample points or spacing.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+];
+
+const TRAPZ_INPUTS_X_Y_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample points or spacing.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Integration dimension.",
+    },
+];
+
+const TRAPZ_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "Q = trapz(Y)",
+        inputs: &TRAPZ_INPUTS_Y,
+        outputs: &TRAPZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Q = trapz(Y, dim)",
+        inputs: &TRAPZ_INPUTS_Y_DIM,
+        outputs: &TRAPZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Q = trapz(X, Y)",
+        inputs: &TRAPZ_INPUTS_X_Y,
+        outputs: &TRAPZ_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Q = trapz(X, Y, dim)",
+        inputs: &TRAPZ_INPUTS_X_Y_DIM,
+        outputs: &TRAPZ_OUTPUT,
+    },
+];
+
+const TRAPZ_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRAPZ.INVALID_ARGUMENT",
+    identifier: Some("RunMat:trapz:InvalidArgument"),
+    when: "Input argument count, dimension selector, or spacing arguments are invalid.",
+    message: "trapz: invalid argument",
+};
+
+const TRAPZ_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRAPZ.INVALID_INPUT",
+    identifier: Some("RunMat:trapz:InvalidInput"),
+    when: "Input values cannot be converted to supported numeric integration domains.",
+    message: "trapz: invalid input",
+};
+
+const TRAPZ_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRAPZ.INTERNAL",
+    identifier: Some("RunMat:trapz:Internal"),
+    when: "Integration execution fails during gather, allocation, or provider promotion.",
+    message: "trapz: internal integration failure",
+};
+
+const TRAPZ_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    TRAPZ_ERROR_INVALID_ARGUMENT,
+    TRAPZ_ERROR_INVALID_INPUT,
+    TRAPZ_ERROR_INTERNAL,
+];
+
+pub const TRAPZ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TRAPZ_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRAPZ_ERRORS,
+};
 
 fn trapz_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
@@ -50,6 +185,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Discrete integration currently lowers to the runtime implementation rather than fusion kernels.",
 };
 
+fn trapz_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    trapz_error_with_message(error.message, error)
+}
+
+fn trapz_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    trapz_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn trapz_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn trapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    trapz_error_with_detail(&TRAPZ_ERROR_INTERNAL, detail)
+}
+
 #[runtime_builtin(
     name = "trapz",
     category = "math/reduction",
@@ -57,6 +218,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "trapz,trapezoidal integration,numerical integration,gpu",
     accel = "none",
     type_resolver(trapz_type),
+    descriptor(crate::builtins::math::reduction::trapz::TRAPZ_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::trapz"
 )]
 async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -68,29 +230,42 @@ async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             .map(value_has_gpu_tensor)
             .unwrap_or(false);
 
-    let y_value = gather_host_value(parsed.y).await?;
+    let y_value = gather_host_value(parsed.y)
+        .await
+        .map_err(|err| trapz_internal_error(err.message()))?;
     let spacing_value = match parsed.spacing {
-        Some(value) => Some(gather_host_value(value).await?),
+        Some(value) => Some(
+            gather_host_value(value)
+                .await
+                .map_err(|err| trapz_internal_error(err.message()))?,
+        ),
         None => None,
     };
     let result = match y_value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            let tensor = value_into_complex_tensor(NAME, y_value)?;
+            let tensor = value_into_complex_tensor(NAME, y_value).map_err(|err| {
+                trapz_error_with_detail(&TRAPZ_ERROR_INVALID_INPUT, err.message())
+            })?;
             let shape = canonical_shape_complex(&tensor);
             let dim = parsed
                 .dim
                 .unwrap_or_else(|| default_dimension_from_shape(&shape));
-            let spacing = spacing_from_value(NAME, spacing_value.clone(), &shape, dim)?;
+            let spacing =
+                spacing_from_value(NAME, spacing_value.clone(), &shape, dim).map_err(|err| {
+                    trapz_error_with_detail(&TRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                })?;
             complex_tensor_into_value(trapz_complex_tensor(&tensor, &spacing, dim)?)
         }
         other => {
             let tensor = crate::builtins::common::tensor::value_into_tensor_for(NAME, other)
-                .map_err(|err| integration_error(NAME, err))?;
+                .map_err(|err| trapz_error_with_detail(&TRAPZ_ERROR_INVALID_INPUT, err))?;
             let shape = canonical_shape_tensor(&tensor);
             let dim = parsed
                 .dim
                 .unwrap_or_else(|| default_dimension_from_shape(&shape));
-            let spacing = spacing_from_value(NAME, spacing_value, &shape, dim)?;
+            let spacing = spacing_from_value(NAME, spacing_value, &shape, dim).map_err(|err| {
+                trapz_error_with_detail(&TRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+            })?;
             crate::builtins::common::tensor::tensor_into_value(trapz_tensor(
                 &tensor, &spacing, dim,
             )?)
@@ -98,7 +273,7 @@ async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
 
     if wants_gpu_result && !matches!(result, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-        promote_real_value_to_gpu(NAME, result)
+        promote_real_value_to_gpu(NAME, result).map_err(|err| trapz_internal_error(err.message()))
     } else {
         Ok(result)
     }
@@ -123,7 +298,9 @@ fn parse_arguments(first: Value, rest: Vec<Value>) -> BuiltinResult<ParsedTrapzA
                 Ok(ParsedTrapzArgs {
                     spacing: None,
                     y: first,
-                    dim: parse_optional_dim(NAME, &second)?,
+                    dim: parse_optional_dim(NAME, &second).map_err(|err| {
+                        trapz_error_with_detail(&TRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                    })?,
                 })
             } else {
                 Ok(ParsedTrapzArgs {
@@ -140,10 +317,12 @@ fn parse_arguments(first: Value, rest: Vec<Value>) -> BuiltinResult<ParsedTrapzA
             Ok(ParsedTrapzArgs {
                 spacing: Some(first),
                 y,
-                dim: parse_optional_dim(NAME, &dim_arg)?,
+                dim: parse_optional_dim(NAME, &dim_arg).map_err(|err| {
+                    trapz_error_with_detail(&TRAPZ_ERROR_INVALID_ARGUMENT, err.message())
+                })?,
             })
         }
-        _ => Err(integration_error(NAME, "trapz: too many input arguments")),
+        _ => Err(trapz_error(&TRAPZ_ERROR_INVALID_ARGUMENT)),
     }
 }
 
@@ -153,7 +332,10 @@ pub(crate) fn trapz_tensor(
     dim: usize,
 ) -> BuiltinResult<Tensor> {
     if dim == 0 {
-        return Err(integration_error(NAME, "trapz: dimension must be >= 1"));
+        return Err(trapz_error_with_detail(
+            &TRAPZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
 
     let shape = pad_shape_for_dim(&canonical_shape_tensor(tensor), dim);
@@ -182,7 +364,7 @@ pub(crate) fn trapz_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = 1;
-    Tensor::new(output, out_shape).map_err(|err| integration_error(NAME, format!("trapz: {err}")))
+    Tensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
 }
 
 fn trapz_complex_tensor(
@@ -191,7 +373,10 @@ fn trapz_complex_tensor(
     dim: usize,
 ) -> BuiltinResult<ComplexTensor> {
     if dim == 0 {
-        return Err(integration_error(NAME, "trapz: dimension must be >= 1"));
+        return Err(trapz_error_with_detail(
+            &TRAPZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
 
     let shape = pad_shape_for_dim(&canonical_shape_complex(tensor), dim);
@@ -223,8 +408,7 @@ fn trapz_complex_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = 1;
-    ComplexTensor::new(output, out_shape)
-        .map_err(|err| integration_error(NAME, format!("trapz: {err}")))
+    ComplexTensor::new(output, out_shape).map_err(|err| trapz_internal_error(&err))
 }
 
 #[cfg(test)]
@@ -312,6 +496,53 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn trapz_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TRAPZ_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Q = trapz(Y)"));
+        assert!(labels.contains(&"Q = trapz(Y, dim)"));
+        assert!(labels.contains(&"Q = trapz(X, Y)"));
+        assert!(labels.contains(&"Q = trapz(X, Y, dim)"));
+    }
+
+    #[test]
+    fn trapz_descriptor_errors_have_stable_codes() {
+        assert!(TRAPZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == TRAPZ_ERROR_INVALID_ARGUMENT.code));
+        assert!(TRAPZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == TRAPZ_ERROR_INVALID_INPUT.code));
+        assert!(TRAPZ_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == TRAPZ_ERROR_INTERNAL.code));
+    }
+
+    #[test]
+    fn trapz_invalid_dim_uses_descriptor_identifier() {
+        let y = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let err =
+            run_trapz(Value::Tensor(y), vec![Value::Int(IntValue::I32(0))]).expect_err("trapz");
+        assert_eq!(err.identifier(), TRAPZ_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn trapz_too_many_inputs_uses_descriptor_identifier() {
+        let err = run_trapz(
+            Value::Num(1.0),
+            vec![Value::Num(2.0), Value::Num(3.0), Value::Num(4.0)],
+        )
+        .expect_err("trapz");
+        assert_eq!(err.identifier(), TRAPZ_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

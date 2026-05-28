@@ -1,0 +1,157 @@
+# Accelerate Provider Refactor Progress
+
+## 2026-05-24
+
+- Started execution against `docs-tmp/ACCELERATE_PROVIDER_REFACTOR.md`.
+- Phase 0: normalized WGPU provider implementation module file layout from `backend/wgpu/provider_impl.rs` to `backend/wgpu/provider_impl/mod.rs`.
+- Scope intent: structural move only; no behavior change.
+- Verification for Phase 0:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo check -p runmat-accelerate` encountered a pre-existing workspace warning-as-error in `runmat-runtime` (`ImpulseResponse.discrete` dead-code), not introduced by this refactor move.
+- Plan doc updated to reflect current repository state and final plan-of-record wording:
+  - canonical monolith path references now point to `provider_impl/mod.rs`
+  - sequence declared mandatory (no optional phases)
+  - Phase 0 explicitly marked complete
+  - boundary language tightened for `ops/image.rs`, `dispatch/*`, and `core` ownership
+- Phase 1a: moved logical/comparison WGSL constants out of `provider_impl/mod.rs` into `backend/wgpu/shaders/logical.rs`, then imported from provider implementation.
+- Verification for Phase 1a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo check -p runmat-accelerate` still blocked by the same pre-existing workspace warning-as-error in `runmat-runtime` (`ImpulseResponse.discrete` dead-code).
+- Phase 1b: extracted contiguous elementwise provider methods into `backend/wgpu/provider_impl/elementwise.rs` and wired `mod elementwise;` in `provider_impl/mod.rs`.
+  - moved methods: `elem_{eq,ne,lt,le,gt,ge}_exec`, `logical_*_exec`, `unary_op_exec`, `scalar_op_exec`.
+  - no kernel parameter or dispatch logic changes; code moved verbatim.
+- Verification for Phase 1b:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 1c: moved binary execution helpers into `provider_impl/elementwise.rs`.
+  - moved methods: `binary_op_exec`, `binary_op_broadcast_exec`.
+  - kept the call graph unchanged (`dot_exec`, `cross_exec`, and trait entrypoints still call these helpers exactly as before).
+- Verification for Phase 1c:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 1d: moved fused elementwise kernel executors into `provider_impl/elementwise.rs`.
+  - moved methods: `fused_elementwise_exec`, `fused_elementwise_multi_exec`.
+  - reduction methods remain in `provider_impl/mod.rs` for the Phase 2 extraction.
+- Verification for Phase 1d:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 2a: created `backend/wgpu/provider_impl/reduction.rs` and moved reduction-family internals from `provider_impl/mod.rs`.
+  - moved: fused reduction execution/tuning helpers, global/dim/std reductions, and ND mean/moments helpers.
+  - kept indexing/tensor family methods in `mod.rs` (next extraction phases).
+- Verification for Phase 2a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 3a: created `backend/wgpu/provider_impl/indexing.rs` and moved indexing/scatter helpers out of `provider_impl/mod.rs`.
+  - moved: `scatter_{column,row}_exec`, `sub2ind_exec`, `ind2sub_exec`, `gather_linear_exec`, `scatter_linear_exec`, `find_exec`.
+  - preserved trait impl boundary in `mod.rs` (`impl WgpuProvider` closed before `impl AccelProvider for WgpuProvider`).
+- Verification for Phase 3a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 4a: created `backend/wgpu/provider_impl/polynomial.rs` and moved polynomial execution helpers.
+  - moved: `polyval_exec`, `polyint_exec`, `polyder_exec`, `polyder_product_exec`, `polyder_quotient_exec`.
+  - `linspace_exec` intentionally remains in `mod.rs` for the constructors extraction phase.
+- Verification for Phase 4a:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 4b: created `backend/wgpu/provider_impl/constructors.rs` and moved constructor/shape utility operations.
+  - moved: `eye_exec`, `fill_exec`, `zeros_exec`, `meshgrid_exec`, `fspecial_exec`, `peaks_exec`, `peaks_xy_exec`, `linspace_exec`, `diag_from_vector_exec`, `diag_extract_exec`.
+  - random generation and image filtering paths remain in `mod.rs`/`rnd.rs` for the next extraction pass.
+- Verification for Phase 4b:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 4c: consolidated random-family execution methods into `provider_impl/rnd.rs`.
+  - moved from `mod.rs` to `rnd.rs`: `random_uniform_exec`, `random_normal_exec`, `stochastic_evolution_exec`, `random_integer_range_exec`, `randperm_exec`.
+  - existing distribution helpers in `rnd.rs` (`exprnd`/`normrnd`/`unifrnd`) remain unchanged; this pass only co-locates the family.
+- Verification for Phase 4c:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 3b: created `backend/wgpu/provider_impl/tensor.rs` and moved a first tensor-ops slice.
+  - moved: `repmat_exec`, `cat_exec`, `kron_exec`, `transpose_exec`.
+  - `permute/circshift/tri*/flip` remain in `mod.rs` for follow-up tensor extraction.
+- Verification for Phase 3b:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 3c: moved tensor transform operations into `provider_impl/tensor.rs`.
+  - moved: `permute_exec`, `circshift_exec`, `tril_exec` (+ fallback), `triu_exec` (+ fallback), `flip_exec`.
+  - left `conv1d`/`iir`/`diff`/`gradient` in `mod.rs` for a later signal-family extraction.
+- Verification for Phase 3c:
+  - `cargo test -p runmat-accelerate --test provider_init` passed.
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Plan refresh pass completed (doc-only):
+  - marked Phases 1-4 complete in the plan-of-record sequence.
+  - updated current-state module listing to match extracted files now present in `provider_impl/`.
+  - rewrote remaining sequence to explicitly cover:
+    - Phase 5: remaining operation family extractions (`signal`, `image`, `linalg`)
+    - Phase 6: lifecycle split (`init/core/helpers`)
+    - Phase 7: coordinated canonical `provider` tree finalization
+  - updated next-move guidance to match the new remaining slices (no optional branch).
+- Stabilization pass before remaining extractions:
+  - fixed extraction follow-on syntax/import visibility issues across `provider_impl/{constructors,indexing,reduction,rnd,mod}.rs`.
+  - updated cross-crate compile fixtures for current MIR/bytecode shape (`runmat-static-analysis`, `runmat-turbine` tests/helpers).
+- Verification for stabilization pass:
+  - `cargo test -p runmat-accelerate --lib` passed.
+  - `cargo test -p runmat-turbine --tests` passed.
+  - `cargo test -p runmat-static-analysis --lib` blocked by a pre-existing warning-as-error in `runmat-runtime` (`ImpulseResponse.discrete` dead-code), not introduced by this refactor.
+- Phase 5a: extracted signal/scan operations into `backend/wgpu/provider_impl/signal.rs`.
+  - moved: `conv1d_exec`, `iir_filter_exec`, `diff_once_exec`, `diff_exec`, `gradient_exec`, `cumsum_exec`, `cumprod_exec`, `cummin_exec`, `cummax_exec`.
+  - wired `mod signal;` and removed the moved method bodies from `provider_impl/mod.rs`.
+- Verification for Phase 5a:
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 5b: extracted image filtering execution paths into `backend/wgpu/provider_impl/image.rs`.
+  - moved: `imfilter_exec`, `imfilter_exec_fallback`.
+  - wired `mod image;` and removed the moved method bodies from `provider_impl/mod.rs`.
+- Verification for Phase 5b:
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 5c: extracted remaining linalg-heavy execution paths into `backend/wgpu/provider_impl/linalg.rs`.
+  - moved: `bandwidth_exec`, `syrk_exec`, `matmul_exec` (+ usage helper), `pagefun_exec` (+ mtimes helper), centered-gram/QR debug helpers, `covariance_exec`, `corrcoef_exec`, `cast_tensor_precision`, `dot_exec`, `cross_exec`.
+  - wired `mod linalg;` and removed the moved method bodies from `provider_impl/mod.rs`.
+- Verification for Phase 5c:
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 5d: moved remaining operation-adjacent helpers out of `provider_impl/mod.rs`.
+  - moved QR device/host helpers into `provider_impl/linalg.rs`.
+  - moved polynomial trim helper into `provider_impl/polynomial.rs`.
+- Phase 6: split provider lifecycle/infrastructure into explicit modules.
+  - added `provider_impl/core.rs` for buffer/readback/submit/register/storage core methods.
+  - added `provider_impl/helpers.rs` for telemetry/pipeline-cache/image-normalize tuning helpers.
+  - added `provider_impl/init.rs` for provider construction/bootstrap (`new_async`/`new`) and residency env parsing.
+  - wired `mod {core,helpers,init};` and removed the monolithic lifecycle impl block from `provider_impl/mod.rs`.
+- Verification for Phase 5d + Phase 6:
+  - `cargo test -p runmat-accelerate --lib` passed.
+- Phase 7: finalized canonical `provider` tree naming/layout.
+  - moved implementation files from `backend/wgpu/provider_impl/*` to `backend/wgpu/provider/*`.
+  - renamed former monolith root to `backend/wgpu/provider/backend.rs` and wired it via `provider.rs`.
+  - `provider.rs` now owns implementation module wiring (`mod backend;`) and re-exports provider surface from there.
+  - removed `pub mod provider_impl;` from `backend/wgpu/mod.rs` and updated all internal tests/imports from `provider_impl` to `provider`.
+- Verification for Phase 7:
+  - `cargo test -p runmat-accelerate --lib` passed.
+  - `cargo test -p runmat-accelerate --tests` passed.
+- Plan/doc refresh (repo-aligned) completed after Phase 7 landing:
+  - rewrote `ACCELERATE_PROVIDER_REFACTOR.md` to reflect actual on-disk state (`provider/*` tree already present).
+  - converted remaining structural cleanup to mandatory plan-of-record phases:
+    - Phase 8: explicit `provider/ops/*` normalization + `rnd.rs` -> `random.rs` rename.
+    - Phase 9: full verification/closeout.
+  - removed stale guidance that still described `provider_impl/mod.rs` as active center of gravity.
+- Last known full-workspace verification state (from latest `cargo test --workspace --all-targets` run):
+  - single remaining failure in `runmat-core` test `execute_outcome_reports_project_symbol_preload_warning_for_invalid_project_source` (expected warning code assertion mismatch).
+  - this is tracked as the current closeout blocker before Phase 9 can be marked complete.
+- Phase 8: completed explicit `provider/ops/*` normalization and random naming cleanup.
+  - moved operation-family modules from `provider/*` into `provider/ops/*`.
+  - renamed `provider/rnd.rs` to `provider/ops/random.rs`.
+  - rewired module paths in `provider/backend.rs` to the new `ops/*` locations.
+- Verification for Phase 8:
+  - `cargo test -p runmat-accelerate --lib` passed.
+  - `cargo test -p runmat-accelerate --tests` passed.
+- Phase 9 closeout validation completed.
+  - Full workspace verification passed:
+    - `cargo test --workspace --all-targets`
+  - Refactor closeout commit chain now includes:
+    - `22728d3e` (`accelerate: finalize provider ops module tree`)
+      - finalized `provider/ops/*` structure
+      - renamed random module path to `ops/random.rs`
+      - removed remaining `provider_impl/*` usage
+  - Non-refactor blockers resolved to reach workspace-green:
+    - `3e36dc58` (`runtime: isolate warning store per execution thread`)
+      - fixed cross-test/execution warning interference by moving warning storage to thread-local state
+    - `877eb464` (`runtime: centralize true-empty neutral cat semantics`)
+      - moved true-empty `[]` neutrality policy into shared concat core path
+- Plan-of-record status: complete.

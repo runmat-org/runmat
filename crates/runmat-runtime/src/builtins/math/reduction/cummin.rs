@@ -5,7 +5,11 @@ use std::cmp::Ordering;
 use runmat_accelerate_api::{
     GpuTensorHandle, ProviderCumminResult, ProviderNanMode, ProviderScanDirection,
 };
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -15,6 +19,315 @@ const NAME: &str = "cummin";
 fn cummin_type(args: &[Type], ctx: &ResolveContext) -> Type {
     cumulative_numeric_type(args, ctx)
 }
+
+const CUMMIN_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cumulative minimum values.",
+}];
+
+const CUMMIN_OUTPUT_MI: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Cumulative minimum values.",
+    },
+    BuiltinParamDescriptor {
+        name: "I",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "One-based running minimum indices along the reduction dimension.",
+    },
+];
+
+const CUMMIN_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar or array.",
+};
+
+const CUMMIN_PARAM_DIM: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "dim",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("[]"),
+    description: "Dimension selector (placeholder [] keeps default dimension).",
+};
+
+const CUMMIN_PARAM_DIRECTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "direction",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"forward\""),
+    description: "Scan direction: \"forward\" or \"reverse\".",
+};
+
+const CUMMIN_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nanflag",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"includenan\""),
+    description:
+        "Missing-value mode: \"includenan\"/\"includemissing\" or \"omitnan\"/\"omitmissing\".",
+};
+
+const CUMMIN_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [CUMMIN_PARAM_A];
+const CUMMIN_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [CUMMIN_PARAM_A, CUMMIN_PARAM_DIM];
+const CUMMIN_INPUTS_DIRECTION: [BuiltinParamDescriptor; 2] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_DIRECTION];
+const CUMMIN_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [CUMMIN_PARAM_A, CUMMIN_PARAM_NANFLAG];
+const CUMMIN_INPUTS_DIM_DIRECTION: [BuiltinParamDescriptor; 3] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_DIM, CUMMIN_PARAM_DIRECTION];
+const CUMMIN_INPUTS_DIRECTION_DIM: [BuiltinParamDescriptor; 3] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_DIRECTION, CUMMIN_PARAM_DIM];
+const CUMMIN_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_DIM, CUMMIN_PARAM_NANFLAG];
+const CUMMIN_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_NANFLAG, CUMMIN_PARAM_DIM];
+const CUMMIN_INPUTS_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 3] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_DIRECTION, CUMMIN_PARAM_NANFLAG];
+const CUMMIN_INPUTS_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 3] =
+    [CUMMIN_PARAM_A, CUMMIN_PARAM_NANFLAG, CUMMIN_PARAM_DIRECTION];
+const CUMMIN_INPUTS_DIM_DIRECTION_NANFLAG: [BuiltinParamDescriptor; 4] = [
+    CUMMIN_PARAM_A,
+    CUMMIN_PARAM_DIM,
+    CUMMIN_PARAM_DIRECTION,
+    CUMMIN_PARAM_NANFLAG,
+];
+const CUMMIN_INPUTS_DIM_NANFLAG_DIRECTION: [BuiltinParamDescriptor; 4] = [
+    CUMMIN_PARAM_A,
+    CUMMIN_PARAM_DIM,
+    CUMMIN_PARAM_NANFLAG,
+    CUMMIN_PARAM_DIRECTION,
+];
+const CUMMIN_INPUTS_DIRECTION_DIM_NANFLAG: [BuiltinParamDescriptor; 4] = [
+    CUMMIN_PARAM_A,
+    CUMMIN_PARAM_DIRECTION,
+    CUMMIN_PARAM_DIM,
+    CUMMIN_PARAM_NANFLAG,
+];
+const CUMMIN_INPUTS_DIRECTION_NANFLAG_DIM: [BuiltinParamDescriptor; 4] = [
+    CUMMIN_PARAM_A,
+    CUMMIN_PARAM_DIRECTION,
+    CUMMIN_PARAM_NANFLAG,
+    CUMMIN_PARAM_DIM,
+];
+const CUMMIN_INPUTS_NANFLAG_DIM_DIRECTION: [BuiltinParamDescriptor; 4] = [
+    CUMMIN_PARAM_A,
+    CUMMIN_PARAM_NANFLAG,
+    CUMMIN_PARAM_DIM,
+    CUMMIN_PARAM_DIRECTION,
+];
+const CUMMIN_INPUTS_NANFLAG_DIRECTION_DIM: [BuiltinParamDescriptor; 4] = [
+    CUMMIN_PARAM_A,
+    CUMMIN_PARAM_NANFLAG,
+    CUMMIN_PARAM_DIRECTION,
+    CUMMIN_PARAM_DIM,
+];
+
+const CUMMIN_SIGNATURES: [BuiltinSignatureDescriptor; 32] = [
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A)",
+        inputs: &CUMMIN_INPUTS_CORE,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, dim)",
+        inputs: &CUMMIN_INPUTS_DIM,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, direction)",
+        inputs: &CUMMIN_INPUTS_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, nanflag)",
+        inputs: &CUMMIN_INPUTS_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, dim, direction)",
+        inputs: &CUMMIN_INPUTS_DIM_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, direction, dim)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_DIM,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, dim, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIM_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, nanflag, dim)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIM,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, direction, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, nanflag, direction)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, dim, direction, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIM_DIRECTION_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, dim, nanflag, direction)",
+        inputs: &CUMMIN_INPUTS_DIM_NANFLAG_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, direction, dim, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_DIM_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, direction, nanflag, dim)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_NANFLAG_DIM,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, nanflag, dim, direction)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIM_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = cummin(A, nanflag, direction, dim)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION_DIM,
+        outputs: &CUMMIN_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A)",
+        inputs: &CUMMIN_INPUTS_CORE,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, dim)",
+        inputs: &CUMMIN_INPUTS_DIM,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, direction)",
+        inputs: &CUMMIN_INPUTS_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, nanflag)",
+        inputs: &CUMMIN_INPUTS_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, dim, direction)",
+        inputs: &CUMMIN_INPUTS_DIM_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, direction, dim)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_DIM,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, dim, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIM_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, nanflag, dim)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIM,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, direction, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, nanflag, direction)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, dim, direction, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIM_DIRECTION_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, dim, nanflag, direction)",
+        inputs: &CUMMIN_INPUTS_DIM_NANFLAG_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, direction, dim, nanflag)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_DIM_NANFLAG,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, direction, nanflag, dim)",
+        inputs: &CUMMIN_INPUTS_DIRECTION_NANFLAG_DIM,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, nanflag, dim, direction)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIM_DIRECTION,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, I] = cummin(A, nanflag, direction, dim)",
+        inputs: &CUMMIN_INPUTS_NANFLAG_DIRECTION_DIM,
+        outputs: &CUMMIN_OUTPUT_MI,
+    },
+];
+
+const CUMMIN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMMIN.INVALID_ARGUMENT",
+    identifier: Some("RunMat:cummin:InvalidArgument"),
+    when: "Dimension, direction, or missing-value argument grammar is invalid.",
+    message: "cummin: invalid argument",
+};
+
+const CUMMIN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMMIN.INVALID_INPUT",
+    identifier: Some("RunMat:cummin:InvalidInput"),
+    when: "Input value type is unsupported for cumulative minimum reduction.",
+    message: "cummin: invalid input",
+};
+
+const CUMMIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CUMMIN.INTERNAL",
+    identifier: Some("RunMat:cummin:Internal"),
+    when: "Reduction execution fails due to conversion, provider, or allocation operations.",
+    message: "cummin: internal reduction failure",
+};
+
+const CUMMIN_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    CUMMIN_ERROR_INVALID_ARGUMENT,
+    CUMMIN_ERROR_INVALID_INPUT,
+    CUMMIN_ERROR_INTERNAL,
+];
+
+pub const CUMMIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CUMMIN_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CUMMIN_ERRORS,
+};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -40,8 +353,30 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may expose prefix-min kernels that return running values and indices; the runtime gathers to host when hooks or options are unsupported.",
 };
 
-fn cummin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn cummin_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    cummin_error_with_message(error.message, error)
+}
+
+fn cummin_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    cummin_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn cummin_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cummin_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    cummin_error_with_detail(&CUMMIN_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::cummin")]
@@ -98,6 +433,7 @@ impl CumminEvaluation {
     keywords = "cummin,cumulative minimum,running minimum,reverse,omitnan,indices,gpu",
     accel = "reduction",
     type_resolver(cummin_type),
+    descriptor(crate::builtins::math::reduction::cummin::CUMMIN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::cummin"
 )]
 async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -125,7 +461,7 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvalu
         Value::GpuTensor(handle) => cummin_gpu(handle, dim, direction, nan_mode).await,
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+                .map_err(|e| cummin_internal_error(&e))?;
             let target_dim = dim.unwrap_or(1);
             let (values, indices) =
                 cummin_complex_tensor(&tensor, target_dim, direction, nan_mode)?;
@@ -150,7 +486,7 @@ fn parse_arguments(
     args: &[Value],
 ) -> BuiltinResult<(Option<usize>, CumminDirection, CumminNanMode)> {
     if args.len() > 3 {
-        return Err(cummin_error("cummin: unsupported arguments"));
+        return Err(cummin_error(&CUMMIN_ERROR_INVALID_ARGUMENT));
     }
 
     let mut dim: Option<usize> = None;
@@ -163,11 +499,14 @@ fn parse_arguments(
         match value {
             Value::Int(_) | Value::Num(_) => {
                 if dim.is_some() {
-                    return Err(cummin_error("cummin: dimension specified more than once"));
+                    return Err(cummin_error_with_detail(
+                        &CUMMIN_ERROR_INVALID_ARGUMENT,
+                        "dimension specified more than once",
+                    ));
                 }
-                dim = Some(
-                    tensor::parse_dimension(value, "cummin").map_err(|err| cummin_error(err))?,
-                );
+                dim = Some(tensor::parse_dimension(value, "cummin").map_err(|err| {
+                    cummin_error_with_detail(&CUMMIN_ERROR_INVALID_ARGUMENT, err)
+                })?);
             }
             Value::Tensor(t) if t.data.is_empty() => {
                 // MATLAB allows [] placeholders; ignore them.
@@ -179,8 +518,9 @@ fn parse_arguments(
                     match keyword.as_str() {
                         "forward" => {
                             if direction_set {
-                                return Err(cummin_error(
-                                    "cummin: direction specified more than once",
+                                return Err(cummin_error_with_detail(
+                                    &CUMMIN_ERROR_INVALID_ARGUMENT,
+                                    "direction specified more than once",
                                 ));
                             }
                             direction = CumminDirection::Forward;
@@ -188,8 +528,9 @@ fn parse_arguments(
                         }
                         "reverse" => {
                             if direction_set {
-                                return Err(cummin_error(
-                                    "cummin: direction specified more than once",
+                                return Err(cummin_error_with_detail(
+                                    &CUMMIN_ERROR_INVALID_ARGUMENT,
+                                    "direction specified more than once",
                                 ));
                             }
                             direction = CumminDirection::Reverse;
@@ -197,8 +538,9 @@ fn parse_arguments(
                         }
                         "omitnan" | "omitmissing" => {
                             if nan_set {
-                                return Err(cummin_error(
-                                    "cummin: missing-value handling specified more than once",
+                                return Err(cummin_error_with_detail(
+                                    &CUMMIN_ERROR_INVALID_ARGUMENT,
+                                    "missing-value handling specified more than once",
                                 ));
                             }
                             nan_mode = CumminNanMode::Omit;
@@ -206,28 +548,32 @@ fn parse_arguments(
                         }
                         "includenan" | "includemissing" => {
                             if nan_set {
-                                return Err(cummin_error(
-                                    "cummin: missing-value handling specified more than once",
+                                return Err(cummin_error_with_detail(
+                                    &CUMMIN_ERROR_INVALID_ARGUMENT,
+                                    "missing-value handling specified more than once",
                                 ));
                             }
                             nan_mode = CumminNanMode::Include;
                             nan_set = true;
                         }
                         "" => {
-                            return Err(cummin_error(
-                                "cummin: empty string option is not supported",
+                            return Err(cummin_error_with_detail(
+                                &CUMMIN_ERROR_INVALID_ARGUMENT,
+                                "empty string option is not supported",
                             ));
                         }
                         other => {
-                            return Err(cummin_error(format!(
-                                "cummin: unrecognised option '{other}'"
-                            )));
+                            return Err(cummin_error_with_detail(
+                                &CUMMIN_ERROR_INVALID_ARGUMENT,
+                                format!("unrecognised option '{other}'"),
+                            ));
                         }
                     }
                 } else {
-                    return Err(cummin_error(format!(
-                        "cummin: unsupported argument type {value:?}"
-                    )));
+                    return Err(cummin_error_with_detail(
+                        &CUMMIN_ERROR_INVALID_ARGUMENT,
+                        format!("unsupported argument type {value:?}"),
+                    ));
                 }
             }
         }
@@ -242,7 +588,8 @@ fn cummin_host(
     direction: CumminDirection,
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<CumminEvaluation> {
-    let tensor = tensor::value_into_tensor_for("cummin", value).map_err(|err| cummin_error(err))?;
+    let tensor = tensor::value_into_tensor_for("cummin", value)
+        .map_err(|err| cummin_error_with_detail(&CUMMIN_ERROR_INVALID_INPUT, err))?;
     let target_dim = dim.unwrap_or_else(|| default_dimension(&tensor));
     let (values, indices) = cummin_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CumminEvaluation {
@@ -267,13 +614,19 @@ async fn cummin_gpu(
     }
     if let Some(target) = dim {
         if target == 0 {
-            return Err(cummin_error("cummin: dimension must be >= 1"));
+            return Err(cummin_error_with_detail(
+                &CUMMIN_ERROR_INVALID_ARGUMENT,
+                "dimension must be >= 1",
+            ));
         }
     }
 
     let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
     if target_dim == 0 {
-        return Err(cummin_error("cummin: dimension must be >= 1"));
+        return Err(cummin_error_with_detail(
+            &CUMMIN_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
 
     if target_dim > handle.shape.len() {
@@ -309,7 +662,9 @@ async fn cummin_gpu(
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|err| cummin_internal_error(err.message()))?;
     let (values, indices) = cummin_tensor(&tensor, target_dim, direction, nan_mode)?;
     Ok(CumminEvaluation {
         values: tensor::tensor_into_value(values),
@@ -324,11 +679,14 @@ fn cummin_tensor(
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<(Tensor, Tensor)> {
     if dim == 0 {
-        return Err(cummin_error("cummin: dimension must be >= 1"));
+        return Err(cummin_error_with_detail(
+            &CUMMIN_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
     if tensor.data.is_empty() {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -339,8 +697,8 @@ fn cummin_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -466,10 +824,10 @@ fn cummin_tensor(
         }
     }
 
-    let values_tensor = Tensor::new(values_out, tensor.shape.clone())
-        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
-    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
-        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+    let values_tensor =
+        Tensor::new(values_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
+    let indices_tensor =
+        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -480,11 +838,14 @@ fn cummin_complex_tensor(
     nan_mode: CumminNanMode,
 ) -> BuiltinResult<(ComplexTensor, Tensor)> {
     if dim == 0 {
-        return Err(cummin_error("cummin: dimension must be >= 1"));
+        return Err(cummin_error_with_detail(
+            &CUMMIN_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        ));
     }
     if tensor.data.is_empty() {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
     if dim > tensor.shape.len() {
@@ -495,8 +856,8 @@ fn cummin_complex_tensor(
     let dim_index = dim - 1;
     let segment_len = tensor.shape[dim_index];
     if segment_len == 0 {
-        let indices = Tensor::new(Vec::new(), tensor.shape.clone())
-            .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        let indices =
+            Tensor::new(Vec::new(), tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
         return Ok((tensor.clone(), indices));
     }
 
@@ -625,9 +986,9 @@ fn cummin_complex_tensor(
     }
 
     let values_tensor = ComplexTensor::new(values_out, tensor.shape.clone())
-        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
-    let indices_tensor = Tensor::new(indices_out, tensor.shape.clone())
-        .map_err(|e| cummin_error(format!("cummin: {e}")))?;
+        .map_err(|e| cummin_internal_error(&e))?;
+    let indices_tensor =
+        Tensor::new(indices_out, tensor.shape.clone()).map_err(|e| cummin_internal_error(&e))?;
     Ok((values_tensor, indices_tensor))
 }
 
@@ -683,7 +1044,7 @@ fn ones_indices(shape: &[usize]) -> BuiltinResult<Tensor> {
     } else {
         vec![1.0f64; len]
     };
-    Tensor::new(data, shape.to_vec()).map_err(|e| cummin_error(format!("cummin: {e}")))
+    Tensor::new(data, shape.to_vec()).map_err(|e| cummin_internal_error(&e))
 }
 
 fn default_dimension(tensor: &Tensor) -> usize {
@@ -732,6 +1093,41 @@ pub(crate) mod tests {
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<CumminEvaluation> {
         block_on(super::evaluate(value, rest))
+    }
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
+    }
+
+    #[test]
+    fn cummin_descriptor_signatures_and_errors() {
+        let labels: Vec<&str> = CUMMIN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"M = cummin(A)"));
+        assert!(labels.contains(&"M = cummin(A, dim)"));
+        assert!(labels.contains(&"M = cummin(A, direction)"));
+        assert!(labels.contains(&"M = cummin(A, nanflag)"));
+        assert!(labels.contains(&"M = cummin(A, dim, direction, nanflag)"));
+        assert!(labels.contains(&"[M, I] = cummin(A)"));
+        assert!(labels.contains(&"[M, I] = cummin(A, dim)"));
+        assert!(labels.contains(&"[M, I] = cummin(A, direction)"));
+        assert!(labels.contains(&"[M, I] = cummin(A, nanflag)"));
+        assert!(labels.contains(&"[M, I] = cummin(A, dim, direction, nanflag)"));
+        assert!(CUMMIN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == CUMMIN_ERROR_INVALID_ARGUMENT.code));
+        assert!(CUMMIN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == CUMMIN_ERROR_INVALID_INPUT.code));
+        assert!(CUMMIN_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == CUMMIN_ERROR_INTERNAL.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -897,7 +1293,13 @@ pub(crate) mod tests {
         match evaluate(Value::Tensor(tensor), &args) {
             Ok(_) => panic!("expected dimension error"),
             Err(err) => {
-                assert!(err.message().contains("dimension must be >= 1"));
+                assert_eq!(
+                    error_identifier(&err),
+                    CUMMIN_ERROR_INVALID_ARGUMENT.identifier
+                );
+                assert!(err
+                    .message()
+                    .contains(CUMMIN_ERROR_INVALID_ARGUMENT.message));
             }
         }
     }
@@ -910,6 +1312,10 @@ pub(crate) mod tests {
         match evaluate(Value::Tensor(tensor), &args) {
             Ok(_) => panic!("expected duplicate direction error"),
             Err(err) => {
+                assert_eq!(
+                    error_identifier(&err),
+                    CUMMIN_ERROR_INVALID_ARGUMENT.identifier
+                );
                 assert!(err.message().contains("direction specified more than once"));
             }
         }

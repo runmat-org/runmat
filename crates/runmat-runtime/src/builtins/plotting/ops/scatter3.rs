@@ -5,12 +5,17 @@ use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 #[cfg(test)]
 use runmat_builtins::Tensor;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
 use runmat_plot::gpu::scatter3::{Scatter3GpuInputs, Scatter3GpuParams};
 use runmat_plot::gpu::ScalarType;
+use runmat_plot::plots::scatter::MarkerStyle;
+use runmat_plot::plots::scatter3::Scatter3GpuStyle;
 use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::Scatter3Plot;
@@ -19,7 +24,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use std::convert::TryFrom;
 
 use super::common::{gather_tensor_from_gpu, numeric_triplet};
@@ -30,14 +35,471 @@ use super::perf::scatter3_lod_stride;
 use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
-    map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
-    PointColorArg, PointGpuColor, PointSizeArg,
+    default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
+    validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
+    PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
-use super::style::LineStyleParseOptions;
+use super::style::{LineStyleParseOptions, MarkerColor};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "scatter3";
+
+const SCATTER3_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the rendered 3-D scatter plot.",
+}];
+
+const SCATTER3_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+];
+
+const SCATTER3_INPUTS_X_Y_Z_S: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+];
+
+const SCATTER3_INPUTS_X_Y_Z_S_C: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Color specification (uniform, per-point scalar, or RGB matrix).",
+    },
+];
+
+const SCATTER3_INPUTS_X_Y_Z_STYLE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker/line style shorthand.",
+    },
+];
+
+const SCATTER3_INPUTS_X_Y_Z_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value marker style properties.",
+    },
+];
+
+const SCATTER3_INPUTS_AX_X_Y_Z: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+];
+
+const SCATTER3_INPUTS_AX_X_Y_Z_S: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+];
+
+const SCATTER3_INPUTS_AX_X_Y_Z_S_C: [BuiltinParamDescriptor; 6] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Color specification (uniform, per-point scalar, or RGB matrix).",
+    },
+];
+
+const SCATTER3_INPUTS_AX_X_Y_Z_STYLE: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker/line style shorthand.",
+    },
+];
+
+const SCATTER3_INPUTS_AX_X_Y_Z_PROPS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value marker style properties.",
+    },
+];
+
+const SCATTER3_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(X, Y, Z)",
+        inputs: &SCATTER3_INPUTS_X_Y_Z,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(X, Y, Z, S)",
+        inputs: &SCATTER3_INPUTS_X_Y_Z_S,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(X, Y, Z, S, C)",
+        inputs: &SCATTER3_INPUTS_X_Y_Z_S_C,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(X, Y, Z, LineSpec)",
+        inputs: &SCATTER3_INPUTS_X_Y_Z_STYLE,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(X, Y, Z, Name, Value, ...)",
+        inputs: &SCATTER3_INPUTS_X_Y_Z_PROPS,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(ax, X, Y, Z)",
+        inputs: &SCATTER3_INPUTS_AX_X_Y_Z,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(ax, X, Y, Z, S)",
+        inputs: &SCATTER3_INPUTS_AX_X_Y_Z_S,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(ax, X, Y, Z, S, C)",
+        inputs: &SCATTER3_INPUTS_AX_X_Y_Z_S_C,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(ax, X, Y, Z, LineSpec)",
+        inputs: &SCATTER3_INPUTS_AX_X_Y_Z_STYLE,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter3(ax, X, Y, Z, Name, Value, ...)",
+        inputs: &SCATTER3_INPUTS_AX_X_Y_Z_PROPS,
+        outputs: &SCATTER3_OUTPUT_HANDLE,
+    },
+];
+
+pub const SCATTER3_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SCATTER3.INVALID_ARGUMENT",
+    identifier: Some("RunMat:scatter3:InvalidArgument"),
+    when: "Input data, axes targeting, or marker style arguments are invalid.",
+    message: "scatter3: invalid argument",
+};
+
+pub const SCATTER3_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SCATTER3.INTERNAL",
+    identifier: Some("RunMat:scatter3:Internal"),
+    when: "Internal 3-D scatter construction or rendering fails unexpectedly.",
+    message: "scatter3: internal operation failed",
+};
+
+const SCATTER3_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SCATTER3_ERROR_INVALID_ARGUMENT, SCATTER3_ERROR_INTERNAL];
+
+pub const SCATTER3_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SCATTER3_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SCATTER3_ERRORS,
+};
+
+fn scatter3_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_scatter3_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    scatter3_error_with_detail(&SCATTER3_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_scatter3_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    scatter3_error_with_detail(&SCATTER3_ERROR_INTERNAL, err.message)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -75,6 +537,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::scatter3::SCATTER3_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub async fn scatter3_builtin(
@@ -85,21 +548,27 @@ pub async fn scatter3_builtin(
 ) -> crate::BuiltinResult<f64> {
     let mut args = vec![x, y, z];
     args.extend(rest);
-    let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
-    apply_axes_target(axes_target, BUILTIN_NAME)?;
+    let (axes_target, mut args) =
+        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?;
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?;
     if args.len() < 3 {
-        return Err(scatter3_err(
-            "scatter3: expected X, Y, and Z data after axes handle",
+        return Err(scatter3_error_with_detail(
+            &SCATTER3_ERROR_INVALID_ARGUMENT,
+            "expected X, Y, and Z data after axes handle",
         ));
     }
     let x = args.remove(0);
     let y = args.remove(0);
     let z = args.remove(0);
     let rest = args;
-    let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
-    let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
-    let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
-    let mut z_input = Some(ScatterInput::from_value(z, BUILTIN_NAME)?);
+    let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())
+        .map_err(map_scatter3_invalid_argument)?;
+    let mut x_input =
+        Some(ScatterInput::from_value(x, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?);
+    let mut y_input =
+        Some(ScatterInput::from_value(y, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?);
+    let mut z_input =
+        Some(ScatterInput::from_value(z, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?);
     let opts = PlotRenderOptions {
         title: "3-D Scatter",
         x_label: "X",
@@ -113,7 +582,8 @@ pub async fn scatter3_builtin(
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
-        let mut resolved_style = resolve_scatter3_style(point_count, &style_args, "scatter3")?;
+        let mut resolved_style = resolve_scatter3_style(point_count, &style_args, "scatter3")
+            .map_err(map_scatter3_invalid_argument)?;
         let x_arg = x_input.take().expect("scatter3 x consumed once");
         let y_arg = y_input.take().expect("scatter3 y consumed once");
         let z_arg = z_input.take().expect("scatter3 z consumed once");
@@ -136,12 +606,20 @@ pub async fn scatter3_builtin(
         }
 
         let (x_tensor, y_tensor, z_tensor) = (
-            x_arg.into_tensor("scatter3")?,
-            y_arg.into_tensor("scatter3")?,
-            z_arg.into_tensor("scatter3")?,
+            x_arg
+                .into_tensor("scatter3")
+                .map_err(map_scatter3_invalid_argument)?,
+            y_arg
+                .into_tensor("scatter3")
+                .map_err(map_scatter3_invalid_argument)?,
+            z_arg
+                .into_tensor("scatter3")
+                .map_err(map_scatter3_invalid_argument)?,
         );
-        let (x_vals, y_vals, z_vals) = numeric_triplet(x_tensor, y_tensor, z_tensor, "scatter3")?;
-        let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)?;
+        let (x_vals, y_vals, z_vals) = numeric_triplet(x_tensor, y_tensor, z_tensor, "scatter3")
+            .map_err(map_scatter3_invalid_argument)?;
+        let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)
+            .map_err(map_scatter3_invalid_argument)?;
         let plot_index = figure.add_scatter3_plot_on_axes(scatter, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -156,12 +634,11 @@ pub async fn scatter3_builtin(
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_scatter3_internal(err));
     }
     Ok(handle)
 }
 
-const DEFAULT_POINT_SIZE: f32 = 6.0;
 const DEFAULT_SCATTER3_LABEL: &str = "Data";
 
 fn scatter3_err(message: impl Into<String>) -> RuntimeError {
@@ -175,7 +652,11 @@ fn default_color() -> Vec4 {
 #[derive(Clone, Debug)]
 struct Scatter3ResolvedStyle {
     uniform_color: Vec4,
+    edge_color: Vec4,
+    edge_thickness: f32,
+    marker_style: MarkerStyle,
     point_size: f32,
+    filled: bool,
     per_point_sizes: Option<Vec<f32>>,
     per_point_colors: Option<Vec<Vec4>>,
     color_values: Option<Vec<f64>>,
@@ -183,6 +664,8 @@ struct Scatter3ResolvedStyle {
     gpu_sizes: Option<GpuTensorHandle>,
     gpu_colors: Option<PointGpuColor>,
     colormap: ColorMap,
+    marker_face_flat: bool,
+    marker_edge_flat: bool,
     requires_cpu: bool,
     label: String,
 }
@@ -194,7 +677,11 @@ fn resolve_scatter3_style(
 ) -> BuiltinResult<Scatter3ResolvedStyle> {
     let mut style = Scatter3ResolvedStyle {
         uniform_color: default_color(),
-        point_size: DEFAULT_POINT_SIZE,
+        edge_color: default_color(),
+        edge_thickness: 1.0,
+        marker_style: MarkerStyle::Circle,
+        point_size: default_marker_diameter_px(),
+        filled: args.filled,
         per_point_sizes: None,
         per_point_colors: None,
         color_values: None,
@@ -202,6 +689,8 @@ fn resolve_scatter3_style(
         gpu_sizes: None,
         gpu_colors: None,
         colormap: ColorMap::Parula,
+        marker_face_flat: false,
+        marker_edge_flat: false,
         requires_cpu: false,
         label: DEFAULT_SCATTER3_LABEL.to_string(),
     };
@@ -212,19 +701,52 @@ fn resolve_scatter3_style(
 
     let appearance = &args.style.appearance;
     style.uniform_color = appearance.color;
+    style.edge_color = appearance.color;
+    style.edge_thickness = appearance.line_width.max(0.1);
 
     if let PointColorArg::Uniform(color) = &args.color {
         style.uniform_color = *color;
+        style.edge_color = *color;
+    }
+
+    if appearance.marker.is_none() {
+        style.edge_color = style.uniform_color;
     }
 
     if let Some(marker) = appearance.marker.as_ref() {
+        style.marker_style = marker.kind.to_plot_marker();
         if let Some(size) = marker.size {
-            style.point_size = size.max(0.1);
+            style.point_size = marker_area_points2_to_diameter_px(size as f64);
+        }
+        if matches!(marker.edge_color, MarkerColor::Flat) {
+            style.marker_edge_flat = true;
+        } else {
+            style.edge_color =
+                resolve_marker_color(&marker.edge_color, style.edge_color, style.uniform_color);
+        }
+        match &marker.face_color {
+            MarkerColor::Flat => {
+                style.marker_face_flat = true;
+                style.filled = true;
+            }
+            MarkerColor::None => {
+                style.filled = false;
+            }
+            _ => {
+                let face_color = resolve_marker_color(
+                    &marker.face_color,
+                    style.uniform_color,
+                    style.uniform_color,
+                );
+                if matches!(marker.face_color, MarkerColor::Color(_) | MarkerColor::Auto) {
+                    style.uniform_color = face_color;
+                }
+            }
         }
     }
 
     if let PointSizeArg::Scalar(size) = &args.size {
-        style.point_size = (*size).max(0.1);
+        style.point_size = marker_area_points2_to_diameter_px(*size as f64);
     }
 
     if let Some(value) = args.size.value() {
@@ -263,6 +785,25 @@ fn resolve_scatter3_style(
         _ => {}
     }
 
+    if style.per_point_colors.is_some() || style.color_values.is_some() {
+        style.filled = true;
+    }
+
+    if style.marker_face_flat {
+        if style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+            return Err(scatter3_err(format!(
+                "{context}: MarkerFaceColor 'flat' requires per-point color data (C argument)"
+            )));
+        }
+        style.filled = true;
+    }
+
+    if style.marker_edge_flat && style.per_point_colors.is_none() && style.gpu_colors.is_none() {
+        return Err(scatter3_err(format!(
+            "{context}: MarkerEdgeColor 'flat' requires per-point color data (C argument)"
+        )));
+    }
+
     if args.style.appearance.line_style != LineStyle::Solid && args.style.line_style_explicit {
         style.requires_cpu = true;
     }
@@ -272,6 +813,15 @@ fn resolve_scatter3_style(
     style.requires_cpu |= args.style.requires_cpu_fallback;
 
     Ok(style)
+}
+
+fn resolve_marker_color(marker_color: &MarkerColor, fallback: Vec4, default_base: Vec4) -> Vec4 {
+    match marker_color {
+        MarkerColor::Auto => fallback,
+        MarkerColor::None => Vec4::new(default_base.x, default_base.y, default_base.z, 0.0),
+        MarkerColor::Flat => fallback,
+        MarkerColor::Color(color) => *color,
+    }
 }
 
 fn build_scatter3_plot(
@@ -300,6 +850,11 @@ fn build_scatter3_plot(
         .with_point_size(style.point_size)
         .with_color(style.uniform_color)
         .with_label(style.label.clone());
+    scatter.set_marker_style(style.marker_style);
+    scatter.set_filled(style.filled);
+    scatter.set_edge_color(style.edge_color);
+    scatter.set_edge_thickness(style.edge_thickness);
+    scatter.set_edge_color_from_vertex(style.marker_edge_flat);
     if let Some(sizes) = style.per_point_sizes.take() {
         scatter.set_point_sizes(sizes);
     }
@@ -374,10 +929,20 @@ fn build_scatter3_gpu_plot(
     .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
 
     let drawn_points = gpu_vertices.vertex_count;
+    let gpu_style = Scatter3GpuStyle {
+        color: style.uniform_color,
+        edge_color: style.edge_color,
+        edge_thickness: style.edge_thickness,
+        marker_style: style.marker_style,
+        filled: style.filled,
+        has_per_point_colors: style.per_point_colors.is_some() || style.gpu_colors.is_some(),
+        edge_from_vertex_colors: style.marker_edge_flat,
+    };
+
     Ok(Scatter3Plot::from_gpu_buffer(
         gpu_vertices,
         drawn_points,
-        style.uniform_color,
+        gpu_style,
         style.point_size,
         bounds,
     )
@@ -521,7 +1086,11 @@ pub(crate) mod tests {
     fn test_style() -> Scatter3ResolvedStyle {
         Scatter3ResolvedStyle {
             uniform_color: default_color(),
-            point_size: DEFAULT_POINT_SIZE,
+            edge_color: default_color(),
+            edge_thickness: 1.0,
+            marker_style: MarkerStyle::Circle,
+            point_size: default_marker_diameter_px(),
+            filled: false,
             per_point_sizes: None,
             per_point_colors: None,
             color_values: None,
@@ -529,6 +1098,8 @@ pub(crate) mod tests {
             gpu_sizes: None,
             gpu_colors: None,
             colormap: ColorMap::Parula,
+            marker_face_flat: false,
+            marker_edge_flat: false,
             requires_cpu: false,
             label: DEFAULT_SCATTER3_LABEL.to_string(),
         }
@@ -592,6 +1163,57 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn scatter3_resolves_marker_style_color_and_size() {
+        setup_plot_tests();
+        let rest = vec![
+            Value::Num(12.0),
+            Value::String("g".into()),
+            Value::String("filled".into()),
+            Value::String("Marker".into()),
+            Value::String("s".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
+        let style = resolve_scatter3_style(3, &args, "scatter3").expect("style");
+        assert_eq!(style.marker_style, MarkerStyle::Square);
+        assert!(style.filled);
+        assert!(
+            (style.point_size - marker_area_points2_to_diameter_px(12.0)).abs() < 1e-5,
+            "size was {}",
+            style.point_size
+        );
+        assert!(style.uniform_color.y > style.uniform_color.x);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scatter3_single_rgb_row_sets_uniform_face_and_edge_color() {
+        setup_plot_tests();
+        let rest = vec![
+            Value::Num(49.0),
+            Value::Tensor(Tensor {
+                data: vec![0.9, 0.2, 0.2],
+                shape: vec![1, 3],
+                rows: 1,
+                cols: 3,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("filled".into()),
+            Value::String("Marker".into()),
+            Value::String("o".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter3()).unwrap();
+        let style = resolve_scatter3_style(4, &args, "scatter3").expect("style");
+        assert!((style.uniform_color.x - 0.9).abs() < 1e-6);
+        assert!((style.uniform_color.y - 0.2).abs() < 1e-6);
+        assert!((style.uniform_color.z - 0.2).abs() < 1e-6);
+        assert!((style.edge_color.x - 0.9).abs() < 1e-6);
+        assert!((style.edge_color.y - 0.2).abs() < 1e-6);
+        assert!((style.edge_color.z - 0.2).abs() < 1e-6);
+        assert!(!style.marker_edge_flat);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn scatter3_applies_display_name() {
         setup_plot_tests();
         let rest = vec![
@@ -648,5 +1270,36 @@ pub(crate) mod tests {
             panic!("expected scatter3")
         };
         assert_eq!(plot.points, vec![glam::Vec3::new(1.0, 2.0, 3.0)]);
+    }
+
+    #[test]
+    fn scatter3_descriptor_signatures_cover_supported_forms() {
+        let labels: Vec<&str> = SCATTER3_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = scatter3(X, Y, Z)"));
+        assert!(labels.contains(&"h = scatter3(X, Y, Z, S, C)"));
+        assert!(labels.contains(&"h = scatter3(X, Y, Z, Name, Value, ...)"));
+        assert!(labels.contains(&"h = scatter3(ax, X, Y, Z)"));
+        assert!(labels.contains(&"h = scatter3(ax, X, Y, Z, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn scatter3_missing_post_axes_input_uses_stable_identifier() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+        setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let err = scatter3_builtin(
+            Value::Num(ax),
+            Value::Num(1.0),
+            Value::String("filled".into()),
+            Vec::new(),
+        )
+        .expect_err("missing z after axes handle should fail");
+        assert_eq!(err.identifier(), SCATTER3_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

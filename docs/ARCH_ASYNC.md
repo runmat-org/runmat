@@ -147,6 +147,16 @@ We want:
 - `TaskId` (copyable id)
 - `TaskHandle` (language-level value referencing a task)
 
+RunMat language futures and tasks are distinct:
+
+- async functions and async blocks create lazy future values
+- creating a future must not execute user code or trigger user-visible side effects
+- `spawn(fut)` is the explicit eager scheduling boundary and returns a `TaskHandle`
+- `await(fut_or_task)` polls to completion and returns the output value or raises the error
+- `await(fut)` without `spawn` polls in the current execution context and does not introduce concurrency
+- `spawn(fut)` requires the future and captured environment to be spawn-safe
+- spawned tasks must not alias mutable parent frame storage
+
 #### Executor trait
 
 This is intentionally minimal and host-neutral:
@@ -162,11 +172,13 @@ We can refine the trait, but the key is: **RunMat does not hardcode Tokio**.
 
 At the language/runtime boundary, `await(x)` needs a protocol:
 
-- if `x` is a `TaskHandle`, poll that task
+- if `x` is a language future, poll that future in the current task/frame
+- else if `x` is a `TaskHandle`, poll or join that task
 - else if `x` is a native awaitable wrapper (`Value::Awaitable(...)`), poll that
 - else error: “not awaitable”
 
 Implementation strategy:
+- store future state machines with explicit rootable frame storage
 - store `Pin<Box<dyn Future<Output=Result<Value, RunMatError>> + 'session>>` for tasks
 - store non-task awaitables similarly or via a small vtable if we need to avoid trait objects
 
@@ -176,14 +188,27 @@ Cancellation is best modeled as:
 - a cancellation token (shared state + waker list)
 - cancellation checks at poll boundaries and await points
 
+#### Spawn safety
+
+`spawn` is the user-visible concurrency boundary. It must not turn ordinary lexical capture into a data race.
+
+Rules:
+
+- futures may capture ordinary lexical state when directly awaited in the current execution context
+- futures passed to `spawn` must use immutable snapshots, by-value copies, immutable shared handles, or explicit synchronized/runtime-managed handles
+- mutable lexical captures from the spawning frame are rejected for `spawn`
+- spawned futures/tasks must not contain raw references into another task's stack/frame or unrooted GC storage
+- provider handles captured by spawned tasks must follow provider metadata for immutable sharing, copy-on-write, synchronized mutation, or rejection
+
 ---
 
 ## VM integration and bytecode changes
 
 ### Bytecode opcodes (minimum)
 
-- `ASYNC_CREATE <closure>`: create a task (lazy or eager; we recommend lazy-by-default).
-- `AWAIT`: pop awaitable; if ready push value; if pending yield from interpreter poll.
+- `FUTURE_CREATE <closure/body>`: create a lazy future without running user code.
+- `SPAWN`: pop future, schedule it for concurrent execution, and push a task handle.
+- `AWAIT`: pop future/task/awaitable; if ready push value; if pending yield from interpreter poll.
 
 Optional but useful:
 - `YIELD` (explicit cooperative yield; mainly for runtime fairness/testing)

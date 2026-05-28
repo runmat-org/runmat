@@ -2,11 +2,16 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use runmat_builtins::{
-    Access, CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ClassDef, MethodDef, ObjectInstance, PropertyDef, StringArray, Tensor, Value,
 };
 
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER,
+    OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
+};
 
 const BUILTIN_NAME: &str = "duration";
 const DURATION_CLASS: &str = "duration";
@@ -16,6 +21,233 @@ pub(crate) const DEFAULT_DURATION_FORMAT: &str = "hh:mm:ss";
 const SECONDS_PER_DAY: f64 = 86_400.0;
 
 static DURATION_CLASS_REGISTERED: OnceLock<()> = OnceLock::new();
+
+const DURATION_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DURATION.INVALID_ARGUMENT",
+    identifier: Some("RunMat:duration:InvalidArgument"),
+    when: "Arguments or option grammar do not match supported duration forms.",
+    message: "duration: invalid argument",
+};
+const DURATION_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DURATION.INVALID_INPUT",
+    identifier: Some("RunMat:duration:InvalidInput"),
+    when: "Input values cannot be converted/broadcast/formatted to a valid duration result.",
+    message: "duration: invalid input",
+};
+const DURATION_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DURATION.INTERNAL",
+    identifier: Some("RunMat:duration:Internal"),
+    when: "Internal duration state or indexing/evaluation failed unexpectedly.",
+    message: "duration: internal operation failed",
+};
+const DURATION_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DURATION_ERROR_INVALID_ARGUMENT,
+    DURATION_ERROR_INVALID_INPUT,
+    DURATION_ERROR_INTERNAL,
+];
+
+const OUT_DURATION: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "t",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Duration object result.",
+}];
+const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "out",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Method result.",
+}];
+const DURATION_ARGS_ONLY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Duration constructor arguments.",
+}];
+const DURATION_BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "lhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left duration operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "rhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right duration/datetime operand.",
+    },
+];
+const DURATION_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Duration receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing kind token.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Index/member payload.",
+    },
+];
+const DURATION_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Duration receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "kind",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexing kind token.",
+    },
+    BuiltinParamDescriptor {
+        name: "payload",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Index/member payload.",
+    },
+    BuiltinParamDescriptor {
+        name: "rhs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const DURATION_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "t = duration(hours)",
+        inputs: &[BuiltinParamDescriptor {
+            name: "hours",
+            ty: BuiltinParamType::NumericArray,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Hour component.",
+        }],
+        outputs: &OUT_DURATION,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = duration(hours, minutes)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "hours",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Hour component.",
+            },
+            BuiltinParamDescriptor {
+                name: "minutes",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Minute component.",
+            },
+        ],
+        outputs: &OUT_DURATION,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = duration(hours, minutes, seconds)",
+        inputs: &[
+            BuiltinParamDescriptor {
+                name: "hours",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Hour component.",
+            },
+            BuiltinParamDescriptor {
+                name: "minutes",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Minute component.",
+            },
+            BuiltinParamDescriptor {
+                name: "seconds",
+                ty: BuiltinParamType::NumericArray,
+                arity: BuiltinParamArity::Required,
+                default: None,
+                description: "Second component.",
+            },
+        ],
+        outputs: &OUT_DURATION,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = duration(___, \"Format\", format)",
+        inputs: &DURATION_ARGS_ONLY,
+        outputs: &OUT_DURATION,
+    },
+    BuiltinSignatureDescriptor {
+        label: "t = duration(___, Name, Value, ...)",
+        inputs: &DURATION_ARGS_ONLY,
+        outputs: &OUT_DURATION,
+    },
+];
+const DURATION_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = duration.subsref(obj, kind, payload)",
+    inputs: &DURATION_SUBSREF_INPUTS,
+    outputs: &OUT_ANY,
+}];
+const DURATION_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "out = duration.subsasgn(obj, kind, payload, rhs)",
+        inputs: &DURATION_SUBSASGN_INPUTS,
+        outputs: &OUT_ANY,
+    }];
+const DURATION_BINARY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "out = duration.op(lhs, rhs)",
+    inputs: &DURATION_BINARY_INPUTS,
+    outputs: &OUT_ANY,
+}];
+
+pub const DURATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DURATION_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DURATION_ERRORS,
+};
+pub const DURATION_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DURATION_SUBSREF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DURATION_ERRORS,
+};
+pub const DURATION_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DURATION_SUBSASGN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DURATION_ERRORS,
+};
+pub const DURATION_BINARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DURATION_BINARY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::MethodOnly,
+    errors: &DURATION_ERRORS,
+};
 
 fn duration_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -40,7 +272,16 @@ fn ensure_duration_class_registered() {
 
         let mut methods = HashMap::new();
         for name in [
-            "subsref", "subsasgn", "plus", "minus", "eq", "ne", "lt", "le", "gt", "ge",
+            OBJECT_SUBSREF_METHOD,
+            OBJECT_SUBSASGN_METHOD,
+            "plus",
+            "minus",
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
         ] {
             methods.insert(
                 name.to_string(),
@@ -49,6 +290,7 @@ fn ensure_duration_class_registered() {
                     is_static: false,
                     access: Access::Public,
                     function_name: format!("{DURATION_CLASS}.{name}"),
+                    implicit_class_argument: None,
                 },
             );
         }
@@ -487,6 +729,7 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "duration",
+    descriptor(crate::builtins::duration::DURATION_DESCRIPTOR),
     builtin_path = "crate::builtins::duration",
     category = "datetime",
     summary = "Create MATLAB-compatible duration arrays from hour, minute, and second components.",
@@ -510,12 +753,13 @@ async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "duration.subsref",
+    descriptor(crate::builtins::duration::DURATION_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::duration"
 )]
 async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
-        "()" => duration_indexing(obj, payload).await,
-        "." => {
+        OBJECT_INDEX_PAREN => duration_indexing(obj, payload).await,
+        OBJECT_INDEX_MEMBER => {
             let Value::Object(object) = obj else {
                 return Err(duration_error(
                     "duration.subsref: receiver must be a duration object",
@@ -537,6 +781,7 @@ async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
 
 #[runmat_macros::runtime_builtin(
     name = "duration.subsasgn",
+    descriptor(crate::builtins::duration::DURATION_SUBSASGN_DESCRIPTOR),
     builtin_path = "crate::builtins::duration"
 )]
 async fn duration_subsasgn(
@@ -551,7 +796,7 @@ async fn duration_subsasgn(
         ));
     };
     match kind.as_str() {
-        "." => {
+        OBJECT_INDEX_MEMBER => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
@@ -572,38 +817,63 @@ async fn duration_subsasgn(
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.eq", builtin_path = "crate::builtins::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.eq",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "eq", |a, b| (a - b).abs() <= 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.ne", builtin_path = "crate::builtins::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.ne",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "ne", |a, b| (a - b).abs() > 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.lt", builtin_path = "crate::builtins::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.lt",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "lt", |a, b| a < b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.le", builtin_path = "crate::builtins::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.le",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "le", |a, b| a <= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.gt", builtin_path = "crate::builtins::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.gt",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "gt", |a, b| a > b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.ge", builtin_path = "crate::builtins::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.ge",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "ge", |a, b| a >= b)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.plus",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
     builtin_path = "crate::builtins::duration"
 )]
 async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -638,6 +908,7 @@ async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(
     name = "duration.minus",
+    descriptor(crate::builtins::duration::DURATION_BINARY_DESCRIPTOR),
     builtin_path = "crate::builtins::duration"
 )]
 async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -659,6 +930,26 @@ mod tests {
 
     fn run_duration(args: Vec<Value>) -> Value {
         futures::executor::block_on(duration_builtin(args)).expect("duration")
+    }
+
+    #[test]
+    fn duration_descriptor_signatures_cover_constructor_and_methods() {
+        let labels: Vec<&str> = DURATION_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"t = duration(hours)"));
+        assert!(labels.contains(&"t = duration(hours, minutes, seconds)"));
+        assert!(labels.contains(&"t = duration(___, \"Format\", format)"));
+        assert_eq!(
+            DURATION_SUBSREF_DESCRIPTOR.signatures[0].label,
+            "out = duration.subsref(obj, kind, payload)"
+        );
+        assert_eq!(
+            DURATION_BINARY_DESCRIPTOR.signatures[0].label,
+            "out = duration.op(lhs, rhs)"
+        );
     }
 
     #[test]

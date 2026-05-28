@@ -1,7 +1,10 @@
 //! MATLAB-compatible `mpower` builtin (matrix power) with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -13,6 +16,71 @@ use crate::builtins::math::linalg::type_resolvers::matrix_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mpower";
+
+const MPOWER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Matrix/scalar power result.",
+}];
+
+const MPOWER_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Base matrix or scalar.",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Exponent.",
+    },
+];
+
+const MPOWER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = mpower(A, p)",
+    inputs: &MPOWER_INPUTS,
+    outputs: &MPOWER_OUTPUT,
+}];
+
+const MPOWER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MPOWER.INVALID_ARGUMENT",
+    identifier: Some("RunMat:mpower:InvalidArgument"),
+    when: "Exponent is unsupported for matrix-power semantics.",
+    message: "mpower: invalid exponent",
+};
+
+const MPOWER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MPOWER.INVALID_INPUT",
+    identifier: Some("RunMat:mpower:InvalidInput"),
+    when: "Base matrix shape is invalid for matrix-power semantics.",
+    message: "mpower: matrix input must be square",
+};
+
+const MPOWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MPOWER.INTERNAL",
+    identifier: Some("RunMat:mpower:Internal"),
+    when: "Runtime cannot materialize matrix-power outputs.",
+    message: "mpower: internal runtime failure",
+};
+
+const MPOWER_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    MPOWER_ERROR_INVALID_ARGUMENT,
+    MPOWER_ERROR_INVALID_INPUT,
+    MPOWER_ERROR_INTERNAL,
+];
+
+pub const MPOWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MPOWER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MPOWER_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mpower")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,8 +104,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Uses repeated provider matmul calls via binary exponentiation; falls back to the host implementation when matmul or identity creation is unavailable.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn mpower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    mpower_error_with_message(error.message, error)
+}
+
+fn mpower_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn mpower_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    mpower_error_with_message(message, &MPOWER_ERROR_INVALID_ARGUMENT)
+}
+
+fn mpower_invalid_input(message: impl Into<String>) -> RuntimeError {
+    mpower_error_with_message(message, &MPOWER_ERROR_INVALID_INPUT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -75,6 +162,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mpower,matrix power,linear algebra,gpu",
     accel = "matmul",
     type_resolver(matrix_unary_type),
+    descriptor(crate::builtins::math::linalg::ops::mpower::MPOWER_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::mpower"
 )]
 async fn mpower_builtin(base: Value, exponent: Value) -> BuiltinResult<Value> {
@@ -92,7 +180,8 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
     let exponent_host = crate::dispatcher::gather_if_needed_async(exponent)
         .await
         .map_err(map_control_flow)?;
-    let result = crate::elementwise::power(&base_host, &exponent_host).map_err(builtin_error)?;
+    let result = crate::builtins::common::elementwise::power(&base_host, &exponent_host)
+        .map_err(map_host_power_error)?;
 
     if matches!(base, Value::GpuTensor(_)) {
         if let Value::Tensor(tensor) = result {
@@ -110,6 +199,19 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
     }
 
     Ok(result)
+}
+
+fn map_host_power_error(message: String) -> RuntimeError {
+    if message.contains("integer exponent")
+        || message.contains("Negative matrix powers")
+        || message.contains("exponent magnitude exceeds")
+    {
+        return mpower_invalid_argument(message);
+    }
+    if message.contains("Matrix must be square for matrix power") {
+        return mpower_invalid_input(message);
+    }
+    mpower_invalid_input(message)
 }
 
 async fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<Value>> {
@@ -130,7 +232,9 @@ async fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<
     };
 
     if exponent_value < 0 {
-        return Err(builtin_error("Negative matrix powers not supported yet"));
+        return Err(mpower_invalid_argument(
+            "Negative matrix powers not supported yet",
+        ));
     }
     let shape = handle.shape.clone();
     if shape.len() != 2 {
@@ -139,7 +243,7 @@ async fn try_gpu_mpower(base: &Value, exponent: &Value) -> BuiltinResult<Option<
     let rows = shape[0];
     let cols = shape[1];
     if rows != cols {
-        return Err(builtin_error(format!(
+        return Err(mpower_invalid_input(format!(
             "Matrix must be square for matrix power: {}x{}",
             rows, cols
         )));
@@ -168,7 +272,7 @@ fn gpu_identity_like(
     match provider.eye_like(prototype) {
         Ok(handle) => Ok(Some(handle)),
         Err(_) => {
-            let eye = crate::matrix::matrix_eye(size);
+            let eye = crate::builtins::common::matrix::matrix_eye(size);
             let view = HostTensorView {
                 data: &eye.data,
                 shape: &eye.shape,
@@ -261,7 +365,7 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw > i32::MAX as i64 || raw < i32::MIN as i64 {
-                return Err(builtin_error(
+                return Err(mpower_invalid_argument(
                     "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
                 ));
             }
@@ -269,10 +373,10 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
         }
         Value::Num(n) => {
             if !n.is_finite() || n.fract() != 0.0 {
-                return Err(builtin_error("Matrix power requires integer exponent"));
+                return Err(mpower_error(&MPOWER_ERROR_INVALID_ARGUMENT));
             }
             if *n > i32::MAX as f64 || *n < i32::MIN as f64 {
-                return Err(builtin_error(
+                return Err(mpower_invalid_argument(
                     "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
                 ));
             }
@@ -281,10 +385,10 @@ fn parse_integer_exponent(value: &Value) -> BuiltinResult<Option<i32>> {
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => {
             let scalar = t.data[0];
             if scalar.fract() != 0.0 || !scalar.is_finite() {
-                return Err(builtin_error("Matrix power requires integer exponent"));
+                return Err(mpower_error(&MPOWER_ERROR_INVALID_ARGUMENT));
             }
             if scalar > i32::MAX as f64 || scalar < i32::MIN as f64 {
-                return Err(builtin_error(
+                return Err(mpower_invalid_argument(
                     "mpower: exponent magnitude exceeds supported range (|n| ≤ 2^31−1)",
                 ));
             }
@@ -350,6 +454,28 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn mpower_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MPOWER_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"B = mpower(A, p)"));
+    }
+
+    #[test]
+    fn mpower_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = MPOWER_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|err| err.code)
+            .collect();
+        assert!(codes.contains(&"RM.MPOWER.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.MPOWER.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.MPOWER.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zero_exponent_returns_identity() {
@@ -379,6 +505,7 @@ pub(crate) mod tests {
     fn non_integer_exponent_errors() {
         let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let err = unwrap_error(mpower_builtin(Value::Tensor(matrix), Value::Num(1.5)).unwrap_err());
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
         assert!(
             err.message()
                 .contains("Matrix power requires integer exponent"),
@@ -393,6 +520,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(-1))).unwrap_err(),
         );
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_ARGUMENT.identifier);
         assert!(
             err.message()
                 .contains("Negative matrix powers not supported yet"),
@@ -407,6 +535,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             mpower_builtin(Value::Tensor(matrix), Value::Int(IntValue::I32(2))).unwrap_err(),
         );
+        assert_eq!(err.identifier(), MPOWER_ERROR_INVALID_INPUT.identifier);
         assert!(
             err.message()
                 .contains("Matrix must be square for matrix power"),

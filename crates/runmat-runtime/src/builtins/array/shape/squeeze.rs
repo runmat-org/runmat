@@ -8,6 +8,8 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -48,6 +50,44 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn squeeze_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("squeeze").build()
 }
+
+const SQUEEZE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value with singleton dimensions removed (2-D minimum preserved).",
+}];
+
+const SQUEEZE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array/value.",
+}];
+
+const SQUEEZE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "B = squeeze(A)",
+    inputs: &SQUEEZE_INPUTS,
+    outputs: &SQUEEZE_OUTPUT,
+}];
+
+const SQUEEZE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SQUEEZE.INVALID_INPUT",
+    identifier: Some("RunMat:squeeze:InvalidInput"),
+    when: "A has an unsupported type for squeeze.",
+    message: "squeeze: unsupported input type",
+};
+
+const SQUEEZE_ERRORS: [BuiltinErrorDescriptor; 1] = [SQUEEZE_ERROR_INVALID_INPUT];
+
+pub const SQUEEZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SQUEEZE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SQUEEZE_ERRORS,
+};
 
 fn squeeze_shape_options(shape: &[Option<usize>]) -> Vec<Option<usize>> {
     if shape.len() <= 2 {
@@ -94,6 +134,7 @@ fn squeeze_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "squeeze,singleton dimensions,array reshape,gpu",
     accel = "shape",
     type_resolver(squeeze_type),
+    descriptor(crate::builtins::array::shape::squeeze::SQUEEZE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::squeeze"
 )]
 async fn squeeze_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -134,7 +175,11 @@ fn value_kind(value: &Value) -> &'static str {
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::Struct(_) => "struct",
-        Value::FunctionHandle(_) | Value::Closure(_) => "function handle",
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_) => "function handle",
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "exception",
         Value::OutputList(_) => "output list",

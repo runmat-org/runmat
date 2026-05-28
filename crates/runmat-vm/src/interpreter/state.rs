@@ -1,8 +1,12 @@
-use crate::bytecode::{Bytecode, ExecutionContext};
+use crate::bytecode::program::ExecutionContext;
+use crate::bytecode::Bytecode;
+use log::debug;
+#[cfg(feature = "native-accel")]
+use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlan};
 use runmat_builtins::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(feature = "native-accel")]
 use std::sync::Arc;
 
@@ -23,10 +27,13 @@ pub struct InterpreterState {
     pub imports: Vec<(Vec<String>, bool)>,
     pub global_aliases: HashMap<usize, String>,
     pub persistent_aliases: HashMap<usize, String>,
+    pub missing_input_slots: HashSet<usize>,
     pub current_function_name: String,
     pub call_counts: Vec<(usize, usize)>,
     #[cfg(feature = "native-accel")]
     pub fusion_plan: Option<Arc<FusionPlan>>,
+    #[cfg(feature = "native-accel")]
+    pub fusion_accel_graph: Option<AccelGraph>,
 }
 
 impl InterpreterState {
@@ -40,19 +47,49 @@ impl InterpreterState {
         if vars.len() < bytecode.var_count {
             vars.resize(bytecode.var_count, Value::Num(0.0));
         }
+        if bytecode.async_metadata.mir_spawn_site_count > 0
+            || bytecode.async_metadata.mir_await_site_count > 0
+        {
+            debug!(
+                "async semantics: compiled bytecode carries {} MIR spawn site(s) and {} MIR await site(s); runtime model={} with explicit spawn/await bytecode boundaries",
+                bytecode.async_metadata.mir_spawn_site_count,
+                bytecode.async_metadata.mir_await_site_count,
+                bytecode.async_metadata.runtime_model.as_str()
+            );
+        }
+        #[cfg(feature = "native-accel")]
+        let (fusion_plan, fusion_accel_graph) = {
+            // Runtime planning/execution owns accel-graph realization from the active
+            // bytecode instruction stream whenever semantic fusion scaffolds exist.
+            let runtime_groups = bytecode.runtime_fusion_groups();
+            let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+            let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
+                bytecode.runtime_fusion_groups_for_graph(graph)
+            } else {
+                runtime_groups
+            };
+            let fusion_plan = prepare_fusion_plan(
+                runtime_graph.as_ref(),
+                &runtime_groups,
+                bytecode.fusion_metadata.mir_fusion_candidate_group_count,
+            );
+            (fusion_plan, runtime_graph)
+        };
         Self {
             stack: Vec::new(),
             context: ExecutionContext {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                functions: bytecode.functions.clone(),
+                spawned_task_ids: std::collections::HashSet::new(),
+                next_spawn_task_id: 0,
             },
             try_stack: Vec::new(),
             last_exception: None,
             imports: Vec::new(),
             global_aliases: HashMap::new(),
             persistent_aliases: HashMap::new(),
+            missing_input_slots: HashSet::new(),
             vars,
             pc: 0,
             call_counts,
@@ -60,11 +97,98 @@ impl InterpreterState {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "<main>".to_string()),
             #[cfg(feature = "native-accel")]
-            fusion_plan: prepare_fusion_plan(
-                bytecode.accel_graph.as_ref(),
-                &bytecode.fusion_groups,
-            ),
+            fusion_plan,
+            #[cfg(feature = "native-accel")]
+            fusion_accel_graph,
             bytecode,
         }
+    }
+}
+
+#[cfg(all(test, feature = "native-accel"))]
+mod tests {
+    use super::InterpreterState;
+    use crate::bytecode::{Bytecode, FusionInstructionKind, FusionInstructionWindow};
+    use runmat_accelerate::graph::{AccelNodeLabel, InstrSpan, PrimitiveOp};
+
+    #[test]
+    fn runtime_materialized_graph_is_retained_for_fusion_execution() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.instructions = vec![
+            crate::Instr::LoadVar(0),
+            crate::Instr::LoadVar(1),
+            crate::Instr::Add,
+        ];
+        bytecode.var_types = vec![
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+        ];
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
+            span: InstrSpan { start: 2, end: 2 },
+            kind: FusionInstructionKind::Elementwise,
+        }];
+
+        let mut initial_vars = Vec::new();
+        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        assert!(
+            state.fusion_plan.is_some(),
+            "expected runtime fusion plan when semantic windows exist"
+        );
+        assert!(
+            state.fusion_accel_graph.is_some(),
+            "expected runtime accel graph to be retained for fusion execution"
+        );
+    }
+
+    #[test]
+    fn runtime_state_ignores_stale_compile_graph_metadata() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.instructions = vec![
+            crate::Instr::LoadVar(0),
+            crate::Instr::LoadVar(1),
+            crate::Instr::Add,
+        ];
+        bytecode.var_types = vec![
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+        ];
+        let stale_graph = crate::accel::graph::build_accel_graph(
+            &[
+                crate::Instr::LoadVar(0),
+                crate::Instr::LoadVar(1),
+                crate::Instr::Mul,
+            ],
+            &bytecode.var_types,
+        );
+        bytecode.accel_graph = Some(stale_graph);
+        bytecode.fusion_metadata.mir_fusion_candidate_group_count = 1;
+        bytecode.fusion_metadata.instruction_windows = vec![FusionInstructionWindow {
+            span: InstrSpan { start: 2, end: 2 },
+            kind: FusionInstructionKind::Elementwise,
+        }];
+
+        let mut initial_vars = Vec::new();
+        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        let graph = state
+            .fusion_accel_graph
+            .as_ref()
+            .expect("expected runtime accel graph to be retained");
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Add))),
+            "runtime retained graph should reflect active bytecode instructions"
+        );
+        assert!(
+            !graph
+                .nodes
+                .iter()
+                .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Mul))),
+            "stale compile graph metadata should not be retained in runtime state"
+        );
     }
 }

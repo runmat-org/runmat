@@ -1,6 +1,10 @@
 //! MATLAB-compatible `fsolve` builtin for nonlinear systems.
 
 use nalgebra::{DMatrix, DVector};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_builtins::{StructValue, Value};
 use runmat_macros::runtime_builtin;
 
@@ -9,16 +13,127 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::math::optim::common::{
-    call_function, initial_guess, optim_error, option_f64, option_string, option_usize,
-    value_to_real_vector, vector_to_value,
+    call_function, initial_guess, option_f64, option_string, option_usize, value_to_real_vector,
+    vector_to_value,
 };
 use crate::builtins::math::optim::type_resolvers::nonlinear_solve_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fsolve";
 const DEFAULT_TOL_X: f64 = 1.0e-6;
 const DEFAULT_TOL_FUN: f64 = 1.0e-6;
 const DEFAULT_MAX_ITER: usize = 400;
+
+const FSOLVE_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Approximate solution vector/scalar.",
+}];
+
+const FSOLVE_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "System residual callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "x0",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Initial guess scalar/vector.",
+    },
+];
+
+const FSOLVE_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "System residual callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "x0",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Initial guess scalar/vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Options struct from optimset.",
+    },
+];
+
+const FSOLVE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "x = fsolve(fun, x0)",
+        inputs: &FSOLVE_INPUTS_CORE,
+        outputs: &FSOLVE_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = fsolve(fun, x0, options)",
+        inputs: &FSOLVE_INPUTS_WITH_OPTIONS,
+        outputs: &FSOLVE_OUTPUT_X,
+    },
+];
+
+const FSOLVE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FSOLVE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:fsolve:InvalidArgument"),
+    when: "Argument grammar/options configuration is invalid.",
+    message: "fsolve: invalid argument",
+};
+
+const FSOLVE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FSOLVE.INVALID_INPUT",
+    identifier: Some("RunMat:fsolve:InvalidInput"),
+    when: "Initial guess/callback/iteration semantics are invalid.",
+    message: "fsolve: invalid input",
+};
+
+const FSOLVE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [FSOLVE_ERROR_INVALID_ARGUMENT, FSOLVE_ERROR_INVALID_INPUT];
+
+pub const FSOLVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FSOLVE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FSOLVE_ERRORS,
+};
+
+fn fsolve_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let message = if detail.starts_with("fsolve:") {
+        detail.to_string()
+    } else {
+        format!("{}: {detail}", error.message)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fsolve_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        fsolve_error_with_detail(fallback, err.message())
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::optim::fsolve")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -54,26 +169,37 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fsolve,nonlinear solve,root finding,levenberg-marquardt,jacobian",
     accel = "sink",
     type_resolver(nonlinear_solve_type),
+    descriptor(crate::builtins::math::optim::fsolve::FSOLVE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::fsolve"
 )]
 async fn fsolve_builtin(function: Value, x0: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(optim_error(NAME, "fsolve: too many input arguments"));
+        return Err(fsolve_error_with_detail(
+            &FSOLVE_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        ));
     }
-    let options = parse_options(rest.first())?;
-    let opts = FsolveOptions::from_struct(options.as_ref())?;
-    let guess = initial_guess(NAME, x0).await?;
-    let solution = solve(&function, guess.values, &guess.shape, guess.scalar, &opts).await?;
+    let options = parse_options(rest.first())
+        .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_ARGUMENT))?;
+    let opts = FsolveOptions::from_struct(options.as_ref())
+        .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_ARGUMENT))?;
+    let guess = initial_guess(NAME, x0)
+        .await
+        .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_INPUT))?;
+    let solution = solve(&function, guess.values, &guess.shape, guess.scalar, &opts)
+        .await
+        .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_INPUT))?;
     vector_to_value(NAME, solution, &guess.shape, guess.scalar)
+        .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_INPUT))
 }
 
 fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
         Some(Value::Struct(options)) => Ok(Some(options.clone())),
-        Some(other) => Err(optim_error(
-            NAME,
-            format!("fsolve: options must be a struct, got {other:?}"),
+        Some(other) => Err(fsolve_error_with_detail(
+            &FSOLVE_ERROR_INVALID_ARGUMENT,
+            format!("options must be a struct, got {other:?}"),
         )),
     }
 }
@@ -90,17 +216,17 @@ impl FsolveOptions {
     fn from_struct(options: Option<&StructValue>) -> BuiltinResult<Self> {
         let display = option_string(options, "Display", "off")?;
         if !matches!(display.as_str(), "off" | "none" | "final" | "iter") {
-            return Err(optim_error(
-                NAME,
-                "fsolve: option Display must be 'off', 'none', 'final', or 'iter'",
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_ARGUMENT,
+                "option Display must be 'off', 'none', 'final', or 'iter'",
             ));
         }
         let tol_x = option_f64(NAME, options, "TolX", DEFAULT_TOL_X)?;
         let tol_fun = option_f64(NAME, options, "TolFun", DEFAULT_TOL_FUN)?;
         if tol_x <= 0.0 || tol_fun <= 0.0 {
-            return Err(optim_error(
-                NAME,
-                "fsolve: options TolX and TolFun must be positive",
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_ARGUMENT,
+                "options TolX and TolFun must be positive",
             ));
         }
         let max_iter = option_usize(NAME, options, "MaxIter", DEFAULT_MAX_ITER)?.max(1);
@@ -123,7 +249,10 @@ async fn solve(
 ) -> BuiltinResult<Vec<f64>> {
     let n = x.len();
     if n == 0 {
-        return Err(optim_error(NAME, "fsolve: initial guess cannot be empty"));
+        return Err(fsolve_error_with_detail(
+            &FSOLVE_ERROR_INVALID_INPUT,
+            "initial guess cannot be empty",
+        ));
     }
 
     let mut residual = eval_residual(function, &x, shape, scalar).await?;
@@ -136,9 +265,9 @@ async fn solve(
 
     for _ in 0..options.max_iter {
         if evals >= options.max_fun_evals {
-            return Err(optim_error(
-                NAME,
-                "fsolve: exceeded maximum function evaluations",
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_INPUT,
+                "exceeded maximum function evaluations",
             ));
         }
         let jacobian =
@@ -183,22 +312,25 @@ async fn solve(
 
             lambda *= 10.0;
             if evals >= options.max_fun_evals {
-                return Err(optim_error(
-                    NAME,
-                    "fsolve: exceeded maximum function evaluations",
+                return Err(fsolve_error_with_detail(
+                    &FSOLVE_ERROR_INVALID_INPUT,
+                    "exceeded maximum function evaluations",
                 ));
             }
         }
 
         if !accepted {
-            return Err(optim_error(
-                NAME,
-                "fsolve: iteration stalled before convergence",
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_INPUT,
+                "iteration stalled before convergence",
             ));
         }
     }
 
-    Err(optim_error(NAME, "fsolve: exceeded maximum iterations"))
+    Err(fsolve_error_with_detail(
+        &FSOLVE_ERROR_INVALID_INPUT,
+        "exceeded maximum iterations",
+    ))
 }
 
 async fn eval_residual(
@@ -212,15 +344,15 @@ async fn eval_residual(
     } else {
         Value::Tensor(
             runmat_builtins::Tensor::new(x.to_vec(), shape.to_vec())
-                .map_err(|e| optim_error(NAME, format!("fsolve: {e}")))?,
+                .map_err(|e| fsolve_error_with_detail(&FSOLVE_ERROR_INVALID_INPUT, e))?,
         )
     };
     let value = call_function(function, vec![arg]).await?;
     let residual = value_to_real_vector(NAME, value).await?;
     if residual.is_empty() {
-        Err(optim_error(
-            NAME,
-            "fsolve: function value must not be empty",
+        Err(fsolve_error_with_detail(
+            &FSOLVE_ERROR_INVALID_INPUT,
+            "function value must not be empty",
         ))
     } else {
         Ok(residual)
@@ -242,9 +374,9 @@ async fn finite_difference_jacobian(
 
     for col in 0..n {
         if *evals >= options.max_fun_evals {
-            return Err(optim_error(
-                NAME,
-                "fsolve: exceeded maximum function evaluations",
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_INPUT,
+                "exceeded maximum function evaluations",
             ));
         }
         let mut perturbed = x.to_vec();
@@ -253,9 +385,9 @@ async fn finite_difference_jacobian(
         let next = eval_residual(function, &perturbed, shape, scalar).await?;
         *evals += 1;
         if next.len() != m {
-            return Err(optim_error(
-                NAME,
-                "fsolve: function output size changed during finite differencing",
+            return Err(fsolve_error_with_detail(
+                &FSOLVE_ERROR_INVALID_INPUT,
+                "function output size changed during finite differencing",
             ));
         }
         for row in 0..m {
@@ -298,9 +430,13 @@ mod tests {
     }
 
     #[test]
-    fn fsolve_vector_system_via_named_user_invoker() {
-        let _guard = crate::user_functions::install_user_function_invoker(Some(
-            std::sync::Arc::new(|_name, args| {
+    fn fsolve_vector_system_via_semantic_resolver() {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            std::sync::Arc::new(|_function, args, _requested_outputs| {
                 let x = match &args[0] {
                     Value::Tensor(t) => t.data.clone(),
                     _ => panic!("expected tensor input"),
@@ -336,8 +472,12 @@ mod tests {
     fn fsolve_preserves_row_vector_shape_for_callback() {
         let seen_shapes = Arc::new(Mutex::new(Vec::new()));
         let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, args| {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
                     Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
                     other => panic!("expected tensor input, got {other:?}"),
@@ -373,8 +513,12 @@ mod tests {
     fn fsolve_preserves_matrix_shape_for_callback() {
         let seen_shapes = Arc::new(Mutex::new(Vec::new()));
         let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, args| {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
                     Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
                     other => panic!("expected tensor input, got {other:?}"),
@@ -407,5 +551,70 @@ mod tests {
             other => panic!("unexpected value {other:?}"),
         }
         assert!(!seen_shapes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fsolve_accepts_semantic_function_handle_callback() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 43);
+                assert_eq!(requested_outputs, 1);
+                let x = match &args[0] {
+                    Value::Num(value) => *value,
+                    other => panic!("expected scalar numeric argument, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(x - 3.0)) })
+            },
+        )));
+        let root = block_on(fsolve_builtin(
+            Value::BoundFunctionHandle {
+                name: "system_function".to_string(),
+                function: 43,
+            },
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - 3.0).abs() < 1.0e-5),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fsolve_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FSOLVE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec!["x = fsolve(fun, x0)", "x = fsolve(fun, x0, options)"]
+        );
+
+        let codes: Vec<&str> = FSOLVE_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(
+            codes,
+            vec!["RM.FSOLVE.INVALID_ARGUMENT", "RM.FSOLVE.INVALID_INPUT"]
+        );
+    }
+
+    #[test]
+    fn fsolve_too_many_args_uses_stable_identifier() {
+        let err = block_on(fsolve_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(1.0),
+            vec![
+                Value::Struct(StructValue::new()),
+                Value::Struct(StructValue::new()),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:fsolve:InvalidArgument"));
     }
 }

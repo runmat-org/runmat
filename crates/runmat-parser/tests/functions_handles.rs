@@ -22,4 +22,11 @@ fn anonymous_function_and_handle_parse() {
         Stmt::ExprStmt(Expr::FuncHandle(name, _), _, _) => assert_eq!(name, "sin"),
         _ => panic!("expected function handle expr stmt"),
     }
+
+    // @pkg.remote_inc
+    let program = parse("@pkg.remote_inc").unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncHandle(name, _), _, _) => assert_eq!(name, "pkg.remote_inc"),
+        _ => panic!("expected qualified function handle expr stmt"),
+    }
 }

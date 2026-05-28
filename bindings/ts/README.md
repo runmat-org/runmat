@@ -126,13 +126,33 @@ If you already have a telemetry/analytics identifier (e.g., the ID that the surr
 
 Call `await session.memoryUsage()` to inspect the current WebAssembly heap. The method returns `{ bytes, pages }`, where `pages` are 64 KiB units. Hosts can poll this to detect runaway `memory.grow` usage and decide when to reset or dispose of sessions.
 
+## Execution requests
+
+RunMat now uses one explicit execution API: `executeRequest(request)`.
+
+- REPL/snippet execution:
+  - `source: { kind: "text", name, text }`
+- File/project execution through the configured filesystem provider:
+  - `source: { kind: "path", path }`
+
+Examples:
+
+```ts
+await session.executeRequest({
+  source: { kind: "text", name: "<repl>", text: "disp(1 + 1)" }
+});
+
+await session.executeRequest({
+  source: { kind: "path", path: "src/main.m" }
+});
+```
+
 ## Execution streaming & interaction
 
-- `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `execute()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
-- `ExecuteResult.warnings` exposes structured `{ identifier, message }` entries pulled from MATLAB's warning store, `stdinEvents` captures every prompt/response emitted during the run for transcript panes, and `stdinRequested` is populated when the interpreter suspends while waiting for input.
+- `subscribeStdout(listener)` / `unsubscribeStdout(id)` stream stdout/stderr events as they are emitted so hosts can drive an xterm pane without waiting for `executeRequest()` to resolve. Every `ExecuteResult` also includes the buffered `stdout` array for easy logging or replay.
+- `ExecuteResult.warnings` exposes structured `{ identifier, message }` entries pulled from MATLAB's warning store, and `stdinEvents` captures every prompt/response emitted during the run for transcript panes.
 - Call `session.cancelExecution()` to cooperatively interrupt a long-running script (e.g., when users press the stop button). The runtime raises `ExecutionCancelled` error, matching desktop builds.
-- `session.setInputHandler(handler)` registers a synchronous callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and can return a string/number/boolean, `{ kind: "keyPress" }`, or `{ error }` to reject the prompt. Returning `null`, `undefined`, `{ pending: true }`, or a Promise signals that the handler will respond asynchronously.
-- When a handler defers, `execute()` resolves with `stdinRequested` containing `{ id, request, waitingMs }`. Call `session.resumeInput(id, value)` once the UI collects the user's response (value follows the same shape as the input handler). `waitingMs` starts at zero and grows until the prompt is satisfied so UIs can show “still waiting…” nudges without forcing a timeout. Use `session.pendingStdinRequests()` to list outstanding prompts (useful when rehydrating a UI after refresh) — each entry carries the same `waitingMs` counter.
+- `session.setInputHandler(handler)` registers a callback for MATLAB's `input`/`pause` prompts. Handlers receive `{ kind: "line" | "keyPress", prompt, echo }` and can return a string/number/boolean, `{ kind: "keyPress" }`, `{ error }` to reject the prompt, or a Promise of any of those values. `executeRequest()` awaits the handler before resolving.
 
 ## Workspace metadata & variable inspection
 
@@ -171,22 +191,22 @@ await initRunMat({ plotCanvas: canvas });
 or attach one later via the exported helpers:
 
 ```ts
-import { attachPlotCanvas, deregisterPlotCanvas, plotRendererReady } from "@runmat/wasm";
+import { createPlotSurface, destroyPlotSurface, plotRendererReady } from "@runmat/wasm";
 
-await attachPlotCanvas(canvas);
+const surfaceId = await createPlotSurface(canvas);
 if (!await plotRendererReady()) {
   console.warn("Plotting not initialized yet.");
 }
 
 // Later, when the canvas is unmounted:
-await deregisterPlotCanvas();
+await destroyPlotSurface(surfaceId);
 ```
 
 Once the canvas is registered, calling `plot`, `scatter`, etc. from the RunMat REPL renders directly into that surface without any additional JS shims.
 
 ## Lifecycle
 
-Each `RunMatSessionHandle` now exposes `session.dispose()`. Call it when tearing down the editor/REPL view so the runtime can cancel pending executions, release stdin handlers, and drop any registered plot canvases. The wrapper marks the instance as disposed and throws helpful errors if a host accidentally calls `execute()` afterwards. `dispose()` is idempotent, so repeated calls are safe.
+Each `RunMatSessionHandle` now exposes `session.dispose()`. Call it when tearing down the editor/REPL view so the runtime can cancel active execution, release stdin handlers, and drop any registered plot canvases. The wrapper marks the instance as disposed and throws helpful errors if a host accidentally calls `executeRequest()` afterwards. `dispose()` is idempotent, so repeated calls are safe.
 
 ### Plotting performance knobs
 
@@ -199,12 +219,11 @@ These map directly to the runtime setters (`set_scatter_target_points`, `set_sur
 
 ### Multi-figure canvases & events
 
-- `registerFigureCanvas(handle, canvas)` wires a specific `<canvas>` to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
-- `deregisterFigureCanvas(handle)` detaches the renderer for a given handle when a tab is hidden or destroyed, freeing GPU resources until the UI reattaches.
+- `createPlotSurface(canvas)` allocates a renderer surface for a specific `<canvas>` and returns a stable `surfaceId`.
+- `bindSurfaceToFigure(surfaceId, handle)` maps that surface to a MATLAB figure handle so multiple figures can render concurrently (e.g., tabs or split panes).
+- `destroyPlotSurface(surfaceId)` detaches the surface and frees renderer resources when a tab/canvas is destroyed.
 - `renderCurrentFigureScene(handle)` forces the renderer to redraw the most recent scene for that figure handle (handy after host-driven resizes or when reactivating a tab that stayed attached to an OffscreenCanvas).
 - `onFigureEvent(listener)` registers a callback that now receives `FigureEvent { handle, kind, figure?: { layout, metadata, plots[] } }`. Metadata contains axis/grid flags, legend entries (including RGBA + plot kind), background/theme info, and optional labels. Plot descriptors enumerate every series (`kind`, `label`, `axesIndex`, `colorRgba`, `visible`). Pass `null` to unsubscribe.
-
-The default `registerPlotCanvas` continues to serve the legacy single-canvas flow; hosts can mix both APIs as needed.
 
 ### Figure orchestration helpers
 

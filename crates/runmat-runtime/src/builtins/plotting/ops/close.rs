@@ -3,24 +3,14 @@
 use std::collections::BTreeSet;
 
 use runmat_builtins::Value;
-use runmat_macros::runtime_builtin;
 
 use super::op_common::figure_actions::{parse_close_action, FigureAction};
 use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
+#[cfg(test)]
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
-#[runtime_builtin(
-    name = "close",
-    category = "plotting",
-    summary = "Close figures by handle or the active figure.",
-    keywords = "close,figure,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    builtin_path = "crate::builtins::plotting::close"
-)]
-pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    match parse_close_action(&rest)? {
+pub(crate) fn close_plot_targets(rest: &[Value]) -> crate::BuiltinResult<f64> {
+    match parse_close_action(rest)? {
         FigureAction::Current => {
             let closed = close_figure_with_builtin("close", None)?;
             Ok(closed.as_u32() as f64)

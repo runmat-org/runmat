@@ -135,6 +135,7 @@ pub struct AxesMetadata {
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
     pub view_elevation_deg: Option<f32>,
+    pub view_revision: u64,
     pub grid_enabled: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
@@ -608,6 +609,7 @@ impl Figure {
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.view_azimuth_deg = Some(azimuth_deg);
             meta.view_elevation_deg = Some(elevation_deg);
+            meta.view_revision = meta.view_revision.wrapping_add(1);
         }
         self.dirty = true;
     }
@@ -1191,10 +1193,11 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
+                        plot.render_data_with_viewport_gpu(
                             axes_viewports_px
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
+                            gpu,
                         ),
                         plot.marker_render_data(),
                     );
@@ -1252,10 +1255,29 @@ impl Figure {
                 }
                 PlotElement::Patch(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data() {
+                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                    ) {
                         out.push((axes_index, edge_data));
                     }
                 }
+                PlotElement::Line3(plot) => out.push((
+                    axes_index,
+                    plot.render_data_with_viewport_gpu(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                        self.axes_metadata.get(axes_index).and_then(|meta| {
+                            match (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                                (Some(az), Some(el)) => Some((az, el)),
+                                _ => None,
+                            }
+                        }),
+                        gpu,
+                    ),
+                )),
                 _ => out.push((axes_index, p.render_data())),
             }
         }
@@ -2143,6 +2165,19 @@ mod tests {
             figure.axes_metadata(1).unwrap().view_elevation_deg,
             Some(20.0)
         );
+    }
+
+    #[test]
+    fn axes_view_revision_advances_for_each_explicit_view_update() {
+        let mut figure = Figure::new();
+
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 0);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 1);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 2);
     }
 
     #[test]

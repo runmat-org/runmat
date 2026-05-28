@@ -113,7 +113,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             continue;
         }
         let mut current_shape = node_output_shape(graph, node);
-        if matches!(current_shape, ShapeInfo::Unknown) {
+        if matches!(current_shape, ShapeInfo::Unknown | ShapeInfo::Scalar) {
             continue;
         }
         let mut chain: Vec<NodeId> = Vec::new();
@@ -705,9 +705,34 @@ fn fusion_debug_enabled() -> bool {
 pub fn prepare_fusion_plan(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
+    candidate_group_count: usize,
 ) -> Option<Arc<FusionPlan>> {
     let graph = graph?;
+    if candidate_group_count == 0 {
+        if !groups.is_empty() && fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: executable bytecode fusion groups present ({}) but semantic candidate groups are absent",
+                groups.len()
+            );
+        }
+        return None;
+    }
     if groups.is_empty() {
+        if candidate_group_count > 0 && fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: semantic candidate groups present ({}) but executable bytecode fusion groups are empty",
+                candidate_group_count
+            );
+        }
+        return None;
+    }
+    let groups = sanitize_runtime_groups(graph, groups);
+    if groups.is_empty() {
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: semantic-gated bytecode groups could not be reconciled against runtime accel graph nodes"
+            );
+        }
         return None;
     }
     let key = graph as *const AccelGraph as usize;
@@ -719,12 +744,82 @@ pub fn prepare_fusion_plan(
         return Some(plan);
     }
 
-    let plan = FusionPlan::from_graph(graph, groups);
+    let plan = FusionPlan::from_graph(graph, &groups);
     let plan = Arc::new(plan);
     if let Ok(mut guard) = PLAN_CACHE.write() {
         guard.insert(key, Arc::downgrade(&plan));
     }
     Some(plan)
+}
+
+fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<FusionGroup> {
+    groups
+        .iter()
+        .filter_map(|group| {
+            let had_explicit_mapped_nodes = !group.nodes.is_empty();
+            let mut sanitized = group.clone();
+            sanitized.nodes.retain(|id| {
+                graph
+                    .node(*id)
+                    .map(|node| {
+                        node_matches_runtime_group_kind(graph, node, &sanitized.kind)
+                            && node_within_group_span(node, &sanitized.span)
+                    })
+                    .unwrap_or(false)
+            });
+            if sanitized.nodes.is_empty() && !had_explicit_mapped_nodes {
+                sanitized.nodes = graph
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        node_matches_runtime_group_kind(graph, node, &sanitized.kind)
+                            && node_within_group_span(node, &sanitized.span)
+                    })
+                    .map(|node| node.id)
+                    .collect();
+            }
+            sanitized.nodes.sort_unstable_by_key(|node_id| {
+                graph
+                    .node(*node_id)
+                    .map(|node| (node.span.start, node.span.end, node.id))
+                    .unwrap_or((usize::MAX, usize::MAX, *node_id))
+            });
+            sanitized.nodes.dedup();
+            if sanitized.nodes.is_empty() {
+                None
+            } else {
+                Some(sanitized)
+            }
+        })
+        .collect()
+}
+
+fn node_matches_runtime_group_kind(
+    graph: &AccelGraph,
+    node: &AccelNode,
+    kind: &FusionKind,
+) -> bool {
+    match kind {
+        FusionKind::ElementwiseChain => {
+            node.is_elementwise()
+                || node.category == AccelOpCategory::Transpose
+                || is_elementwise_max_min(graph, node)
+        }
+        FusionKind::Reduction => node.is_reduction(),
+        FusionKind::MatmulEpilogue => {
+            node.category == AccelOpCategory::MatMul
+                || node.is_elementwise()
+                || node.category == AccelOpCategory::Transpose
+        }
+        FusionKind::CenteredGram
+        | FusionKind::ImageNormalize
+        | FusionKind::PowerStepNormalize
+        | FusionKind::ExplainedVariance => true,
+    }
+}
+
+fn node_within_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
+    node.span.start >= span.start && node.span.end <= span.end
 }
 
 pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
@@ -1269,7 +1364,14 @@ impl FusionGroupPlan {
         // - Reduction: require WGSL generation at plan time as well.
         // - Other kinds: executed via provider paths.
         let supported = if plan.kernel.kind.is_elementwise() {
-            plan.generate_wgsl("f32").is_some()
+            // Keep scalar ops on the VM/runtime scalar path. Fusing scalar elementwise
+            // spans can materialize scalar GPU handles that later leak into scalar-only
+            // VM coercion boundaries.
+            if scalar_shape_known_one(&plan.group.shape) {
+                false
+            } else {
+                plan.generate_wgsl("f32").is_some()
+            }
         } else if plan.kernel.kind.is_reduction() {
             plan.generate_reduction_wgsl("f32").is_some()
         } else {
@@ -3410,6 +3512,147 @@ mod tests {
         let group = &groups[0];
         assert_eq!(group.nodes, vec![0, 1]);
         assert_eq!(group.kind, FusionKind::ElementwiseChain);
+    }
+
+    #[test]
+    fn prepare_fusion_plan_requires_semantic_candidate_groups() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 0);
+        assert!(
+            plan.is_none(),
+            "bytecode groups alone should not produce an executable fusion plan without semantic candidate evidence"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_allows_semantic_gated_groups() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_some(),
+            "semantic candidate evidence should allow executable fusion plan preparation"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_recovers_empty_group_nodes_from_contained_runtime_span() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 10, end: 10 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
+            .expect("runtime group sanitization should recover contained elementwise nodes");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(
+            plan.groups[0].group.nodes,
+            vec![0],
+            "runtime sanitization should recover a compatible contained node for empty group mapping"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_graph_is_too_far() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 20, end: 20 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject empty group mapping when no compatible nearby nodes exist"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_node_covers_group_span() {
+        let values = vec![
+            ValueInfo {
+                id: 0,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: 1,
+                origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+        ];
+        let graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+                category: AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: InstrSpan { start: 10, end: 12 },
+                tags: vec![AccelGraphTag::Elementwise],
+            }],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        };
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 11, end: 11 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject covering runtime-node spans when semantic group spans are narrower"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_stale_mapped_nodes_without_runtime_remap() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: vec![1],
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 10, end: 10 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject stale mapped nodes instead of remapping from runtime graph scan"
+        );
     }
 
     #[test]

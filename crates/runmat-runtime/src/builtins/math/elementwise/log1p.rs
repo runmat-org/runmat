@@ -6,7 +6,11 @@
 //! missing, mirroring MATLAB behavior.
 
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -65,10 +69,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "log1p";
 
+const LOG1P_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise log(1+x) result.",
+}];
+const LOG1P_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const LOG1P_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = log1p(X)",
+    inputs: &LOG1P_INPUTS,
+    outputs: &LOG1P_OUTPUT,
+}];
+const LOG1P_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG1P.INVALID_INPUT",
+    identifier: Some("RunMat:log1p:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "log1p: invalid input",
+};
+const LOG1P_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOG1P.INTERNAL",
+    identifier: Some("RunMat:log1p:Internal"),
+    when: "Internal tensor construction or provider interaction failed.",
+    message: "log1p: internal error",
+};
+const LOG1P_ERRORS: [BuiltinErrorDescriptor; 2] = [LOG1P_ERROR_INVALID_INPUT, LOG1P_ERROR_INTERNAL];
+pub const LOG1P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOG1P_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOG1P_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn log1p_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -78,6 +133,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "log1p,log(1+x),natural logarithm,elementwise,gpu,precision",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::log1p::LOG1P_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::log1p"
 )]
 async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
@@ -89,9 +145,10 @@ async fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(ct) => log1p_complex_tensor(ct),
         Value::CharArray(ca) => log1p_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("log1p: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(log1p_error_with_detail(
+            &LOG1P_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => log1p_real(other),
     }
 }
@@ -243,6 +300,22 @@ pub(crate) mod tests {
 
     fn log1p_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::log1p_builtin(value))
+    }
+
+    #[test]
+    fn log1p_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LOG1P_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = log1p(X)"));
+    }
+
+    #[test]
+    fn log1p_string_rejected_with_stable_identifier() {
+        let err = log1p_builtin(Value::from("bad")).expect_err("expected input error");
+        assert_eq!(err.identifier(), LOG1P_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]

@@ -704,6 +704,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
             view_elevation_deg: value.view_elevation_deg,
+            view_revision: 0,
             grid_enabled: value.grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,

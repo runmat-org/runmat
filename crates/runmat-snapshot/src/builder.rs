@@ -609,18 +609,18 @@ impl SnapshotBuilder {
         ]
     }
 
-    /// Compile source to HIR
-    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirProgram> {
+    /// Compile source to semantic HIR
+    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirAssembly> {
         let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
         let hir =
             runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(hir.hir)
+        Ok(hir.assembly)
     }
 
     /// Extract type information from HIR
     fn extract_type_info(
         &self,
-        _hir: &runmat_hir::HirProgram,
+        _hir: &runmat_hir::HirAssembly,
         _type_cache: &mut HashMap<String, runmat_hir::Type>,
     ) {
         // Type extraction would analyze HIR and populate type cache
@@ -648,13 +648,10 @@ impl SnapshotBuilder {
     }
 
     /// Create HIR pattern (simplified)
-    fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirProgram {
+    fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirAssembly {
         self.compile_to_hir(source).unwrap_or_else(|_| {
             // Fallback to empty program
-            runmat_hir::HirProgram {
-                body: Vec::new(),
-                var_types: Vec::new(),
-            }
+            runmat_hir::HirAssembly::default()
         })
     }
 
@@ -665,10 +662,16 @@ impl SnapshotBuilder {
         let mut stdlib_bytecode = HashMap::new();
         let mut operation_sequences = Vec::new();
         let mut hotspots = Vec::new();
+        let stdlib_sources: HashMap<_, _> =
+            self.get_stdlib_function_sources().into_iter().collect();
 
         // Compile HIR functions to bytecode
         for (name, hir) in &hir_cache.functions {
-            match runmat_vm::compile(hir, &HashMap::new()) {
+            let compiled = stdlib_sources
+                .get(name)
+                .map(|source| self.compile_source_to_bytecode(source))
+                .unwrap_or_else(|| self.compile_assembly_to_bytecode(hir));
+            match compiled {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
 
@@ -730,11 +733,32 @@ impl SnapshotBuilder {
 
     /// Create bytecode for sequence
     fn create_sequence_bytecode(&self, source: &str) -> runmat_vm::Bytecode {
-        match self.compile_to_hir(source) {
-            Ok(hir) => runmat_vm::compile(&hir, &HashMap::new())
-                .unwrap_or_else(|_| runmat_vm::Bytecode::empty()),
-            Err(_) => runmat_vm::Bytecode::empty(),
-        }
+        self.compile_source_to_bytecode(source)
+            .unwrap_or_else(|_| runmat_vm::Bytecode::empty())
+    }
+
+    fn compile_source_to_bytecode(&self, source: &str) -> Result<runmat_vm::Bytecode> {
+        let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
+        let lowering =
+            runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
+        self.compile_assembly_to_bytecode(&lowering.assembly)
+    }
+
+    fn compile_assembly_to_bytecode(
+        &self,
+        assembly: &runmat_hir::HirAssembly,
+    ) -> Result<runmat_vm::Bytecode> {
+        let entrypoint = assembly
+            .entrypoints
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("semantic HIR assembly has no entrypoint"))?;
+        let mir = runmat_mir::lowering::lower_assembly(assembly).map_err(|err| {
+            anyhow::anyhow!(format!(
+                "failed to lower semantic HIR assembly to MIR: {err:?}"
+            ))
+        })?;
+        let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        runmat_vm::compile(assembly, &mir, entrypoint.id).map_err(Into::into)
     }
 
     /// Identify hotspot bytecode for JIT optimization

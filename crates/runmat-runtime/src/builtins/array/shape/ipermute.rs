@@ -17,7 +17,11 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::ipermute")]
@@ -89,6 +93,71 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+const IPERMUTE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Array with inverse permutation applied.",
+}];
+
+const IPERMUTE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Permuted input array/value.",
+    },
+    BuiltinParamDescriptor {
+        name: "order",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Permutation vector previously used with permute.",
+    },
+];
+
+const IPERMUTE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "A = ipermute(B, order)",
+    inputs: &IPERMUTE_INPUTS,
+    outputs: &IPERMUTE_OUTPUT,
+}];
+
+const IPERMUTE_ERROR_INVALID_ORDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IPERMUTE.INVALID_ORDER",
+    identifier: Some("RunMat:ipermute:InvalidOrder"),
+    when: "order is non-numeric, non-vector, empty, non-integer, out of range, or duplicated.",
+    message: "ipermute: invalid order vector",
+};
+
+const IPERMUTE_ERROR_RANK_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IPERMUTE.RANK_MISMATCH",
+    identifier: Some("RunMat:ipermute:RankMismatch"),
+    when: "order length is less than ndims(B).",
+    message: "ipermute: order length must be at least ndims(B)",
+};
+
+const IPERMUTE_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IPERMUTE.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:ipermute:UnsupportedInput"),
+    when: "B has unsupported type for ipermute.",
+    message: "ipermute: unsupported input type",
+};
+
+const IPERMUTE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    IPERMUTE_ERROR_INVALID_ORDER,
+    IPERMUTE_ERROR_RANK_MISMATCH,
+    IPERMUTE_ERROR_UNSUPPORTED_INPUT,
+];
+
+pub const IPERMUTE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IPERMUTE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IPERMUTE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "ipermute",
     category = "array/shape",
@@ -96,6 +165,7 @@ fn ipermute_error(message: impl Into<String>) -> RuntimeError {
     keywords = "ipermute,inverse permute,dimension reorder,gpu",
     accel = "custom",
     type_resolver(ipermute_type),
+    descriptor(crate::builtins::array::shape::ipermute::IPERMUTE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::ipermute"
 )]
 async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {

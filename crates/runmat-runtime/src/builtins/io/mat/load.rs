@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, StringArray, StructValue, Tensor, Value,
 };
 use runmat_filesystem::File;
@@ -20,6 +22,161 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+
+const LOAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct containing the loaded variables.",
+}];
+const LOAD_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const LOAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"matlab.mat\""),
+    description: "MAT-file path.",
+}];
+const LOAD_INPUTS_FILENAME_VARS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"matlab.mat\""),
+        description: "MAT-file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "varName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Variable names to load.",
+    },
+];
+const LOAD_INPUTS_FILENAME_REGEXP: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"matlab.mat\""),
+        description: "MAT-file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-regexp\""),
+        description: "Regular-expression selection option.",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Regex patterns matched against variable names.",
+    },
+];
+const LOAD_INPUTS_OPTIONS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Compatibility options such as '-mat' and '-regexp'.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option arguments and variable selectors.",
+    },
+];
+const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "S = load()",
+        inputs: &LOAD_INPUTS_NONE,
+        outputs: &LOAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = load(filename)",
+        inputs: &LOAD_INPUTS_FILENAME,
+        outputs: &LOAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = load(filename, varName1, varName2, ...)",
+        inputs: &LOAD_INPUTS_FILENAME_VARS,
+        outputs: &LOAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = load(filename, \"-regexp\", pattern1, ...)",
+        inputs: &LOAD_INPUTS_FILENAME_REGEXP,
+        outputs: &LOAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = load(option, value, ...)",
+        inputs: &LOAD_INPUTS_OPTIONS,
+        outputs: &LOAD_OUTPUT,
+    },
+];
+const LOAD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:load:InvalidArgument"),
+    when: "Arguments do not match a supported load invocation form.",
+    message: "load: invalid argument",
+};
+const LOAD_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.INVALID_OPTION",
+    identifier: Some("RunMat:load:InvalidOption"),
+    when: "An option token or option argument is invalid.",
+    message: "load: invalid option",
+};
+const LOAD_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.FILENAME",
+    identifier: Some("RunMat:load:Filename"),
+    when: "Filename is invalid or cannot be normalized.",
+    message: "load: invalid filename",
+};
+const LOAD_ERROR_SELECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.SELECTION",
+    identifier: Some("RunMat:load:Selection"),
+    when: "Requested variables are missing or no variables are selected.",
+    message: "load: variable selection failed",
+};
+const LOAD_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.IO",
+    identifier: Some("RunMat:load:Io"),
+    when: "MAT-file data cannot be read or decoded.",
+    message: "load: MAT-file I/O failure",
+};
+const LOAD_ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.OUTPUT_COUNT",
+    identifier: Some("RunMat:load:OutputCount"),
+    when: "Caller requests more outputs than supported by load.",
+    message: "load: unsupported output count",
+};
+const LOAD_ERROR_WORKSPACE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LOAD.WORKSPACE",
+    identifier: Some("RunMat:load:Workspace"),
+    when: "Statement-form load cannot assign values into workspace.",
+    message: "load: workspace assignment failed",
+};
+const LOAD_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    LOAD_ERROR_INVALID_ARGUMENT,
+    LOAD_ERROR_INVALID_OPTION,
+    LOAD_ERROR_FILENAME,
+    LOAD_ERROR_SELECTION,
+    LOAD_ERROR_IO,
+    LOAD_ERROR_OUTPUT_COUNT,
+    LOAD_ERROR_WORKSPACE,
+];
+pub const LOAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOAD_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::mat::load")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -56,6 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     accel = "cpu",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::load_type),
+    descriptor(crate::builtins::io::mat::load::LOAD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::mat::load"
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -65,7 +223,10 @@ async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     // like `[a, b] = load(...)`. Guard against requesting more than one struct output.
     if let Some(n) = crate::output_count::current_output_count() {
         if n > 1 {
-            return Err(load_error("load supports at most one output argument"));
+            return Err(load_error_with(
+                &LOAD_ERROR_OUTPUT_COUNT,
+                "load supports at most one output argument",
+            ));
         }
     }
 
@@ -77,7 +238,8 @@ async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     //   None    → called outside the VM (e.g. directly from Rust) → return a struct.
     if crate::output_context::requested_output_count() == Some(0) {
         for (name, value) in eval.variables() {
-            crate::workspace::assign(name, value.clone()).map_err(|err| load_error(err))?;
+            crate::workspace::assign(name, value.clone())
+                .map_err(|err| load_error_with(&LOAD_ERROR_WORKSPACE, err))?;
         }
         return Ok(Value::OutputList(Vec::new()));
     }
@@ -116,19 +278,32 @@ struct LoadRequest {
 const BUILTIN_NAME: &str = "load";
 
 fn load_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    load_error_with(&LOAD_ERROR_INVALID_ARGUMENT, message)
+}
+
+fn load_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn load_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> RuntimeError {
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
@@ -155,6 +330,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
     for pattern in invocation.regex_tokens {
         let regex = Regex::new(&pattern).map_err(|err| {
             load_error_with_source(
+                &LOAD_ERROR_INVALID_OPTION,
                 format!("load: invalid regular expression '{pattern}': {err}"),
                 err,
             )
@@ -198,7 +374,10 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                 "-regexp" => {
                     idx += 1;
                     if idx >= values.len() {
-                        return Err(load_error("load: '-regexp' requires at least one pattern"));
+                        return Err(load_error_with(
+                            &LOAD_ERROR_INVALID_OPTION,
+                            "load: '-regexp' requires at least one pattern",
+                        ));
                     }
                     while idx < values.len() {
                         if option_token(&values[idx])?.is_some() {
@@ -206,7 +385,8 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                         }
                         let names = extract_names(&values[idx]).await?;
                         if names.is_empty() {
-                            return Err(load_error(
+                            return Err(load_error_with(
+                                &LOAD_ERROR_INVALID_OPTION,
                                 "load: '-regexp' requires non-empty pattern strings",
                             ));
                         }
@@ -216,7 +396,10 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
                     continue;
                 }
                 other => {
-                    return Err(load_error(format!("load: unsupported option '{other}'")));
+                    return Err(load_error_with(
+                        &LOAD_ERROR_INVALID_OPTION,
+                        format!("load: unsupported option '{other}'"),
+                    ));
                 }
             }
         } else {
@@ -244,8 +427,12 @@ async fn parse_invocation(values: &[Value]) -> BuiltinResult<ParsedInvocation> {
 }
 
 fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let raw = value_to_string_scalar(value)
-        .ok_or_else(|| load_error("load: filename must be a character vector or string scalar"))?;
+    let raw = value_to_string_scalar(value).ok_or_else(|| {
+        load_error_with(
+            &LOAD_ERROR_FILENAME,
+            "load: filename must be a character vector or string scalar",
+        )
+    })?;
     let mut path = PathBuf::from(raw);
     if path.extension().is_none() {
         path.set_extension("mat");
@@ -270,7 +457,10 @@ fn select_variables(
 
     for name in &request.variables {
         let value = by_name.get(name.as_str()).ok_or_else(|| {
-            load_error(format!("load: variable '{name}' was not found in the file"))
+            load_error_with(
+                &LOAD_ERROR_SELECTION,
+                format!("load: variable '{name}' was not found in the file"),
+            )
         })?;
         insert_or_replace(&mut selected, name, (*value).clone());
     }
@@ -288,12 +478,18 @@ fn select_variables(
             }
         }
         if matched == 0 && request.variables.is_empty() {
-            return Err(load_error("load: no variables matched '-regexp' patterns"));
+            return Err(load_error_with(
+                &LOAD_ERROR_SELECTION,
+                "load: no variables matched '-regexp' patterns",
+            ));
         }
     }
 
     if selected.is_empty() {
-        return Err(load_error("load: no variables selected"));
+        return Err(load_error_with(
+            &LOAD_ERROR_SELECTION,
+            "load: no variables selected",
+        ));
     }
 
     Ok(selected)
@@ -327,6 +523,7 @@ pub(crate) async fn read_mat_file_for_builtin(
 pub(crate) async fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> {
     let file = File::open_async(path).await.map_err(|err| {
         load_error_with_source(
+            &LOAD_ERROR_IO,
             format!("load: failed to open '{}': {err}", path.display()),
             err,
         )
@@ -343,7 +540,11 @@ pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(Strin
 fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)>> {
     let mut header = [0u8; MAT_HEADER_LEN];
     reader.read_exact(&mut header).map_err(|err| {
-        load_error_with_source(format!("load: failed to read MAT-file header: {err}"), err)
+        load_error_with_source(
+            &LOAD_ERROR_IO,
+            format!("load: failed to read MAT-file header: {err}"),
+            err,
+        )
     })?;
     if header[126] != b'I' || header[127] != b'M' {
         return Err(load_error("load: file is not a MATLAB Level-5 MAT-file"));
@@ -804,6 +1005,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
                 return Ok(None);
             }
             return Err(load_error_with_source(
+                &LOAD_ERROR_IO,
                 format!("load: failed to read MAT element header: {err}"),
                 err,
             ));
@@ -817,6 +1019,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
         let mut inline = [0u8; 4];
         reader.read_exact(&mut inline).map_err(|err| {
             load_error_with_source(
+                &LOAD_ERROR_IO,
                 format!("load: failed to read compact MAT element: {err}"),
                 err,
             )
@@ -828,6 +1031,7 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
         let mut len_bytes = [0u8; 4];
         reader.read_exact(&mut len_bytes).map_err(|err| {
             load_error_with_source(
+                &LOAD_ERROR_IO,
                 format!("load: failed to read MAT element length: {err}"),
                 err,
             )
@@ -835,13 +1039,21 @@ fn read_tagged<R: Read>(reader: &mut R, allow_eof: bool) -> BuiltinResult<Option
         let length = u32::from_le_bytes(len_bytes) as usize;
         let mut data = vec![0u8; length];
         reader.read_exact(&mut data).map_err(|err| {
-            load_error_with_source(format!("load: failed to read MAT element body: {err}"), err)
+            load_error_with_source(
+                &LOAD_ERROR_IO,
+                format!("load: failed to read MAT element body: {err}"),
+                err,
+            )
         })?;
         let padding = (8 - (length % 8)) % 8;
         if padding != 0 {
             let mut pad = vec![0u8; padding];
             reader.read_exact(&mut pad).map_err(|err| {
-                load_error_with_source(format!("load: failed to read MAT padding: {err}"), err)
+                load_error_with_source(
+                    &LOAD_ERROR_IO,
+                    format!("load: failed to read MAT padding: {err}"),
+                    err,
+                )
             })?;
         }
         Ok(Some(TaggedData {
@@ -907,6 +1119,20 @@ pub(crate) mod tests {
             }
             Ok(_) => panic!("expected error containing '{snippet}'"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn load_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LOAD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"S = load()"));
+        assert!(labels.contains(&"S = load(filename)"));
+        assert!(labels.contains(&"S = load(filename, varName1, varName2, ...)"));
+        assert!(labels.contains(&"S = load(filename, \"-regexp\", pattern1, ...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

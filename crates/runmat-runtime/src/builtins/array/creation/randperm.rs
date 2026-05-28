@@ -1,7 +1,11 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -53,6 +57,226 @@ fn randperm_type(args: &[Type], ctx: &ResolveContext) -> Type {
     row_vector_type(ctx)
 }
 
+const RANDPERM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Row vector containing permutation values.",
+}];
+
+const RANDPERM_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Population size.",
+}];
+
+const RANDPERM_SIG_NK_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Population size.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Number of selected elements.",
+    },
+];
+
+const RANDPERM_SIG_N_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Population size.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class override ('double').",
+    },
+];
+
+const RANDPERM_SIG_NK_CLASS_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Population size.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Number of selected elements.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class override ('double').",
+    },
+];
+
+const RANDPERM_SIG_N_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Population size.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const RANDPERM_SIG_NK_LIKE_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Population size.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Number of selected elements.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const RANDPERM_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "p = randperm(n)",
+        inputs: &RANDPERM_SIG_N_INPUTS,
+        outputs: &RANDPERM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = randperm(n, k)",
+        inputs: &RANDPERM_SIG_NK_INPUTS,
+        outputs: &RANDPERM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = randperm(n, \"double\")",
+        inputs: &RANDPERM_SIG_N_CLASS_INPUTS,
+        outputs: &RANDPERM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = randperm(n, k, \"double\")",
+        inputs: &RANDPERM_SIG_NK_CLASS_INPUTS,
+        outputs: &RANDPERM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = randperm(n, \"like\", prototype)",
+        inputs: &RANDPERM_SIG_N_LIKE_INPUTS,
+        outputs: &RANDPERM_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = randperm(n, k, \"like\", prototype)",
+        inputs: &RANDPERM_SIG_NK_LIKE_INPUTS,
+        outputs: &RANDPERM_OUTPUT,
+    },
+];
+
+const RANDPERM_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.MISSING_N",
+        identifier: None,
+        when: "No N argument is provided.",
+        message: "randperm: requires at least one input argument",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.INVALID_SIZE_ARG",
+        identifier: None,
+        when: "N or K is not a supported non-negative integer scalar.",
+        message: "randperm: N/K must be non-negative integers",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.INVALID_K",
+        identifier: None,
+        when: "K is larger than N.",
+        message: "randperm: K must satisfy 0 <= K <= N",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "randperm: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.MULTIPLE_LIKE",
+        identifier: None,
+        when: "The 'like' keyword is provided multiple times.",
+        message: "randperm: duplicate 'like' prototype specified",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.CLASS_CONFLICT",
+        identifier: None,
+        when: "A class keyword and a 'like' prototype are both provided.",
+        message: "randperm: cannot combine 'double' with a 'like' prototype",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.UNSUPPORTED_CLASS",
+        identifier: None,
+        when: "An unsupported output class is requested.",
+        message: "randperm: single precision output is not implemented yet",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RANDPERM.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not recognized.",
+        message: "randperm: unrecognised option",
+    },
+];
+
+pub const RANDPERM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RANDPERM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RANDPERM_ERRORS,
+};
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "randperm",
@@ -71,6 +295,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "randperm,permutation,random,indices,gpu,like",
     accel = "array_construct",
     type_resolver(randperm_type),
+    descriptor(crate::builtins::array::creation::randperm::RANDPERM_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

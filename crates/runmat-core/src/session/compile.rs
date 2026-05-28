@@ -1,6 +1,63 @@
 use super::*;
+use crate::fusion::FusionPlannerMetadata;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+fn entrypoint_target_function(
+    assembly: &runmat_hir::HirAssembly,
+) -> Option<runmat_hir::FunctionId> {
+    assembly
+        .entrypoints
+        .first()
+        .map(|entrypoint| entrypoint.target)
+}
+
+fn mir_local_fact_count_for_entrypoint(
+    analysis: &runmat_mir::analysis::AnalysisStore,
+    assembly: &runmat_hir::HirAssembly,
+) -> usize {
+    let Some(entrypoint_target) = entrypoint_target_function(assembly) else {
+        return analysis.mir_locals.len();
+    };
+    analysis
+        .mir_locals
+        .keys()
+        .filter(|key| key.function == entrypoint_target)
+        .count()
+}
+
+fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
+    use runmat_config::project::discover_known_project_symbols_from_source_name;
+
+    let source_path = PathBuf::from(source_name);
+    let cwd = if source_path.is_absolute() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"))
+    } else {
+        match runmat_filesystem::current_dir() {
+            Ok(cwd) => cwd,
+            Err(_) => return HashSet::new(),
+        }
+    };
+    discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
+}
 
 impl RunMatSession {
+    #[cfg(test)]
+    pub(crate) fn compile_input_for_source_name(
+        &mut self,
+        source_name: &str,
+        input: &str,
+    ) -> std::result::Result<PreparedExecution, RunError> {
+        let previous_source_name = self.active_source_name.clone();
+        self.active_source_name = source_name.to_string();
+        let result = self.compile_input(input);
+        self.active_source_name = previous_source_name;
+        result
+    }
+
     pub(crate) fn compile_input(
         &mut self,
         input: &str,
@@ -13,27 +70,40 @@ impl RunMatSession {
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
+            let function_names = self.function_registry.names.clone();
+            let workspace_bindings = self.lowering_workspace_bindings();
+            let known_project_symbols = discover_known_project_symbols(&source_name);
             runmat_hir::lower(
                 &ast,
-                &LoweringContext::new(&self.variable_names, &self.function_definitions),
+                &LoweringContext::new(&workspace_bindings)
+                    .with_bound_functions(&function_names)
+                    .with_known_project_symbols(&known_project_symbols)
+                    .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
+                    .with_top_level_await_enabled(self.top_level_await_enabled),
             )?
         };
-        let existing_functions = self.convert_hir_functions_to_user_functions();
+        let mir = {
+            let _span = info_span!("runtime.compile.mir").entered();
+            runmat_mir::lowering::lower_assembly(&lowering.assembly)?
+        };
+        let analysis = {
+            let _span = info_span!("runtime.analyze").entered();
+            runmat_mir::analysis::analyze_assembly(&mir)
+        };
         let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            runmat_vm::compile(&lowering.hir, &existing_functions)?
+            self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
         };
         bytecode.source_id = Some(source_id);
-        let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
-        for (name, func) in bytecode.functions.iter_mut() {
-            if new_function_names.contains(name) {
-                func.source_id = Some(source_id);
-            }
-        }
+        let (function_registry_after_success, next_semantic_function_id_after_success) =
+            self.prepare_session_semantic_function_registry(&mut bytecode);
         Ok(PreparedExecution {
             ast,
             lowering,
+            analysis,
             bytecode,
+            function_registry_after_success,
+            next_semantic_function_id_after_success,
         })
     }
 
@@ -61,6 +131,96 @@ impl RunMatSession {
         error.context.call_stack = rendered;
     }
 
+    fn compile_semantic_bytecode_from_mir(
+        &self,
+        assembly: &runmat_hir::HirAssembly,
+        mir: &runmat_mir::MirAssembly,
+    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
+        let Some(entrypoint) = assembly.entrypoints.first() else {
+            let bound_functions = runmat_vm::compile_semantic_function_registry(assembly, mir)?;
+            let function_registry = runmat_vm::FunctionRegistry::new(bound_functions.clone());
+            let mut bytecode = runmat_vm::Bytecode::empty();
+            bytecode.bound_functions = bound_functions;
+            bytecode.function_registry = function_registry;
+            return Ok(bytecode);
+        };
+        Ok(runmat_vm::compile(assembly, mir, entrypoint.id)?)
+    }
+
+    fn prepare_session_semantic_function_registry(
+        &self,
+        bytecode: &mut runmat_vm::Bytecode,
+    ) -> (runmat_vm::FunctionRegistry, usize) {
+        let mut session_registry = self.function_registry.clone();
+        let mut next_semantic_function_id = self.next_semantic_function_id;
+        let current_registry = bytecode.function_registry();
+        if current_registry.functions.is_empty() {
+            bytecode.function_registry = session_registry.clone();
+            bytecode.bound_functions = bytecode.function_registry.functions.clone();
+            bind_semantic_function_references(bytecode);
+            return (session_registry, next_semantic_function_id);
+        }
+
+        let mut remap = HashMap::new();
+        let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
+        ids.sort_by_key(|id| id.0);
+        for old_id in ids {
+            let new_id = runmat_hir::FunctionId(next_semantic_function_id);
+            next_semantic_function_id += 1;
+            remap.insert(old_id, new_id);
+        }
+
+        for instr in &mut bytecode.instructions {
+            remap_semantic_function_instr(instr, &remap);
+        }
+        let name_remaps: Vec<(String, runmat_hir::FunctionId)> = current_registry
+            .names
+            .iter()
+            .map(|(name, function)| (name.clone(), *function))
+            .collect();
+
+        let mut replaced_sources = Vec::new();
+        for function in current_registry.functions.values() {
+            if let Some(existing_id) = session_registry.resolve_name(&function.display_name) {
+                if let Some(source_id) = session_registry
+                    .get(existing_id)
+                    .and_then(|existing| existing.source_id)
+                {
+                    if !replaced_sources.contains(&source_id) {
+                        replaced_sources.push(source_id);
+                    }
+                }
+            }
+        }
+        for source_id in replaced_sources {
+            session_registry.remove_source(source_id);
+        }
+
+        for (old_id, function) in current_registry.functions {
+            let Some(new_id) = remap.get(&old_id).copied() else {
+                continue;
+            };
+            let mut function = function;
+            function.function = new_id;
+            function.source_id = bytecode.source_id;
+            for instr in &mut function.instructions {
+                remap_semantic_function_instr(instr, &remap);
+            }
+            session_registry.insert_replacing_name(function);
+        }
+        for (name, old_id) in name_remaps {
+            let Some(new_id) = remap.get(&old_id).copied() else {
+                continue;
+            };
+            session_registry.names.insert(name, new_id);
+        }
+
+        bytecode.function_registry = session_registry.clone();
+        bytecode.bound_functions = bytecode.function_registry.functions.clone();
+        bind_semantic_function_references(bytecode);
+        (session_registry, next_semantic_function_id)
+    }
+
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {
         let Some(identifier) = error.identifier.clone() else {
             return;
@@ -78,9 +238,40 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
         let prepared = self.compile_input(input)?;
+        let runtime_groups = prepared.bytecode.runtime_fusion_groups();
+        let (runtime_graph, runtime_graph_source) = prepared
+            .bytecode
+            .runtime_accel_graph_for_fusion_with_source(&runtime_groups);
         Ok(build_fusion_snapshot(
-            prepared.bytecode.accel_graph.as_ref(),
-            &prepared.bytecode.fusion_groups,
+            &runtime_groups,
+            &prepared
+                .bytecode
+                .fusion_metadata
+                .mir_fusion_candidate_groups,
+            &prepared.bytecode.fusion_metadata.instruction_windows,
+            Some(FusionPlannerMetadata {
+                source: "semantic-mir-analysis".to_string(),
+                accel_graph_state: if runtime_graph.is_some() {
+                    "present".to_string()
+                } else {
+                    "missing".to_string()
+                },
+                accel_graph_source: runtime_graph_source.as_str().to_string(),
+                mir_local_fact_count: mir_local_fact_count_for_entrypoint(
+                    &prepared.analysis,
+                    &prepared.lowering.assembly,
+                ),
+                mir_diagnostic_count: prepared.analysis.diagnostics.len(),
+                mir_fusion_signal_count: prepared.bytecode.fusion_metadata.mir_fusion_signal_count,
+                mir_fusion_candidate_group_count: prepared
+                    .bytecode
+                    .fusion_metadata
+                    .mir_fusion_candidate_group_count,
+                mir_semantic_instruction_window_count: prepared
+                    .bytecode
+                    .fusion_metadata
+                    .instruction_window_count,
+            }),
         ))
     }
 
@@ -128,48 +319,259 @@ impl RunMatSession {
         // Update our variable array and mapping
         self.variable_array = new_variable_array;
     }
+}
 
-    /// Convert stored HIR function definitions to UserFunction format for compilation
-    fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, runmat_vm::UserFunction> {
-        let mut user_functions = HashMap::new();
-
-        for (name, hir_stmt) in &self.function_definitions {
-            if let runmat_hir::HirStmt::Function {
-                name: func_name,
-                params,
-                outputs,
-                body,
-                has_varargin: _,
-                has_varargout: _,
-                ..
-            } = hir_stmt
-            {
-                // Use the existing HIR utilities to calculate variable count
-                let var_map =
-                    runmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
-                let max_local_var = var_map.len();
-
-                let source_id = self.function_source_ids.get(name).copied();
-                if let Some(id) = source_id {
-                    if let Some(source) = self.source_pool.get(id) {
-                        let _ = (&source.name, &source.text);
-                    }
-                }
-                let user_func = runmat_vm::UserFunction {
-                    name: func_name.clone(),
-                    params: params.clone(),
-                    outputs: outputs.clone(),
-                    body: body.clone(),
-                    local_var_count: max_local_var,
-                    has_varargin: false,
-                    has_varargout: false,
-                    var_types: vec![Type::Unknown; max_local_var],
-                    source_id,
-                };
-                user_functions.insert(name.clone(), user_func);
+fn remap_semantic_function_instr(
+    instr: &mut runmat_vm::Instr,
+    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+) {
+    match instr {
+        runmat_vm::Instr::CreateSemanticClosure(function, _, _)
+        | runmat_vm::Instr::CreateBoundFunctionHandle(function, _)
+        | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
+        | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
+            if let Some(new_id) = remap.get(function).copied() {
+                *function = new_id;
             }
         }
+        runmat_vm::Instr::IndexSliceExpr {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        }
+        | runmat_vm::Instr::StoreSliceExpr {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        } => {
+            remap_optional_end_exprs(range_start_exprs, remap);
+            remap_optional_end_exprs(range_step_exprs, remap);
+            for expr in range_end_exprs {
+                remap_semantic_function_end_expr(expr, remap);
+            }
+            for (_, expr) in end_numeric_exprs {
+                remap_semantic_function_end_expr(expr, remap);
+            }
+        }
+        _ => {}
+    }
+}
 
-        user_functions
+fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
+    let registry = bytecode.function_registry.clone();
+    bind_semantic_callback_literals(bytecode, &registry);
+    for instr in &mut bytecode.instructions {
+        match instr {
+            runmat_vm::Instr::CreateFunctionHandle(name) => {
+                if let Some(function) = registry.resolve_name(name) {
+                    *instr = runmat_vm::Instr::CreateBoundFunctionHandle(function, name.clone());
+                }
+            }
+            runmat_vm::Instr::IndexSliceExpr {
+                range_start_exprs,
+                range_step_exprs,
+                range_end_exprs,
+                end_numeric_exprs,
+                ..
+            }
+            | runmat_vm::Instr::StoreSliceExpr {
+                range_start_exprs,
+                range_step_exprs,
+                range_end_exprs,
+                end_numeric_exprs,
+                ..
+            } => {
+                bind_optional_end_exprs(range_start_exprs, &registry);
+                bind_optional_end_exprs(range_step_exprs, &registry);
+                for expr in range_end_exprs {
+                    bind_semantic_function_end_expr(expr, &registry);
+                }
+                for (_, expr) in end_numeric_exprs {
+                    bind_semantic_function_end_expr(expr, &registry);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn bind_semantic_callback_literals(
+    bytecode: &mut runmat_vm::Bytecode,
+    registry: &runmat_vm::FunctionRegistry,
+) {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut replacements = Vec::new();
+
+    for (pc, instr) in bytecode.instructions.iter().enumerate() {
+        match instr {
+            runmat_vm::Instr::CallBuiltinMulti(name, argc, _)
+                if matches!(name.as_str(), "cellfun" | "arrayfun") && *argc > 0 =>
+            {
+                if stack.len() >= *argc {
+                    let producer = stack[stack.len() - *argc];
+                    if let Some((function, display_name)) =
+                        callback_literal(bytecode.instructions.get(producer), registry)
+                    {
+                        replacements.push((producer, function, display_name));
+                    }
+                }
+            }
+            runmat_vm::Instr::CallFevalMulti(argc, _) => {
+                let pops = *argc + 1;
+                if stack.len() >= pops {
+                    let producer = stack[stack.len() - pops];
+                    if let Some((function, display_name)) =
+                        callback_literal(bytecode.instructions.get(producer), registry)
+                    {
+                        replacements.push((producer, function, display_name));
+                    }
+                }
+            }
+            runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
+                if let Some(effect) = instr.stack_effect() {
+                    if stack.len() >= effect.pops {
+                        let producer = stack[stack.len() - effect.pops];
+                        if let Some((function, display_name)) =
+                            callback_literal(bytecode.instructions.get(producer), registry)
+                        {
+                            replacements.push((producer, function, display_name));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let Some(effect) = instr.stack_effect() else {
+            stack.clear();
+            continue;
+        };
+        if effect.pops > stack.len() {
+            stack.clear();
+        } else {
+            for _ in 0..effect.pops {
+                stack.pop();
+            }
+        }
+        for _ in 0..effect.pushes {
+            stack.push(pc);
+        }
+    }
+
+    for (producer, function, display_name) in replacements {
+        bytecode.instructions[producer] =
+            runmat_vm::Instr::CreateBoundFunctionHandle(function, display_name);
+    }
+}
+
+fn callback_literal(
+    instr: Option<&runmat_vm::Instr>,
+    registry: &runmat_vm::FunctionRegistry,
+) -> Option<(runmat_hir::FunctionId, String)> {
+    let text = match instr? {
+        runmat_vm::Instr::LoadString(text) | runmat_vm::Instr::LoadCharRow(text) => text,
+        _ => return None,
+    };
+    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
+    if name.is_empty() {
+        return None;
+    }
+    registry
+        .resolve_name(name)
+        .map(|function| (function, name.to_string()))
+}
+
+fn bind_optional_end_exprs(
+    exprs: &mut [Option<runmat_vm::EndExpr>],
+    registry: &runmat_vm::FunctionRegistry,
+) {
+    for expr in exprs.iter_mut().flatten() {
+        bind_semantic_function_end_expr(expr, registry);
+    }
+}
+
+fn bind_semantic_function_end_expr(
+    expr: &mut runmat_vm::EndExpr,
+    registry: &runmat_vm::FunctionRegistry,
+) {
+    match expr {
+        runmat_vm::EndExpr::ResolvedCall { identity, args, .. } => {
+            if let runmat_hir::CallableIdentity::DynamicName(name) = identity {
+                let dynamic_name = name.0.clone();
+                if let Some(function) = registry.resolve_name(&dynamic_name) {
+                    *identity = runmat_hir::CallableIdentity::BoundFunction(function);
+                }
+            }
+            for arg in args {
+                bind_semantic_function_end_expr(arg, registry);
+            }
+        }
+        runmat_vm::EndExpr::Add(lhs, rhs)
+        | runmat_vm::EndExpr::Sub(lhs, rhs)
+        | runmat_vm::EndExpr::Mul(lhs, rhs)
+        | runmat_vm::EndExpr::Div(lhs, rhs)
+        | runmat_vm::EndExpr::LeftDiv(lhs, rhs)
+        | runmat_vm::EndExpr::Pow(lhs, rhs) => {
+            bind_semantic_function_end_expr(lhs, registry);
+            bind_semantic_function_end_expr(rhs, registry);
+        }
+        runmat_vm::EndExpr::Neg(inner)
+        | runmat_vm::EndExpr::Pos(inner)
+        | runmat_vm::EndExpr::Floor(inner)
+        | runmat_vm::EndExpr::Ceil(inner)
+        | runmat_vm::EndExpr::Round(inner)
+        | runmat_vm::EndExpr::Fix(inner) => bind_semantic_function_end_expr(inner, registry),
+        runmat_vm::EndExpr::End | runmat_vm::EndExpr::Const(_) | runmat_vm::EndExpr::Var(_) => {}
+    }
+}
+
+fn remap_optional_end_exprs(
+    exprs: &mut [Option<runmat_vm::EndExpr>],
+    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+) {
+    for expr in exprs.iter_mut().flatten() {
+        remap_semantic_function_end_expr(expr, remap);
+    }
+}
+
+fn remap_semantic_function_end_expr(
+    expr: &mut runmat_vm::EndExpr,
+    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+) {
+    match expr {
+        runmat_vm::EndExpr::ResolvedCall { identity, args, .. } => {
+            match identity {
+                runmat_hir::CallableIdentity::BoundFunction(function)
+                | runmat_hir::CallableIdentity::AnonymousFunction(function) => {
+                    if let Some(new_id) = remap.get(function).copied() {
+                        *function = new_id;
+                    }
+                }
+                _ => {}
+            }
+            for arg in args {
+                remap_semantic_function_end_expr(arg, remap);
+            }
+        }
+        runmat_vm::EndExpr::Add(lhs, rhs)
+        | runmat_vm::EndExpr::Sub(lhs, rhs)
+        | runmat_vm::EndExpr::Mul(lhs, rhs)
+        | runmat_vm::EndExpr::Div(lhs, rhs)
+        | runmat_vm::EndExpr::LeftDiv(lhs, rhs)
+        | runmat_vm::EndExpr::Pow(lhs, rhs) => {
+            remap_semantic_function_end_expr(lhs, remap);
+            remap_semantic_function_end_expr(rhs, remap);
+        }
+        runmat_vm::EndExpr::Neg(inner)
+        | runmat_vm::EndExpr::Pos(inner)
+        | runmat_vm::EndExpr::Floor(inner)
+        | runmat_vm::EndExpr::Ceil(inner)
+        | runmat_vm::EndExpr::Round(inner)
+        | runmat_vm::EndExpr::Fix(inner) => remap_semantic_function_end_expr(inner, remap),
+        runmat_vm::EndExpr::End | runmat_vm::EndExpr::Const(_) | runmat_vm::EndExpr::Var(_) => {}
     }
 }

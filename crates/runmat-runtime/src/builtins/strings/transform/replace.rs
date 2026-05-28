@@ -1,6 +1,10 @@
 //! MATLAB-compatible `replace` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -44,29 +48,139 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "replace";
-const ARG_TYPE_ERROR: &str =
-    "replace: first argument must be a string array, character array, or cell array of character vectors";
-const PATTERN_TYPE_ERROR: &str =
-    "replace: second argument must be a string array, character array, or cell array of character vectors";
-const REPLACEMENT_TYPE_ERROR: &str =
-    "replace: third argument must be a string array, character array, or cell array of character vectors";
-const EMPTY_PATTERN_ERROR: &str =
-    "replace: second argument must contain at least one search string";
-const EMPTY_REPLACEMENT_ERROR: &str =
-    "replace: third argument must contain at least one replacement string";
-const SIZE_MISMATCH_ERROR: &str =
-    "replace: replacement array must be a scalar or match the number of search strings";
-const CELL_ELEMENT_ERROR: &str =
-    "replace: cell array elements must be string scalars or character vectors";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
+const REPLACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "newText",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Text with replacements applied, preserving input container kind.",
+}];
+
+const REPLACE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input text (string/char/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "oldText",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Search text list (scalar or array/cell).",
+    },
+    BuiltinParamDescriptor {
+        name: "newText",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Replacement text list (scalar or matching-size list).",
+    },
+];
+
+const REPLACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "newText = replace(str, oldText, newText)",
+    inputs: &REPLACE_INPUTS,
+    outputs: &REPLACE_OUTPUT,
+}];
+
+const REPLACE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.INVALID_INPUT",
+    identifier: Some("RunMat:replace:InvalidInput"),
+    when: "First argument is not a string array, char array, or cell array of text scalars.",
+    message:
+        "replace: first argument must be a string array, character array, or cell array of character vectors",
+};
+
+const REPLACE_ERROR_PATTERN_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.PATTERN_TYPE",
+    identifier: Some("RunMat:replace:PatternType"),
+    when: "Second argument is not a text scalar/array/cell of text scalars.",
+    message:
+        "replace: second argument must be a string array, character array, or cell array of character vectors",
+};
+
+const REPLACE_ERROR_REPLACEMENT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.REPLACEMENT_TYPE",
+    identifier: Some("RunMat:replace:ReplacementType"),
+    when: "Third argument is not a text scalar/array/cell of text scalars.",
+    message:
+        "replace: third argument must be a string array, character array, or cell array of character vectors",
+};
+
+const REPLACE_ERROR_EMPTY_PATTERN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.EMPTY_PATTERN",
+    identifier: Some("RunMat:replace:EmptyPattern"),
+    when: "Search text list is empty.",
+    message: "replace: second argument must contain at least one search string",
+};
+
+const REPLACE_ERROR_EMPTY_REPLACEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.EMPTY_REPLACEMENT",
+    identifier: Some("RunMat:replace:EmptyReplacement"),
+    when: "Replacement text list is empty.",
+    message: "replace: third argument must contain at least one replacement string",
+};
+
+const REPLACE_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.SIZE_MISMATCH",
+    identifier: Some("RunMat:replace:SizeMismatch"),
+    when: "Replacement list is neither scalar nor equal in length to search list.",
+    message: "replace: replacement array must be a scalar or match the number of search strings",
+};
+
+const REPLACE_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.CELL_ELEMENT",
+    identifier: Some("RunMat:replace:CellElement"),
+    when: "Cell arrays contain non-text elements or non-row char arrays.",
+    message: "replace: cell array elements must be string scalars or character vectors",
+};
+
+const REPLACE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.REPLACE.INTERNAL",
+    identifier: Some("RunMat:replace:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "replace: internal error",
+};
+
+const REPLACE_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    REPLACE_ERROR_INVALID_INPUT,
+    REPLACE_ERROR_PATTERN_TYPE,
+    REPLACE_ERROR_REPLACEMENT_TYPE,
+    REPLACE_ERROR_EMPTY_PATTERN,
+    REPLACE_ERROR_EMPTY_REPLACEMENT,
+    REPLACE_ERROR_SIZE_MISMATCH,
+    REPLACE_ERROR_CELL_ELEMENT,
+    REPLACE_ERROR_INTERNAL,
+];
+
+pub const REPLACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &REPLACE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &REPLACE_ERRORS,
+};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
+fn replace_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn replace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    replace_error_with_message(error.message, error)
 }
 
 #[runtime_builtin(
@@ -76,6 +190,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
     keywords = "replace,strrep,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),
+    descriptor(crate::builtins::strings::transform::replace::REPLACE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::transform::replace"
 )]
 async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<Value> {
@@ -90,7 +205,7 @@ async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<V
         Value::StringArray(sa) => replace_string_array(sa, &spec),
         Value::CharArray(ca) => replace_char_array(ca, &spec),
         Value::Cell(cell) => replace_cell_array(cell, &spec),
-        _ => Err(runtime_error_for(ARG_TYPE_ERROR)),
+        _ => Err(replace_error(&REPLACE_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -112,8 +227,9 @@ fn replace_string_array(array: StringArray, spec: &ReplacementSpec) -> BuiltinRe
             replaced.push(spec.apply(&entry));
         }
     }
-    let result = StringArray::new(replaced, shape)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))?;
+    let result = StringArray::new(replaced, shape).map_err(|e| {
+        replace_error_with_message(format!("{BUILTIN_NAME}: {e}"), &REPLACE_ERROR_INTERNAL)
+    })?;
     Ok(Value::StringArray(result))
 }
 
@@ -144,7 +260,9 @@ fn replace_char_array(array: CharArray, spec: &ReplacementSpec) -> BuiltinResult
 
     CharArray::new(flattened, rows, target_cols)
         .map(Value::CharArray)
-        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+        .map_err(|e| {
+            replace_error_with_message(format!("{BUILTIN_NAME}: {e}"), &REPLACE_ERROR_INTERNAL)
+        })
 }
 
 fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec) -> BuiltinResult<Value> {
@@ -159,7 +277,9 @@ fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec) -> BuiltinResult<
             replaced.push(value);
         }
     }
-    make_cell(replaced, rows, cols).map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
+    make_cell(replaced, rows, cols).map_err(|e| {
+        replace_error_with_message(format!("{BUILTIN_NAME}: {e}"), &REPLACE_ERROR_INTERNAL)
+    })
 }
 
 fn replace_cell_element(value: &Value, spec: &ReplacementSpec) -> BuiltinResult<Value> {
@@ -170,20 +290,23 @@ fn replace_cell_element(value: &Value, spec: &ReplacementSpec) -> BuiltinResult<
             spec,
         ))),
         Value::CharArray(ca) if ca.rows <= 1 => replace_char_array(ca.clone(), spec),
-        Value::CharArray(_) => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-        _ => Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+        Value::CharArray(_) => Err(replace_error(&REPLACE_ERROR_CELL_ELEMENT)),
+        _ => Err(replace_error(&REPLACE_ERROR_CELL_ELEMENT)),
     }
 }
 
 fn extract_pattern_list(value: &Value) -> BuiltinResult<Vec<String>> {
-    extract_text_list(value, PATTERN_TYPE_ERROR)
+    extract_text_list(value, &REPLACE_ERROR_PATTERN_TYPE)
 }
 
 fn extract_replacement_list(value: &Value) -> BuiltinResult<Vec<String>> {
-    extract_text_list(value, REPLACEMENT_TYPE_ERROR)
+    extract_text_list(value, &REPLACE_ERROR_REPLACEMENT_TYPE)
 }
 
-fn extract_text_list(value: &Value, type_error: &str) -> BuiltinResult<Vec<String>> {
+fn extract_text_list(
+    value: &Value,
+    type_error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.clone()]),
         Value::StringArray(array) => Ok(array.data.clone()),
@@ -215,13 +338,17 @@ fn extract_text_list(value: &Value, type_error: &str) -> BuiltinResult<Vec<Strin
                             entries.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
                         }
                     }
-                    Value::CharArray(_) => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
-                    _ => return Err(runtime_error_for(CELL_ELEMENT_ERROR)),
+                    Value::CharArray(_) => {
+                        return Err(replace_error(&REPLACE_ERROR_CELL_ELEMENT));
+                    }
+                    _ => {
+                        return Err(replace_error(&REPLACE_ERROR_CELL_ELEMENT));
+                    }
                 }
             }
             Ok(entries)
         }
-        _ => Err(runtime_error_for(type_error)),
+        _ => Err(replace_error(type_error)),
     }
 }
 
@@ -233,12 +360,12 @@ impl ReplacementSpec {
     fn from_values(old: &Value, new: &Value) -> BuiltinResult<Self> {
         let patterns = extract_pattern_list(old)?;
         if patterns.is_empty() {
-            return Err(runtime_error_for(EMPTY_PATTERN_ERROR));
+            return Err(replace_error(&REPLACE_ERROR_EMPTY_PATTERN));
         }
 
         let replacements = extract_replacement_list(new)?;
         if replacements.is_empty() {
-            return Err(runtime_error_for(EMPTY_REPLACEMENT_ERROR));
+            return Err(replace_error(&REPLACE_ERROR_EMPTY_REPLACEMENT));
         }
 
         let pairs = if replacements.len() == patterns.len() {
@@ -250,7 +377,7 @@ impl ReplacementSpec {
                 .map(|pattern| (pattern, replacement.clone()))
                 .collect::<Vec<_>>()
         } else {
-            return Err(runtime_error_for(SIZE_MISMATCH_ERROR));
+            return Err(replace_error(&REPLACE_ERROR_SIZE_MISMATCH));
         };
 
         Ok(Self { pairs })
@@ -416,7 +543,7 @@ pub(crate) mod tests {
             Value::String("b".into()),
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), ARG_TYPE_ERROR);
+        assert_eq!(err.to_string(), REPLACE_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -428,7 +555,7 @@ pub(crate) mod tests {
             Value::String("x".into()),
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), PATTERN_TYPE_ERROR);
+        assert_eq!(err.to_string(), REPLACE_ERROR_PATTERN_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -442,7 +569,7 @@ pub(crate) mod tests {
             ),
         )
         .unwrap_err();
-        assert_eq!(err.to_string(), SIZE_MISMATCH_ERROR);
+        assert_eq!(err.to_string(), REPLACE_ERROR_SIZE_MISMATCH.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

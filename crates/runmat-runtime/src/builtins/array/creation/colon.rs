@@ -1,7 +1,11 @@
 //! MATLAB-compatible `colon` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{CharArray, ComplexTensor, LiteralValue, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LiteralValue, LogicalArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -75,8 +79,181 @@ fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
         .unwrap_or_else(|| row_vector_type(ctx))
 }
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("colon").build()
+const BUILTIN_NAME: &str = "colon";
+
+const COLON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Arithmetic progression row vector (numeric or character).",
+}];
+
+const COLON_SIG_TWO_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Start scalar value.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stop scalar value (implicit step = 1).",
+    },
+];
+
+const COLON_SIG_THREE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Start scalar value.",
+    },
+    BuiltinParamDescriptor {
+        name: "step",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Non-zero increment.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Stop scalar value.",
+    },
+];
+
+const COLON_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "x = colon(start, stop)",
+        inputs: &COLON_SIG_TWO_INPUTS,
+        outputs: &COLON_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = colon(start, step, stop)",
+        inputs: &COLON_SIG_THREE_INPUTS,
+        outputs: &COLON_OUTPUT,
+    },
+];
+
+const COLON_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.ARG_COUNT",
+    identifier: None,
+    when: "More than three input arguments are provided.",
+    message: "colon: expected two or three input arguments",
+};
+
+const COLON_ERROR_ZERO_INCREMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.ZERO_INCREMENT",
+    identifier: Some("RunMat:IndexStepZero"),
+    when: "The explicit increment is zero.",
+    message: "colon: increment must be nonzero",
+};
+
+const COLON_ERROR_NON_SCALAR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.NON_SCALAR_INPUT",
+    identifier: None,
+    when: "At least one input is not scalar.",
+    message: "colon: expected scalar input",
+};
+
+const COLON_ERROR_NON_FINITE_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.NON_FINITE_INPUT",
+    identifier: None,
+    when: "At least one input scalar is non-finite.",
+    message: "colon: inputs must be finite numeric scalars",
+};
+
+const COLON_ERROR_COMPLEX_IMAGINARY_NONZERO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.COMPLEX_IMAGINARY_NONZERO",
+    identifier: None,
+    when: "Complex inputs have non-zero imaginary parts.",
+    message: "colon: complex inputs must have zero imaginary part",
+};
+
+const COLON_ERROR_UNSUPPORTED_STRING_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.UNSUPPORTED_STRING_INPUT",
+    identifier: None,
+    when: "String-like values are used as scalar bounds/step.",
+    message: "colon: inputs must be real scalar values; received a string-like argument",
+};
+
+const COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.CHAR_NON_INTEGER_CODEPOINT",
+    identifier: None,
+    when: "Character sequence values are non-integer.",
+    message: "colon: character sequence requires integer code points",
+};
+
+const COLON_ERROR_CHAR_CODEPOINT_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.CHAR_CODEPOINT_RANGE",
+    identifier: None,
+    when: "Character sequence values are outside valid Unicode range.",
+    message: "colon: character code point out of range",
+};
+
+const COLON_ERROR_SEQUENCE_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.SEQUENCE_RANGE",
+    identifier: None,
+    when: "Computed progression span/ratio is non-finite.",
+    message: "colon: sequence length exceeds representable range",
+};
+
+const COLON_ERROR_SEQUENCE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.SEQUENCE_LIMIT",
+    identifier: None,
+    when: "Computed progression length exceeds platform limits.",
+    message: "colon: sequence length exceeds platform limits",
+};
+
+const COLON_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COLON.INTERNAL",
+    identifier: None,
+    when: "Internal tensor/character output construction failed.",
+    message: "colon: internal error",
+};
+
+const COLON_ERRORS: [BuiltinErrorDescriptor; 11] = [
+    COLON_ERROR_ARG_COUNT,
+    COLON_ERROR_ZERO_INCREMENT,
+    COLON_ERROR_NON_SCALAR_INPUT,
+    COLON_ERROR_NON_FINITE_INPUT,
+    COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
+    COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+    COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT,
+    COLON_ERROR_CHAR_CODEPOINT_RANGE,
+    COLON_ERROR_SEQUENCE_RANGE,
+    COLON_ERROR_SEQUENCE_LIMIT,
+    COLON_ERROR_INTERNAL,
+];
+
+pub const COLON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COLON_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COLON_ERRORS,
+};
+
+fn colon_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    colon_error_with_message(error.message, error)
+}
+
+fn colon_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -86,6 +263,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     keywords = "colon,sequence,range,step,gpu",
     accel = "array_construct",
     type_resolver(colon_type),
+    descriptor(crate::builtins::array::creation::colon::COLON_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::colon"
 )]
 async fn colon_builtin(
@@ -94,9 +272,7 @@ async fn colon_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error(
-            "colon: expected two or three input arguments",
-        ));
+        return Err(colon_error(&COLON_ERROR_ARG_COUNT));
     }
 
     let start_scalar = parse_real_scalar("colon", start).await?;
@@ -121,7 +297,7 @@ async fn colon_builtin(
     } else {
         let step_scalar = parse_real_scalar("colon", step_or_end).await?;
         if step_scalar.value == 0.0 {
-            return Err(builtin_error("colon: increment must be nonzero"));
+            return Err(colon_error(&COLON_ERROR_ZERO_INCREMENT));
         }
         let stop_scalar = parse_real_scalar("colon", rest[0].clone()).await?;
         let char_mode =
@@ -149,12 +325,10 @@ fn build_sequence(
     char_mode: bool,
 ) -> crate::BuiltinResult<Value> {
     if !start.is_finite() || !step.is_finite() || !stop.is_finite() {
-        return Err(builtin_error(
-            "colon: inputs must be finite numeric scalars",
-        ));
+        return Err(colon_error(&COLON_ERROR_NON_FINITE_INPUT));
     }
     if step == 0.0 {
-        return Err(builtin_error("colon: increment must be nonzero"));
+        return Err(colon_error(&COLON_ERROR_ZERO_INCREMENT));
     }
 
     let plan = plan_progression(start, step, stop)?;
@@ -213,7 +387,7 @@ fn finalize_numeric_sequence(data: Vec<f64>, prefer_gpu: bool) -> crate::Builtin
 
     Tensor::new(data, shape)
         .map(tensor::tensor_into_value)
-        .map_err(|e| builtin_error(format!("colon: {e}")))
+        .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))
 }
 
 struct ProgressionPlan {
@@ -240,9 +414,7 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> crate::BuiltinResult<Pr
 
     let diff = (stop - start) / step;
     if !diff.is_finite() {
-        return Err(builtin_error(
-            "colon: sequence length exceeds representable range",
-        ));
+        return Err(colon_error(&COLON_ERROR_SEQUENCE_RANGE));
     }
 
     let ratio_raw = (tol / step_abs).abs();
@@ -263,16 +435,14 @@ fn plan_progression(start: f64, step: f64, stop: f64) -> crate::BuiltinResult<Pr
     }
 
     if approx.is_infinite() || approx > usize::MAX as f64 {
-        return Err(builtin_error(
-            "colon: sequence length exceeds platform limits",
-        ));
+        return Err(colon_error(&COLON_ERROR_SEQUENCE_LIMIT));
     }
 
     let floor = approx.floor();
     let count = floor as usize;
     let count = count
         .checked_add(1)
-        .ok_or_else(|| builtin_error("colon: sequence length exceeds platform limits"))?;
+        .ok_or_else(|| colon_error(&COLON_ERROR_SEQUENCE_LIMIT))?;
 
     if count == 0 {
         return Ok(ProgressionPlan {
@@ -376,13 +546,15 @@ fn parse_real_scalar_host(name: &str, value: Value) -> crate::BuiltinResult<Pars
             prefer_gpu: false,
             origin: ScalarOrigin::Char,
         }),
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error(format!(
-            "{name}: inputs must be real scalar values; received a string-like argument"
-        ))),
+        Value::String(_) | Value::StringArray(_) => Err(colon_error_with_message(
+            format!("{name}: inputs must be real scalar values; received a string-like argument"),
+            &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+        )),
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_real_scalar"),
-        other => Err(builtin_error(format!(
-            "{name}: inputs must be real scalar values; received {other:?}"
-        ))),
+        other => Err(colon_error_with_message(
+            format!("{name}: inputs must be real scalar values; received {other:?}"),
+            &COLON_ERROR_UNSUPPORTED_STRING_INPUT,
+        )),
     }
 }
 
@@ -390,38 +562,49 @@ fn ensure_finite(name: &str, value: f64) -> crate::BuiltinResult<f64> {
     if value.is_finite() {
         Ok(value)
     } else {
-        Err(builtin_error(format!(
-            "{name}: inputs must be finite numeric scalars"
-        )))
+        Err(colon_error_with_message(
+            format!("{name}: inputs must be finite numeric scalars"),
+            &COLON_ERROR_NON_FINITE_INPUT,
+        ))
     }
 }
 
 fn tensor_scalar(name: &str, tensor: &Tensor) -> crate::BuiltinResult<f64> {
     if !tensor::is_scalar_tensor(tensor) {
-        return Err(builtin_error(format!("{name}: expected scalar input")));
+        return Err(colon_error_with_message(
+            format!("{name}: expected scalar input"),
+            &COLON_ERROR_NON_SCALAR_INPUT,
+        ));
     }
     ensure_finite(name, tensor.data[0])
 }
 
 fn logical_scalar(name: &str, logical: &LogicalArray) -> crate::BuiltinResult<f64> {
     if logical.len() != 1 {
-        return Err(builtin_error(format!("{name}: expected scalar input")));
+        return Err(colon_error_with_message(
+            format!("{name}: expected scalar input"),
+            &COLON_ERROR_NON_SCALAR_INPUT,
+        ));
     }
     Ok(if logical.data[0] != 0 { 1.0 } else { 0.0 })
 }
 
 fn complex_to_real(name: &str, re: f64, im: f64) -> crate::BuiltinResult<f64> {
     if im.abs() > ZERO_IM_TOL * re.abs().max(1.0) {
-        return Err(builtin_error(format!(
-            "{name}: complex inputs must have zero imaginary part"
-        )));
+        return Err(colon_error_with_message(
+            format!("{name}: complex inputs must have zero imaginary part"),
+            &COLON_ERROR_COMPLEX_IMAGINARY_NONZERO,
+        ));
     }
     ensure_finite(name, re)
 }
 
 fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinResult<f64> {
     if tensor.data.len() != 1 {
-        return Err(builtin_error(format!("{name}: expected scalar input")));
+        return Err(colon_error_with_message(
+            format!("{name}: expected scalar input"),
+            &COLON_ERROR_NON_SCALAR_INPUT,
+        ));
     }
     let (re, im) = tensor.data[0];
     complex_to_real(name, re, im)
@@ -429,7 +612,10 @@ fn complex_tensor_scalar(name: &str, tensor: &ComplexTensor) -> crate::BuiltinRe
 
 fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
     if array.rows * array.cols != 1 {
-        return Err(builtin_error(format!("{name}: expected scalar input")));
+        return Err(colon_error_with_message(
+            format!("{name}: expected scalar input"),
+            &COLON_ERROR_NON_SCALAR_INPUT,
+        ));
     }
     let ch = array.data[0];
     Ok(ch as u32 as f64)
@@ -441,20 +627,19 @@ fn build_char_sequence(data: Vec<f64>) -> crate::BuiltinResult<Value> {
     for value in data {
         let rounded = value.round();
         if (value - rounded).abs() > CHAR_TOL {
-            return Err(builtin_error(
-                "colon: character sequence requires integer code points",
-            ));
+            return Err(colon_error(&COLON_ERROR_CHAR_NON_INTEGER_CODEPOINT));
         }
         if !(0.0..=(u32::MAX as f64)).contains(&rounded) {
-            return Err(builtin_error("colon: character code point out of range"));
+            return Err(colon_error(&COLON_ERROR_CHAR_CODEPOINT_RANGE));
         }
         let code = rounded as u32;
         let ch = std::char::from_u32(code)
-            .ok_or_else(|| builtin_error("colon: character code point out of range"))?;
+            .ok_or_else(|| colon_error(&COLON_ERROR_CHAR_CODEPOINT_RANGE))?;
         chars.push(ch);
     }
 
-    let array = CharArray::new(chars, 1, len).map_err(|e| builtin_error(format!("colon: {e}")))?;
+    let array = CharArray::new(chars, 1, len)
+        .map_err(|e| colon_error_with_message(format!("colon: {e}"), &COLON_ERROR_INTERNAL))?;
     Ok(Value::CharArray(array))
 }
 

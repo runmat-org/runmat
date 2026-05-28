@@ -1,9 +1,133 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::op_common::{map_figure_error, parse_text_command};
 use super::state::set_figure_title_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+const TITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created/updated title object.",
+}];
+
+const TITLE_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Title text (string/char/cellstr-like multiline forms).",
+}];
+
+const TITLE_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Title text (string/char/cellstr-like multiline forms).",
+    },
+];
+
+const TITLE_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Title text (string/char/cellstr-like multiline forms).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const TITLE_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Title text (string/char/cellstr-like multiline forms).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const TITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = title(txt)",
+        inputs: &TITLE_INPUTS_TEXT,
+        outputs: &TITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = title(ax, txt)",
+        inputs: &TITLE_INPUTS_AX_TEXT,
+        outputs: &TITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = title(txt, Name, Value, ...)",
+        inputs: &TITLE_INPUTS_TEXT_PROPS,
+        outputs: &TITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = title(ax, txt, Name, Value, ...)",
+        inputs: &TITLE_INPUTS_AX_TEXT_PROPS,
+        outputs: &TITLE_OUTPUT_HANDLE,
+    },
+];
+
+const TITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TITLE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:title:InvalidArgument"),
+    when: "Axes handle, text payload, or property/value arguments are invalid.",
+    message: "title: invalid argument",
+};
+
+const TITLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TITLE.INTERNAL",
+    identifier: Some("RunMat:title:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "title: internal operation failed",
+};
+
+const TITLE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [TITLE_ERROR_INVALID_ARGUMENT, TITLE_ERROR_INTERNAL];
+
+pub const TITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TITLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TITLE_ERRORS,
+};
 
 #[runtime_builtin(
     name = "title",
@@ -12,6 +136,7 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
     keywords = "title,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::title::TITLE_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::title"
 )]
 pub fn title_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -43,6 +168,18 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    #[test]
+    fn title_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TITLE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = title(txt)"));
+        assert!(labels.contains(&"h = title(ax, txt)"));
+        assert!(labels.contains(&"h = title(txt, Name, Value, ...)"));
     }
 
     #[test]

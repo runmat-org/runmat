@@ -15,6 +15,7 @@ runmat-accelerate = { workspace = true, optional = true }
 runmat-accelerate-api = { workspace = true, optional = true }
 runmat-gc = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-mir = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-thread-local = { workspace = true }
 runmat-time = { workspace = true }

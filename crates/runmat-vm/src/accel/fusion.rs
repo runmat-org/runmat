@@ -1,5 +1,5 @@
 use crate::accel::residency as accel_residency;
-use crate::bytecode::ExecutionContext;
+use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
 use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
@@ -13,6 +13,7 @@ use runmat_accelerate::fusion_exec::{
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
 use runmat_builtins::Value;
+use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 
@@ -35,7 +36,10 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
-        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_) => "FunctionHandle",
+        Value::BoundFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
@@ -53,6 +57,19 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
         Value::String(s) => format!("in#{i}:String({})", s),
         _ => format!("in#{i}:{}", value_kind(v)),
+    }
+}
+
+#[inline]
+fn is_scalarish_runtime_value(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
+        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::LogicalArray(array) => is_scalar_shape(&array.shape),
+        Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
+        Value::CharArray(array) => array.rows * array.cols == 1,
+        _ => false,
     }
 }
 
@@ -79,9 +96,13 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
         if matches!(
             instr,
             Instr::StoreIndex(_)
+                | Instr::StoreIndexDelete(_)
                 | Instr::StoreSlice(_, _, _, _)
+                | Instr::StoreSliceDelete(_, _, _, _)
                 | Instr::StoreSliceExpr { .. }
-                | Instr::StoreIndexCell(_)
+                | Instr::StoreSliceExprDelete { .. }
+                | Instr::StoreIndexCell { .. }
+                | Instr::StoreIndexCellDelete { .. }
                 | Instr::StoreMember(_)
                 | Instr::StoreMemberOrInit(_)
                 | Instr::StoreMemberDynamic
@@ -395,8 +416,8 @@ pub fn write_elementwise_materialized_stores(
         match store.binding.kind {
             VarKind::Global => {
                 let i = store.binding.index;
-                if i < vars.len() && !accel_residency::same_gpu_handle(&vars[i], &value) {
-                    accel_residency::clear_value(&vars[i]);
+                if i < vars.len() {
+                    accel_residency::clear_value_excluding(&vars[i], &value);
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
@@ -410,14 +431,12 @@ pub fn write_elementwise_materialized_stores(
                     while context.locals.len() <= absolute {
                         context.locals.push(Value::Num(0.0));
                     }
-                    if !accel_residency::same_gpu_handle(&context.locals[absolute], &value) {
-                        accel_residency::clear_value(&context.locals[absolute]);
-                    }
+                    accel_residency::clear_value_excluding(&context.locals[absolute], &value);
                     context.locals[absolute] = value;
                 } else {
                     let i = store.binding.index;
-                    if i < vars.len() && !accel_residency::same_gpu_handle(&vars[i], &value) {
-                        accel_residency::clear_value(&vars[i]);
+                    if i < vars.len() {
+                        accel_residency::clear_value_excluding(&vars[i], &value);
                     }
                     if i >= vars.len() {
                         vars.resize(i + 1, Value::Num(0.0));
@@ -913,6 +932,15 @@ pub async fn try_execute_fusion_group(
 ) -> Result<Value, RuntimeError> {
     let (stack_guard, request, consumed_inputs) =
         gather_fusion_inputs(plan, graph, stack, vars, context)?;
+    if plan.group.kind.is_elementwise()
+        && !request.inputs.is_empty()
+        && request.inputs.iter().all(is_scalarish_runtime_value)
+    {
+        return Err(mex(
+            "FusionScalarBypass",
+            "fusion: bypass scalar-only elementwise group",
+        ));
+    }
     log::debug!(
         "dispatch fusion kind {:?}, supported {}",
         plan.group.kind,
@@ -933,5 +961,65 @@ pub async fn try_execute_fusion_group(
     } else {
         execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
             .await
+    }
+}
+
+#[cfg(all(test, feature = "native-accel"))]
+mod tests {
+    use super::write_elementwise_materialized_stores;
+    use crate::bytecode::program::ExecutionContext;
+    use runmat_accelerate::fusion::FusionStoreMaterialization;
+    use runmat_accelerate::fusion_residency;
+    use runmat_accelerate::graph::VarBinding;
+    use runmat_accelerate::VarKind;
+    use runmat_accelerate_api::GpuTensorHandle;
+    use runmat_builtins::Value;
+
+    #[test]
+    fn fusion_writeback_preserves_shared_gpu_handles() {
+        let shared = GpuTensorHandle {
+            shape: vec![1],
+            device_id: 17,
+            buffer_id: 17001,
+        };
+        let old_only = GpuTensorHandle {
+            shape: vec![1],
+            device_id: 17,
+            buffer_id: 17002,
+        };
+        fusion_residency::mark(&shared);
+        fusion_residency::mark(&old_only);
+        assert!(fusion_residency::is_resident(&shared));
+        assert!(fusion_residency::is_resident(&old_only));
+
+        let mut vars = vec![Value::OutputList(vec![
+            Value::GpuTensor(shared.clone()),
+            Value::GpuTensor(old_only.clone()),
+        ])];
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        write_elementwise_materialized_stores(
+            vec![(
+                FusionStoreMaterialization {
+                    value_id: 1,
+                    binding: VarBinding {
+                        kind: VarKind::Global,
+                        index: 0,
+                    },
+                },
+                Value::GpuTensor(shared.clone()),
+            )],
+            &mut vars,
+            &mut context,
+        );
+
+        assert!(fusion_residency::is_resident(&shared));
+        assert!(!fusion_residency::is_resident(&old_only));
+        fusion_residency::clear(&shared);
     }
 }

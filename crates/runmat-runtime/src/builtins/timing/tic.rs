@@ -1,6 +1,10 @@
 //! MATLAB-compatible `tic` builtin with precise stopwatch semantics for RunMat.
 
 use once_cell::sync::Lazy;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 use runmat_time::Instant;
 use std::sync::Mutex;
@@ -61,12 +65,49 @@ impl StopwatchState {
 }
 
 const BUILTIN_NAME: &str = "tic";
-const LOCK_ERR: &str = "tic: failed to acquire stopwatch state";
 
-fn stopwatch_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeError {
-    crate::build_runtime_error(message)
-        .with_builtin(builtin)
-        .build()
+const TIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "timerVal",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Timer handle used by toc.",
+}];
+
+const TIC_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const TIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "timerVal = tic()",
+    inputs: &TIC_INPUTS,
+    outputs: &TIC_OUTPUT,
+}];
+
+const TIC_ERROR_STATE_LOCK: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIC.STATE_LOCK",
+    identifier: Some("RunMat:tic:StateLockFailed"),
+    when: "Internal stopwatch state cannot be acquired.",
+    message: "tic: failed to acquire stopwatch state",
+};
+
+const TIC_ERRORS: [BuiltinErrorDescriptor; 1] = [TIC_ERROR_STATE_LOCK];
+
+pub const TIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TIC_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TIC_ERRORS,
+};
+
+fn stopwatch_error_with_message(
+    builtin: &str,
+    message: impl Into<String>,
+    error: &BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = crate::build_runtime_error(message).with_builtin(builtin);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Start a stopwatch timer and return a handle suitable for `toc`.
@@ -77,6 +118,7 @@ fn stopwatch_error(builtin: &str, message: impl Into<String>) -> crate::RuntimeE
     keywords = "tic,timing,profiling,benchmark",
     sink = true,
     type_resolver(tic_type),
+    descriptor(crate::builtins::timing::tic::TIC_DESCRIPTOR),
     builtin_path = "crate::builtins::timing::tic"
 )]
 pub async fn tic_builtin() -> crate::BuiltinResult<f64> {
@@ -87,9 +129,13 @@ pub async fn tic_builtin() -> crate::BuiltinResult<f64> {
 pub(crate) fn record_tic(builtin: &str) -> Result<f64, crate::RuntimeError> {
     let now = Instant::now();
     {
-        let mut guard = STOPWATCH
-            .lock()
-            .map_err(|_| stopwatch_error(builtin, LOCK_ERR))?;
+        let mut guard = STOPWATCH.lock().map_err(|_| {
+            stopwatch_error_with_message(
+                builtin,
+                TIC_ERROR_STATE_LOCK.message,
+                &TIC_ERROR_STATE_LOCK,
+            )
+        })?;
         guard.push(now);
     }
     Ok(encode_instant(now))
@@ -97,9 +143,9 @@ pub(crate) fn record_tic(builtin: &str) -> Result<f64, crate::RuntimeError> {
 
 /// Remove and return the most recently recorded `tic`, if any.
 pub(crate) fn take_latest_start(builtin: &str) -> Result<Option<Instant>, crate::RuntimeError> {
-    let mut guard = STOPWATCH
-        .lock()
-        .map_err(|_| stopwatch_error(builtin, LOCK_ERR))?;
+    let mut guard = STOPWATCH.lock().map_err(|_| {
+        stopwatch_error_with_message(builtin, TIC_ERROR_STATE_LOCK.message, &TIC_ERROR_STATE_LOCK)
+    })?;
     Ok(guard.pop())
 }
 
@@ -109,12 +155,13 @@ pub(crate) fn encode_instant(instant: Instant) -> f64 {
 }
 
 /// Decode a scalar handle into an `Instant`.
-pub(crate) fn decode_handle(handle: f64, builtin: &str) -> Result<Instant, crate::RuntimeError> {
+pub(crate) fn decode_handle(
+    handle: f64,
+    builtin: &str,
+    error: &BuiltinErrorDescriptor,
+) -> Result<Instant, crate::RuntimeError> {
     if !handle.is_finite() || handle.is_sign_negative() {
-        return Err(crate::build_runtime_error("toc: invalid timer handle")
-            .with_builtin(builtin)
-            .with_identifier("RunMat:toc:InvalidTimerHandle")
-            .build());
+        return Err(stopwatch_error_with_message(builtin, error.message, error));
     }
     let duration = Duration::from_secs_f64(handle);
     Ok((*MONOTONIC_ORIGIN) + duration)
@@ -126,6 +173,13 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use std::thread;
     use std::time::Duration;
+
+    const TEST_INVALID_HANDLE_ERROR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+        code: "RM.TOC.INVALID_HANDLE",
+        identifier: Some("RunMat:toc:InvalidTimerHandle"),
+        when: "The timer handle is non-finite or negative.",
+        message: "toc: invalid timer handle",
+    };
 
     fn reset_stopwatch() {
         let mut guard = STOPWATCH.lock().unwrap();
@@ -159,7 +213,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         reset_stopwatch();
         let handle = block_on(tic_builtin()).expect("tic");
-        let decoded = decode_handle(handle, "toc").expect("decode");
+        let decoded = decode_handle(handle, "toc", &TEST_INVALID_HANDLE_ERROR).expect("decode");
         let round_trip = encode_instant(decoded);
         let delta = (round_trip - handle).abs();
         assert!(delta < 1e-9, "delta {delta}");
@@ -181,7 +235,7 @@ pub(crate) mod tests {
     #[test]
     fn decode_handle_rejects_invalid_values() {
         let _guard = TEST_GUARD.lock().unwrap();
-        assert!(decode_handle(f64::NAN, "toc").is_err());
-        assert!(decode_handle(-1.0, "toc").is_err());
+        assert!(decode_handle(f64::NAN, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
+        assert!(decode_handle(-1.0, "toc", &TEST_INVALID_HANDLE_ERROR).is_err());
     }
 }

@@ -16,8 +16,6 @@ enum PlottingBackendError {
     Interactive(String),
     #[error("static backend error: {0}")]
     Static(String),
-    #[error("jupyter backend error: {0}")]
-    Jupyter(String),
     #[error("export initialization error: {0}")]
     ImageExportInit(String),
     #[error("export render error: {0}")]
@@ -280,6 +278,7 @@ pub async fn render_figure_snapshot(
     textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
     log::debug!(
         "runmat-runtime: render_figure_snapshot.start handle={} width={} height={} textmark={}",
         handle.as_u32(),
@@ -299,30 +298,47 @@ pub async fn render_figure_snapshot(
         figure.axes_metadata.len(),
         figure.statistics().total_plots
     );
-    let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
-        figure,
-        width,
-        height,
-        super::web::current_plot_theme_config(),
-        textmark.as_deref(),
-    )
-    .await
-    .map_err(|err| {
-        log::warn!(
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
+    }
+    if height > 0 {
+        settings.height = height;
+    }
+    let mut exporter = ImageExporter::with_settings(settings)
+        .await
+        .map_err(|err| {
+            map_control_flow_with_builtin(
+                engine_error_with_source(
+                    "Plot export initialization failed.",
+                    PlottingBackendError::ImageExportInit(err),
+                ),
+                SNAPSHOT_CONTEXT,
+            )
+        })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
+    exporter.set_textmark(textmark.as_deref());
+
+    let mut figure = figure;
+    let bytes = exporter
+        .render_png_bytes(&mut figure)
+        .await
+        .map_err(|err| {
+            log::warn!(
             "runmat-runtime: render_figure_snapshot.failed handle={} width={} height={} error={}",
             handle.as_u32(),
             width,
             height,
             err
         );
-        map_control_flow_with_builtin(
-            engine_error_with_source(
-                format!("Plot export failed: {err}"),
-                PlottingBackendError::ImageExport(err),
-            ),
-            SNAPSHOT_CONTEXT,
-        )
-    })?;
+            map_control_flow_with_builtin(
+                engine_error_with_source(
+                    format!("Plot export failed: {err}"),
+                    PlottingBackendError::ImageExport(err),
+                ),
+                SNAPSHOT_CONTEXT,
+            )
+        })?;
     log::debug!(
         "runmat-runtime: render_figure_snapshot.ok handle={} bytes={}",
         handle.as_u32(),
@@ -340,6 +356,7 @@ pub async fn render_figure_snapshot_with_camera_state(
     textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
     log::debug!(
         "runmat-runtime: render_figure_snapshot_with_camera_state.start handle={} width={} height={} axes={}",
         handle.as_u32(),
@@ -360,46 +377,35 @@ pub async fn render_figure_snapshot_with_camera_state(
         .map(surface_plot_camera_to_core_camera)
         .collect();
 
-    if axes_cameras.is_empty() {
-        let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
-            figure,
-            width,
-            height,
-            super::web::current_plot_theme_config(),
-            textmark.as_deref(),
-        )
-        .await
-            .map_err(|err| {
-                log::warn!(
-                    "runmat-runtime: render_figure_snapshot_with_camera_state.fallback_failed handle={} error={}",
-                    handle.as_u32(),
-                    err
-                );
-                map_control_flow_with_builtin(
-                    engine_error_with_source(
-                        format!("Plot export failed: {err}"),
-                        PlottingBackendError::ImageExport(err),
-                    ),
-                    SNAPSHOT_CONTEXT,
-                )
-            })?;
-        log::debug!(
-            "runmat-runtime: render_figure_snapshot_with_camera_state.fallback_ok handle={} bytes={}",
-            handle.as_u32(),
-            bytes.len()
-        );
-        return Ok(bytes);
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
     }
+    if height > 0 {
+        settings.height = height;
+    }
+    let mut exporter = ImageExporter::with_settings(settings)
+        .await
+        .map_err(|err| {
+            map_control_flow_with_builtin(
+                engine_error_with_source(
+                    "Plot export initialization failed.",
+                    PlottingBackendError::ImageExportInit(err),
+                ),
+                SNAPSHOT_CONTEXT,
+            )
+        })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
+    exporter.set_textmark(textmark.as_deref());
 
-    let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark(
-        figure,
-        width,
-        height,
-        &axes_cameras,
-        super::web::current_plot_theme_config(),
-        textmark.as_deref(),
-    )
-    .await
+    let mut figure = figure;
+    let bytes = if axes_cameras.is_empty() {
+        exporter.render_png_bytes(&mut figure).await
+    } else {
+        exporter
+            .render_png_bytes_with_axes_cameras(&mut figure, &axes_cameras)
+            .await
+    }
     .map_err(|err| {
         log::warn!(
             "runmat-runtime: render_figure_snapshot_with_camera_state.failed handle={} axes={} error={}",
@@ -468,17 +474,34 @@ pub(crate) mod native {
     use super::*;
     use once_cell::sync::OnceCell;
     use runmat_plot::plots::Figure;
-    use std::env;
     use std::sync::Arc;
+    use std::sync::RwLock;
 
     static FIGURE_EVENT_BRIDGE: OnceCell<()> = OnceCell::new();
+    static PLOTTING_MODE_OVERRIDE: OnceCell<RwLock<Option<PlottingMode>>> = OnceCell::new();
 
     #[derive(Debug, Clone, Copy)]
     enum PlottingMode {
         Auto,
         Interactive,
         Static,
-        Jupyter,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum RuntimePlottingMode {
+        Auto,
+        Interactive,
+        Static,
+    }
+
+    pub fn set_runtime_plotting_mode(mode: RuntimePlottingMode) {
+        let lock = PLOTTING_MODE_OVERRIDE.get_or_init(|| RwLock::new(None));
+        let mut guard = lock.write().expect("plotting mode lock poisoned");
+        *guard = Some(match mode {
+            RuntimePlottingMode::Auto => PlottingMode::Auto,
+            RuntimePlottingMode::Interactive => PlottingMode::Interactive,
+            RuntimePlottingMode::Static => PlottingMode::Static,
+        });
     }
 
     pub fn render(handle: FigureHandle, mut figure: Figure) -> BuiltinResult<String> {
@@ -486,28 +509,18 @@ pub(crate) mod native {
         match detect_mode() {
             PlottingMode::Interactive => interactive_export(handle, &mut figure),
             PlottingMode::Static => static_export(&mut figure, "plot.png"),
-            PlottingMode::Jupyter => jupyter_export(&mut figure),
-            PlottingMode::Auto => {
-                if env::var("JPY_PARENT_PID").is_ok() || env::var("JUPYTER_RUNTIME_DIR").is_ok() {
-                    jupyter_export(&mut figure)
-                } else {
-                    interactive_export(handle, &mut figure)
-                }
-            }
+            PlottingMode::Auto => interactive_export(handle, &mut figure),
         }
     }
 
     fn detect_mode() -> PlottingMode {
-        if let Ok(mode) = env::var("RUNMAT_PLOT_MODE") {
-            match mode.to_lowercase().as_str() {
-                "gui" => PlottingMode::Interactive,
-                "headless" | "static" => PlottingMode::Static,
-                "jupyter" => PlottingMode::Jupyter,
-                _ => PlottingMode::Auto,
+        if let Some(lock) = PLOTTING_MODE_OVERRIDE.get() {
+            let guard = lock.read().expect("plotting mode lock poisoned");
+            if let Some(mode) = *guard {
+                return mode;
             }
-        } else {
-            PlottingMode::Auto
         }
+        PlottingMode::Auto
     }
 
     fn interactive_export(handle: FigureHandle, figure: &mut Figure) -> BuiltinResult<String> {
@@ -529,23 +542,6 @@ pub(crate) mod native {
             .map_err(|err| {
                 engine_error_with_source("Plot export failed.", PlottingBackendError::Static(err))
             })
-    }
-
-    #[cfg(feature = "jupyter")]
-    fn jupyter_export(figure: &mut Figure) -> BuiltinResult<String> {
-        use runmat_plot::jupyter::JupyterBackend;
-        let mut backend = JupyterBackend::new();
-        backend.display_figure(figure).map_err(|err| {
-            engine_error_with_source(
-                "Jupyter plotting failed.",
-                PlottingBackendError::Jupyter(err),
-            )
-        })
-    }
-
-    #[cfg(not(feature = "jupyter"))]
-    fn jupyter_export(_figure: &mut Figure) -> BuiltinResult<String> {
-        Err(engine_error("Jupyter feature not enabled"))
     }
 
     fn ensure_figure_event_bridge() {

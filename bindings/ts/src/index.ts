@@ -351,7 +351,38 @@ export interface StdinEventLog {
   error?: string;
 }
 
+export type RuntimeFlow =
+  | { kind: "no-value" }
+  | { kind: "single"; value: unknown }
+  | { kind: "output-list"; values: unknown[] }
+  | { kind: "comma-list"; values: unknown[] }
+  | { kind: "dynamic-list"; id: string };
+
+export interface ExecuteRequestTextSource {
+  kind: "text";
+  name: string;
+  text: string;
+}
+
+export interface ExecuteRequestPathSource {
+  kind: "path";
+  path: string;
+}
+
+export type ExecuteRequestSource = ExecuteRequestTextSource | ExecuteRequestPathSource;
+
+export interface ExecuteRequest {
+  source: ExecuteRequestSource;
+  compatibility?: LanguageCompatMode;
+  hostPolicy?: {
+    topLevelAwait?: boolean;
+  };
+  requestedOutputs?: number;
+}
+
 export interface ExecuteResult {
+  flow: RuntimeFlow;
+  displayEvents: DisplayEvent[];
   valueText?: string;
   valueJson?: unknown;
   typeInfo?: string;
@@ -365,6 +396,16 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
+}
+
+export interface DisplayEvent {
+  label: string;
+  valueText: string;
+  valueJson: unknown;
+  span: {
+    start: number;
+    end: number;
+  };
 }
 
 export type RunMatErrorKind = "syntax" | "semantic" | "compile" | "runtime";
@@ -412,6 +453,7 @@ export interface WorkspaceSnapshot {
   full: boolean;
   version: number;
   values: WorkspaceEntry[];
+  removals?: string[];
 }
 
 export interface WorkspaceEntry {
@@ -533,7 +575,7 @@ export interface MemoryUsage {
 }
 
 export interface RunMatSessionHandle {
-  execute(source: string): Promise<ExecuteResult>;
+  executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
   clearWorkspace(): void;
@@ -556,7 +598,6 @@ export interface RunMatSessionHandle {
   telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
-  cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
   materializeVariable(
     selector: WorkspaceMaterializeSelector,
@@ -589,10 +630,11 @@ interface NativeInitOptions {
   callstackLimit?: number;
   errorNamespace?: string;
   languageCompat?: LanguageCompatMode;
+  fsProvider?: RunMatFilesystemProvider;
 }
 
 interface RunMatNativeSession {
-  execute(source: string): Promise<ExecuteResult>;
+  executeRequest(request: ExecuteRequest): Promise<ExecuteResult>;
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
@@ -615,7 +657,6 @@ interface RunMatNativeSession {
   telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
-  cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
@@ -678,12 +719,6 @@ export interface PlotSurfaceCameraState {
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
-  registerFsProvider?: (provider: RunMatFilesystemProvider) => void;
-  // Legacy plot canvas bindings (handle-based).
-  registerPlotCanvas?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterPlotCanvas?: () => void;
-  registerFigureCanvas?: (handle: number, canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<void>;
-  deregisterFigureCanvas?: (handle: number) => void;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null;
@@ -772,18 +807,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
   const native = await loadNativeModule(options.wasmModule);
   const snapshotResolution = await resolveSnapshotSource(options.snapshot);
   const fsProvider = await resolveFsProvider(options.fsProvider);
-  if (fsProvider) {
-    if (typeof native.registerFsProvider !== "function") {
-      throw new Error("The loaded runmat-wasm module does not support filesystem providers yet.");
-    }
-    native.registerFsProvider(fsProvider);
-  }
   if (options.plotCanvas) {
-    if (typeof native.registerPlotCanvas === "function") {
-      // Legacy binding: register the default plot canvas before initializing the session.
-      await native.registerPlotCanvas(options.plotCanvas);
-    } else if (typeof native.createPlotSurface === "function") {
-      // New binding: create a surface for the provided canvas. The caller is responsible for binding/presenting.
+    if (typeof native.createPlotSurface === "function") {
       await native.createPlotSurface(options.plotCanvas);
     } else {
       const err = new Error(
@@ -832,7 +857,8 @@ export async function initRunMat(options: RunMatInitOptions = {}): Promise<RunMa
     emitFusionPlan: options.emitFusionPlan ?? false,
     callstackLimit: options.callstackLimit,
     errorNamespace: options.errorNamespace,
-    languageCompat: options.language?.compat
+    languageCompat: options.language?.compat,
+    fsProvider
   });
   return new WebRunMatSession(session);
 }
@@ -843,22 +869,6 @@ export async function plotRendererReady(): Promise<boolean> {
     return false;
   }
   return native.plotRendererReady();
-}
-
-export async function deregisterPlotCanvas(): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.deregisterPlotCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not expose deregisterPlotCanvas.");
-  }
-  native.deregisterPlotCanvas();
-}
-
-export async function deregisterFigureCanvas(handle: number): Promise<void> {
-  const native = await loadNativeModule();
-  if (typeof native.deregisterFigureCanvas !== "function") {
-    throw new Error("The loaded runmat-wasm module does not expose deregisterFigureCanvas.");
-  }
-  native.deregisterFigureCanvas(handle);
 }
 
 export async function createPlotSurface(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<number> {
@@ -1190,10 +1200,10 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
-  async execute(source: string): Promise<ExecuteResult> {
+  async executeRequest(request: ExecuteRequest): Promise<ExecuteResult> {
     this.ensureActive();
     try {
-      return await this.native.execute(source);
+      return await this.native.executeRequest(request);
     } catch (error) {
       throw coerceRunMatError(error);
     }
@@ -1360,15 +1370,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     if (typeof this.native.cancelExecution === "function") {
       this.native.cancelExecution();
-    }
-  }
-
-  cancelPendingRequests(): void {
-    if (this.disposed) {
-      return;
-    }
-    if (typeof this.native.cancelPendingRequests === "function") {
-      this.native.cancelPendingRequests();
     }
   }
 
@@ -1802,5 +1803,5 @@ export const __internals = {
 };
 
 function isNativeSession(value: unknown): value is RunMatNativeSession {
-  return Boolean(value && typeof (value as RunMatNativeSession).execute === "function");
+  return Boolean(value && typeof (value as RunMatNativeSession).executeRequest === "function");
 }

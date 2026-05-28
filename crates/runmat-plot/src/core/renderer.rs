@@ -137,6 +137,14 @@ pub struct PointStyleUniforms {
     pub _pad: [f32; 2],
 }
 
+/// Screen-space uniforms for camera-projected marker billboards.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct MarkerScreenUniforms {
+    pub viewport_px: [f32; 2],
+    pub _pad: [f32; 2],
+}
+
 impl Default for Uniforms {
     fn default() -> Self {
         Self::new()
@@ -250,6 +258,11 @@ pub struct WgpuRenderer {
     image_bind_group_layout: wgpu::BindGroupLayout,
     image_sampler: wgpu::Sampler,
     point_style_bind_group_layout: wgpu::BindGroupLayout,
+    marker_screen_bind_group_layout: wgpu::BindGroupLayout,
+    marker_screen_uniform_buffer: wgpu::Buffer,
+    marker_screen_bind_group: wgpu::BindGroup,
+    axes_marker_screen_uniform_buffers: Vec<wgpu::Buffer>,
+    axes_marker_screen_bind_groups: Vec<wgpu::BindGroup>,
 
     // Grid helper uniforms/pipeline (3D only)
     grid_uniform_buffer: wgpu::Buffer,
@@ -337,6 +350,21 @@ impl WgpuRenderer {
         })
     }
 
+    fn create_marker_screen_bind_group_for_buffer(
+        &self,
+        buffer: &wgpu::Buffer,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &self.marker_screen_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        })
+    }
+
     pub fn ensure_axes_uniform_capacity(&mut self, axes_count: usize) {
         while self.axes_uniform_buffers.len() < axes_count {
             let idx = self.axes_uniform_buffers.len();
@@ -391,6 +419,25 @@ impl WgpuRenderer {
             );
             self.axes_grid_uniform_buffers.push(buffer);
             self.axes_grid_uniform_bind_groups.push(bind_group);
+        }
+        while self.axes_marker_screen_uniform_buffers.len() < axes_count {
+            let idx = self.axes_marker_screen_uniform_buffers.len();
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Marker Screen Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[MarkerScreenUniforms {
+                        viewport_px: [1.0, 1.0],
+                        _pad: [0.0, 0.0],
+                    }]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+            let bind_group = self.create_marker_screen_bind_group_for_buffer(
+                &buffer,
+                &format!("axes_marker_screen_bind_group_{idx}"),
+            );
+            self.axes_marker_screen_uniform_buffers.push(buffer);
+            self.axes_marker_screen_bind_groups.push(bind_group);
         }
     }
 
@@ -525,6 +572,37 @@ impl WgpuRenderer {
                     count: None,
                 }],
             });
+        let marker_screen_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Marker Screen Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let marker_screen_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Marker Screen Uniform Buffer"),
+                contents: bytemuck::cast_slice(&[MarkerScreenUniforms {
+                    viewport_px: [1.0, 1.0],
+                    _pad: [0.0, 0.0],
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let marker_screen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Marker Screen Bind Group"),
+            layout: &marker_screen_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: marker_screen_uniform_buffer.as_entire_binding(),
+            }],
+        });
 
         // Grid uniforms (3D helper plane)
         let grid_uniforms = GridUniforms::default();
@@ -571,6 +649,11 @@ impl WgpuRenderer {
             image_bind_group_layout,
             image_sampler,
             point_style_bind_group_layout,
+            marker_screen_bind_group_layout,
+            marker_screen_uniform_buffer,
+            marker_screen_bind_group,
+            axes_marker_screen_uniform_buffers: Vec::new(),
+            axes_marker_screen_bind_groups: Vec::new(),
             grid_uniform_buffer,
             grid_uniform_bind_group,
             grid_uniform_bind_group_layout,
@@ -902,6 +985,41 @@ impl WgpuRenderer {
         );
     }
 
+    pub fn update_marker_screen_uniforms(&mut self, viewport_px: [f32; 2]) {
+        let uniforms = MarkerScreenUniforms {
+            viewport_px: [viewport_px[0].max(1.0), viewport_px[1].max(1.0)],
+            _pad: [0.0, 0.0],
+        };
+        self.queue.write_buffer(
+            &self.marker_screen_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+        self.ensure_axes_uniform_capacity(1);
+        self.queue.write_buffer(
+            &self.axes_marker_screen_uniform_buffers[0],
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+    }
+
+    pub fn update_marker_screen_uniforms_for_axes(
+        &mut self,
+        axes_index: usize,
+        viewport_px: [f32; 2],
+    ) {
+        self.ensure_axes_uniform_capacity(axes_index + 1);
+        let uniforms = MarkerScreenUniforms {
+            viewport_px: [viewport_px[0].max(1.0), viewport_px[1].max(1.0)],
+            _pad: [0.0, 0.0],
+        };
+        self.queue.write_buffer(
+            &self.axes_marker_screen_uniform_buffers[axes_index],
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+    }
+
     /// Get the uniform bind group for rendering
     pub fn get_uniform_bind_group(&self) -> &wgpu::BindGroup {
         &self.uniform_bind_group
@@ -911,6 +1029,16 @@ impl WgpuRenderer {
         self.axes_uniform_bind_groups
             .get(axes_index)
             .unwrap_or(&self.uniform_bind_group)
+    }
+
+    pub fn get_marker_screen_bind_group(&self) -> &wgpu::BindGroup {
+        &self.marker_screen_bind_group
+    }
+
+    pub fn get_marker_screen_bind_group_for_axes(&self, axes_index: usize) -> &wgpu::BindGroup {
+        self.axes_marker_screen_bind_groups
+            .get(axes_index)
+            .unwrap_or(&self.marker_screen_bind_group)
     }
 
     /// Ensure pipeline exists for the specified type
@@ -932,7 +1060,7 @@ impl WgpuRenderer {
                 }
             }
             PipelineType::Scatter3 => {
-                // For now, use points pipeline - will optimize later
+                // Scatter3 shares marker semantics with point-based marker plots.
                 self.ensure_pipeline(PipelineType::Points);
             }
             PipelineType::Textured => {
@@ -969,21 +1097,25 @@ impl WgpuRenderer {
         let shader = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Point Shader"),
-                source: wgpu::ShaderSource::Wgsl(shaders::vertex::POINT.into()),
+                label: Some("Point Billboard Shader"),
+                source: wgpu::ShaderSource::Wgsl(shaders::vertex::POINT_BILLBOARD.into()),
             });
 
         let pipeline_layout = self
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Point Pipeline Layout"),
-                bind_group_layouts: &[&self.uniform_bind_group_layout],
+                bind_group_layouts: &[
+                    &self.uniform_bind_group_layout,
+                    &self.point_style_bind_group_layout,
+                    &self.marker_screen_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
         self.device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Point Pipeline"),
+                label: Some("Point Billboard Pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -1000,7 +1132,7 @@ impl WgpuRenderer {
                     })],
                 }),
                 primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::PointList,
+                    topology: wgpu::PrimitiveTopology::TriangleList,
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: None,

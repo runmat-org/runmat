@@ -1,11 +1,13 @@
 //! Error bar plot implementation.
 
 use crate::core::{
-    marker_shape_code, vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material,
-    PipelineType, RenderData, Vertex,
+    marker_shape_code, vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuPackContext,
+    GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
 };
+use crate::gpu::errorbar::{ErrorBarGpuInputs, ErrorBarGpuParams};
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
 use glam::{Vec3, Vec4};
+use log::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorBarOrientation {
@@ -39,6 +41,7 @@ pub struct ErrorBar {
     gpu_vertices: Option<GpuVertexBuffer>,
     gpu_vertex_count: Option<usize>,
     gpu_bounds: Option<BoundingBox>,
+    gpu_inputs: Option<ErrorBarGpuInputs>,
     marker_vertices: Option<Vec<Vertex>>,
     marker_gpu_vertices: Option<GpuVertexBuffer>,
     marker_dirty: bool,
@@ -82,6 +85,7 @@ impl ErrorBar {
             gpu_vertices: None,
             gpu_vertex_count: None,
             gpu_bounds: None,
+            gpu_inputs: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
@@ -128,6 +132,7 @@ impl ErrorBar {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;
         self.gpu_bounds = None;
+        self.gpu_inputs = None;
         self.marker_gpu_vertices = None;
         self.marker_dirty = true;
         self
@@ -191,10 +196,129 @@ impl ErrorBar {
             gpu_vertices: Some(buffer),
             gpu_vertex_count: Some(vertex_count),
             gpu_bounds: Some(bounds),
+            gpu_inputs: None,
             marker_vertices: None,
             marker_gpu_vertices: None,
             marker_dirty: true,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_gpu_inputs(
+        color: Vec4,
+        line_width: f32,
+        line_style: LineStyle,
+        cap_size: f32,
+        orientation: ErrorBarOrientation,
+        inputs: ErrorBarGpuInputs,
+        bounds: BoundingBox,
+    ) -> Self {
+        Self {
+            x: Vec::new(),
+            y: Vec::new(),
+            y_neg: Vec::new(),
+            y_pos: Vec::new(),
+            x_neg: Vec::new(),
+            x_pos: Vec::new(),
+            orientation,
+            color,
+            line_width,
+            line_style,
+            cap_size,
+            marker: None,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: None,
+            dirty: false,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_bounds: Some(bounds),
+            gpu_inputs: Some(inputs),
+            marker_vertices: None,
+            marker_gpu_vertices: None,
+            marker_dirty: true,
+        }
+    }
+
+    fn cap_half_width_data(&self, bounds: &BoundingBox, viewport_px: Option<(u32, u32)>) -> f32 {
+        match viewport_px {
+            Some(vp) => {
+                let data_per_px = crate::core::data_units_per_px(bounds, vp);
+                self.cap_size.max(0.0) * 0.5 * data_per_px
+            }
+            None => self.cap_size.max(0.0) * 0.5,
+        }
+    }
+
+    fn generate_line_vertices_with_cap_half(&self, cap_half_data: f32) -> Vec<Vertex> {
+        let mut verts = Vec::new();
+        for i in 0..self.x.len() {
+            let xi = self.x[i] as f32;
+            let yi = self.y[i] as f32;
+            if !xi.is_finite() || !yi.is_finite() {
+                continue;
+            }
+            if matches!(
+                self.orientation,
+                ErrorBarOrientation::Vertical | ErrorBarOrientation::Both
+            ) {
+                let y0 = (self.y[i] - self.y_neg[i]) as f32;
+                let y1 = (self.y[i] + self.y_pos[i]) as f32;
+                if y0.is_finite() && y1.is_finite() && include_segment(i, self.line_style) {
+                    verts.push(Vertex::new(Vec3::new(xi, y0, 0.0), self.color));
+                    verts.push(Vertex::new(Vec3::new(xi, y1, 0.0), self.color));
+                    if cap_half_data > 0.0 {
+                        verts.push(Vertex::new(
+                            Vec3::new(xi - cap_half_data, y0, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi + cap_half_data, y0, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi - cap_half_data, y1, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(xi + cap_half_data, y1, 0.0),
+                            self.color,
+                        ));
+                    }
+                }
+            }
+            if matches!(
+                self.orientation,
+                ErrorBarOrientation::Horizontal | ErrorBarOrientation::Both
+            ) {
+                let x0 = (self.x[i] - self.x_neg[i]) as f32;
+                let x1 = (self.x[i] + self.x_pos[i]) as f32;
+                if x0.is_finite() && x1.is_finite() && include_segment(i, self.line_style) {
+                    verts.push(Vertex::new(Vec3::new(x0, yi, 0.0), self.color));
+                    verts.push(Vertex::new(Vec3::new(x1, yi, 0.0), self.color));
+                    if cap_half_data > 0.0 {
+                        verts.push(Vertex::new(
+                            Vec3::new(x0, yi - cap_half_data, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(x0, yi + cap_half_data, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(x1, yi - cap_half_data, 0.0),
+                            self.color,
+                        ));
+                        verts.push(Vertex::new(
+                            Vec3::new(x1, yi + cap_half_data, 0.0),
+                            self.color,
+                        ));
+                    }
+                }
+            }
+        }
+        verts
     }
 
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
@@ -205,50 +329,9 @@ impl ErrorBar {
             return self.vertices.as_ref().unwrap();
         }
         if self.dirty || self.vertices.is_none() {
-            let mut verts = Vec::new();
-            for i in 0..self.x.len() {
-                let xi = self.x[i] as f32;
-                let yi = self.y[i] as f32;
-                if !xi.is_finite() || !yi.is_finite() {
-                    continue;
-                }
-                if matches!(
-                    self.orientation,
-                    ErrorBarOrientation::Vertical | ErrorBarOrientation::Both
-                ) {
-                    let y0 = (self.y[i] - self.y_neg[i]) as f32;
-                    let y1 = (self.y[i] + self.y_pos[i]) as f32;
-                    if y0.is_finite() && y1.is_finite() && include_segment(i, self.line_style) {
-                        verts.push(Vertex::new(Vec3::new(xi, y0, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(xi, y1, 0.0), self.color));
-                        if self.cap_size > 0.0 {
-                            let half = self.cap_size * 0.005;
-                            verts.push(Vertex::new(Vec3::new(xi - half, y0, 0.0), self.color));
-                            verts.push(Vertex::new(Vec3::new(xi + half, y0, 0.0), self.color));
-                            verts.push(Vertex::new(Vec3::new(xi - half, y1, 0.0), self.color));
-                            verts.push(Vertex::new(Vec3::new(xi + half, y1, 0.0), self.color));
-                        }
-                    }
-                }
-                if matches!(
-                    self.orientation,
-                    ErrorBarOrientation::Horizontal | ErrorBarOrientation::Both
-                ) {
-                    let x0 = (self.x[i] - self.x_neg[i]) as f32;
-                    let x1 = (self.x[i] + self.x_pos[i]) as f32;
-                    if x0.is_finite() && x1.is_finite() && include_segment(i, self.line_style) {
-                        verts.push(Vertex::new(Vec3::new(x0, yi, 0.0), self.color));
-                        verts.push(Vertex::new(Vec3::new(x1, yi, 0.0), self.color));
-                        if self.cap_size > 0.0 {
-                            let half = self.cap_size * 0.005;
-                            verts.push(Vertex::new(Vec3::new(x0, yi - half, 0.0), self.color));
-                            verts.push(Vertex::new(Vec3::new(x0, yi + half, 0.0), self.color));
-                            verts.push(Vertex::new(Vec3::new(x1, yi - half, 0.0), self.color));
-                            verts.push(Vertex::new(Vec3::new(x1, yi + half, 0.0), self.color));
-                        }
-                    }
-                }
-            }
+            let bounds = self.bounds();
+            let cap_half_data = self.cap_half_width_data(&bounds, None);
+            let verts = self.generate_line_vertices_with_cap_half(cap_half_data);
             self.vertices = Some(verts);
             self.dirty = false;
         }
@@ -368,7 +451,8 @@ impl ErrorBar {
                     .max(yi + self.y_pos.get(i).copied().unwrap_or(0.0) as f32);
             }
             if self.cap_size > 0.0 {
-                let half = self.cap_size * 0.005;
+                let range_bounds = BoundingBox::new(min, max);
+                let half = self.cap_half_width_data(&range_bounds, None);
                 min.x -= half;
                 max.x += half;
                 min.y -= half;
@@ -418,6 +502,66 @@ impl ErrorBar {
         }
     }
 
+    fn orientation_code(&self) -> u32 {
+        match self.orientation {
+            ErrorBarOrientation::Vertical => 0,
+            ErrorBarOrientation::Horizontal => 1,
+            ErrorBarOrientation::Both => 2,
+        }
+    }
+
+    fn pack_gpu_vertices_if_needed(
+        &mut self,
+        gpu: &GpuPackContext<'_>,
+        viewport_px: (u32, u32),
+    ) -> Result<(), String> {
+        if self.gpu_vertices.is_some() {
+            return Ok(());
+        }
+        let Some(inputs) = self.gpu_inputs.as_ref() else {
+            return Ok(());
+        };
+        let bounds = self
+            .gpu_bounds
+            .ok_or_else(|| "errorbar: missing GPU bounds".to_string())?;
+        let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+        let cap_size_data = self.cap_size.max(0.0) * data_per_px;
+        let orientation = self.orientation_code();
+        let packed = crate::gpu::errorbar::pack_vertical_vertices(
+            gpu.device,
+            gpu.queue,
+            inputs,
+            &ErrorBarGpuParams {
+                color: self.color,
+                cap_size_data,
+                line_style: self.line_style,
+                orientation,
+            },
+        )?;
+        let segments_per_point = match orientation {
+            0 | 1 => 6usize,
+            _ => 12usize,
+        };
+        self.gpu_vertex_count = Some(inputs.len as usize * segments_per_point);
+        self.gpu_vertices = Some(packed);
+        Ok(())
+    }
+
+    pub fn render_data_with_viewport_gpu(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        gpu: Option<&GpuPackContext<'_>>,
+    ) -> RenderData {
+        if self.gpu_inputs.is_some() && self.gpu_vertices.is_none() {
+            if let (Some(gpu), Some(vp)) = (gpu, viewport_px) {
+                if let Err(err) = self.pack_gpu_vertices_if_needed(gpu, vp) {
+                    warn!("errorbar gpu pack failed: {err}");
+                }
+            }
+        }
+        self.render_data_with_viewport(viewport_px)
+    }
+
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
         if self.gpu_vertices.is_some() {
             return self.render_data();
@@ -425,10 +569,13 @@ impl ErrorBar {
 
         let bounds = self.bounds();
         let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
-            let viewport_px = viewport_px.unwrap_or((600, 400));
+            let Some(viewport_px) = viewport_px else {
+                return self.render_data();
+            };
             let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
             let width_data = self.line_width.max(0.1) * data_per_px;
-            let verts = self.generate_vertices().clone();
+            let cap_half_data = self.cap_half_width_data(&bounds, Some(viewport_px));
+            let verts = self.generate_line_vertices_with_cap_half(cap_half_data);
             let mut thick = Vec::new();
             for segment in verts.chunks_exact(2) {
                 let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];

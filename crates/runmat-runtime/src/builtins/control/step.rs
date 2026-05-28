@@ -2,7 +2,11 @@
 
 use nalgebra::DMatrix;
 use num_complex::Complex64;
-use runmat_builtins::{ComplexTensor, ObjectInstance, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ObjectInstance, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -16,6 +20,142 @@ const BUILTIN_NAME: &str = "step";
 const EPS: f64 = 1.0e-12;
 const DEFAULT_SAMPLES: usize = 101;
 const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
+
+const STEP_OUTPUT_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Step response samples (column vector).",
+}];
+const STEP_OUTPUT_Y_T: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Step response samples (column vector).",
+    },
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Time samples (column vector).",
+    },
+];
+const STEP_INPUTS_SYS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "sys",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "SISO tf model.",
+}];
+const STEP_INPUTS_SYS_TIME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "sys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "SISO tf model.",
+    },
+    BuiltinParamDescriptor {
+        name: "time",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Final time scalar or explicit time vector.",
+    },
+];
+const STEP_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "y = step(sys)",
+        inputs: &STEP_INPUTS_SYS,
+        outputs: &STEP_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = step(sys, tFinal)",
+        inputs: &STEP_INPUTS_SYS_TIME,
+        outputs: &STEP_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "y = step(sys, t)",
+        inputs: &STEP_INPUTS_SYS_TIME,
+        outputs: &STEP_OUTPUT_Y,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y,t] = step(sys)",
+        inputs: &STEP_INPUTS_SYS,
+        outputs: &STEP_OUTPUT_Y_T,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y,t] = step(sys, tFinal)",
+        inputs: &STEP_INPUTS_SYS_TIME,
+        outputs: &STEP_OUTPUT_Y_T,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[y,t] = step(sys, t)",
+        inputs: &STEP_INPUTS_SYS_TIME,
+        outputs: &STEP_OUTPUT_Y_T,
+    },
+];
+const STEP_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.INVALID_ARGUMENT",
+    identifier: Some("RunMat:step:InvalidArgument"),
+    when: "Inputs do not match supported step invocation forms.",
+    message: "step: invalid argument",
+};
+const STEP_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.INVALID_MODEL",
+    identifier: Some("RunMat:step:InvalidModel"),
+    when: "Input system is not a supported tf object with valid required properties.",
+    message: "step: invalid model",
+};
+const STEP_ERROR_INVALID_TIME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.INVALID_TIME",
+    identifier: Some("RunMat:step:InvalidTime"),
+    when: "Time argument is invalid for the model class or sampling mode.",
+    message: "step: invalid time input",
+};
+const STEP_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.UNSUPPORTED_MODEL",
+    identifier: Some("RunMat:step:UnsupportedModel"),
+    when: "Model is well-formed but unsupported by the current step implementation.",
+    message: "step: unsupported model",
+};
+const STEP_ERROR_DISCRETE_LIMIT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.DISCRETE_LIMIT",
+    identifier: Some("RunMat:step:DiscreteLimit"),
+    when: "Discrete simulation would exceed platform or configured sample limits.",
+    message: "step: discrete simulation limit exceeded",
+};
+const STEP_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.PLOT_FAILED",
+    identifier: Some("RunMat:step:PlotFailed"),
+    when: "Statement-form plotting failed for reasons other than known nonfatal setup conditions.",
+    message: "step: plotting failed",
+};
+const STEP_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEP.INTERNAL",
+    identifier: Some("RunMat:step:Internal"),
+    when: "Internal response assembly failed.",
+    message: "step: internal error",
+};
+const STEP_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    STEP_ERROR_INVALID_ARGUMENT,
+    STEP_ERROR_INVALID_MODEL,
+    STEP_ERROR_INVALID_TIME,
+    STEP_ERROR_UNSUPPORTED_MODEL,
+    STEP_ERROR_DISCRETE_LIMIT,
+    STEP_ERROR_PLOT_FAILED,
+    STEP_ERROR_INTERNAL,
+];
+pub const STEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STEP_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STEP_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::step")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,10 +184,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "step simulates a dynamic system and terminates numeric fusion chains.",
 };
 
-fn step_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn step_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    step_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn step_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -58,12 +210,14 @@ fn step_error(message: impl Into<String>) -> RuntimeError {
     sink = true,
     suppress_auto_output = true,
     type_resolver(step_type),
+    descriptor(crate::builtins::control::step::STEP_DESCRIPTOR),
     builtin_path = "crate::builtins::control::step"
 )]
 async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(step_error(
-            "step: expected step(sys), step(sys, tFinal), or step(sys, t)",
+        return Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_ARGUMENT,
+            "expected step(sys), step(sys, tFinal), or step(sys, t)",
         ));
     }
 
@@ -110,37 +264,46 @@ struct TransferFunction {
 impl TransferFunction {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         let Value::Object(object) = value else {
-            return Err(step_error("step: expected a tf object"));
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_MODEL,
+                "expected a tf object",
+            ));
         };
         if !object.is_class("tf") {
-            return Err(step_error(format!(
-                "step: expected a tf object, got {}",
-                object.class_name
-            )));
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_MODEL,
+                format!("expected a tf object, got {}", object.class_name),
+            ));
         }
 
         let numerator = property_coefficients(&object, "Numerator")?;
         let denominator = property_coefficients(&object, "Denominator")?;
         let sample_time = property_scalar(&object, "Ts")?;
         if !sample_time.is_finite() || sample_time < 0.0 {
-            return Err(step_error(
-                "step: tf sample time must be finite and non-negative",
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_MODEL,
+                "tf sample time must be finite and non-negative",
             ));
         }
 
         let numerator = trim_leading_zeros(numerator);
         let denominator = trim_leading_zeros(denominator);
         if denominator.is_empty() {
-            return Err(step_error("step: denominator coefficients cannot be empty"));
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_MODEL,
+                "denominator coefficients cannot be empty",
+            ));
         }
         if denominator[0].abs() <= EPS {
-            return Err(step_error(
-                "step: leading denominator coefficient must be non-zero",
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_MODEL,
+                "leading denominator coefficient must be non-zero",
             ));
         }
         if numerator.len().saturating_sub(1) > denominator.len().saturating_sub(1) {
-            return Err(step_error(
-                "step: improper transfer functions are not supported yet",
+            return Err(step_error_with_detail(
+                &STEP_ERROR_UNSUPPORTED_MODEL,
+                "improper transfer functions are not supported yet",
             ));
         }
 
@@ -168,18 +331,21 @@ impl TransferFunction {
 }
 
 fn property_coefficients(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
-    let value = object
-        .properties
-        .get(name)
-        .ok_or_else(|| step_error(format!("step: tf object is missing {name}")))?;
+    let value = object.properties.get(name).ok_or_else(|| {
+        step_error_with_detail(
+            &STEP_ERROR_INVALID_MODEL,
+            format!("tf object is missing {name}"),
+        )
+    })?;
     match value {
         Value::Tensor(tensor) => Ok(tensor.data.clone()),
         Value::ComplexTensor(tensor) => real_complex_coefficients(tensor, name),
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
-        other => Err(step_error(format!(
-            "step: tf {name} coefficients must be numeric, got {other:?}"
-        ))),
+        other => Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_MODEL,
+            format!("tf {name} coefficients must be numeric, got {other:?}"),
+        )),
     }
 }
 
@@ -187,9 +353,10 @@ fn real_complex_coefficients(tensor: &ComplexTensor, name: &str) -> BuiltinResul
     let mut out = Vec::with_capacity(tensor.data.len());
     for &(re, im) in &tensor.data {
         if im.abs() > EPS {
-            return Err(step_error(format!(
-                "step: complex tf {name} coefficients are not supported yet"
-            )));
+            return Err(step_error_with_detail(
+                &STEP_ERROR_UNSUPPORTED_MODEL,
+                format!("complex tf {name} coefficients are not supported yet"),
+            ));
         }
         out.push(re);
     }
@@ -197,16 +364,19 @@ fn real_complex_coefficients(tensor: &ComplexTensor, name: &str) -> BuiltinResul
 }
 
 fn property_scalar(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
-    let value = object
-        .properties
-        .get(name)
-        .ok_or_else(|| step_error(format!("step: tf object is missing {name}")))?;
+    let value = object.properties.get(name).ok_or_else(|| {
+        step_error_with_detail(
+            &STEP_ERROR_INVALID_MODEL,
+            format!("tf object is missing {name}"),
+        )
+    })?;
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
-        other => Err(step_error(format!(
-            "step: tf {name} property must be a scalar, got {other:?}"
-        ))),
+        other => Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_MODEL,
+            format!("tf {name} property must be a scalar, got {other:?}"),
+        )),
     }
 }
 
@@ -232,16 +402,18 @@ impl TimeSpec {
                 }
                 Self::vector(tensor.data.clone(), sample_time)
             }
-            other => Err(step_error(format!(
-                "step: time input must be a scalar final time or numeric vector, got {other:?}"
-            ))),
+            other => Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_TIME,
+                format!("time input must be a scalar final time or numeric vector, got {other:?}"),
+            )),
         }
     }
 
     fn final_time(value: f64) -> BuiltinResult<Self> {
         if !value.is_finite() || value <= 0.0 {
-            return Err(step_error(
-                "step: final time must be a positive finite scalar",
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_TIME,
+                "final time must be a positive finite scalar",
             ));
         }
         Ok(Self::FinalTime(value))
@@ -253,8 +425,9 @@ impl TimeSpec {
             for &t in &values {
                 let k = (t / sample_time).round();
                 if (t - k * sample_time).abs() > 1.0e-8 * sample_time.max(1.0) {
-                    return Err(step_error(
-                        "step: discrete-time sample vector must align with the model sample time",
+                    return Err(step_error_with_detail(
+                        &STEP_ERROR_INVALID_TIME,
+                        "discrete-time sample vector must align with the model sample time",
                     ));
                 }
             }
@@ -268,24 +441,34 @@ fn ensure_time_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
     if non_unit <= 1 {
         Ok(())
     } else {
-        Err(step_error("step: time input must be a vector"))
+        Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_TIME,
+            "time input must be a vector",
+        ))
     }
 }
 
 fn validate_time_vector(values: &[f64]) -> BuiltinResult<()> {
     if values.is_empty() {
-        return Err(step_error("step: time vector must not be empty"));
+        return Err(step_error_with_detail(
+            &STEP_ERROR_INVALID_TIME,
+            "time vector must not be empty",
+        ));
     }
     let mut previous = None;
     for &value in values {
         if !value.is_finite() || value < 0.0 {
-            return Err(step_error(
-                "step: time vector values must be finite and non-negative",
+            return Err(step_error_with_detail(
+                &STEP_ERROR_INVALID_TIME,
+                "time vector values must be finite and non-negative",
             ));
         }
         if let Some(prev) = previous {
             if value < prev {
-                return Err(step_error("step: time vector must be nondecreasing"));
+                return Err(step_error_with_detail(
+                    &STEP_ERROR_INVALID_TIME,
+                    "time vector must be nondecreasing",
+                ));
             }
         }
         previous = Some(value);
@@ -417,27 +600,33 @@ fn add_scaled(state: &[f64], delta: &[f64], scale: f64) -> Vec<f64> {
 fn evaluate_discrete_step(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<StepEval> {
     let t = discrete_time_vector(model.sample_time, time)?;
     if t.len() > MAX_DISCRETE_SAMPLES {
-        return Err(step_error(format!(
-            "step: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
-        )));
+        return Err(step_error_with_detail(
+            &STEP_ERROR_DISCRETE_LIMIT,
+            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
+        ));
     }
     let sample_indices = t
         .iter()
         .map(|&value| checked_discrete_sample_index(model.sample_time, value))
         .collect::<BuiltinResult<Vec<_>>>()?;
     let max_k = sample_indices.iter().copied().max().unwrap_or(0);
-    let count = max_k
-        .checked_add(1)
-        .ok_or_else(|| step_error("step: discrete sample index exceeds platform limits"))?;
+    let count = max_k.checked_add(1).ok_or_else(|| {
+        step_error_with_detail(
+            &STEP_ERROR_DISCRETE_LIMIT,
+            "discrete sample index exceeds platform limits",
+        )
+    })?;
     let (num, den) = model.normalized();
     let all_y = discrete_response(&num, &den, count)?;
     let y = sample_indices
         .into_iter()
         .map(|idx| {
-            all_y
-                .get(idx)
-                .copied()
-                .ok_or_else(|| step_error("step: discrete sample index exceeds response length"))
+            all_y.get(idx).copied().ok_or_else(|| {
+                step_error_with_detail(
+                    &STEP_ERROR_DISCRETE_LIMIT,
+                    "discrete sample index exceeds response length",
+                )
+            })
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     Ok(StepEval { y, t })
@@ -459,14 +648,16 @@ fn discrete_time_vector(sample_time: f64, time: TimeSpec) -> BuiltinResult<Vec<f
 fn checked_discrete_sample_steps(sample_time: f64, final_time: f64) -> BuiltinResult<usize> {
     let steps = (final_time / sample_time).floor();
     if !steps.is_finite() || steps < 0.0 || steps > usize::MAX as f64 {
-        return Err(step_error(
-            "step: discrete sample count exceeds platform limits",
+        return Err(step_error_with_detail(
+            &STEP_ERROR_DISCRETE_LIMIT,
+            "discrete sample count exceeds platform limits",
         ));
     }
     if steps >= MAX_DISCRETE_SAMPLES as f64 {
-        return Err(step_error(format!(
-            "step: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
-        )));
+        return Err(step_error_with_detail(
+            &STEP_ERROR_DISCRETE_LIMIT,
+            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
+        ));
     }
     Ok(steps as usize)
 }
@@ -474,14 +665,16 @@ fn checked_discrete_sample_steps(sample_time: f64, final_time: f64) -> BuiltinRe
 fn checked_discrete_sample_index(sample_time: f64, time: f64) -> BuiltinResult<usize> {
     let index = (time / sample_time).round();
     if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
-        return Err(step_error(
-            "step: discrete sample index exceeds platform limits",
+        return Err(step_error_with_detail(
+            &STEP_ERROR_DISCRETE_LIMIT,
+            "discrete sample index exceeds platform limits",
         ));
     }
     if index >= MAX_DISCRETE_SAMPLES as f64 {
-        return Err(step_error(format!(
-            "step: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
-        )));
+        return Err(step_error_with_detail(
+            &STEP_ERROR_DISCRETE_LIMIT,
+            format!("discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"),
+        ));
     }
     Ok(index as usize)
 }
@@ -515,7 +708,10 @@ async fn plot_response(eval: &StepEval) -> BuiltinResult<()> {
         if super::is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }
-        return Err(err);
+        return Err(step_error_with_detail(
+            &STEP_ERROR_PLOT_FAILED,
+            err.message(),
+        ));
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Step Response")]).await;
     let _ = crate::call_builtin_async("xlabel", &[Value::from("Time")]).await;
@@ -554,9 +750,12 @@ fn polynomial_roots(coeffs: &[f64]) -> BuiltinResult<Vec<Complex64>> {
     for (idx, coeff) in trimmed.iter().enumerate().skip(1) {
         companion[(0, idx - 1)] = Complex64::new(-coeff / leading, 0.0);
     }
-    let eigenvalues = companion
-        .eigenvalues()
-        .ok_or_else(|| step_error("step: failed to compute transfer-function poles"))?;
+    let eigenvalues = companion.eigenvalues().ok_or_else(|| {
+        step_error_with_detail(
+            &STEP_ERROR_INTERNAL,
+            "failed to compute transfer-function poles",
+        )
+    })?;
     Ok(eigenvalues.iter().copied().collect())
 }
 
@@ -582,8 +781,12 @@ fn dot(lhs: &[f64], rhs: &[f64]) -> f64 {
 
 fn column_tensor(data: Vec<f64>) -> BuiltinResult<Value> {
     let rows = data.len();
-    let tensor =
-        Tensor::new(data, vec![rows, 1]).map_err(|err| step_error(format!("step: {err}")))?;
+    let tensor = Tensor::new(data, vec![rows, 1]).map_err(|err| {
+        step_error_with_detail(
+            &STEP_ERROR_INTERNAL,
+            format!("failed to build response tensor: {err}"),
+        )
+    })?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -626,6 +829,21 @@ mod tests {
             Value::Tensor(tensor) => tensor.data,
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn step_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = STEP_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"y = step(sys)"));
+        assert!(labels.contains(&"y = step(sys, tFinal)"));
+        assert!(labels.contains(&"y = step(sys, t)"));
+        assert!(labels.contains(&"[y,t] = step(sys)"));
+        assert!(labels.contains(&"[y,t] = step(sys, tFinal)"));
+        assert!(labels.contains(&"[y,t] = step(sys, t)"));
     }
 
     #[test]
@@ -699,6 +917,7 @@ mod tests {
         let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0e-6);
         let err = run_step(sys, vec![Value::Num(2.0)]).expect_err("should fail");
         assert!(err.message().contains("more than 1000000 samples"));
+        assert_eq!(err.identifier(), STEP_ERROR_DISCRETE_LIMIT.identifier);
     }
 
     #[test]
@@ -714,5 +933,6 @@ mod tests {
     fn rejects_non_tf_input() {
         let err = run_step(Value::Num(1.0), Vec::new()).expect_err("expected error");
         assert!(err.message().contains("expected a tf object"));
+        assert_eq!(err.identifier(), STEP_ERROR_INVALID_MODEL.identifier);
     }
 }

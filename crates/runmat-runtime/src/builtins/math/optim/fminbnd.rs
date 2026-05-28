@@ -13,7 +13,11 @@
 //! The optional options struct (typically created by `optimset`) honours
 //! `TolX`, `MaxIter`, `MaxFunEvals`, and `Display`.
 
-use runmat_builtins::{LogicalArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    LogicalArray, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -23,9 +27,8 @@ use crate::builtins::common::spec::{
 use crate::builtins::math::optim::brent::{
     brent_min, BrentMinObserver, BrentMinResult, BrentParams, BrentStepKind,
 };
-use crate::builtins::math::optim::common::optim_error;
 use crate::builtins::math::optim::type_resolvers::scalar_root_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "fminbnd";
 const ALGORITHM: &str = "golden section search, parabolic interpolation";
@@ -33,6 +36,233 @@ const DEFAULT_TOL_X: f64 = 1.0e-4;
 const DEFAULT_MAX_ITER: usize = 500;
 const DEFAULT_MAX_FUN_EVALS: usize = 500;
 const DEFAULT_DISPLAY: DisplayMode = DisplayMode::Notify;
+
+const FMINBND_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Estimated minimizer location.",
+}];
+
+const FMINBND_OUTPUT_X_FVAL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Estimated minimizer location.",
+    },
+    BuiltinParamDescriptor {
+        name: "fval",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Objective value at x.",
+    },
+];
+
+const FMINBND_OUTPUT_X_FVAL_EXITFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Estimated minimizer location.",
+    },
+    BuiltinParamDescriptor {
+        name: "fval",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Objective value at x.",
+    },
+    BuiltinParamDescriptor {
+        name: "exitflag",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Convergence status code.",
+    },
+];
+
+const FMINBND_OUTPUT_ALL: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Estimated minimizer location.",
+    },
+    BuiltinParamDescriptor {
+        name: "fval",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Objective value at x.",
+    },
+    BuiltinParamDescriptor {
+        name: "exitflag",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Convergence status code.",
+    },
+    BuiltinParamDescriptor {
+        name: "output",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Iteration/function-count metadata struct.",
+    },
+];
+
+const FMINBND_INPUTS_CORE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar objective callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "x1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "x2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound.",
+    },
+];
+
+const FMINBND_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fun",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar objective callback.",
+    },
+    BuiltinParamDescriptor {
+        name: "x1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "x2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Options struct from optimset.",
+    },
+];
+
+const FMINBND_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "x = fminbnd(fun, x1, x2)",
+        inputs: &FMINBND_INPUTS_CORE,
+        outputs: &FMINBND_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = fminbnd(fun, x1, x2, options)",
+        inputs: &FMINBND_INPUTS_WITH_OPTIONS,
+        outputs: &FMINBND_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval] = fminbnd(fun, x1, x2)",
+        inputs: &FMINBND_INPUTS_CORE,
+        outputs: &FMINBND_OUTPUT_X_FVAL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval] = fminbnd(fun, x1, x2, options)",
+        inputs: &FMINBND_INPUTS_WITH_OPTIONS,
+        outputs: &FMINBND_OUTPUT_X_FVAL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag] = fminbnd(fun, x1, x2)",
+        inputs: &FMINBND_INPUTS_CORE,
+        outputs: &FMINBND_OUTPUT_X_FVAL_EXITFLAG,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag] = fminbnd(fun, x1, x2, options)",
+        inputs: &FMINBND_INPUTS_WITH_OPTIONS,
+        outputs: &FMINBND_OUTPUT_X_FVAL_EXITFLAG,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output] = fminbnd(fun, x1, x2)",
+        inputs: &FMINBND_INPUTS_CORE,
+        outputs: &FMINBND_OUTPUT_ALL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[x, fval, exitflag, output] = fminbnd(fun, x1, x2, options)",
+        inputs: &FMINBND_INPUTS_WITH_OPTIONS,
+        outputs: &FMINBND_OUTPUT_ALL,
+    },
+];
+
+const FMINBND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FMINBND.INVALID_ARGUMENT",
+    identifier: Some("RunMat:fminbnd:InvalidArgument"),
+    when: "Argument grammar/options parsing is invalid.",
+    message: "fminbnd: invalid argument",
+};
+
+const FMINBND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FMINBND.INVALID_INPUT",
+    identifier: Some("RunMat:fminbnd:InvalidInput"),
+    when: "Bounds/callback/input scalar semantics are invalid.",
+    message: "fminbnd: invalid input",
+};
+
+const FMINBND_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [FMINBND_ERROR_INVALID_ARGUMENT, FMINBND_ERROR_INVALID_INPUT];
+
+pub const FMINBND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FMINBND_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FMINBND_ERRORS,
+};
+
+fn fminbnd_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let message = if detail.starts_with("fminbnd:") {
+        detail.to_string()
+    } else {
+        format!("{}: {detail}", error.message)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fminbnd_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        fminbnd_error_with_detail(fallback, err.message())
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::optim::fminbnd")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -69,6 +299,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "fminbnd,bounded minimization,brent,golden section,parabolic interpolation,optimization",
     accel = "sink",
     type_resolver(scalar_root_type),
+    descriptor(crate::builtins::math::optim::fminbnd::FMINBND_DESCRIPTOR),
     builtin_path = "crate::builtins::math::optim::fminbnd"
 )]
 async fn fminbnd_builtin(
@@ -78,21 +309,35 @@ async fn fminbnd_builtin(
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(optim_error(NAME, "fminbnd: too many input arguments"));
+        return Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        ));
     }
-    let options_struct = parse_options(rest.first())?;
-    let options = FminbndOptions::from_struct(options_struct.as_ref())?;
-    let x1 = scalar_bound("lower bound", x1).await?;
-    let x2 = scalar_bound("upper bound", x2).await?;
+    let options_struct = parse_options(rest.first())
+        .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
+    let options = FminbndOptions::from_struct(options_struct.as_ref())
+        .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_ARGUMENT))?;
+    let x1 = scalar_bound("lower bound", x1)
+        .await
+        .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
+    let x2 = scalar_bound("upper bound", x2)
+        .await
+        .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
 
     if !x1.is_finite() || !x2.is_finite() {
-        return Err(optim_error(NAME, "fminbnd: bounds must be finite"));
+        return Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_INPUT,
+            "bounds must be finite",
+        ));
     }
     if x1 > x2 {
         return finalize_inconsistent_bounds(&options);
     }
 
-    let outcome = run_solver(&function, x1, x2, &options).await?;
+    let outcome = run_solver(&function, x1, x2, &options)
+        .await
+        .map_err(|err| fminbnd_map_error(err, &FMINBND_ERROR_INVALID_INPUT))?;
     finalize(outcome, &options)
 }
 
@@ -111,10 +356,10 @@ impl DisplayMode {
             "iter" => Ok(Self::Iter),
             "notify" => Ok(Self::Notify),
             "final" => Ok(Self::Final),
-            other => Err(optim_error(
-                NAME,
+            other => Err(fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_ARGUMENT,
                 format!(
-                    "fminbnd: option Display must be 'off', 'iter', 'notify', or 'final', got '{other}'"
+                    "option Display must be 'off', 'iter', 'notify', or 'final', got '{other}'"
                 ),
             )),
         }
@@ -143,7 +388,10 @@ impl FminbndOptions {
             None => DEFAULT_TOL_X,
         };
         if tol_x <= 0.0 {
-            return Err(optim_error(NAME, "fminbnd: option TolX must be positive"));
+            return Err(fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_ARGUMENT,
+                "option TolX must be positive",
+            ));
         }
         let max_iter = match options.and_then(|o| lookup(o, "MaxIter")) {
             Some(value) => option_positive_usize("MaxIter", value)?,
@@ -166,9 +414,9 @@ fn parse_options(value: Option<&Value>) -> BuiltinResult<Option<StructValue>> {
     match value {
         None => Ok(None),
         Some(Value::Struct(options)) => Ok(Some(options.clone())),
-        Some(other) => Err(optim_error(
-            NAME,
-            format!("fminbnd: options must be a struct, got {other:?}"),
+        Some(other) => Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("options must be a struct, got {other:?}"),
         )),
     }
 }
@@ -186,9 +434,9 @@ fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
         Value::String(s) => Ok(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        other => Err(optim_error(
-            NAME,
-            format!("fminbnd: option {field} must be a string, got {other:?}"),
+        other => Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option {field} must be a string, got {other:?}"),
         )),
     }
 }
@@ -213,18 +461,18 @@ fn option_f64(field: &str, value: &Value) -> BuiltinResult<f64> {
             }
         }
         other => {
-            return Err(optim_error(
-                NAME,
-                format!("fminbnd: option {field} must be a real scalar, got {other:?}"),
+            return Err(fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_ARGUMENT,
+                format!("option {field} must be a real scalar, got {other:?}"),
             ))
         }
     };
     if parsed.is_finite() {
         Ok(parsed)
     } else {
-        Err(optim_error(
-            NAME,
-            format!("fminbnd: option {field} must be finite"),
+        Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option {field} must be finite"),
         ))
     }
 }
@@ -232,15 +480,15 @@ fn option_f64(field: &str, value: &Value) -> BuiltinResult<f64> {
 fn option_positive_usize(field: &str, value: &Value) -> BuiltinResult<usize> {
     let parsed = option_f64(field, value)?;
     if parsed < 1.0 {
-        return Err(optim_error(
-            NAME,
-            format!("fminbnd: option {field} must be a positive integer"),
+        return Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option {field} must be a positive integer"),
         ));
     }
     if parsed.fract() != 0.0 {
-        return Err(optim_error(
-            NAME,
-            format!("fminbnd: option {field} must be an integer scalar"),
+        return Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_ARGUMENT,
+            format!("option {field} must be an integer scalar"),
         ));
     }
     Ok(parsed as usize)
@@ -267,18 +515,18 @@ async fn scalar_bound(label: &str, value: Value) -> BuiltinResult<f64> {
             }
         }
         other => {
-            return Err(optim_error(
-                NAME,
-                format!("fminbnd: {label} must be a finite real scalar, got {other:?}"),
+            return Err(fminbnd_error_with_detail(
+                &FMINBND_ERROR_INVALID_INPUT,
+                format!("{label} must be a finite real scalar, got {other:?}"),
             ))
         }
     };
     if parsed.is_finite() {
         Ok(parsed)
     } else {
-        Err(optim_error(
-            NAME,
-            format!("fminbnd: {label} must be finite"),
+        Err(fminbnd_error_with_detail(
+            &FMINBND_ERROR_INVALID_INPUT,
+            format!("{label} must be finite"),
         ))
     }
 }
@@ -495,6 +743,38 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Value as V;
 
+    const FMINBND_HELPER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "fx",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Objective scalar value.",
+    }];
+
+    const FMINBND_HELPER_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar objective input.",
+    }];
+
+    const FMINBND_HELPER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "fx = __fminbnd_helper(x)",
+            inputs: &FMINBND_HELPER_INPUTS,
+            outputs: &FMINBND_HELPER_OUTPUT,
+        }];
+
+    const FMINBND_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+    pub const FMINBND_TEST_HELPER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &FMINBND_HELPER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &FMINBND_HELPER_ERRORS,
+    };
+
     fn run_default(handle: &str, lo: f64, hi: f64) -> Value {
         block_on(fminbnd_builtin(
             V::FunctionHandle(handle.into()),
@@ -515,9 +795,18 @@ mod tests {
         .expect("fminbnd")
     }
 
+    #[test]
+    fn fminbnd_test_helper_descriptor_is_attached_shape() {
+        assert_eq!(
+            FMINBND_TEST_HELPER_DESCRIPTOR.signatures[0].label,
+            "fx = __fminbnd_helper(x)"
+        );
+    }
+
     #[runtime_builtin(
         name = "__fminbnd_quad_minus_two",
         type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+        descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::fminbnd::tests"
     )]
     async fn quad_minus_two(x: Value) -> crate::BuiltinResult<Value> {
@@ -529,6 +818,7 @@ mod tests {
     #[runtime_builtin(
         name = "__fminbnd_quad_minus_three",
         type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+        descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::fminbnd::tests"
     )]
     async fn quad_minus_three(x: Value) -> crate::BuiltinResult<Value> {
@@ -540,6 +830,7 @@ mod tests {
     #[runtime_builtin(
         name = "__fminbnd_multi_modal",
         type_resolver(crate::builtins::math::optim::type_resolvers::scalar_root_type),
+        descriptor(crate::builtins::math::optim::fminbnd::tests::FMINBND_TEST_HELPER_DESCRIPTOR),
         builtin_path = "crate::builtins::math::optim::fminbnd::tests"
     )]
     async fn multi_modal(x: Value) -> crate::BuiltinResult<Value> {
@@ -821,5 +1112,52 @@ mod tests {
             },
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn fminbnd_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FMINBND_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                "x = fminbnd(fun, x1, x2)",
+                "x = fminbnd(fun, x1, x2, options)",
+                "[x, fval] = fminbnd(fun, x1, x2)",
+                "[x, fval] = fminbnd(fun, x1, x2, options)",
+                "[x, fval, exitflag] = fminbnd(fun, x1, x2)",
+                "[x, fval, exitflag] = fminbnd(fun, x1, x2, options)",
+                "[x, fval, exitflag, output] = fminbnd(fun, x1, x2)",
+                "[x, fval, exitflag, output] = fminbnd(fun, x1, x2, options)",
+            ]
+        );
+
+        let codes: Vec<&str> = FMINBND_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert_eq!(
+            codes,
+            vec!["RM.FMINBND.INVALID_ARGUMENT", "RM.FMINBND.INVALID_INPUT"]
+        );
+    }
+
+    #[test]
+    fn fminbnd_too_many_args_uses_stable_identifier() {
+        let err = block_on(fminbnd_builtin(
+            V::FunctionHandle("__fminbnd_quad_minus_two".into()),
+            V::Num(0.0),
+            V::Num(5.0),
+            vec![
+                Value::Struct(StructValue::new()),
+                Value::Struct(StructValue::new()),
+            ],
+        ))
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:fminbnd:InvalidArgument"));
     }
 }

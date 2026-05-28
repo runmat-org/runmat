@@ -166,6 +166,22 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             "kind": "function",
             "name": name,
         }),
+        Value::ExternalFunctionHandle(name) => json!({
+            "kind": "function",
+            "name": name,
+            "source": "external",
+        }),
+        Value::MethodFunctionHandle(name) => json!({
+            "kind": "function",
+            "name": name,
+            "source": "method",
+        }),
+        Value::BoundFunctionHandle { name, function } => json!({
+            "kind": "function",
+            "name": name,
+            "source": "bound",
+            "functionId": function,
+        }),
         Value::Closure(closure) => json!({
             "kind": "closure",
             "functionName": closure.function_name,

@@ -1,9 +1,13 @@
 //! MATLAB-compatible polygon patch plot implementation.
 
 use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
+use crate::geometry::stroke3d::{tessellate_polyline, StrokeCap3D, StrokeStyle3D};
+use crate::plots::line::LineStyle;
 use glam::{Vec2, Vec3, Vec4};
 
 const TRIANGULATION_EPSILON: f32 = 1.0e-6;
+
+const POINTS_TO_PX: f32 = 96.0 / 72.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatchFaceColorMode {
@@ -315,13 +319,79 @@ impl PatchPlot {
     }
 
     pub fn edge_render_data(&mut self) -> Option<RenderData> {
+        self.edge_render_data_with_viewport(None)
+    }
+
+    pub fn edge_render_data_with_viewport(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+    ) -> Option<RenderData> {
         let bounds = self.bounds();
         let line_width = self.line_width.max(0.0);
-        let vertices = self.generate_edge_vertices().clone();
-        if vertices.is_empty() || line_width == 0.0 {
+        if line_width == 0.0 {
             return None;
         }
+
         let color = self.effective_edge_color();
+        let width_px = (line_width.max(0.1) * POINTS_TO_PX).max(0.1);
+        if let Some(vp) = viewport_px.filter(|_| width_px > 1.0) {
+            let has_3d_content =
+                self.force_3d || self.vertices.iter().any(|point| point.z.abs() > 1e-6);
+            let data_per_px = if has_3d_content {
+                crate::core::data_units_per_px_3d(&bounds, vp)
+            } else {
+                crate::core::data_units_per_px(&bounds, vp)
+            };
+            let half_width_data = (width_px * 0.5) * data_per_px;
+            let style = StrokeStyle3D::new(half_width_data, LineStyle::Solid, StrokeCap3D::Butt);
+            let mut tri_vertices = Vec::new();
+            for face in &self.faces {
+                if face.len() < 2 {
+                    continue;
+                }
+                let mut polyline = Vec::with_capacity(face.len() + 1);
+                for &idx in face {
+                    polyline.push(self.vertices[idx]);
+                }
+                polyline.push(self.vertices[face[0]]);
+                tri_vertices.extend(tessellate_polyline(&polyline, color, style));
+            }
+            if !tri_vertices.is_empty() {
+                let indices = (0..tri_vertices.len() as u32).collect::<Vec<u32>>();
+                let index_count = indices.len();
+                let vertex_count = tri_vertices.len();
+                return Some(RenderData {
+                    pipeline_type: PipelineType::Triangles,
+                    vertices: tri_vertices,
+                    indices: Some(indices),
+                    gpu_vertices: None,
+                    bounds: Some(bounds),
+                    material: Material {
+                        albedo: color,
+                        roughness: width_px.max(0.5),
+                        alpha_mode: if color.w < 1.0 {
+                            AlphaMode::Blend
+                        } else {
+                            AlphaMode::Opaque
+                        },
+                        ..Default::default()
+                    },
+                    draw_calls: vec![DrawCall {
+                        vertex_offset: 0,
+                        vertex_count,
+                        index_offset: Some(0),
+                        index_count: Some(index_count),
+                        instance_count: 1,
+                    }],
+                    image: None,
+                });
+            }
+        }
+
+        let vertices = self.generate_edge_vertices().clone();
+        if vertices.is_empty() {
+            return None;
+        }
         Some(RenderData {
             pipeline_type: PipelineType::Lines,
             vertices,
@@ -330,7 +400,7 @@ impl PatchPlot {
             bounds: Some(bounds),
             material: Material {
                 albedo: color,
-                roughness: line_width.max(0.5),
+                roughness: width_px.max(0.5),
                 alpha_mode: if color.w < 1.0 {
                     AlphaMode::Blend
                 } else {

@@ -1,6 +1,6 @@
 #![cfg(feature = "wgpu")]
 
-use runmat_accelerate::backend::wgpu::provider_impl::{WgpuProvider, WgpuProviderOptions};
+use runmat_accelerate::backend::wgpu::provider::{WgpuProvider, WgpuProviderOptions};
 use runmat_accelerate_api::AccelProvider;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_accelerate_api::HostTensorView;

@@ -3,7 +3,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -47,19 +51,371 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fopen";
 
-fn fopen_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const FOPEN_OUTPUT_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "fid",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "File identifier on success, or -1 on failure.",
+}];
+const FOPEN_OUTPUT_FID_MSG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier on success, or -1 on failure.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"\""),
+        description: "Open failure message string (empty on success).",
+    },
+];
+const FOPEN_OUTPUT_FID_MSG_MACHINEFMT_ENCODING: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier on success, or -1 on failure.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"\""),
+        description: "Open failure message string (empty on success).",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Resolved machine-format label for the opened stream.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"UTF-8\""),
+        description: "Resolved encoding label for the opened stream.",
+    },
+];
+const FOPEN_OUTPUT_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filename associated with queried file identifier.",
+}];
+const FOPEN_OUTPUT_FILENAME_PERMISSION_MACHINEFMT_ENCODING: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filename associated with queried file identifier.",
+    },
+    BuiltinParamDescriptor {
+        name: "permission",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"\""),
+        description: "Canonical fopen permission string.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"\""),
+        description: "Machine-format label of queried stream.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"\""),
+        description: "Encoding label of queried stream.",
+    },
+];
+const FOPEN_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "fids",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Column vector of open user file identifiers.",
+}];
+const FOPEN_OUTPUT_HANDLES_NAMES_MACHINEFMTS_ENCODINGS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fids",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column vector of open user file identifiers.",
+    },
+    BuiltinParamDescriptor {
+        name: "names",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("{}"),
+        description: "Cell column of display names.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmts",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("{}"),
+        description: "Cell column of machine-format labels.",
+    },
+    BuiltinParamDescriptor {
+        name: "encodings",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("{}"),
+        description: "Cell column of encoding labels.",
+    },
+];
+
+const FOPEN_INPUTS_OPEN_FILE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Path to file to open.",
+}];
+const FOPEN_INPUTS_OPEN_FILE_PERMISSION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to file to open.",
+    },
+    BuiltinParamDescriptor {
+        name: "permission",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"r\""),
+        description: "Permission string such as 'r', 'w', 'a', optionally with '+'/'b'/'t'.",
+    },
+];
+const FOPEN_INPUTS_OPEN_FILE_PERMISSION_MACHINEFMT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to file to open.",
+    },
+    BuiltinParamDescriptor {
+        name: "permission",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"r\""),
+        description: "Permission string such as 'r', 'w', 'a', optionally with '+'/'b'/'t'.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine-format label.",
+    },
+];
+const FOPEN_INPUTS_OPEN_FILE_PERMISSION_MACHINEFMT_ENCODING: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path to file to open.",
+    },
+    BuiltinParamDescriptor {
+        name: "permission",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"r\""),
+        description: "Permission string such as 'r', 'w', 'a', optionally with '+'/'b'/'t'.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine-format label.",
+    },
+    BuiltinParamDescriptor {
+        name: "encoding",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"UTF-8\""),
+        description: "Encoding label.",
+    },
+];
+const FOPEN_INPUTS_QUERY_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "fid",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric file identifier.",
+}];
+const FOPEN_INPUTS_LIST_ALL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "selector",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"all\""),
+    description: "Literal selector 'all'.",
+}];
+const FOPEN_INPUTS_LIST_ALL_MACHINEFMT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "selector",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"all\""),
+        description: "Literal selector 'all'.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Machine-format filter for listed handles.",
+    },
+];
+
+const FOPEN_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
+    BuiltinSignatureDescriptor {
+        label: "fid = fopen(filename)",
+        inputs: &FOPEN_INPUTS_OPEN_FILE,
+        outputs: &FOPEN_OUTPUT_FID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "fid = fopen(filename, permission)",
+        inputs: &FOPEN_INPUTS_OPEN_FILE_PERMISSION,
+        outputs: &FOPEN_OUTPUT_FID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "fid = fopen(filename, permission, machinefmt)",
+        inputs: &FOPEN_INPUTS_OPEN_FILE_PERMISSION_MACHINEFMT,
+        outputs: &FOPEN_OUTPUT_FID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "fid = fopen(filename, permission, machinefmt, encoding)",
+        inputs: &FOPEN_INPUTS_OPEN_FILE_PERMISSION_MACHINEFMT_ENCODING,
+        outputs: &FOPEN_OUTPUT_FID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[fid, msg] = fopen(filename, ...)",
+        inputs: &FOPEN_INPUTS_OPEN_FILE_PERMISSION_MACHINEFMT_ENCODING,
+        outputs: &FOPEN_OUTPUT_FID_MSG,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[fid, msg, machinefmt, encoding] = fopen(filename, ...)",
+        inputs: &FOPEN_INPUTS_OPEN_FILE_PERMISSION_MACHINEFMT_ENCODING,
+        outputs: &FOPEN_OUTPUT_FID_MSG_MACHINEFMT_ENCODING,
+    },
+    BuiltinSignatureDescriptor {
+        label: "filename = fopen(fid)",
+        inputs: &FOPEN_INPUTS_QUERY_FID,
+        outputs: &FOPEN_OUTPUT_FILENAME,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[filename, permission, machinefmt, encoding] = fopen(fid)",
+        inputs: &FOPEN_INPUTS_QUERY_FID,
+        outputs: &FOPEN_OUTPUT_FILENAME_PERMISSION_MACHINEFMT_ENCODING,
+    },
+    BuiltinSignatureDescriptor {
+        label: "fids = fopen(\"all\")",
+        inputs: &FOPEN_INPUTS_LIST_ALL,
+        outputs: &FOPEN_OUTPUT_HANDLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "fids = fopen(\"all\", machinefmt)",
+        inputs: &FOPEN_INPUTS_LIST_ALL_MACHINEFMT,
+        outputs: &FOPEN_OUTPUT_HANDLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[fids, names, machinefmts, encodings] = fopen(\"all\")",
+        inputs: &FOPEN_INPUTS_LIST_ALL,
+        outputs: &FOPEN_OUTPUT_HANDLES_NAMES_MACHINEFMTS_ENCODINGS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[fids, names, machinefmts, encodings] = fopen(\"all\", machinefmt)",
+        inputs: &FOPEN_INPUTS_LIST_ALL_MACHINEFMT,
+        outputs: &FOPEN_OUTPUT_HANDLES_NAMES_MACHINEFMTS_ENCODINGS,
+    },
+];
+
+const FOPEN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOPEN.INVALID_INPUT",
+    identifier: Some("RunMat:fopen:InvalidInput"),
+    when: "Argument count or argument shape/type is invalid.",
+    message: "fopen: invalid input arguments",
+};
+const FOPEN_ERROR_INVALID_PERMISSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOPEN.INVALID_PERMISSION",
+    identifier: Some("RunMat:fopen:InvalidPermission"),
+    when: "Permission string is invalid or unsupported.",
+    message: "fopen: invalid permission string",
+};
+const FOPEN_ERROR_INVALID_MACHINEFMT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOPEN.INVALID_MACHINEFMT",
+    identifier: Some("RunMat:fopen:InvalidMachineFormat"),
+    when: "Machine-format argument is invalid or unsupported.",
+    message: "fopen: invalid machine format",
+};
+const FOPEN_ERROR_INVALID_ENCODING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOPEN.INVALID_ENCODING",
+    identifier: Some("RunMat:fopen:InvalidEncoding"),
+    when: "Encoding argument is invalid.",
+    message: "fopen: invalid encoding",
+};
+const FOPEN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FOPEN.INTERNAL",
+    identifier: None,
+    when: "Internal runtime conversion/control-flow operation fails.",
+    message: "fopen: internal error",
+};
+const FOPEN_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    FOPEN_ERROR_INVALID_INPUT,
+    FOPEN_ERROR_INVALID_PERMISSION,
+    FOPEN_ERROR_INVALID_MACHINEFMT,
+    FOPEN_ERROR_INVALID_ENCODING,
+    FOPEN_ERROR_INTERNAL,
+];
+pub const FOPEN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FOPEN_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FOPEN_ERRORS,
+};
+
+fn fopen_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    fopen_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn fopen_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let message = err.message().to_string();
-    let identifier = err.identifier().map(|value| value.to_string());
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
         .with_source(err);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = FOPEN_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -72,6 +428,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     keywords = "fopen,file,io,permission,encoding",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fopen_type),
+    descriptor(crate::builtins::io::filetext::fopen::FOPEN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::fopen"
 )]
 async fn fopen_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -254,7 +611,8 @@ impl ListOutputs {
             handles = Vec::new();
         }
         let shape = if rows == 0 { vec![0, 1] } else { vec![rows, 1] };
-        let tensor = Tensor::new(handles, shape).map_err(|e| fopen_error(format!("fopen: {e}")))?;
+        let tensor = Tensor::new(handles, shape)
+            .map_err(|e| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, &e))?;
 
         let mut name_values = Vec::with_capacity(infos.len());
         let mut machine_values = Vec::with_capacity(infos.len());
@@ -308,11 +666,15 @@ impl Permission {
             Some(v) => {
                 let text = scalar_string(
                     v,
-                    "fopen: expected permission as a string scalar or character vector",
+                    "expected permission as a string scalar or character vector",
+                    &FOPEN_ERROR_INVALID_PERMISSION,
                 )?;
                 let trimmed = text.trim();
                 if trimmed.is_empty() {
-                    return Err(fopen_error("fopen: permission string must not be empty"));
+                    return Err(fopen_error_with_detail(
+                        &FOPEN_ERROR_INVALID_PERMISSION,
+                        "permission string must not be empty",
+                    ));
                 }
                 trimmed.to_string()
             }
@@ -322,7 +684,12 @@ impl Permission {
         let mut chars = raw.chars();
         let base = chars
             .next()
-            .ok_or_else(|| fopen_error("fopen: permission string must not be empty"))?
+            .ok_or_else(|| {
+                fopen_error_with_detail(
+                    &FOPEN_ERROR_INVALID_PERMISSION,
+                    "permission string must not be empty",
+                )
+            })?
             .to_ascii_lowercase();
 
         let mut read = false;
@@ -346,9 +713,10 @@ impl Permission {
                 append = true;
             }
             _ => {
-                return Err(fopen_error(format!(
-                    "fopen: unsupported permission prefix '{base}'"
-                )));
+                return Err(fopen_error_with_detail(
+                    &FOPEN_ERROR_INVALID_PERMISSION,
+                    format!("unsupported permission prefix '{base}'"),
+                ));
             }
         }
 
@@ -360,8 +728,9 @@ impl Permission {
             match c {
                 '+' => {
                     if plus {
-                        return Err(fopen_error(
-                            "fopen: duplicate '+' modifier in permission string",
+                        return Err(fopen_error_with_detail(
+                            &FOPEN_ERROR_INVALID_PERMISSION,
+                            "duplicate '+' modifier in permission string",
                         ));
                     }
                     plus = true;
@@ -370,31 +739,35 @@ impl Permission {
                 }
                 'b' | 'B' => {
                     if binary {
-                        return Err(fopen_error(
-                            "fopen: duplicate 'b' modifier in permission string",
+                        return Err(fopen_error_with_detail(
+                            &FOPEN_ERROR_INVALID_PERMISSION,
+                            "duplicate 'b' modifier in permission string",
                         ));
                     }
                     binary = true;
                 }
                 't' | 'T' => {
                     if explicit_text {
-                        return Err(fopen_error(
-                            "fopen: duplicate 't' modifier in permission string",
+                        return Err(fopen_error_with_detail(
+                            &FOPEN_ERROR_INVALID_PERMISSION,
+                            "duplicate 't' modifier in permission string",
                         ));
                     }
                     explicit_text = true;
                 }
                 other => {
-                    return Err(fopen_error(format!(
-                        "fopen: unrecognised permission modifier '{other}'"
-                    )));
+                    return Err(fopen_error_with_detail(
+                        &FOPEN_ERROR_INVALID_PERMISSION,
+                        format!("unrecognised permission modifier '{other}'"),
+                    ));
                 }
             }
         }
 
         if binary && explicit_text {
-            return Err(fopen_error(
-                "fopen: permission modifiers 'b' and 't' are mutually exclusive",
+            return Err(fopen_error_with_detail(
+                &FOPEN_ERROR_INVALID_PERMISSION,
+                "permission modifiers 'b' and 't' are mutually exclusive",
             ));
         }
 
@@ -438,7 +811,10 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
 
 async fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
     if rest.len() > 3 {
-        return Err(fopen_error("fopen: too many input arguments"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "too many input arguments",
+        ));
     }
 
     let path = value_to_path(path_value)?;
@@ -475,7 +851,10 @@ async fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenE
 
 fn handle_query(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
     if !rest.is_empty() {
-        return Err(fopen_error("fopen: too many input arguments"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "too many input arguments",
+        ));
     }
     let fid = parse_fid(fid_value)?;
     let outputs = match registry::info_for(fid) {
@@ -487,7 +866,10 @@ fn handle_query(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
 
 fn handle_all(rest: &[Value]) -> BuiltinResult<FopenEval> {
     if rest.len() > 1 {
-        return Err(fopen_error("fopen: too many input arguments"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "too many input arguments",
+        ));
     }
     let machinefmt_filter = if let Some(value) = rest.first() {
         Some(parse_machinefmt(Some(value))?)
@@ -525,18 +907,30 @@ fn is_numeric_value(value: &Value) -> bool {
 }
 
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
-    let num: f64 = value
-        .try_into()
-        .map_err(|_| fopen_error("fopen: file identifier must be numeric"))?;
+    let num: f64 = value.try_into().map_err(|_| {
+        fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "file identifier must be numeric",
+        )
+    })?;
     if !num.is_finite() {
-        return Err(fopen_error("fopen: file identifier must be finite"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "file identifier must be finite",
+        ));
     }
     let rounded = num.round();
     if (rounded - num).abs() > f64::EPSILON {
-        return Err(fopen_error("fopen: file identifier must be an integer"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "file identifier must be an integer",
+        ));
     }
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
-        return Err(fopen_error("fopen: file identifier is out of range"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "file identifier is out of range",
+        ));
     }
     Ok(rounded as i32)
 }
@@ -544,14 +938,18 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
 fn value_to_path(value: &Value) -> BuiltinResult<PathBuf> {
     let raw = scalar_string(
         value,
-        "fopen: expected filename as a string scalar or character vector",
+        "expected filename as a string scalar or character vector",
+        &FOPEN_ERROR_INVALID_INPUT,
     )?;
     normalize_path(&raw)
 }
 
 fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
-        return Err(fopen_error("fopen: filename must not be empty"));
+        return Err(fopen_error_with_detail(
+            &FOPEN_ERROR_INVALID_INPUT,
+            "filename must not be empty",
+        ));
     }
     Ok(Path::new(raw).to_path_buf())
 }
@@ -562,11 +960,15 @@ fn parse_machinefmt(value: Option<&Value>) -> BuiltinResult<String> {
         Some(v) => {
             let text = scalar_string(
                 v,
-                "fopen: expected machine format as a string scalar or character vector",
+                "expected machine format as a string scalar or character vector",
+                &FOPEN_ERROR_INVALID_MACHINEFMT,
             )?;
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                return Err(fopen_error("fopen: machine format must not be empty"));
+                return Err(fopen_error_with_detail(
+                    &FOPEN_ERROR_INVALID_MACHINEFMT,
+                    "machine format must not be empty",
+                ));
             }
             let lower = trimmed.to_ascii_lowercase();
             let collapsed: String = lower
@@ -591,9 +993,10 @@ fn parse_machinefmt(value: Option<&Value>) -> BuiltinResult<String> {
             if let Some(suffix) = lower.strip_prefix("ieee-be") {
                 return Ok(format!("ieee-be{suffix}"));
             }
-            Err(fopen_error(format!(
-                "fopen: unsupported machine format '{trimmed}'"
-            )))
+            Err(fopen_error_with_detail(
+                &FOPEN_ERROR_INVALID_MACHINEFMT,
+                format!("unsupported machine format '{trimmed}'"),
+            ))
         }
     }
 }
@@ -610,32 +1013,41 @@ fn parse_encoding(value: Option<&Value>, permission: &Permission) -> BuiltinResu
         Some(v) => {
             let text = scalar_string(
                 v,
-                "fopen: expected encoding as a string scalar or character vector",
+                "expected encoding as a string scalar or character vector",
+                &FOPEN_ERROR_INVALID_ENCODING,
             )?;
             let trimmed = text.trim();
             if trimmed.is_empty() {
-                return Err(fopen_error("fopen: encoding name must not be empty"));
+                return Err(fopen_error_with_detail(
+                    &FOPEN_ERROR_INVALID_ENCODING,
+                    "encoding name must not be empty",
+                ));
             }
             Ok(normalize_encoding_label(trimmed))
         }
     }
 }
 
-fn scalar_string(value: &Value, err: &str) -> BuiltinResult<String> {
+fn scalar_string(
+    value: &Value,
+    err_detail: &str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        _ => Err(fopen_error(err)),
+        _ => Err(fopen_error_with_detail(error, err_detail)),
     }
 }
 
 fn make_cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
     let len = values.len();
     if len == 0 {
-        make_cell(values, 0, 0).map_err(|err| fopen_error(format!("fopen: {err}")))
+        make_cell(values, 0, 0).map_err(|err| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, &err))
     } else {
-        make_cell(values, len, 1).map_err(|err| fopen_error(format!("fopen: {err}")))
+        make_cell(values, len, 1)
+            .map_err(|err| fopen_error_with_detail(&FOPEN_ERROR_INTERNAL, &err))
     }
 }
 
@@ -663,6 +1075,27 @@ pub(crate) mod tests {
 
     fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
         registry::test_guard()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fopen_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FOPEN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"fid = fopen(filename)"));
+        assert!(labels.contains(&"fid = fopen(filename, permission)"));
+        assert!(labels.contains(&"fid = fopen(filename, permission, machinefmt)"));
+        assert!(labels.contains(&"fid = fopen(filename, permission, machinefmt, encoding)"));
+        assert!(labels.contains(&"[fid, msg] = fopen(filename, ...)"));
+        assert!(labels.contains(&"[fid, msg, machinefmt, encoding] = fopen(filename, ...)"));
+        assert!(labels.contains(&"filename = fopen(fid)"));
+        assert!(labels.contains(&"[filename, permission, machinefmt, encoding] = fopen(fid)"));
+        assert!(labels.contains(&"fids = fopen(\"all\")"));
+        assert!(labels.contains(&"fids = fopen(\"all\", machinefmt)"));
+        assert!(labels.contains(&"[fids, names, machinefmts, encodings] = fopen(\"all\")"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

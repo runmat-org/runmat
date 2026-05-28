@@ -1,5 +1,9 @@
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -50,10 +54,62 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "nextpow2";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const NEXTPOW2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Exponent p where 2^p >= abs(X).",
+}];
+
+const NEXTPOW2_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Real numeric/logical input.",
+}];
+
+const NEXTPOW2_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "p = nextpow2(X)",
+    inputs: &NEXTPOW2_INPUTS,
+    outputs: &NEXTPOW2_OUTPUT,
+}];
+
+const NEXTPOW2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NEXTPOW2.INVALID_INPUT",
+    identifier: Some("RunMat:nextpow2:InvalidInput"),
+    when: "Input is not convertible to a supported real numeric tensor.",
+    message: "nextpow2: invalid input",
+};
+
+const NEXTPOW2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NEXTPOW2.INTERNAL",
+    identifier: Some("RunMat:nextpow2:Internal"),
+    when: "Internal gather/provider/tensor construction failed.",
+    message: "nextpow2: internal error",
+};
+
+const NEXTPOW2_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [NEXTPOW2_ERROR_INVALID_INPUT, NEXTPOW2_ERROR_INTERNAL];
+
+pub const NEXTPOW2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NEXTPOW2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NEXTPOW2_ERRORS,
+};
+
+fn nextpow2_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -63,6 +119,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "nextpow2,power of two,fft,zero padding,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::nextpow2::NEXTPOW2_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::nextpow2"
 )]
 async fn nextpow2_builtin(value: Value) -> BuiltinResult<Value> {
@@ -84,7 +141,7 @@ async fn nextpow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
 fn nextpow2_host(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|e| builtin_error(format!("nextpow2: {e}")))?;
+        .map_err(|e| nextpow2_error_with_detail(&NEXTPOW2_ERROR_INVALID_INPUT, e))?;
     Ok(tensor::tensor_into_value(nextpow2_tensor(tensor)?))
 }
 
@@ -94,7 +151,8 @@ fn nextpow2_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&x| nextpow2_scalar(x))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("nextpow2: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| nextpow2_error_with_detail(&NEXTPOW2_ERROR_INTERNAL, e))
 }
 
 fn nextpow2_scalar(x: f64) -> f64 {
@@ -112,6 +170,16 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+
+    #[test]
+    fn nextpow2_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = NEXTPOW2_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"p = nextpow2(X)"));
+    }
 
     #[test]
     fn nextpow2_type_preserves_tensor_shape() {
@@ -185,5 +253,11 @@ mod tests {
             let t = test_support::gather(gpu).expect("gather");
             assert_eq!(t.data, vec![0.0, 0.0, 2.0, 4.0]);
         });
+    }
+
+    #[test]
+    fn nextpow2_rejects_string_with_stable_identifier() {
+        let err = block_on(nextpow2_builtin(Value::from("bad"))).expect_err("expected error");
+        assert_eq!(err.identifier(), NEXTPOW2_ERROR_INVALID_INPUT.identifier);
     }
 }

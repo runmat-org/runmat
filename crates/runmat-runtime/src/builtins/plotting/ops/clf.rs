@@ -3,11 +3,69 @@
 use std::collections::BTreeSet;
 
 use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
 use super::op_common::figure_actions::{parse_clf_action, FigureAction};
 use super::state::{clear_figure, clear_figure_with_builtin, figure_handles, FigureHandle};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+const CLF_OUTPUT_RESULT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "result",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cleared handle for single-target calls or count for multi/all clears.",
+}];
+
+const CLF_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+
+const CLF_INPUTS_TARGETS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "targets",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Figure handle(s) or mode tokens ('all', 'reset').",
+}];
+
+const CLF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "result = clf()",
+        inputs: &CLF_INPUTS_NONE,
+        outputs: &CLF_OUTPUT_RESULT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "result = clf(targets...)",
+        inputs: &CLF_INPUTS_TARGETS,
+        outputs: &CLF_OUTPUT_RESULT,
+    },
+];
+
+const CLF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CLF.INVALID_ARGUMENT",
+    identifier: Some("RunMat:clf:InvalidArgument"),
+    when: "One or more clear targets are invalid.",
+    message: "clf: invalid argument",
+};
+
+const CLF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CLF.INTERNAL",
+    identifier: Some("RunMat:clf:Internal"),
+    when: "Internal figure clear operation fails.",
+    message: "clf: internal operation failed",
+};
+
+const CLF_ERRORS: [BuiltinErrorDescriptor; 2] = [CLF_ERROR_INVALID_ARGUMENT, CLF_ERROR_INTERNAL];
+
+pub const CLF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CLF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CLF_ERRORS,
+};
 
 #[runtime_builtin(
     name = "clf",
@@ -17,6 +75,7 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::clf::CLF_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::clf"
 )]
 pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -63,6 +122,18 @@ pub(crate) mod tests {
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn clf_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CLF_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"result = clf()"));
+        assert!(labels.contains(&"result = clf(targets...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

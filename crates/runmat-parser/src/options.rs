@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum CompatMode {
+    #[serde(rename = "runmat")]
+    RunMat,
     #[default]
+    #[serde(rename = "matlab")]
     Matlab,
+    #[serde(rename = "strict")]
     Strict,
 }
 
@@ -25,5 +28,12 @@ impl Default for ParserOptions {
 impl ParserOptions {
     pub fn new(compat_mode: CompatMode) -> Self {
         Self { compat_mode }
+    }
+}
+
+impl CompatMode {
+    /// Whether semantic lowering should allow RunMat-only extension syntax.
+    pub fn allows_runmat_extensions(self) -> bool {
+        !matches!(self, Self::Strict)
     }
 }

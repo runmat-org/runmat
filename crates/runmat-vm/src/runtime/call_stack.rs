@@ -13,14 +13,6 @@ struct CallStackState {
     depth: usize,
 }
 
-pub struct CallFrameGuard;
-
-impl Drop for CallFrameGuard {
-    fn drop(&mut self) {
-        pop_call_frame();
-    }
-}
-
 runmat_thread_local! {
     static CALL_STACK: RefCell<CallStackState> = const {
         RefCell::new(CallStackState {
@@ -68,43 +60,6 @@ pub fn set_call_stack_limit(limit: usize) {
             while stack.frames.len() > limit {
                 stack.frames.remove(0);
             }
-        }
-    });
-}
-
-pub fn push_call_frame(name: &str, bytecode: &Bytecode, pc: usize) -> CallFrameGuard {
-    let span = bytecode
-        .instr_spans
-        .get(pc)
-        .map(|span| (span.start, span.end));
-    let frame = CallFrame {
-        function: name.to_string(),
-        source_id: bytecode.source_id.map(|id| id.0),
-        span,
-    };
-    CALL_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        stack.depth = stack.depth.saturating_add(1);
-        let limit = callstack_limit();
-        if limit == 0 {
-            return;
-        }
-        if stack.frames.len() == limit {
-            stack.frames.remove(0);
-        }
-        stack.frames.push(frame);
-    });
-    CallFrameGuard
-}
-
-pub fn pop_call_frame() {
-    CALL_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        if stack.depth > 0 {
-            stack.depth -= 1;
-        }
-        if !stack.frames.is_empty() {
-            stack.frames.pop();
         }
     });
 }

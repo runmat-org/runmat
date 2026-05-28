@@ -7,7 +7,7 @@ use parse::parse;
 fn basic_command_syntax_to_func_call() {
     let program = parse("plot x y").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
             assert_eq!(name, "plot");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::Ident(ref n, _) if n == "x"));
@@ -22,7 +22,7 @@ fn command_form_with_quoted_and_ellipsis() {
     // echo with quoted arg and ellipsis line continuation
     let program = parse("echo 'hello' ...\n 42").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "echo");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::String(_, _)));
@@ -37,7 +37,7 @@ fn command_form_ellipsis_consumes_multiple_trailing_newlines() {
     // `...` followed by more than one newline should still continue the command.
     let program = parse("echo 'hello' ...\n\n 42").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "echo");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::String(_, _)));
@@ -73,7 +73,7 @@ fn command_form_with_end_token_as_arg() {
     // end appears as a bare token in command-form; parser should treat it as an identifier literal
     let program = parse("foo end bar").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "foo");
             assert_eq!(args.len(), 2);
             // We currently parse end as EndKeyword only inside expression contexts; here it remains Ident("end")
@@ -91,7 +91,7 @@ fn command_form_with_end_token_as_arg() {
 fn command_syntax_with_numbers_and_strings() {
     let program = parse("cmd 42 'ok'").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
             assert_eq!(name, "cmd");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::Number(ref n, _) if n == "42"));
@@ -105,12 +105,12 @@ fn command_syntax_with_numbers_and_strings() {
 fn hold_on_rewrites_to_string_arg() {
     let program = parse_with_options("hold on", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
             assert_eq!(name, "hold");
             assert_eq!(args.len(), 1);
             assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"on\""));
         }
-        _ => panic!("expected hold command to become func call"),
+        _ => panic!("expected hold command to become command call"),
     }
 }
 
@@ -118,7 +118,7 @@ fn hold_on_rewrites_to_string_arg() {
 fn colorbar_without_arg_allowed() {
     let program = parse_with_options("colorbar", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
             assert_eq!(name, "colorbar");
             assert!(args.is_empty());
         }
@@ -127,10 +127,53 @@ fn colorbar_without_arg_allowed() {
 }
 
 #[test]
+fn drawnow_without_arg_is_command_form() {
+    let program = parse_with_options("drawnow", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "drawnow");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected drawnow command form"),
+    }
+}
+
+#[test]
+fn axis_on_off_rewrite_to_string_args() {
+    for src in ["axis on", "axis off"] {
+        let program = parse_with_options(src, ParserOptions::new(CompatMode::Matlab)).unwrap();
+        match &program.body[0] {
+            Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+                assert_eq!(name, "axis");
+                assert_eq!(args.len(), 1);
+                let expected = src.split_whitespace().nth(1).unwrap();
+                assert!(matches!(&args[0], Expr::String(s, _) if s.trim_matches('"') == expected));
+            }
+            _ => panic!("expected {src} command form"),
+        }
+    }
+}
+
+#[test]
+fn warning_stringifies_bare_word_args() {
+    let program =
+        parse_with_options("warning off all", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "warning");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"off\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"all\""));
+        }
+        _ => panic!("expected warning command form"),
+    }
+}
+
+#[test]
 fn close_all_stringifies_bare_word_arg() {
     let program = parse_with_options("close all", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
             assert_eq!(name, "close");
             assert_eq!(args.len(), 1);
             assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"all\""));
@@ -143,7 +186,7 @@ fn close_all_stringifies_bare_word_arg() {
 fn clear_all_stringifies_bare_word_arg() {
     let program = parse_with_options("clear all", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
             assert_eq!(name, "clear");
             assert_eq!(args.len(), 1);
             assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"all\""));
@@ -153,10 +196,52 @@ fn clear_all_stringifies_bare_word_arg() {
 }
 
 #[test]
+fn clear_without_arg_is_command_form() {
+    let program = parse_with_options("clear", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "clear");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected clear command form"),
+    }
+}
+
+#[test]
+fn clc_without_arg_is_command_form() {
+    let program = parse_with_options("clc", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "clc");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected clc command form"),
+    }
+}
+
+#[test]
+fn pause_without_arg_is_command_form() {
+    let program = parse_with_options("pause", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "pause");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected pause command form"),
+    }
+}
+
+#[test]
 fn clearvars_stringifies_bare_word_args() {
     let program =
         parse_with_options("clearvars x y", ParserOptions::new(CompatMode::Matlab)).unwrap();
     match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "clearvars");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"x\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"y\""));
+        }
         Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
             assert_eq!(name, "clearvars");
             assert_eq!(args.len(), 2);
@@ -175,6 +260,13 @@ fn clearvars_except_stringifies_dash_option_and_names() {
     )
     .unwrap();
     match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "clearvars");
+            assert_eq!(args.len(), 3);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"-except\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"x\""));
+            assert!(matches!(args[2], Expr::String(ref s, _) if s == "\"y\""));
+        }
         Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
             assert_eq!(name, "clearvars");
             assert_eq!(args.len(), 3);

@@ -1,6 +1,13 @@
+use crate::call::shared::{
+    call_object_member_subsasgn, call_object_member_subsref,
+    call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
+    class_defines_member_subsasgn, class_defines_member_subsref, external_qualified_display_name,
+};
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
 use runmat_runtime::RuntimeError;
+
+const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 
 pub async fn load_member(
     base: Value,
@@ -18,13 +25,18 @@ pub async fn load_member(
                     .into());
                 }
                 if p.get_access == Access::Private {
-                    return Err(format!("Property '{}' is private", field).into());
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
                 }
                 if p.is_dependent {
-                    let getter = format!("get.{field}");
-                    if let Ok(v) =
-                        runmat_runtime::call_builtin_async(&getter, &[Value::Object(obj.clone())])
-                            .await
+                    if let Ok(v) = call_object_property_getter_with_outputs(
+                        Value::Object(obj.clone()),
+                        &field,
+                        1,
+                    )
+                    .await
                     {
                         return Ok(v);
                     }
@@ -46,14 +58,8 @@ pub async fn load_member(
                 )
                 .into())
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if cls.methods.contains_key("subsref") {
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String(".".to_string()),
-                        Value::String(field),
-                    ];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
+                if class_defines_member_subsref(&cls) {
+                    call_object_member_subsref(Value::Object(obj), field).await
                 } else {
                     Err(format!(
                         "Undefined property '{}' for class {}",
@@ -66,13 +72,7 @@ pub async fn load_member(
             }
         }
         Value::HandleObject(handle) => {
-            let args = vec![
-                Value::HandleObject(handle),
-                Value::String("subsref".to_string()),
-                Value::String(".".to_string()),
-                Value::String(field),
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
+            call_object_member_subsref(Value::HandleObject(handle), field).await
         }
         Value::ClassRef(cls) => load_static_member(&cls, &field),
         base @ (Value::Num(_) | Value::Int(_)) => {
@@ -96,24 +96,7 @@ pub async fn load_member(
                 Err(format!("Undefined field '{}'", field).into())
             }
         }
-        Value::Cell(ca) => {
-            let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-            for v in &ca.data {
-                match &**v {
-                    Value::Struct(st) => {
-                        if let Some(fv) = st.fields.get(&field) {
-                            out.push(fv.clone());
-                        } else {
-                            out.push(Value::Num(0.0));
-                        }
-                    }
-                    other => out.push(other.clone()),
-                }
-            }
-            let new_cell = runmat_builtins::CellArray::new(out, ca.rows, ca.cols)
-                .map_err(|e| format!("cell field gather: {e}"))?;
-            Ok(Value::Cell(new_cell))
-        }
+        Value::Cell(ca) => crate::ops::cells::gather_cell_member(&ca, &field),
         Value::MException(mexn) => {
             let value = match field.as_str() {
                 "identifier" => Value::String(mexn.identifier.clone()),
@@ -166,16 +149,18 @@ pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError>
         }
         Ok(Value::Closure(Closure {
             function_name: m.function_name,
+            bound_function: None,
             captures: vec![],
         }))
     } else {
-        let qualified = format!("{cls}.{field}");
+        let qualified = external_qualified_display_name(cls, field);
         if runmat_builtins::builtin_functions()
             .iter()
             .any(|b| b.name == qualified)
         {
             Ok(Value::Closure(Closure {
                 function_name: qualified,
+                bound_function: None,
                 captures: vec![],
             }))
         } else {
@@ -205,13 +190,17 @@ where
                     .into());
                 }
                 if p.set_access == Access::Private {
-                    return Err(format!("Property '{}' is private", field).into());
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
                 }
                 if p.is_dependent {
-                    let setter = format!("set.{field}");
-                    if let Ok(v) = runmat_runtime::call_builtin_async(
-                        &setter,
-                        &[Value::Object(obj.clone()), rhs.clone()],
+                    if let Ok(v) = call_object_property_setter_with_outputs(
+                        Value::Object(obj.clone()),
+                        &field,
+                        rhs.clone(),
+                        1,
                     )
                     .await
                     {
@@ -224,15 +213,8 @@ where
                 obj.properties.insert(field, rhs);
                 Ok(Value::Object(obj))
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if cls.methods.contains_key("subsasgn") {
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String(".".to_string()),
-                        Value::String(field),
-                        rhs,
-                    ];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
+                if class_defines_member_subsasgn(&cls) {
+                    call_object_member_subsasgn(Value::Object(obj), field, rhs).await
                 } else {
                     Err(format!("Undefined property '{}' for class {}", field, cls.name).into())
                 }
@@ -246,7 +228,10 @@ where
                     return Err(format!("Property '{}' is not static", field).into());
                 }
                 if p.set_access == Access::Private {
-                    return Err(format!("Property '{}' is private", field).into());
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
                 }
                 runmat_builtins::set_static_property_value_in_owner(&owner, &field, rhs)?;
                 Ok(Value::ClassRef(cls))
@@ -255,14 +240,7 @@ where
             }
         }
         Value::HandleObject(handle) => {
-            let args = vec![
-                Value::HandleObject(handle),
-                Value::String("subsasgn".to_string()),
-                Value::String(".".to_string()),
-                Value::String(field),
-                rhs,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
+            call_object_member_subsasgn(Value::HandleObject(handle), field, rhs).await
         }
         Value::Num(0.0) if allow_init => {
             let mut st = StructValue::new();
@@ -290,41 +268,7 @@ where
             st.fields.insert(field, rhs);
             Ok(Value::Struct(st))
         }
-        Value::Cell(mut ca) => {
-            let rhs_cell = if let Value::Cell(rc) = &rhs {
-                Some(rc)
-            } else {
-                None
-            };
-            if let Some(rc) = rhs_cell {
-                if rc.rows != ca.rows || rc.cols != ca.cols {
-                    return Err("Field assignment: cell rhs shape mismatch"
-                        .to_string()
-                        .into());
-                }
-            }
-            for i in 0..ca.data.len() {
-                let rv = if let Some(rc) = rhs_cell {
-                    (*rc.data[i]).clone()
-                } else {
-                    rhs.clone()
-                };
-                match &mut *ca.data[i] {
-                    Value::Struct(st) => {
-                        if let Some(oldv) = st.fields.get(&field) {
-                            on_write(oldv, &rv);
-                        }
-                        st.fields.insert(field.clone(), rv);
-                    }
-                    other => {
-                        let mut st = StructValue::new();
-                        st.fields.insert(field.clone(), rv);
-                        *other = Value::Struct(st);
-                    }
-                }
-            }
-            Ok(Value::Cell(ca))
-        }
+        Value::Cell(ca) => crate::ops::cells::assign_cell_member(ca, field, rhs, on_write),
         _ => Err(mex("StoreMember", "StoreMember on non-object")),
     }
 }
@@ -372,5 +316,219 @@ fn is_possible_graphics_handle_value(value: &Value) -> bool {
         Value::Num(v) => v.is_finite() && *v > 0.0,
         Value::Int(i) => i.to_f64() > 0.0,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_member, load_static_member, store_member};
+    use runmat_builtins::{
+        get_static_property_value, register_class, Access, ClassDef, MethodDef, ObjectInstance,
+        PropertyDef, Value,
+    };
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn load_static_member_resolves_inherited_static_property_value() {
+        let parent_name = unique_class_name("vm_static_parent");
+        let child_name = unique_class_name("vm_static_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "version".to_string(),
+            PropertyDef {
+                name: "version".to_string(),
+                is_static: true,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: Some(Value::Num(1.0)),
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        runmat_builtins::set_static_property_value(&parent_name, "version", Value::Num(3.0));
+        let value = load_static_member(&child_name, "version")
+            .expect("inherited static property should resolve through parent metadata owner");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn store_member_updates_inherited_static_property_owner_slot() {
+        let parent_name = unique_class_name("vm_store_static_parent");
+        let child_name = unique_class_name("vm_store_static_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "version".to_string(),
+            PropertyDef {
+                name: "version".to_string(),
+                is_static: true,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: Some(Value::Num(1.0)),
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let out = futures::executor::block_on(store_member(
+            Value::ClassRef(child_name.clone()),
+            "version".to_string(),
+            Value::Num(9.0),
+            false,
+            |_old, _new| {},
+        ))
+        .expect("storing inherited static property via child class ref should succeed");
+        assert_eq!(out, Value::ClassRef(child_name));
+        assert_eq!(
+            get_static_property_value(&parent_name, "version"),
+            Some(Value::Num(9.0))
+        );
+    }
+
+    #[test]
+    fn load_static_member_resolves_inherited_static_method() {
+        let parent_name = unique_class_name("vm_method_parent");
+        let child_name = unique_class_name("vm_method_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "build".to_string(),
+            MethodDef {
+                name: "build".to_string(),
+                is_static: true,
+                access: Access::Public,
+                function_name: "build_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let value = load_static_member(&child_name, "build")
+            .expect("inherited static method should resolve through parent metadata");
+        let Value::Closure(closure) = value else {
+            panic!("expected static method lookup to return closure");
+        };
+        assert_eq!(closure.function_name, "build_impl");
+    }
+
+    #[test]
+    fn load_member_uses_inherited_subsref_for_missing_property() {
+        let parent_name = unique_class_name("vm_subsref_parent");
+        let child_name = unique_class_name("vm_subsref_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "subsref".to_string(),
+            MethodDef {
+                name: "subsref".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "OverIdx.subsref".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let obj = Value::Object(ObjectInstance::new(child_name));
+        let value = futures::executor::block_on(load_member(obj, "missing".to_string(), false))
+            .expect("missing member should dispatch to inherited subsref");
+        assert_eq!(value, Value::Num(77.0));
+    }
+
+    #[test]
+    fn store_member_uses_inherited_subsasgn_for_missing_property() {
+        let parent_name = unique_class_name("vm_subsasgn_parent");
+        let child_name = unique_class_name("vm_subsasgn_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "subsasgn".to_string(),
+            MethodDef {
+                name: "subsasgn".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "OverIdx.subsasgn".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let out = futures::executor::block_on(store_member(
+            Value::Object(ObjectInstance::new(child_name)),
+            "missing".to_string(),
+            Value::Num(13.0),
+            false,
+            |_old, _new| {},
+        ))
+        .expect("missing member store should dispatch to inherited subsasgn");
+        let Value::Object(obj) = out else {
+            panic!("expected object result from inherited subsasgn");
+        };
+        assert_eq!(obj.properties.get("missing"), Some(&Value::Num(13.0)));
     }
 }

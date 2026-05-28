@@ -5,7 +5,10 @@ use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 #[cfg(test)]
 use runmat_builtins::Tensor;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{
@@ -31,13 +34,14 @@ use super::perf::scatter_target_points;
 use super::plotting_error;
 use super::point::{
     convert_rgb_color_matrix, convert_scalar_color_values, convert_size_vector,
-    map_scalar_values_to_colors, validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs,
-    PointColorArg, PointGpuColor, PointSizeArg,
+    default_marker_diameter_px, map_scalar_values_to_colors, marker_area_points2_to_diameter_px,
+    validate_gpu_color_matrix, validate_gpu_vector_length, PointArgs, PointColorArg, PointGpuColor,
+    PointSizeArg,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-use crate::{BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -69,6 +73,392 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "scatter";
 
+const SCATTER_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the rendered scatter plot.",
+}];
+
+const SCATTER_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+];
+
+const SCATTER_INPUTS_X_Y_S: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+];
+
+const SCATTER_INPUTS_X_Y_S_C: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Color specification (uniform, per-point scalar, or RGB matrix).",
+    },
+];
+
+const SCATTER_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker/line style shorthand.",
+    },
+];
+
+const SCATTER_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value marker style properties.",
+    },
+];
+
+const SCATTER_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+];
+
+const SCATTER_INPUTS_AX_X_Y_S: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+];
+
+const SCATTER_INPUTS_AX_X_Y_S_C: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker area specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Color specification (uniform, per-point scalar, or RGB matrix).",
+    },
+];
+
+const SCATTER_INPUTS_AX_X_Y_STYLE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Marker/line style shorthand.",
+    },
+];
+
+const SCATTER_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value marker style properties.",
+    },
+];
+
+const SCATTER_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(X, Y)",
+        inputs: &SCATTER_INPUTS_X_Y,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(X, Y, S)",
+        inputs: &SCATTER_INPUTS_X_Y_S,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(X, Y, S, C)",
+        inputs: &SCATTER_INPUTS_X_Y_S_C,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(X, Y, LineSpec)",
+        inputs: &SCATTER_INPUTS_X_Y_STYLE,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(X, Y, Name, Value, ...)",
+        inputs: &SCATTER_INPUTS_X_Y_PROPS,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(ax, X, Y)",
+        inputs: &SCATTER_INPUTS_AX_X_Y,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(ax, X, Y, S)",
+        inputs: &SCATTER_INPUTS_AX_X_Y_S,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(ax, X, Y, S, C)",
+        inputs: &SCATTER_INPUTS_AX_X_Y_S_C,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(ax, X, Y, LineSpec)",
+        inputs: &SCATTER_INPUTS_AX_X_Y_STYLE,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = scatter(ax, X, Y, Name, Value, ...)",
+        inputs: &SCATTER_INPUTS_AX_X_Y_PROPS,
+        outputs: &SCATTER_OUTPUT_HANDLE,
+    },
+];
+
+pub const SCATTER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SCATTER.INVALID_ARGUMENT",
+    identifier: Some("RunMat:scatter:InvalidArgument"),
+    when: "Input data, axes targeting, or marker style arguments are invalid.",
+    message: "scatter: invalid argument",
+};
+
+pub const SCATTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SCATTER.INTERNAL",
+    identifier: Some("RunMat:scatter:Internal"),
+    when: "Internal scatter construction or rendering fails unexpectedly.",
+    message: "scatter: internal operation failed",
+};
+
+const SCATTER_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SCATTER_ERROR_INVALID_ARGUMENT, SCATTER_ERROR_INTERNAL];
+
+pub const SCATTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SCATTER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SCATTER_ERRORS,
+};
+
+fn scatter_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_scatter_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    scatter_error_with_detail(&SCATTER_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_scatter_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    scatter_error_with_detail(&SCATTER_ERROR_INTERNAL, err.message)
+}
+
 #[runtime_builtin(
     name = "scatter",
     category = "plotting",
@@ -77,24 +467,30 @@ const BUILTIN_NAME: &str = "scatter";
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::scatter::SCATTER_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::scatter"
 )]
 pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut args = vec![x, y];
     args.extend(rest);
-    let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
-    apply_axes_target(axes_target, BUILTIN_NAME)?;
+    let (axes_target, mut args) =
+        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?;
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?;
     if args.len() < 2 {
-        return Err(scatter_err(
-            "scatter: expected X and Y data after axes handle",
+        return Err(scatter_error_with_detail(
+            &SCATTER_ERROR_INVALID_ARGUMENT,
+            "expected X and Y data after axes handle",
         ));
     }
     let x = args.remove(0);
     let y = args.remove(0);
     let rest = args;
-    let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
-    let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
-    let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
+    let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())
+        .map_err(map_scatter_invalid_argument)?;
+    let mut x_input =
+        Some(ScatterInput::from_value(x, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?);
+    let mut y_input =
+        Some(ScatterInput::from_value(y, BUILTIN_NAME).map_err(map_scatter_invalid_argument)?);
     let opts = PlotRenderOptions {
         title: "Scatter Plot",
         x_label: "X",
@@ -107,7 +503,8 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
-        let mut resolved_style = resolve_scatter_style(point_count, &style_args, "scatter")?;
+        let mut resolved_style = resolve_scatter_style(point_count, &style_args, "scatter")
+            .map_err(map_scatter_invalid_argument)?;
         let x_arg = x_input.take().expect("scatter x consumed once");
         let y_arg = y_input.take().expect("scatter y consumed once");
 
@@ -126,9 +523,18 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
             }
         }
 
-        let (x_tensor, y_tensor) = (x_arg.into_tensor("scatter")?, y_arg.into_tensor("scatter")?);
-        let (x_data, y_data) = numeric_pair(x_tensor, y_tensor, "scatter")?;
-        let scatter = build_scatter_plot(x_data, y_data, &mut resolved_style)?;
+        let (x_tensor, y_tensor) = (
+            x_arg
+                .into_tensor("scatter")
+                .map_err(map_scatter_invalid_argument)?,
+            y_arg
+                .into_tensor("scatter")
+                .map_err(map_scatter_invalid_argument)?,
+        );
+        let (x_data, y_data) =
+            numeric_pair(x_tensor, y_tensor, "scatter").map_err(map_scatter_invalid_argument)?;
+        let scatter = build_scatter_plot(x_data, y_data, &mut resolved_style)
+            .map_err(map_scatter_invalid_argument)?;
         let plot_index = figure.add_scatter_plot_on_axes(scatter, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -143,7 +549,7 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_scatter_internal(err));
     }
     Ok(handle)
 }
@@ -185,8 +591,6 @@ fn build_scatter_plot(
     }
     Ok(scatter)
 }
-
-const DEFAULT_MARKER_SIZE: f32 = 10.0;
 
 fn scatter_err(message: impl Into<String>) -> RuntimeError {
     plotting_error(BUILTIN_NAME, message)
@@ -230,7 +634,7 @@ fn resolve_scatter_style(
         edge_color: default_color(),
         edge_thickness: DEFAULT_LINE_WIDTH,
         marker_style: MarkerStyle::Circle,
-        marker_size: DEFAULT_MARKER_SIZE,
+        marker_size: default_marker_diameter_px(),
         filled: args.filled,
         per_point_sizes: None,
         per_point_colors: None,
@@ -256,6 +660,7 @@ fn resolve_scatter_style(
 
     if let PointColorArg::Uniform(color) = &args.color {
         style.uniform_color = *color;
+        style.edge_color = *color;
     }
 
     if appearance.marker.is_none() {
@@ -295,7 +700,7 @@ fn resolve_scatter_style(
     }
 
     if let PointSizeArg::Scalar(size) = &args.size {
-        style.marker_size = (*size).max(0.1);
+        style.marker_size = marker_area_points2_to_diameter_px(*size as f64);
     }
 
     if let Some(value) = args.size.value() {
@@ -603,7 +1008,7 @@ pub(crate) mod tests {
             edge_color: default_color(),
             edge_thickness: DEFAULT_LINE_WIDTH,
             marker_style: MarkerStyle::Circle,
-            marker_size: DEFAULT_MARKER_SIZE,
+            marker_size: default_marker_diameter_px(),
             filled: false,
             per_point_sizes: None,
             per_point_colors: None,
@@ -673,7 +1078,39 @@ pub(crate) mod tests {
         let style = resolve_scatter_style(3, &args, "scatter").expect("style");
         assert!(style.filled);
         assert_eq!(style.marker_style, MarkerStyle::Square);
-        assert_eq!(style.marker_size as i32, 12);
+        assert!(
+            (style.marker_size - marker_area_points2_to_diameter_px(12.0)).abs() < 1e-5,
+            "size was {}",
+            style.marker_size
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn scatter_single_rgb_row_sets_uniform_face_and_edge_color() {
+        setup_plot_tests();
+        let rest = vec![
+            Value::Num(49.0),
+            Value::Tensor(Tensor {
+                data: vec![0.9, 0.2, 0.2],
+                shape: vec![1, 3],
+                rows: 1,
+                cols: 3,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("filled".into()),
+            Value::String("Marker".into()),
+            Value::String("o".into()),
+        ];
+        let args = PointArgs::parse(rest, LineStyleParseOptions::scatter()).unwrap();
+        let style = resolve_scatter_style(4, &args, "scatter").expect("style");
+        assert!((style.uniform_color.x - 0.9).abs() < 1e-6);
+        assert!((style.uniform_color.y - 0.2).abs() < 1e-6);
+        assert!((style.uniform_color.z - 0.2).abs() < 1e-6);
+        assert!((style.edge_color.x - 0.9).abs() < 1e-6);
+        assert!((style.edge_color.y - 0.2).abs() < 1e-6);
+        assert!((style.edge_color.z - 0.2).abs() < 1e-6);
+        assert!(!style.marker_edge_flat);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -774,6 +1211,7 @@ pub(crate) mod tests {
                 appearance,
                 requires_cpu_fallback: false,
                 line_style_explicit: false,
+                color_explicit: false,
                 line_style_order: None,
                 label: None,
             },
@@ -793,5 +1231,31 @@ pub(crate) mod tests {
             ),
             Type::Num
         );
+    }
+
+    #[test]
+    fn scatter_descriptor_signatures_cover_supported_forms() {
+        let labels: Vec<&str> = SCATTER_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = scatter(X, Y)"));
+        assert!(labels.contains(&"h = scatter(X, Y, S, C)"));
+        assert!(labels.contains(&"h = scatter(X, Y, Name, Value, ...)"));
+        assert!(labels.contains(&"h = scatter(ax, X, Y)"));
+        assert!(labels.contains(&"h = scatter(ax, X, Y, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn scatter_missing_post_axes_input_uses_stable_identifier() {
+        let _guard = lock_plot_registry();
+        setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let err = scatter_builtin(Value::Num(ax), Value::Num(1.0), Vec::new())
+            .expect_err("missing y after axes handle should fail");
+        assert_eq!(err.identifier(), SCATTER_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

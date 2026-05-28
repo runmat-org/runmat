@@ -10,7 +10,11 @@
 use std::f64::consts::PI;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
@@ -21,10 +25,144 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "sawtooth";
 const TWO_PI: f64 = 2.0 * PI;
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const SAWTOOTH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sawtooth output sampled at t.",
+}];
+
+const SAWTOOTH_SIG_DEFAULT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "t",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sample times.",
+}];
+
+const SAWTOOTH_SIG_XMAX_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "t",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample times.",
+    },
+    BuiltinParamDescriptor {
+        name: "xmax",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "Peak position fraction in [0, 1].",
+    },
+];
+
+const SAWTOOTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = sawtooth(t)",
+        inputs: &SAWTOOTH_SIG_DEFAULT_INPUTS,
+        outputs: &SAWTOOTH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = sawtooth(t, xmax)",
+        inputs: &SAWTOOTH_SIG_XMAX_INPUTS,
+        outputs: &SAWTOOTH_OUTPUT,
+    },
+];
+
+const SAWTOOTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAWTOOTH.INVALID_INPUT",
+    identifier: Some("RunMat:sawtooth:InvalidInput"),
+    when: "Primary input is not numeric-real tensor/scalar compatible.",
+    message: "sawtooth: expected numeric input",
+};
+
+const SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAWTOOTH.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:sawtooth:ComplexUnsupported"),
+    when: "Primary input includes complex values.",
+    message: "sawtooth: input must be real; complex values are not supported",
+};
+
+const SAWTOOTH_ERROR_XMAX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAWTOOTH.XMAX_INVALID",
+    identifier: Some("RunMat:sawtooth:XmaxInvalid"),
+    when: "xmax argument is not a real numeric scalar.",
+    message: "sawtooth: xmax must be a real numeric scalar in [0, 1]",
+};
+
+const SAWTOOTH_ERROR_XMAX_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAWTOOTH.XMAX_RANGE",
+    identifier: Some("RunMat:sawtooth:XmaxOutOfRange"),
+    when: "xmax argument lies outside [0, 1] or is non-finite.",
+    message: "sawtooth: xmax must be a finite scalar in [0, 1]",
+};
+
+const SAWTOOTH_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAWTOOTH.ARG_COUNT",
+    identifier: Some("RunMat:sawtooth:ArgCount"),
+    when: "More than one optional argument is provided.",
+    message: "sawtooth: expected 1 or 2 arguments",
+};
+
+const SAWTOOTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAWTOOTH.INTERNAL",
+    identifier: Some("RunMat:sawtooth:InternalError"),
+    when: "Internal tensor construction or GPU gather fails.",
+    message: "sawtooth: internal error",
+};
+
+const SAWTOOTH_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    SAWTOOTH_ERROR_INVALID_INPUT,
+    SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED,
+    SAWTOOTH_ERROR_XMAX_INVALID,
+    SAWTOOTH_ERROR_XMAX_RANGE,
+    SAWTOOTH_ERROR_ARG_COUNT,
+    SAWTOOTH_ERROR_INTERNAL,
+];
+
+pub const SAWTOOTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SAWTOOTH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SAWTOOTH_ERRORS,
+};
+
+fn sawtooth_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    sawtooth_error_with_message(error.message, error)
+}
+
+fn sawtooth_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    sawtooth_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn sawtooth_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn sawtooth_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Element-wise scalar sawtooth.
@@ -62,17 +200,18 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
     summary = "Generate a periodic sawtooth waveform with optional peak position.",
     keywords = "sawtooth,waveform,signal processing,triangle,periodic",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::sawtooth"
 )]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
     let xmax = parse_xmax(&varargin).await?;
     match t {
         Value::GpuTensor(handle) => sawtooth_gpu(handle, xmax).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "sawtooth: input must be real; complex values are not supported",
-        )),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => {
+            Err(sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED))
+        }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(builtin_error("sawtooth: expected numeric input"))
+            Err(sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT))
         }
         other => sawtooth_real(other, xmax),
     }
@@ -84,31 +223,35 @@ async fn parse_xmax(varargin: &[Value]) -> BuiltinResult<f64> {
         1 => {
             let raw = scalar_f64_from_value_async(&varargin[0])
                 .await
-                .map_err(|err| builtin_error(format!("sawtooth: {err}")))?
-                .ok_or_else(|| {
-                    builtin_error("sawtooth: xmax must be a real numeric scalar in [0, 1]")
-                })?;
+                .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_XMAX_INVALID, err))?
+                .ok_or_else(|| sawtooth_error(&SAWTOOTH_ERROR_XMAX_INVALID))?;
             if !raw.is_finite() || !(0.0..=1.0).contains(&raw) {
-                return Err(builtin_error(format!(
-                    "sawtooth: xmax must be a finite scalar in [0, 1], got {raw}"
-                )));
+                return Err(sawtooth_error_with_detail(
+                    &SAWTOOTH_ERROR_XMAX_RANGE,
+                    format!("got {raw}"),
+                ));
             }
             Ok(raw)
         }
-        _ => Err(builtin_error(format!(
-            "sawtooth: expected 1 or 2 arguments, got {}",
-            varargin.len() + 1
-        ))),
+        _ => Err(sawtooth_error_with_detail(
+            &SAWTOOTH_ERROR_ARG_COUNT,
+            format!("got {}", varargin.len() + 1),
+        )),
     }
 }
 
 async fn sawtooth_gpu(handle: GpuTensorHandle, xmax: f64) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle)
+        .await
+        .map_err(|source| {
+            sawtooth_error_with_source(&SAWTOOTH_ERROR_INTERNAL, "gpu gather failed", source)
+        })?;
     sawtooth_tensor(tensor, xmax).map(tensor_into_value)
 }
 
 fn sawtooth_real(value: Value, xmax: f64) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INVALID_INPUT, err))?;
     sawtooth_tensor(tensor, xmax).map(tensor_into_value)
 }
 
@@ -118,14 +261,15 @@ fn sawtooth_tensor(tensor: Tensor, xmax: f64) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&value| sawtooth_scalar(value, xmax))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|err| builtin_error(format!("sawtooth: {err}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|err| sawtooth_error_with_detail(&SAWTOOTH_ERROR_INTERNAL, &err))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, IntValue, LogicalArray, ResolveContext, Type};
 
     fn call(t: Value) -> BuiltinResult<Value> {
         block_on(sawtooth_builtin(t, Vec::new()))
@@ -171,6 +315,19 @@ mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn sawtooth_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("sawtooth builtin");
+        let descriptor = builtin.descriptor.expect("sawtooth descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = sawtooth(t)"));
+        assert!(labels.contains(&"Y = sawtooth(t, xmax)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.SAWTOOTH.XMAX_RANGE"));
     }
 
     #[test]

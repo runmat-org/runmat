@@ -16,6 +16,8 @@ pub fn value_contains_gpu(value: &Value) -> bool {
         Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(ptr)),
         Value::Struct(sv) => sv.fields.values().any(value_contains_gpu),
         Value::Object(obj) => obj.properties.values().any(value_contains_gpu),
+        Value::Closure(closure) => closure.captures.iter().any(value_contains_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_gpu),
         _ => false,
     }
 }
@@ -143,6 +145,20 @@ fn gather_if_needed_async_impl<'a>(
                 }
                 Ok(Value::Object(cloned))
             }
+            Value::Closure(closure) => {
+                let mut cloned = closure.clone();
+                for value in &mut cloned.captures {
+                    *value = gather_if_needed_async_impl(value).await?;
+                }
+                Ok(Value::Closure(cloned))
+            }
+            Value::OutputList(values) => {
+                let mut gathered = Vec::with_capacity(values.len());
+                for value in values {
+                    gathered.push(gather_if_needed_async_impl(value).await?);
+                }
+                Ok(Value::OutputList(gathered))
+            }
             other => Ok(other.clone()),
         }
     })
@@ -187,9 +203,13 @@ async fn call_builtin_async_impl(
 
     if matching_builtins.is_empty() {
         // Fallback: treat as class constructor if class is registered
-        if let Some(cls) = runmat_builtins::get_class(name) {
-            // Prefer explicit constructor method with the same name as class (static)
-            if let Some(ctor) = cls.methods.get(name) {
+        if runmat_builtins::get_class(name).is_some() {
+            // Prefer explicit constructor method with the same name as class (static/public),
+            // including inherited metadata lookup.
+            if let Some((ctor, _owner)) = runmat_builtins::lookup_method(name, name) {
+                if !ctor.is_static || ctor.access == runmat_builtins::Access::Private {
+                    return new_object_builtin(name.to_string()).await;
+                }
                 // Dispatch to constructor builtin; pass args through
                 return call_builtin_async_impl(&ctor.function_name, args, output_count).await;
             }
@@ -309,5 +329,153 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
         Ok(Some(gathered_args))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{call_builtin, gather_if_needed_async, value_contains_gpu};
+    use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
+    use runmat_builtins::{register_class, Access, ClassDef, Closure, MethodDef, Value};
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn value_contains_gpu_detects_nested_closure_captures() {
+        let value = Value::Closure(Closure {
+            function_name: "worker".to_string(),
+            bound_function: None,
+            captures: vec![Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 999,
+                buffer_id: 42,
+            })],
+        });
+        assert!(value_contains_gpu(&value));
+    }
+
+    #[test]
+    fn value_contains_gpu_detects_output_list_entries() {
+        let value = Value::OutputList(vec![
+            Value::Num(1.0),
+            Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 998,
+                buffer_id: 43,
+            }),
+        ]);
+        assert!(value_contains_gpu(&value));
+    }
+
+    #[test]
+    fn gather_if_needed_reports_provider_unavailable_for_nested_output_list_gpu() {
+        runmat_accelerate_api::clear_provider();
+        let _provider_guard = ThreadProviderGuard::set(None);
+        let value = Value::OutputList(vec![Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
+            device_id: 0,
+            buffer_id: 44,
+        })]);
+        let err = futures::executor::block_on(gather_if_needed_async(&value))
+            .expect_err("missing provider should fail nested output-list gather");
+        assert_eq!(err.identifier(), Some("RunMat:gather:ProviderUnavailable"));
+    }
+
+    #[test]
+    fn gather_if_needed_reports_provider_unavailable_for_closure_capture_gpu() {
+        runmat_accelerate_api::clear_provider();
+        let _provider_guard = ThreadProviderGuard::set(None);
+        let value = Value::Closure(Closure {
+            function_name: "worker".to_string(),
+            bound_function: None,
+            captures: vec![Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
+                device_id: 0,
+                buffer_id: 45,
+            })],
+        });
+        let err = futures::executor::block_on(gather_if_needed_async(&value))
+            .expect_err("missing provider should fail closure-captured gather");
+        assert_eq!(err.identifier(), Some("RunMat:gather:ProviderUnavailable"));
+    }
+
+    #[test]
+    fn constructor_fallback_uses_inherited_static_constructor_metadata() {
+        let parent_name = unique_class_name("runtime_ctor_parent");
+        let child_name = unique_class_name("runtime_ctor_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            child_name.clone(),
+            MethodDef {
+                name: child_name.clone(),
+                is_static: true,
+                access: Access::Public,
+                function_name: "Point.origin".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let out =
+            call_builtin(&child_name, &[]).expect("inherited static constructor should dispatch");
+        let Value::Object(obj) = out else {
+            panic!("expected object from constructor dispatch");
+        };
+        assert_eq!(obj.class_name, "Point");
+    }
+
+    #[test]
+    fn constructor_fallback_skips_private_or_non_static_constructor_methods() {
+        for (prefix, is_static, access) in [
+            ("runtime_ctor_private", true, Access::Private),
+            ("runtime_ctor_nonstatic", false, Access::Public),
+        ] {
+            let class_name = unique_class_name(prefix);
+            let mut methods = HashMap::new();
+            methods.insert(
+                class_name.clone(),
+                MethodDef {
+                    name: class_name.clone(),
+                    is_static,
+                    access: access.clone(),
+                    function_name: "Point.origin".to_string(),
+                    implicit_class_argument: None,
+                },
+            );
+            register_class(ClassDef {
+                name: class_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods,
+            });
+
+            let out = call_builtin(&class_name, &[])
+                .expect("fallback should default-construct when ctor metadata is not invokable");
+            let Value::Object(obj) = out else {
+                panic!("expected object result");
+            };
+            assert_eq!(obj.class_name, class_name);
+        }
     }
 }

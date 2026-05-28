@@ -5,11 +5,15 @@
 
 pub mod arg_tokens;
 pub mod broadcast;
+pub mod concatenation;
+pub mod elementwise;
 pub mod env;
 pub mod format;
 pub mod fs;
 pub mod gpu_helpers;
+pub mod indexing;
 pub mod linalg;
+pub mod matrix;
 pub mod path_search;
 pub mod path_state;
 pub mod random;

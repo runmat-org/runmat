@@ -10,7 +10,11 @@ use std::char;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +26,260 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "dlmread";
+
+const DLMREAD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric matrix parsed from the delimited text file.",
+}];
+const DLMREAD_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Delimited text file path.",
+}];
+const DLMREAD_INPUTS_FILENAME_DELIMITER: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimited text file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimiter as string/char or numeric code.",
+    },
+];
+const DLMREAD_INPUTS_FILENAME_ROW_COL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimited text file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based starting row offset.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based starting column offset.",
+    },
+];
+const DLMREAD_INPUTS_FILENAME_DELIMITER_RANGE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimited text file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimiter as string/char or numeric code.",
+    },
+    BuiltinParamDescriptor {
+        name: "range",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Range as A1-style string or numeric range vector.",
+    },
+];
+const DLMREAD_INPUTS_FILENAME_DELIMITER_ROW_COL: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimited text file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimiter as string/char or numeric code.",
+    },
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based starting row offset.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based starting column offset.",
+    },
+];
+const DLMREAD_INPUTS_FILENAME_DELIMITER_ROW_COL_RANGE: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimited text file path.",
+    },
+    BuiltinParamDescriptor {
+        name: "delimiter",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Delimiter as string/char or numeric code.",
+    },
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based starting row offset.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based starting column offset.",
+    },
+    BuiltinParamDescriptor {
+        name: "range",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Range as A1-style string or numeric range vector.",
+    },
+];
+const DLMREAD_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "M = dlmread(filename)",
+        inputs: &DLMREAD_INPUTS_FILENAME,
+        outputs: &DLMREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = dlmread(filename, delimiter)",
+        inputs: &DLMREAD_INPUTS_FILENAME_DELIMITER,
+        outputs: &DLMREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = dlmread(filename, row, col)",
+        inputs: &DLMREAD_INPUTS_FILENAME_ROW_COL,
+        outputs: &DLMREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = dlmread(filename, delimiter, range)",
+        inputs: &DLMREAD_INPUTS_FILENAME_DELIMITER_RANGE,
+        outputs: &DLMREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = dlmread(filename, delimiter, row, col)",
+        inputs: &DLMREAD_INPUTS_FILENAME_DELIMITER_ROW_COL,
+        outputs: &DLMREAD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = dlmread(filename, delimiter, row, col, range)",
+        inputs: &DLMREAD_INPUTS_FILENAME_DELIMITER_ROW_COL_RANGE,
+        outputs: &DLMREAD_OUTPUT,
+    },
+];
+const DLMREAD_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.ARG_CONFIG",
+    identifier: None,
+    when: "Argument list does not match supported dlmread call forms.",
+    message: "dlmread: invalid argument configuration",
+};
+const DLMREAD_ERROR_DELIMITER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.DELIMITER",
+    identifier: None,
+    when: "Delimiter value is invalid.",
+    message: "dlmread: invalid delimiter",
+};
+const DLMREAD_ERROR_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.INDEX",
+    identifier: None,
+    when: "Row/column indices are invalid.",
+    message: "dlmread: invalid row/column index",
+};
+const DLMREAD_ERROR_RANGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.RANGE",
+    identifier: None,
+    when: "Range specification is malformed or semantically invalid.",
+    message: "dlmread: invalid range",
+};
+const DLMREAD_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.FILENAME",
+    identifier: None,
+    when: "Filename argument is not a scalar string/char vector.",
+    message: "dlmread: invalid filename input",
+};
+const DLMREAD_ERROR_FILENAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.FILENAME_EMPTY",
+    identifier: None,
+    when: "Filename resolves to an empty path.",
+    message: "dlmread: filename must not be empty",
+};
+const DLMREAD_ERROR_IO_OPEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.IO_OPEN",
+    identifier: None,
+    when: "Input file cannot be opened.",
+    message: "dlmread: unable to open file",
+};
+const DLMREAD_ERROR_IO_READ: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.IO_READ",
+    identifier: None,
+    when: "Input file cannot be read.",
+    message: "dlmread: failed to read file",
+};
+const DLMREAD_ERROR_NON_NUMERIC_TOKEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.NON_NUMERIC_TOKEN",
+    identifier: None,
+    when: "A token cannot be parsed as numeric in the selected import region.",
+    message: "dlmread: nonnumeric token encountered",
+};
+const DLMREAD_ERROR_TENSOR_BUILD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DLMREAD.TENSOR_BUILD",
+    identifier: None,
+    when: "Internal tensor output materialization fails.",
+    message: "dlmread: unable to construct output matrix",
+};
+const DLMREAD_ERRORS: [BuiltinErrorDescriptor; 10] = [
+    DLMREAD_ERROR_ARG_CONFIG,
+    DLMREAD_ERROR_DELIMITER,
+    DLMREAD_ERROR_INDEX,
+    DLMREAD_ERROR_RANGE,
+    DLMREAD_ERROR_FILENAME,
+    DLMREAD_ERROR_FILENAME_EMPTY,
+    DLMREAD_ERROR_IO_OPEN,
+    DLMREAD_ERROR_IO_READ,
+    DLMREAD_ERROR_NON_NUMERIC_TOKEN,
+    DLMREAD_ERROR_TENSOR_BUILD,
+];
+pub const DLMREAD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DLMREAD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DLMREAD_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::dlmread")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,20 +297,36 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Runs entirely on the host CPU; providers are not involved.",
 };
 
-fn dlmread_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn dlmread_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    dlmread_error_with(error, error.message)
 }
 
-fn dlmread_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
+fn dlmread_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn dlmread_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -85,6 +359,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "dlmread,delimiter,ascii import,range",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tensor_type),
+    descriptor(crate::builtins::io::tabular::dlmread::DLMREAD_DESCRIPTOR),
     builtin_path = "crate::builtins::io::tabular::dlmread"
 )]
 async fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -123,7 +398,10 @@ enum DelimiterSpec {
 impl DelimiterSpec {
     fn new_from_string(raw: &str) -> BuiltinResult<Self> {
         if raw.is_empty() {
-            return Err(dlmread_error("dlmread: delimiter must not be empty"));
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_DELIMITER,
+                "dlmread: delimiter must not be empty",
+            ));
         }
         if raw == r"\t" {
             return Ok(DelimiterSpec::Char('\t'));
@@ -212,7 +490,8 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
                 options.start_row = value_to_start_index(&gathered[1], "row")?;
                 options.start_col = value_to_start_index(&gathered[2], "col")?;
             } else {
-                return Err(dlmread_error(
+                return Err(dlmread_error_with(
+                    &DLMREAD_ERROR_ARG_CONFIG,
                     "dlmread: expected dlmread(filename[, delimiter][, row, col][, range])",
                 ));
             }
@@ -220,7 +499,10 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
         }
         4 => {
             if !is_range_candidate(&gathered[3]) {
-                return Err(dlmread_error("dlmread: expected Range as final argument"));
+                return Err(dlmread_error_with(
+                    &DLMREAD_ERROR_ARG_CONFIG,
+                    "dlmread: expected Range as final argument",
+                ));
             }
             options.delimiter = parse_delimiter(&gathered[0])?;
             options.start_row = value_to_start_index(&gathered[1], "row")?;
@@ -228,7 +510,8 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmReadOptions> {
             options.range = Some(parse_range(&gathered[3])?);
             Ok(options)
         }
-        _ => Err(dlmread_error(
+        _ => Err(dlmread_error_with(
+            &DLMREAD_ERROR_ARG_CONFIG,
             "dlmread: expected dlmread(filename[, delimiter][, row, col][, range])",
         )),
     }
@@ -283,7 +566,8 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
             if sa.data.len() == 1 {
                 DelimiterSpec::new_from_string(&sa.data[0])
             } else {
-                Err(dlmread_error(
+                Err(dlmread_error_with(
+                    &DLMREAD_ERROR_DELIMITER,
                     "dlmread: string array delimiters must be scalar",
                 ))
             }
@@ -291,31 +575,43 @@ fn parse_delimiter(value: &Value) -> BuiltinResult<DelimiterSpec> {
         Value::Int(i) => delimiter_from_ascii(i.to_i64()),
         Value::Num(n) => delimiter_from_numeric(*n),
         Value::Tensor(t) if t.data.len() == 1 => delimiter_from_numeric(t.data[0]),
-        _ => Err(dlmread_error(format!(
-            "dlmread: unsupported delimiter value {value:?}"
-        ))),
+        _ => Err(dlmread_error_with(
+            &DLMREAD_ERROR_DELIMITER,
+            format!("dlmread: unsupported delimiter value {value:?}"),
+        )),
     }
 }
 
 fn delimiter_from_numeric(value: f64) -> BuiltinResult<DelimiterSpec> {
     if !value.is_finite() {
-        return Err(dlmread_error("dlmread: delimiter code must be finite"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_DELIMITER,
+            "dlmread: delimiter code must be finite",
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(dlmread_error("dlmread: delimiter code must be an integer"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_DELIMITER,
+            "dlmread: delimiter code must be an integer",
+        ));
     }
     delimiter_from_ascii(rounded as i64)
 }
 
 fn delimiter_from_ascii(value: i64) -> BuiltinResult<DelimiterSpec> {
     if value < 0 || value > char::MAX as i64 {
-        return Err(dlmread_error(
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_DELIMITER,
             "dlmread: delimiter code must be within Unicode range",
         ));
     }
-    let ch = char::from_u32(value as u32)
-        .ok_or_else(|| dlmread_error("dlmread: delimiter code does not map to a Unicode scalar"))?;
+    let ch = char::from_u32(value as u32).ok_or_else(|| {
+        dlmread_error_with(
+            &DLMREAD_ERROR_DELIMITER,
+            "dlmread: delimiter code does not map to a Unicode scalar",
+        )
+    })?;
     Ok(DelimiterSpec::Char(ch))
 }
 
@@ -324,32 +620,50 @@ fn value_to_start_index(value: &Value, name: &str) -> BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(dlmread_error(format!(
-                    "dlmread: {name} must be a non-negative integer"
-                )));
+                return Err(dlmread_error_with(
+                    &DLMREAD_ERROR_INDEX,
+                    format!("dlmread: {name} must be a non-negative integer"),
+                ));
             }
-            usize::try_from(raw).map_err(|_| dlmread_error(format!("dlmread: {name} is too large")))
+            usize::try_from(raw).map_err(|_| {
+                dlmread_error_with(
+                    &DLMREAD_ERROR_INDEX,
+                    format!("dlmread: {name} is too large"),
+                )
+            })
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(dlmread_error(format!("dlmread: {name} must be finite")));
+                return Err(dlmread_error_with(
+                    &DLMREAD_ERROR_INDEX,
+                    format!("dlmread: {name} must be finite"),
+                ));
             }
             if *n < 0.0 {
-                return Err(dlmread_error(format!(
-                    "dlmread: {name} must be a non-negative integer"
-                )));
+                return Err(dlmread_error_with(
+                    &DLMREAD_ERROR_INDEX,
+                    format!("dlmread: {name} must be a non-negative integer"),
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(dlmread_error(format!("dlmread: {name} must be an integer")));
+                return Err(dlmread_error_with(
+                    &DLMREAD_ERROR_INDEX,
+                    format!("dlmread: {name} must be an integer"),
+                ));
             }
-            usize::try_from(rounded as i64)
-                .map_err(|_| dlmread_error(format!("dlmread: {name} is too large")))
+            usize::try_from(rounded as i64).map_err(|_| {
+                dlmread_error_with(
+                    &DLMREAD_ERROR_INDEX,
+                    format!("dlmread: {name} is too large"),
+                )
+            })
         }
         Value::Tensor(t) if t.data.len() == 1 => value_to_start_index(&Value::Num(t.data[0]), name),
-        _ => Err(dlmread_error(format!(
-            "dlmread: expected numeric scalar for {name}, got {value:?}"
-        ))),
+        _ => Err(dlmread_error_with(
+            &DLMREAD_ERROR_INDEX,
+            format!("dlmread: expected numeric scalar for {name}, got {value:?}"),
+        )),
     }
 }
 
@@ -364,25 +678,31 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
             if sa.data.len() == 1 {
                 normalize_path(&sa.data[0])
             } else {
-                Err(dlmread_error(
+                Err(dlmread_error_with(
+                    &DLMREAD_ERROR_FILENAME,
                     "dlmread: string array filename inputs must be scalar",
                 ))
             }
         }
-        Value::CharArray(_) => Err(dlmread_error(
+        Value::CharArray(_) => Err(dlmread_error_with(
+            &DLMREAD_ERROR_FILENAME,
             "dlmread: expected a 1-by-N character vector for the file name",
         )),
-        other => Err(dlmread_error(format!(
-            "dlmread: expected filename as string scalar or character vector, got {other:?}"
-        ))),
+        other => Err(dlmread_error_with(
+            &DLMREAD_ERROR_FILENAME,
+            format!(
+                "dlmread: expected filename as string scalar or character vector, got {other:?}"
+            ),
+        )),
     }
 }
 
 fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     if raw.trim().is_empty() {
-        return Err(dlmread_error("dlmread: filename must not be empty"));
+        return Err(dlmread_error(&DLMREAD_ERROR_FILENAME_EMPTY));
     }
-    let expanded = expand_user_path(raw, BUILTIN_NAME).map_err(dlmread_error)?;
+    let expanded = expand_user_path(raw, BUILTIN_NAME)
+        .map_err(|message| dlmread_error_with(&DLMREAD_ERROR_FILENAME, message))?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
@@ -394,6 +714,7 @@ async fn read_dlm_rows(
 ) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
     let file = File::open_async(path).await.map_err(|err| {
         dlmread_error_with_source(
+            &DLMREAD_ERROR_IO_OPEN,
             format!("dlmread: unable to open '{}': {err}", path.display()),
             err,
         )
@@ -408,6 +729,7 @@ async fn read_dlm_rows(
         buffer.clear();
         let bytes = reader.read_line(&mut buffer).map_err(|err| {
             dlmread_error_with_source(
+                &DLMREAD_ERROR_IO_READ,
                 format!("dlmread: failed to read '{}': {err}", path.display()),
                 err,
             )
@@ -468,12 +790,15 @@ fn parse_dlm_row(
             "inf" | "+inf" => f64::INFINITY,
             "-inf" => f64::NEG_INFINITY,
             _ => trimmed.parse::<f64>().map_err(|_| {
-                dlmread_error(format!(
-                    "dlmread: nonnumeric token '{}' at row {}, column {}",
-                    trimmed,
-                    line_index + 1,
-                    col_index + 1
-                ))
+                dlmread_error_with(
+                    &DLMREAD_ERROR_NON_NUMERIC_TOKEN,
+                    format!(
+                        "dlmread: nonnumeric token '{}' at row {}, column {}",
+                        trimmed,
+                        line_index + 1,
+                        col_index + 1
+                    ),
+                )
             })?,
         };
         values.push(value);
@@ -492,14 +817,16 @@ struct RangeSpec {
 fn validate_range(spec: RangeSpec) -> BuiltinResult<RangeSpec> {
     if let Some(end_row) = spec.end_row {
         if end_row < spec.start_row {
-            return Err(dlmread_error(
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
                 "dlmread: Range must satisfy R1 <= R2 and C1 <= C2",
             ));
         }
     }
     if let Some(end_col) = spec.end_col {
         if end_col < spec.start_col {
-            return Err(dlmread_error(
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
                 "dlmread: Range must satisfy R1 <= R2 and C1 <= C2",
             ));
         }
@@ -518,13 +845,15 @@ fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
             if sa.data.len() == 1 {
                 parse_range_string(&sa.data[0])
             } else {
-                Err(dlmread_error(
+                Err(dlmread_error_with(
+                    &DLMREAD_ERROR_RANGE,
                     "dlmread: Range string array inputs must be scalar",
                 ))
             }
         }
         Value::Tensor(_) => parse_range_numeric(value),
-        _ => Err(dlmread_error(
+        _ => Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
             "dlmread: Range must be provided as a string or numeric vector",
         )),
     }
@@ -533,17 +862,22 @@ fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
 fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return Err(dlmread_error("dlmread: Range string cannot be empty"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            "dlmread: Range string cannot be empty",
+        ));
     }
     let parts: Vec<&str> = trimmed.split(':').collect();
     if parts.len() > 2 {
-        return Err(dlmread_error(format!(
-            "dlmread: invalid Range specification '{trimmed}'"
-        )));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            format!("dlmread: invalid Range specification '{trimmed}'"),
+        ));
     }
     let start = parse_cell_reference(parts[0])?;
     if start.col.is_none() {
-        return Err(dlmread_error(
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
             "dlmread: Range must specify a starting column",
         ));
     }
@@ -554,7 +888,8 @@ fn parse_range_string(text: &str) -> BuiltinResult<RangeSpec> {
     };
     if let Some(ref end_ref) = end {
         if end_ref.col.is_none() {
-            return Err(dlmread_error(
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
                 "dlmread: Range end must include a column reference",
             ));
         }
@@ -576,13 +911,15 @@ fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
     let elements = match value {
         Value::Tensor(t) => t.data.clone(),
         _ => {
-            return Err(dlmread_error(
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
                 "dlmread: numeric Range must be provided as a vector with 2 or 4 elements",
             ))
         }
     };
     if elements.len() != 2 && elements.len() != 4 {
-        return Err(dlmread_error(
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
             "dlmread: numeric Range must contain exactly 2 or 4 elements",
         ));
     }
@@ -608,20 +945,32 @@ fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
 
 fn non_negative_index(value: f64, position: usize) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(dlmread_error("dlmread: Range indices must be finite"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            "dlmread: Range indices must be finite",
+        ));
     }
     if value < 0.0 {
-        return Err(dlmread_error("dlmread: Range indices must be non-negative"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            "dlmread: Range indices must be non-negative",
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(dlmread_error("dlmread: Range indices must be integers"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            "dlmread: Range indices must be integers",
+        ));
     }
     usize::try_from(rounded as i64).map_err(|_| {
-        dlmread_error(format!(
-            "dlmread: Range index {} is too large to fit in usize",
-            position + 1
-        ))
+        dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            format!(
+                "dlmread: Range index {} is too large to fit in usize",
+                position + 1
+            ),
+        )
     })
 }
 
@@ -643,13 +992,17 @@ fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
         } else if ch.is_ascii_digit() {
             digits.push(ch);
         } else {
-            return Err(dlmread_error(format!(
-                "dlmread: invalid Range component '{token}'"
-            )));
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
+                format!("dlmread: invalid Range component '{token}'"),
+            ));
         }
     }
     if letters.is_empty() && digits.is_empty() {
-        return Err(dlmread_error("dlmread: Range references cannot be empty"));
+        return Err(dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            "dlmread: Range references cannot be empty",
+        ));
     }
     let col = if letters.is_empty() {
         None
@@ -660,13 +1013,19 @@ fn parse_cell_reference(token: &str) -> BuiltinResult<CellReference> {
         None
     } else {
         let parsed = digits.parse::<usize>().map_err(|_| {
-            dlmread_error(format!(
-                "dlmread: invalid row index '{}' in Range component '{token}'",
-                digits
-            ))
+            dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
+                format!(
+                    "dlmread: invalid row index '{}' in Range component '{token}'",
+                    digits
+                ),
+            )
         })?;
         if parsed == 0 {
-            return Err(dlmread_error("dlmread: Range rows must be >= 1"));
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
+                "dlmread: Range rows must be >= 1",
+            ));
         }
         Some(parsed - 1)
     };
@@ -677,19 +1036,28 @@ fn column_index_from_letters(letters: &str) -> BuiltinResult<usize> {
     let mut value: usize = 0;
     for ch in letters.chars() {
         if !ch.is_ascii_uppercase() {
-            return Err(dlmread_error(format!(
-                "dlmread: invalid column designator '{letters}' in Range"
-            )));
+            return Err(dlmread_error_with(
+                &DLMREAD_ERROR_RANGE,
+                format!("dlmread: invalid column designator '{letters}' in Range"),
+            ));
         }
         let digit = (ch as u8 - b'A' + 1) as usize;
         value = value
             .checked_mul(26)
             .and_then(|v| v.checked_add(digit))
-            .ok_or_else(|| dlmread_error("dlmread: Range column index overflowed"))?;
+            .ok_or_else(|| {
+                dlmread_error_with(
+                    &DLMREAD_ERROR_RANGE,
+                    "dlmread: Range column index overflowed",
+                )
+            })?;
     }
-    value
-        .checked_sub(1)
-        .ok_or_else(|| dlmread_error("dlmread: Range column index underflowed"))
+    value.checked_sub(1).ok_or_else(|| {
+        dlmread_error_with(
+            &DLMREAD_ERROR_RANGE,
+            "dlmread: Range column index underflowed",
+        )
+    })
 }
 
 struct SubsetResult {
@@ -825,7 +1193,7 @@ fn rows_to_tensor(
 ) -> BuiltinResult<Tensor> {
     if row_count == 0 || col_count == 0 {
         return Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| dlmread_error(format!("dlmread: {e}")));
+            .map_err(|e| dlmread_error_with(&DLMREAD_ERROR_TENSOR_BUILD, format!("dlmread: {e}")));
     }
     let mut data = vec![default_fill; row_count * col_count];
     for (row_idx, row) in rows.iter().enumerate().take(row_count) {
@@ -835,7 +1203,7 @@ fn rows_to_tensor(
         }
     }
     Tensor::new(data, vec![row_count, col_count])
-        .map_err(|e| dlmread_error(format!("dlmread: {e}")))
+        .map_err(|e| dlmread_error_with(&DLMREAD_ERROR_TENSOR_BUILD, format!("dlmread: {e}")))
 }
 
 #[cfg(test)]
@@ -864,6 +1232,39 @@ pub(crate) mod tests {
             seq
         ));
         path
+    }
+
+    #[test]
+    fn dlmread_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = DLMREAD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(
+            labels.contains(&"M = dlmread(filename)"),
+            "missing base dlmread signature label"
+        );
+        assert!(
+            labels.contains(&"M = dlmread(filename, delimiter)"),
+            "missing delimiter dlmread signature label"
+        );
+        assert!(
+            labels.contains(&"M = dlmread(filename, row, col)"),
+            "missing offset dlmread signature label"
+        );
+        assert!(
+            labels.contains(&"M = dlmread(filename, delimiter, range)"),
+            "missing delimiter+range dlmread signature label"
+        );
+        assert!(
+            labels.contains(&"M = dlmread(filename, delimiter, row, col)"),
+            "missing delimiter+offset dlmread signature label"
+        );
+        assert!(
+            labels.contains(&"M = dlmread(filename, delimiter, row, col, range)"),
+            "missing delimiter+offset+range dlmread signature label"
+        );
     }
 
     fn write_temp_file(lines: &[&str]) -> PathBuf {

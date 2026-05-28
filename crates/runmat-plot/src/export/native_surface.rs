@@ -14,6 +14,9 @@ use crate::overlay::plot_overlay::{OverlayConfig, OverlayMetrics, PlotOverlay};
 #[cfg(feature = "egui-overlay")]
 use egui_wgpu::ScreenDescriptor;
 
+pub const HEADLESS_GPU_ADAPTER_UNAVAILABLE: &str = "Failed to find suitable GPU adapter";
+pub const HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX: &str = "Failed to create device:";
+
 /// Renderer adapter for external/native surface targets owned by a host runtime.
 pub struct NativeSurfaceRenderContext {
     renderer: PlotRenderer,
@@ -540,6 +543,12 @@ impl NativeSurfaceRenderContext {
                     "runmat-plot: native_surface.render_scene_with_overlay.subplot_viewports_ready count={}",
                     viewports.len()
                 );
+                let axes_plot_sizes_px: Vec<(u32, u32)> = viewports
+                    .iter()
+                    .map(|&(_, _, w, h)| (w.max(1), h.max(1)))
+                    .collect();
+                self.renderer
+                    .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
                 self.renderer
                     .render_axes_to_viewports(
                         encoder,
@@ -588,6 +597,9 @@ impl NativeSurfaceRenderContext {
                     .axes_camera(0)
                     .cloned()
                     .unwrap_or_else(|| self.renderer.camera().clone());
+                let axes_plot_sizes_px = vec![(vw.max(1), vh.max(1))];
+                self.renderer
+                    .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
                 self.renderer
                     .render_camera_to_viewport(
                         encoder,
@@ -700,11 +712,11 @@ async fn create_headless_context(
             force_fallback_adapter: false,
         })
         .await
-        .ok_or("Failed to find suitable GPU adapter")?;
+        .ok_or(HEADLESS_GPU_ADAPTER_UNAVAILABLE)?;
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor::default(), None)
         .await
-        .map_err(|err| format!("Failed to create device: {err}"))?;
+        .map_err(|err| format!("{HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX} {err}"))?;
     let context =
         NativeSurfaceRenderContext::new(Arc::new(device), Arc::new(queue), width, height, format)
             .await?;
@@ -714,6 +726,11 @@ async fn create_headless_context(
         height
     );
     Ok(context)
+}
+
+pub fn is_headless_gpu_unavailable_error(err: &str) -> bool {
+    err.contains(HEADLESS_GPU_ADAPTER_UNAVAILABLE)
+        || err.contains(HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX)
 }
 
 pub async fn render_figure_rgba_bytes_interactive_with_camera(

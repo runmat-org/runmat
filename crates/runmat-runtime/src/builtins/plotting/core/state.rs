@@ -1,3 +1,4 @@
+use glam::Vec4;
 use once_cell::sync::OnceCell;
 use runmat_builtins::Tensor;
 use runmat_plot::plots::{
@@ -17,6 +18,7 @@ use thiserror::Error;
 use super::common::{default_figure, ERR_PLOTTING_UNAVAILABLE};
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
 use super::engine::render_figure;
+use super::web::current_plot_theme_config;
 use super::{plotting_error, plotting_error_with_source};
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -49,12 +51,7 @@ impl Default for FigureHandle {
     }
 }
 
-const DEFAULT_LINE_STYLE_ORDER: [LineStyle; 4] = [
-    LineStyle::Solid,
-    LineStyle::Dashed,
-    LineStyle::Dotted,
-    LineStyle::DashDot,
-];
+const DEFAULT_LINE_STYLE_ORDER: [LineStyle; 1] = [LineStyle::Solid];
 
 #[derive(Clone)]
 struct LineStyleCycle {
@@ -95,12 +92,30 @@ impl LineStyleCycle {
     }
 }
 
+#[derive(Clone, Default)]
+struct LineColorCycle {
+    cursor: usize,
+}
+
+impl LineColorCycle {
+    fn next(&mut self) -> Vec4 {
+        let color = line_color_for_series_index(self.cursor);
+        self.cursor = self.cursor.saturating_add(1);
+        color
+    }
+
+    fn reset_cursor(&mut self) {
+        self.cursor = 0;
+    }
+}
+
 #[derive(Default)]
 struct FigureState {
     figure: Figure,
     active_axes: usize,
     hold_per_axes: HashMap<usize, bool>,
     line_style_cycles: HashMap<usize, LineStyleCycle>,
+    line_color_cycles: HashMap<usize, LineColorCycle>,
     revision: u64,
 }
 
@@ -113,6 +128,7 @@ impl FigureState {
             active_axes: 0,
             hold_per_axes: HashMap::new(),
             line_style_cycles: HashMap::new(),
+            line_color_cycles: HashMap::new(),
             revision: 0,
         }
     }
@@ -129,8 +145,15 @@ impl FigureState {
         self.line_style_cycles.entry(axes_index).or_default()
     }
 
+    fn color_cycle_for_axes_mut(&mut self, axes_index: usize) -> &mut LineColorCycle {
+        self.line_color_cycles.entry(axes_index).or_default()
+    }
+
     fn reset_cycle(&mut self, axes_index: usize) {
         if let Some(cycle) = self.line_style_cycles.get_mut(&axes_index) {
+            cycle.reset_cursor();
+        }
+        if let Some(cycle) = self.line_color_cycles.get_mut(&axes_index) {
             cycle.reset_cursor();
         }
     }
@@ -138,7 +161,8 @@ impl FigureState {
 
 struct ActiveAxesContext {
     axes_index: usize,
-    cycle_ptr: *mut LineStyleCycle,
+    style_cycle_ptr: *mut LineStyleCycle,
+    color_cycle_ptr: *mut LineColorCycle,
 }
 
 struct AxesContextGuard {
@@ -147,7 +171,8 @@ struct AxesContextGuard {
 
 impl AxesContextGuard {
     fn install(state: &mut FigureState, axes_index: usize) -> Self {
-        let cycle_ptr = state.cycle_for_axes_mut(axes_index) as *mut LineStyleCycle;
+        let style_cycle_ptr = state.cycle_for_axes_mut(axes_index) as *mut LineStyleCycle;
+        let color_cycle_ptr = state.color_cycle_for_axes_mut(axes_index) as *mut LineColorCycle;
         ACTIVE_AXES_CONTEXT.with(|ctx| {
             debug_assert!(
                 ctx.borrow().is_none(),
@@ -155,7 +180,8 @@ impl AxesContextGuard {
             );
             ctx.borrow_mut().replace(ActiveAxesContext {
                 axes_index,
-                cycle_ptr,
+                style_cycle_ptr,
+                color_cycle_ptr,
             });
         });
         Self { _private: () }
@@ -170,14 +196,32 @@ impl Drop for AxesContextGuard {
     }
 }
 
-fn with_active_cycle<R>(axes_index: usize, f: impl FnOnce(&mut LineStyleCycle) -> R) -> Option<R> {
+fn with_active_style_cycle<R>(
+    axes_index: usize,
+    f: impl FnOnce(&mut LineStyleCycle) -> R,
+) -> Option<R> {
     ACTIVE_AXES_CONTEXT.with(|ctx| {
         let guard = ctx.borrow();
         let active = guard.as_ref()?;
         if active.axes_index != axes_index {
             return None;
         }
-        let cycle = unsafe { &mut *active.cycle_ptr };
+        let cycle = unsafe { &mut *active.style_cycle_ptr };
+        Some(f(cycle))
+    })
+}
+
+fn with_active_color_cycle<R>(
+    axes_index: usize,
+    f: impl FnOnce(&mut LineColorCycle) -> R,
+) -> Option<R> {
+    ACTIVE_AXES_CONTEXT.with(|ctx| {
+        let guard = ctx.borrow();
+        let active = guard.as_ref()?;
+        if active.axes_index != axes_index {
+            return None;
+        }
+        let cycle = unsafe { &mut *active.color_cycle_ptr };
         Some(f(cycle))
     })
 }
@@ -198,6 +242,7 @@ pub struct HistogramHandleState {
     pub bin_edges: Vec<f64>,
     pub raw_counts: Vec<f64>,
     pub normalization: String,
+    pub display_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -441,15 +486,6 @@ pub(crate) fn close_figure_with_builtin(
     target: Option<FigureHandle>,
 ) -> BuiltinResult<FigureHandle> {
     close_figure(target).map_err(|err| map_figure_error(builtin, err))
-}
-
-pub(crate) fn configure_subplot_with_builtin(
-    builtin: &'static str,
-    rows: usize,
-    cols: usize,
-    index: usize,
-) -> BuiltinResult<()> {
-    configure_subplot(rows, cols, index).map_err(|err| map_figure_error(builtin, err))
 }
 
 pub fn set_grid_enabled(enabled: bool) {
@@ -1147,6 +1183,7 @@ pub fn register_histogram_handle(
             bin_edges,
             raw_counts,
             normalization,
+            display_name: None,
         }),
     );
     id as f64
@@ -1436,6 +1473,28 @@ pub fn update_histogram_handle_for_plot(
         PlotChildHandleState::Histogram(hist) => {
             hist.normalization = normalization;
             hist.raw_counts = raw_counts;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn set_histogram_handle_display_name(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    display_name: Option<String>,
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg.plot_children.values_mut().find(|state| match state {
+        PlotChildHandleState::Histogram(hist) => {
+            hist.figure == figure && hist.axes_index == axes_index && hist.plot_index == plot_index
+        }
+        _ => false,
+    });
+    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
+        PlotChildHandleState::Histogram(hist) => {
+            hist.display_name = display_name;
             Ok(())
         }
         _ => Err(FigureError::InvalidPlotObjectHandle),
@@ -2302,7 +2361,7 @@ pub(crate) fn disable_rendering_for_tests() {
 }
 
 pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {
-    if with_active_cycle(axes_index, |cycle| cycle.set_order(order)).is_some() {
+    if with_active_style_cycle(axes_index, |cycle| cycle.set_order(order)).is_some() {
         return;
     }
     let mut reg = registry();
@@ -2312,13 +2371,28 @@ pub fn set_line_style_order_for_axes(axes_index: usize, order: &[LineStyle]) {
 }
 
 pub fn next_line_style_for_axes(axes_index: usize) -> LineStyle {
-    if let Some(style) = with_active_cycle(axes_index, |cycle| cycle.next()) {
+    if let Some(style) = with_active_style_cycle(axes_index, |cycle| cycle.next()) {
         return style;
     }
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
     state.cycle_for_axes_mut(axes_index).next()
+}
+
+pub fn line_color_for_series_index(series_index: usize) -> Vec4 {
+    let theme = current_plot_theme_config().build_theme();
+    theme.get_data_color(series_index)
+}
+
+pub fn next_line_color_for_axes(axes_index: usize) -> Vec4 {
+    if let Some(color) = with_active_color_cycle(axes_index, |cycle| cycle.next()) {
+        return color;
+    }
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    state.color_cycle_for_axes_mut(axes_index).next()
 }
 
 #[cfg(test)]

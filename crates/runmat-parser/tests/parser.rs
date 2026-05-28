@@ -107,12 +107,16 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             params,
             outputs,
             body,
+            isolated,
+            is_async,
             ..
         } => Stmt::Function {
             name: name.clone(),
             params: params.clone(),
             outputs: outputs.clone(),
             body: body.iter().map(strip_stmt).collect(),
+            isolated: *isolated,
+            is_async: *is_async,
             span: Span::default(),
         },
         Stmt::Import { path, wildcard, .. } => Stmt::Import {
@@ -149,6 +153,21 @@ fn strip_expr(expr: &Expr) -> Expr {
         ),
         Expr::Tensor(rows, _) => Expr::Tensor(strip_rows(rows), Span::default()),
         Expr::Cell(rows, _) => Expr::Cell(strip_rows(rows), Span::default()),
+        Expr::StructLiteral(fields, _) => Expr::StructLiteral(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), strip_expr(value)))
+                .collect(),
+            Span::default(),
+        ),
+        Expr::ObjectLiteral(class_name, fields, _) => Expr::ObjectLiteral(
+            class_name.clone(),
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), strip_expr(value)))
+                .collect(),
+            Span::default(),
+        ),
         Expr::Index(base, indices, _) => Expr::Index(
             Box::new(strip_expr(base)),
             indices.iter().map(strip_expr).collect(),
@@ -167,6 +186,11 @@ fn strip_expr(expr: &Expr) -> Expr {
         ),
         Expr::Colon(_) => Expr::Colon(Span::default()),
         Expr::FuncCall(name, args, _) => Expr::FuncCall(
+            name.clone(),
+            args.iter().map(strip_expr).collect(),
+            Span::default(),
+        ),
+        Expr::CommandCall(name, args, _) => Expr::CommandCall(
             name.clone(),
             args.iter().map(strip_expr).collect(),
             Span::default(),
@@ -296,6 +320,49 @@ fn parse_assignment() {
                     Box::new(num("5".to_string())),
                 ),
                 true, // Semicolon suppresses display even at EOF
+            )],
+        },
+    );
+}
+
+#[test]
+fn parse_struct_aggregate_literal() {
+    let program = parse("x = struct{name = 1, age = 2};").unwrap();
+    assert_program_eq(
+        program,
+        Program {
+            body: vec![assign(
+                "x".to_string(),
+                Expr::StructLiteral(
+                    vec![
+                        ("name".to_string(), num("1".to_string())),
+                        ("age".to_string(), num("2".to_string())),
+                    ],
+                    Span::default(),
+                ),
+                true,
+            )],
+        },
+    );
+}
+
+#[test]
+fn parse_object_aggregate_literal() {
+    let program = parse("p = ?Point{x = 1, y = 2};").unwrap();
+    assert_program_eq(
+        program,
+        Program {
+            body: vec![assign(
+                "p".to_string(),
+                Expr::ObjectLiteral(
+                    "Point".to_string(),
+                    vec![
+                        ("x".to_string(), num("1".to_string())),
+                        ("y".to_string(), num("2".to_string())),
+                    ],
+                    Span::default(),
+                ),
+                true,
             )],
         },
     );
@@ -467,11 +534,11 @@ fn expected_identifier_reports_offending_token_position() {
 
 #[test]
 fn expected_member_name_reports_offending_token_position() {
-    let src = "x = a.(";
+    let src = "x = a.;";
     let err = parse(src).unwrap_err();
     assert_eq!(err.message, "expected member name after '.'");
-    assert_eq!(err.position, src.find('(').unwrap());
-    assert_eq!(err.found_token.as_deref(), Some("("));
+    assert_eq!(err.position, src.find(';').unwrap());
+    assert_eq!(err.found_token.as_deref(), Some(";"));
     assert_eq!(err.expected.as_deref(), Some("identifier"));
 }
 
@@ -760,10 +827,26 @@ fn parse_function_definition() {
                     ),
                     true,
                 )],
+                isolated: false,
+                is_async: false,
                 span: span_value(),
             }],
         },
     );
+}
+
+#[test]
+fn parse_function_modifiers() {
+    let program = parse("isolated async function y=f(x); y=x; end").unwrap();
+    match &program.body[0] {
+        Stmt::Function {
+            isolated, is_async, ..
+        } => {
+            assert!(*isolated);
+            assert!(*is_async);
+        }
+        _ => panic!("expected function stmt"),
+    }
 }
 
 #[test]

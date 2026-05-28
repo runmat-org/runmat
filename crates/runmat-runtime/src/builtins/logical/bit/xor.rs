@@ -3,7 +3,11 @@
 //! The implementation mirrors MATLAB's element-wise exclusive OR semantics across logical,
 //! numeric, complex, and character inputs, including implicit expansion and gpuArray support.
 
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -65,6 +69,62 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Fusion generates WGSL kernels that treat non-zero inputs as true and write 0/1 outputs for exclusive OR.",
 };
 
+const BUILTIN_NAME: &str = "xor";
+
+const XOR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical element-wise exclusive disjunction result.",
+}];
+
+const XOR_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const XOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = xor(A, B)",
+    inputs: &XOR_INPUTS,
+    outputs: &XOR_OUTPUT,
+}];
+
+const XOR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.XOR.INVALID_INPUT",
+    identifier: Some("RunMat:xor:InvalidInput"),
+    when: "An input is not logical, numeric, complex, character, or gpuArray with gatherable numeric data.",
+    message: "xor: unsupported input type; expected logical, numeric, complex, or character data",
+};
+
+const XOR_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.XOR.SIZE_MISMATCH",
+    identifier: Some("RunMat:xor:SizeMismatch"),
+    when: "Input shapes are not broadcast-compatible.",
+    message: "xor: array sizes are not compatible for broadcasting",
+};
+
+const XOR_ERRORS: [BuiltinErrorDescriptor; 2] = [XOR_ERROR_INVALID_INPUT, XOR_ERROR_SIZE_MISMATCH];
+
+pub const XOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &XOR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &XOR_ERRORS,
+};
+
 #[runtime_builtin(
     name = "xor",
     category = "logical/bit",
@@ -72,6 +132,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "logical,xor,exclusive,boolean,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),
+    descriptor(crate::builtins::logical::bit::xor::XOR_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::bit::xor"
 )]
 async fn xor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -86,13 +147,13 @@ async fn xor_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn xor_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    let left = logical_buffer_from("xor", lhs).await?;
-    let right = logical_buffer_from("xor", rhs).await?;
-    let shape = broadcast_shapes("xor", &left.shape, &right.shape)
-        .map_err(|err| builtin_error("xor", err))?;
+    let left = logical_buffer_from(BUILTIN_NAME, lhs).await?;
+    let right = logical_buffer_from(BUILTIN_NAME, rhs).await?;
+    let shape = broadcast_shapes(BUILTIN_NAME, &left.shape, &right.shape)
+        .map_err(|err| builtin_error_with_message(err, &XOR_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
-        return logical_value("xor", Vec::new(), shape);
+        return logical_value(BUILTIN_NAME, Vec::new(), shape);
     }
 
     let strides_left = compute_strides(&left.shape);
@@ -116,11 +177,18 @@ async fn xor_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
         data.push(if cond { 1 } else { 0 });
     }
 
-    logical_value("xor", data, shape)
+    logical_value(BUILTIN_NAME, data, shape)
 }
 
-fn builtin_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(fn_name).build()
+fn builtin_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {
@@ -129,7 +197,9 @@ fn logical_value(fn_name: &str, data: Vec<u8>, shape: Vec<usize>) -> BuiltinResu
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| builtin_error(fn_name, format!("{fn_name}: {e}")))
+            .map_err(|e| {
+                builtin_error_with_message(format!("{fn_name}: {e}"), &XOR_ERROR_INVALID_INPUT)
+            })
     }
 }
 
@@ -166,15 +236,16 @@ async fn logical_buffer_from(name: &str, value: Value) -> BuiltinResult<LogicalB
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|err| builtin_error(name, format!("{name}: {err}")))?;
+                .map_err(|err| {
+                    builtin_error_with_message(format!("{name}: {err}"), &XOR_ERROR_INVALID_INPUT)
+                })?;
             tensor_to_logical_buffer(tensor)
         }
-        other => Err(builtin_error(
-            name,
+        other => Err(builtin_error_with_message(
             format!(
-                "{name}: unsupported input type {:?}; expected logical, numeric, complex, or character data",
-                other
+                "{name}: unsupported input type {other:?}; expected logical, numeric, complex, or character data"
             ),
+            &XOR_ERROR_INVALID_INPUT,
         )),
     }
 }
@@ -238,7 +309,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
 
-    fn assert_error_contains(err: RuntimeError, expected: &str) {
+    fn assert_error_contains(err: &RuntimeError, expected: &str) {
         assert!(
             err.message().contains(expected),
             "unexpected error: {}",
@@ -375,14 +446,16 @@ pub(crate) mod tests {
         let lhs = Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![2, 2]).unwrap();
         let rhs = Tensor::new(vec![1.0, 0.0, 3.0], vec![3, 1]).unwrap();
         let err = run_xor(Value::Tensor(lhs), Value::Tensor(rhs)).unwrap_err();
-        assert_error_contains(err, "size mismatch");
+        assert_error_contains(&err, "size mismatch");
+        assert_eq!(err.identifier(), XOR_ERROR_SIZE_MISMATCH.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn xor_rejects_unsupported_types() {
         let err = run_xor(Value::String("runmat".into()), Value::Bool(true)).unwrap_err();
-        assert_error_contains(err, "unsupported input type");
+        assert_error_contains(&err, "unsupported input type");
+        assert_eq!(err.identifier(), XOR_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

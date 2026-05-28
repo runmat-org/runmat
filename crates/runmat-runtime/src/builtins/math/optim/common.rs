@@ -6,11 +6,13 @@ pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeErro
     build_runtime_error(message).with_builtin(name).build()
 }
 
+fn canonicalize_callback_handle(handle: &Value) -> Value {
+    crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone())
+}
+
 pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinResult<Value> {
-    let mut call_args = Vec::with_capacity(args.len() + 1);
-    call_args.push(handle.clone());
-    call_args.extend(args);
-    crate::call_builtin_async("feval", &call_args).await
+    let callback = canonicalize_callback_handle(handle);
+    crate::call_feval_async_with_outputs(callback, &args, 1).await
 }
 
 pub(crate) async fn call_scalar_function(name: &str, handle: &Value, x: f64) -> BuiltinResult<f64> {
@@ -251,4 +253,190 @@ pub(crate) struct InitialGuess {
     pub values: Vec<f64>,
     pub shape: Vec<usize>,
     pub scalar: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonicalize_callback_handle;
+    use runmat_builtins::{CharArray, Closure, StringArray, Value};
+    use std::sync::Arc;
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_function_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(42)
+            })));
+        let canonical = canonicalize_callback_handle(&Value::FunctionHandle("decay".to_string()));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "decay".to_string(),
+                function: 42,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_qualified_external_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.decay").then_some(43)
+            })));
+        let canonical =
+            canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".to_string()));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "pkg.decay".to_string(),
+                function: 43,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_keeps_malformed_external_handle_name_shaped() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg..decay").then_some(44)
+            })));
+        let raw = Value::ExternalFunctionHandle("pkg..decay".to_string());
+        let canonical = canonicalize_callback_handle(&raw);
+        assert_eq!(canonical, raw);
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_text_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(45)
+            })));
+        let canonical = canonicalize_callback_handle(&Value::String("@decay".to_string()));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "decay".to_string(),
+                function: 45,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_trims_text_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(145)
+            })));
+        let canonical = canonicalize_callback_handle(&Value::String("  @decay  ".to_string()));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "decay".to_string(),
+                function: 145,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_string_array_text_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.decay").then_some(46)
+            })));
+        let canonical = canonicalize_callback_handle(&Value::StringArray(
+            StringArray::new(vec!["@pkg.decay".to_string()], vec![1, 1]).expect("string array"),
+        ));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "pkg.decay".to_string(),
+                function: 46,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_trims_string_array_text_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.decay").then_some(146)
+            })));
+        let canonical = canonicalize_callback_handle(&Value::StringArray(
+            StringArray::new(vec!["  @pkg.decay  ".to_string()], vec![1, 1]).expect("string array"),
+        ));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "pkg.decay".to_string(),
+                function: 146,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_char_text_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(47)
+            })));
+        let canonical =
+            canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("@decay")));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "decay".to_string(),
+                function: 47,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_trims_char_text_handle_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(147)
+            })));
+        let canonical =
+            canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("  @decay  ")));
+        assert_eq!(
+            canonical,
+            Value::BoundFunctionHandle {
+                name: "decay".to_string(),
+                function: 147,
+            }
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_binds_name_only_closure_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "decay").then_some(48)
+            })));
+        let raw = Value::Closure(Closure {
+            function_name: "decay".to_string(),
+            bound_function: None,
+            captures: vec![Value::Num(9.0)],
+        });
+        let canonical = canonicalize_callback_handle(&raw);
+        assert_eq!(
+            canonical,
+            Value::Closure(Closure {
+                function_name: "decay".to_string(),
+                bound_function: Some(48),
+                captures: vec![Value::Num(9.0)],
+            })
+        );
+    }
+
+    #[test]
+    fn callback_handle_canonicalizer_keeps_name_only_closure_without_resolver() {
+        let raw = Value::Closure(Closure {
+            function_name: "decay".to_string(),
+            bound_function: None,
+            captures: vec![Value::Num(9.0)],
+        });
+        let canonical = canonicalize_callback_handle(&raw);
+        assert_eq!(canonical, raw);
+    }
 }

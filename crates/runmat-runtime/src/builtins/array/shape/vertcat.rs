@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::vertcat")]
@@ -181,6 +185,70 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("vertcat").build()
 }
 
+const VERTCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Vertically concatenated result (dimension 1).",
+}];
+
+const VERTCAT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
+
+const VERTCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+];
+
+const VERTCAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = vertcat()",
+        inputs: &VERTCAT_INPUTS_EMPTY,
+        outputs: &VERTCAT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = vertcat(A1, An...)",
+        inputs: &VERTCAT_INPUTS,
+        outputs: &VERTCAT_OUTPUT,
+    },
+];
+
+const VERTCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VERTCAT.INVALID_INPUT",
+    identifier: Some("RunMat:vertcat:InvalidInput"),
+    when: "Inputs are malformed or incompatible for vertical concatenation.",
+    message: "vertcat: invalid input arguments",
+};
+
+const VERTCAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VERTCAT.TYPE_MISMATCH",
+    identifier: Some("RunMat:vertcat:TypeMismatch"),
+    when: "Input classes cannot be concatenated together.",
+    message: "vertcat: incompatible input classes for concatenation",
+};
+
+const VERTCAT_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [VERTCAT_ERROR_INVALID_INPUT, VERTCAT_ERROR_TYPE_MISMATCH];
+
+pub const VERTCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &VERTCAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &VERTCAT_ERRORS,
+};
+
 #[runtime_builtin(
     name = "vertcat",
     category = "array/shape",
@@ -188,6 +256,7 @@ fn vertcat_error(message: impl Into<String>) -> RuntimeError {
     keywords = "vertcat,vertical concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(vertcat_type),
+    descriptor(crate::builtins::array::shape::vertcat::VERTCAT_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::vertcat"
 )]
 async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -281,6 +350,14 @@ pub(crate) mod tests {
         let value = Value::Num(42.0);
         let result = vertcat_builtin(vec![value.clone()]).expect("vertcat");
         assert_eq!(result, value);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn true_empty_operand_is_neutral_for_dynamic_growth() {
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
+        let result = vertcat_builtin(vec![Value::Tensor(empty), Value::Num(2.0)]).expect("vertcat");
+        assert_eq!(result, Value::Num(2.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

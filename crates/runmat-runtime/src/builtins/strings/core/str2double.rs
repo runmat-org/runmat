@@ -2,7 +2,11 @@
 
 use std::borrow::Cow;
 
-use runmat_builtins::{CellArray, CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -41,19 +45,81 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Conversion builtin; not eligible for fusion and materialises host-side doubles.",
 };
 
-const ARG_TYPE_ERROR: &str =
-    "str2double: input must be a string array, character array, or cell array of character vectors";
-const CELL_ELEMENT_ERROR: &str =
-    "str2double: cell array elements must be character vectors or string scalars";
+const BUILTIN_NAME: &str = "str2double";
 
-fn str2double_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("str2double")
-        .build()
+const STR2DOUBLE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Parsed double values; invalid parses become NaN.",
+}];
+
+const STR2DOUBLE_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "str",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String, character, or cell-array text input to parse.",
+}];
+
+const STR2DOUBLE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = str2double(str)",
+    inputs: &STR2DOUBLE_INPUT,
+    outputs: &STR2DOUBLE_OUTPUT,
+}];
+
+const STR2DOUBLE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STR2DOUBLE.INVALID_INPUT",
+    identifier: Some("RunMat:str2double:InvalidInput"),
+    when: "Input is not a supported text container.",
+    message: "str2double: input must be a string array, character array, or cell array of character vectors",
+};
+
+const STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STR2DOUBLE.INVALID_CELL_ELEMENT",
+    identifier: Some("RunMat:str2double:InvalidCellElement"),
+    when: "Cell array contains non-text or non-scalar text entries.",
+    message: "str2double: cell array elements must be character vectors or string scalars",
+};
+
+const STR2DOUBLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STR2DOUBLE.INTERNAL",
+    identifier: Some("RunMat:str2double:InternalError"),
+    when: "Internal tensor assembly failed while building parsed output.",
+    message: "str2double: internal error",
+};
+
+const STR2DOUBLE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    STR2DOUBLE_ERROR_INVALID_INPUT,
+    STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT,
+    STR2DOUBLE_ERROR_INTERNAL,
+];
+
+pub const STR2DOUBLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STR2DOUBLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STR2DOUBLE_ERRORS,
+};
+
+fn str2double_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    str2double_error_with_message(error.message, error)
+}
+
+fn str2double_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "str2double")
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(
@@ -63,6 +129,7 @@ fn remap_str2double_flow(err: RuntimeError) -> RuntimeError {
     keywords = "str2double,string to double,text conversion,gpu",
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),
+    descriptor(crate::builtins::strings::core::str2double::STR2DOUBLE_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::str2double"
 )]
 async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -74,7 +141,7 @@ async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::StringArray(array) => str2double_string_array(array),
         Value::CharArray(array) => str2double_char_array(array),
         Value::Cell(cell) => str2double_cell_array(cell),
-        _ => Err(str2double_flow(ARG_TYPE_ERROR)),
+        _ => Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -85,7 +152,7 @@ fn str2double_string_array(array: StringArray) -> BuiltinResult<Value> {
         values.push(parse_numeric_scalar(text));
     }
     let tensor =
-        Tensor::new(values, shape).map_err(|e| str2double_flow(format!("str2double: {e}")))?;
+        Tensor::new(values, shape).map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -100,7 +167,7 @@ fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
         values.push(parse_numeric_scalar(&row_text));
     }
     let tensor = Tensor::new(values, vec![rows, 1])
-        .map_err(|e| str2double_flow(format!("str2double: {e}")))?;
+        .map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -120,14 +187,16 @@ fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
                     let row_text: String = char_vec.data.iter().collect();
                     parse_numeric_scalar(&row_text)
                 }
-                Value::CharArray(_) => return Err(str2double_flow(CELL_ELEMENT_ERROR)),
-                _ => return Err(str2double_flow(CELL_ELEMENT_ERROR)),
+                Value::CharArray(_) => {
+                    return Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT));
+                }
+                _ => return Err(str2double_error(&STR2DOUBLE_ERROR_INVALID_CELL_ELEMENT)),
             };
             values.push(numeric);
         }
     }
     let tensor = Tensor::new(values, vec![rows, cols])
-        .map_err(|e| str2double_flow(format!("str2double: {e}")))?;
+        .map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 

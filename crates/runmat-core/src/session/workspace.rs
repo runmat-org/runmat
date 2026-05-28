@@ -1,10 +1,42 @@
 use super::*;
 
 impl RunMatSession {
+    pub fn workspace_handle(&self) -> crate::abi::WorkspaceHandle {
+        self.abi_workspace_handle
+    }
+
+    pub(crate) fn workspace_binding_key(&self, name: &str) -> crate::abi::WorkspaceBindingKey {
+        let binding = runmat_hir::BindingName(name.to_string());
+        if let Some(source) = self.active_source_identity.clone() {
+            crate::abi::WorkspaceBindingKey::SourceBinding {
+                source,
+                def_path: source_binding_def_path(self.current_source_name()),
+                binding,
+            }
+        } else {
+            crate::abi::WorkspaceBindingKey::Interactive {
+                session: self.abi_workspace_handle.0,
+                name: binding,
+            }
+        }
+    }
+
+    pub(crate) fn bind_workspace_slot(&mut self, name: String, slot: usize) {
+        let key = self.workspace_binding_key(&name);
+        self.workspace_bindings
+            .insert(name, SessionWorkspaceBinding { key, slot });
+    }
+
+    pub(crate) fn lowering_workspace_bindings(&self) -> HashMap<String, usize> {
+        self.workspace_bindings
+            .iter()
+            .map(|(name, binding)| (name.clone(), binding.slot))
+            .collect()
+    }
+
     pub fn clear_variables(&mut self) {
-        self.variables.clear();
         self.variable_array.clear();
-        self.variable_names.clear();
+        self.workspace_bindings.clear();
         self.workspace_values.clear();
         self.workspace_preview_tokens.clear();
     }
@@ -17,14 +49,8 @@ impl RunMatSession {
             return Ok(None);
         }
 
-        let source_map = if self.workspace_values.is_empty() {
-            &self.variables
-        } else {
-            &self.workspace_values
-        };
-
-        let mut entries: Vec<(String, Value)> = Vec::with_capacity(source_map.len());
-        for (name, value) in source_map {
+        let mut entries: Vec<(String, Value)> = Vec::with_capacity(self.workspace_values.len());
+        for (name, value) in &self.workspace_values {
             let gathered = gather_if_needed_async(value).await?;
             entries.push((name.clone(), gathered));
         }
@@ -49,9 +75,8 @@ impl RunMatSession {
         self.clear_variables();
 
         for (index, (name, value)) in entries.into_iter().enumerate() {
-            self.variable_names.insert(name.clone(), index);
+            self.bind_workspace_slot(name.clone(), index);
             self.variable_array.push(value.clone());
-            self.variables.insert(name.clone(), value.clone());
             self.workspace_values.insert(name, value);
         }
 
@@ -61,13 +86,8 @@ impl RunMatSession {
     }
 
     pub fn workspace_snapshot(&mut self) -> WorkspaceSnapshot {
-        let source_map = if self.workspace_values.is_empty() {
-            &self.variables
-        } else {
-            &self.workspace_values
-        };
-
-        let mut entries: Vec<WorkspaceEntry> = source_map
+        let mut entries: Vec<WorkspaceEntry> = self
+            .workspace_values
             .iter()
             .map(|(name, value)| workspace_entry(name, value))
             .collect();
@@ -97,7 +117,6 @@ impl RunMatSession {
         let value = self
             .workspace_values
             .get(&name)
-            .or_else(|| self.variables.get(&name))
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Variable '{name}' not found in workspace"))?;
 
@@ -160,9 +179,9 @@ impl RunMatSession {
         })
     }
 
-    /// Get a copy of current variables
+    /// Get the current persistent workspace values keyed by source name.
     pub fn get_variables(&self) -> &HashMap<String, Value> {
-        &self.variables
+        &self.workspace_values
     }
 
     pub(crate) fn build_workspace_snapshot(
@@ -197,5 +216,24 @@ impl RunMatSession {
             values.push(entry);
         }
         values
+    }
+}
+
+fn source_binding_def_path(source_name: &str) -> runmat_hir::DefPath {
+    use std::path::Path;
+
+    let stem = Path::new(source_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or("entrypoint")
+        .to_string();
+
+    runmat_hir::DefPath {
+        package: runmat_hir::PackageName("workspace".to_string()),
+        module: runmat_hir::QualifiedName(vec![runmat_hir::SymbolName(stem.clone())]),
+        item: vec![runmat_hir::DefPathSegment::Function(
+            runmat_hir::SymbolName(stem),
+        )],
     }
 }

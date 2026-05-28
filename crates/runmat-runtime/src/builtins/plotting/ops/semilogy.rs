@@ -1,13 +1,126 @@
 use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
 use super::plot::plot_builtin;
-use super::state::{current_axes_state, set_log_modes_for_axes};
+use super::state::{current_axes_state, set_log_modes_for_axes, FigureError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "semilogy";
+
+const SEMILOGY_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Line handle.",
+}];
+const SEMILOGY_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Y data vector/matrix.",
+}];
+const SEMILOGY_INPUTS_XY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X data vector/matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector/matrix.",
+    },
+];
+const SEMILOGY_INPUTS_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Plot-style inputs: optional axes handle, style tokens, and Name/Value pairs.",
+}];
+const SEMILOGY_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "h = semilogy(Y)",
+        inputs: &SEMILOGY_INPUTS_Y,
+        outputs: &SEMILOGY_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = semilogy(X, Y)",
+        inputs: &SEMILOGY_INPUTS_XY,
+        outputs: &SEMILOGY_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = semilogy(args...)",
+        inputs: &SEMILOGY_INPUTS_ARGS,
+        outputs: &SEMILOGY_OUTPUT_HANDLE,
+    },
+];
+const SEMILOGY_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SEMILOGY.PLOT_FAILED",
+    identifier: Some("RunMat:semilogy:PlotFailed"),
+    when: "Underlying plot rendering/parsing fails while building the semilog plot.",
+    message: "semilogy: plot operation failed",
+};
+const SEMILOGY_ERROR_LOG_AXIS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SEMILOGY.LOG_AXIS_FAILED",
+    identifier: Some("RunMat:semilogy:LogAxisFailed"),
+    when: "Applying logarithmic Y-axis mode fails.",
+    message: "semilogy: failed to apply logarithmic axis mode",
+};
+const SEMILOGY_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SEMILOGY_ERROR_PLOT_FAILED, SEMILOGY_ERROR_LOG_AXIS_FAILED];
+pub const SEMILOGY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SEMILOGY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SEMILOGY_ERRORS,
+};
+
+fn semilogy_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn semilogy_map_plot_error(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "{}: {}",
+        SEMILOGY_ERROR_PLOT_FAILED.message,
+        err.message()
+    ))
+    .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = SEMILOGY_ERROR_PLOT_FAILED.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_source(err).build()
+}
+
+fn semilogy_map_axes_error(err: FigureError) -> RuntimeError {
+    semilogy_error_with_message(
+        format!("{}: {}", SEMILOGY_ERROR_LOG_AXIS_FAILED.message, err),
+        &SEMILOGY_ERROR_LOG_AXIS_FAILED,
+    )
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::semilogy")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,19 +157,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::semilogy::SEMILOGY_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::semilogy"
 )]
 pub async fn semilogy_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let result = plot_builtin(args).await;
+    let result = plot_builtin(args).await.map_err(semilogy_map_plot_error)?;
     let axes = current_axes_state();
-    set_log_modes_for_axes(axes.handle, axes.active_index, false, true).map_err(|err| {
-        crate::builtins::plotting::plotting_error_with_source(
-            "semilogy",
-            format!("semilogy: {err}"),
-            err,
-        )
-    })?;
-    result
+    set_log_modes_for_axes(axes.handle, axes.active_index, false, true)
+        .map_err(semilogy_map_axes_error)?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -111,5 +220,17 @@ mod tests {
         let fig = clone_figure(fig_handle).unwrap();
         assert!(fig.axes_metadata(1).unwrap().y_log);
         assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn semilogy_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SEMILOGY_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = semilogy(Y)"));
+        assert!(labels.contains(&"h = semilogy(X, Y)"));
+        assert!(labels.contains(&"h = semilogy(args...)"));
     }
 }

@@ -4,7 +4,11 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use runmat_builtins::{ObjectInstance, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ObjectInstance, StructValue, Tensor, Value,
+};
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
 
@@ -49,6 +53,959 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Data builtins are side-effecting and not fusible.",
 };
 
+const DATA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.INVALID_ARGUMENT",
+    identifier: Some("RunMat:data:InvalidArgument"),
+    when: "Arguments, receiver object, or option grammar are invalid for the requested data API.",
+    message: "data: invalid argument",
+};
+
+const DATA_ERROR_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.NOT_FOUND",
+    identifier: Some("RunMat:data:NotFound"),
+    when: "Referenced dataset/array/transaction object is missing or cannot be resolved.",
+    message: "data: requested object not found",
+};
+
+const DATA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DATA.INTERNAL",
+    identifier: Some("RunMat:data:Internal"),
+    when: "Filesystem/manifest/chunk processing fails unexpectedly during data API execution.",
+    message: "data: internal operation failed",
+};
+
+const DATA_DESCRIPTOR_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    DATA_ERROR_INVALID_ARGUMENT,
+    DATA_ERROR_NOT_FOUND,
+    DATA_ERROR_INTERNAL,
+];
+
+const OUT_DATASET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ds",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dataset handle object.",
+}];
+
+const OUT_ARRAY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "arr",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "DataArray handle object.",
+}];
+
+const OUT_TX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tx",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "DataTransaction handle object.",
+}];
+
+const OUT_BOOL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ok",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical success/result flag.",
+}];
+
+const OUT_STRING: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "s",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "String scalar result.",
+}];
+
+const OUT_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct result.",
+}];
+
+const OUT_CELL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell-array result.",
+}];
+
+const OUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Value result.",
+}];
+
+const OUT_TENSOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric tensor result.",
+}];
+
+const IN_PATH_SCHEMA_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "schema",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset schema struct.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_PATH_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_FROM_TO_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fromPath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Source dataset path.",
+    },
+    BuiltinParamDescriptor {
+        name: "toPath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Destination dataset path.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_PATH_FORMAT_TARGET_REST: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dataset path (.data).",
+    },
+    BuiltinParamDescriptor {
+        name: "format",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format token (currently 'data').",
+    },
+    BuiltinParamDescriptor {
+        name: "targetPath",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target dataset path.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_PREFIX_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "prefix",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filesystem prefix to scan for datasets.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "obj",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Receiver object.",
+}];
+
+const IN_BASE_NAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Name key/array identifier.",
+    },
+];
+
+const IN_BASE_KEY_DEFAULT: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "key",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute key.",
+    },
+    BuiltinParamDescriptor {
+        name: "defaultValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Fallback value when key is absent.",
+    },
+];
+
+const IN_BASE_KEY_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "key",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute key.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Attribute value.",
+    },
+];
+
+const IN_BASE_ATTRS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "attrs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct of attribute updates.",
+    },
+];
+
+const IN_BASE_LABEL_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "label",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Snapshot label.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE_SLICE_OPTIONAL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional slice specification.",
+    },
+];
+
+const IN_BASE_VALUES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Full-array values payload.",
+    },
+];
+
+const IN_BASE_SLICE_VALUES: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Slice specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Slice values payload.",
+    },
+];
+
+const IN_BASE_NEW_SHAPE_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "newShape",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "New array shape.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_BASE_VALUE_REST: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "obj",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataArray receiver object.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_TX_WRITE: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Slice specification.",
+    },
+    BuiltinParamDescriptor {
+        name: "values",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Values payload.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_TX_ARRAY_SHAPE_REST: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "newShape",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "New shape vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Reserved name/value options.",
+    },
+];
+
+const IN_TX_ARRAY_VALUE_SLICE_OPT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Fill value.",
+    },
+    BuiltinParamDescriptor {
+        name: "sliceSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional slice specification.",
+    },
+];
+
+const IN_TX_ARRAY_NAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target array name.",
+    },
+];
+
+const IN_TX_ARRAY_META: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "arrayName",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "New array name.",
+    },
+    BuiltinParamDescriptor {
+        name: "meta",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Array metadata struct.",
+    },
+];
+
+const IN_TX_COMMIT_REST: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "tx",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "DataTransaction receiver.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Commit options (e.g. if_manifest).",
+    },
+];
+
+macro_rules! one_sig_descriptor {
+    ($desc:ident, $sigs:ident, $label:expr, $inputs:expr, $outputs:expr) => {
+        const $sigs: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+            label: $label,
+            inputs: $inputs,
+            outputs: $outputs,
+        }];
+        pub const $desc: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &$sigs,
+            output_mode: BuiltinOutputMode::Fixed,
+            completion_policy: BuiltinCompletionPolicy::Public,
+            errors: &DATA_DESCRIPTOR_ERRORS,
+        };
+    };
+}
+
+one_sig_descriptor!(
+    DATA_CREATE_DESCRIPTOR,
+    DATA_CREATE_SIGS,
+    "ds = data.create(path, schema, Name, Value, ...)",
+    &IN_PATH_SCHEMA_REST,
+    &OUT_DATASET
+);
+one_sig_descriptor!(
+    DATA_OPEN_DESCRIPTOR,
+    DATA_OPEN_SIGS,
+    "ds = data.open(path, Name, Value, ...)",
+    &IN_PATH_REST,
+    &OUT_DATASET
+);
+one_sig_descriptor!(
+    DATA_EXISTS_DESCRIPTOR,
+    DATA_EXISTS_SIGS,
+    "tf = data.exists(path)",
+    &IN_PATH_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_DELETE_DESCRIPTOR,
+    DATA_DELETE_SIGS,
+    "tf = data.delete(path, Name, Value, ...)",
+    &IN_PATH_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_COPY_DESCRIPTOR,
+    DATA_COPY_SIGS,
+    "tf = data.copy(fromPath, toPath, Name, Value, ...)",
+    &IN_FROM_TO_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_MOVE_DESCRIPTOR,
+    DATA_MOVE_SIGS,
+    "tf = data.move(fromPath, toPath, Name, Value, ...)",
+    &IN_FROM_TO_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_IMPORT_DESCRIPTOR,
+    DATA_IMPORT_SIGS,
+    "ds = data.import(path, format, sourcePath, Name, Value, ...)",
+    &IN_PATH_FORMAT_TARGET_REST,
+    &OUT_DATASET
+);
+one_sig_descriptor!(
+    DATA_EXPORT_DESCRIPTOR,
+    DATA_EXPORT_SIGS,
+    "tf = data.export(path, format, targetPath, Name, Value, ...)",
+    &IN_PATH_FORMAT_TARGET_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATA_LIST_DESCRIPTOR,
+    DATA_LIST_SIGS,
+    "C = data.list(prefix, Name, Value, ...)",
+    &IN_PREFIX_REST,
+    &OUT_CELL
+);
+one_sig_descriptor!(
+    DATA_INSPECT_DESCRIPTOR,
+    DATA_INSPECT_SIGS,
+    "S = data.inspect(path)",
+    &IN_PATH_REST,
+    &OUT_STRUCT
+);
+
+one_sig_descriptor!(
+    DATASET_PATH_DESCRIPTOR,
+    DATASET_PATH_SIGS,
+    "path = Dataset.path(ds)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_ID_DESCRIPTOR,
+    DATASET_ID_SIGS,
+    "id = Dataset.id(ds)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_VERSION_DESCRIPTOR,
+    DATASET_VERSION_SIGS,
+    "version = Dataset.version(ds)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_ARRAYS_DESCRIPTOR,
+    DATASET_ARRAYS_SIGS,
+    "C = Dataset.arrays(ds)",
+    &IN_BASE,
+    &OUT_CELL
+);
+one_sig_descriptor!(
+    DATASET_HAS_ARRAY_DESCRIPTOR,
+    DATASET_HAS_ARRAY_SIGS,
+    "tf = Dataset.has_array(ds, name)",
+    &IN_BASE_NAME,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATASET_ARRAY_DESCRIPTOR,
+    DATASET_ARRAY_SIGS,
+    "arr = Dataset.array(ds, name)",
+    &IN_BASE_NAME,
+    &OUT_ARRAY
+);
+one_sig_descriptor!(
+    DATASET_ATTRS_DESCRIPTOR,
+    DATASET_ATTRS_SIGS,
+    "S = Dataset.attrs(ds)",
+    &IN_BASE,
+    &OUT_STRUCT
+);
+one_sig_descriptor!(
+    DATASET_GET_ATTR_DESCRIPTOR,
+    DATASET_GET_ATTR_SIGS,
+    "value = Dataset.get_attr(ds, key, defaultValue)",
+    &IN_BASE_KEY_DEFAULT,
+    &OUT_VALUE
+);
+one_sig_descriptor!(
+    DATASET_SET_ATTR_DESCRIPTOR,
+    DATASET_SET_ATTR_SIGS,
+    "tf = Dataset.set_attr(ds, key, value)",
+    &IN_BASE_KEY_VALUE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATASET_SET_ATTRS_DESCRIPTOR,
+    DATASET_SET_ATTRS_SIGS,
+    "tf = Dataset.set_attrs(ds, attrs)",
+    &IN_BASE_ATTRS,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATASET_BEGIN_DESCRIPTOR,
+    DATASET_BEGIN_SIGS,
+    "tx = Dataset.begin(ds, Name, Value, ...)",
+    &IN_BASE_REST,
+    &OUT_TX
+);
+one_sig_descriptor!(
+    DATASET_SNAPSHOT_DESCRIPTOR,
+    DATASET_SNAPSHOT_SIGS,
+    "snapshotPath = Dataset.snapshot(ds, label, Name, Value, ...)",
+    &IN_BASE_LABEL_REST,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATASET_REFRESH_DESCRIPTOR,
+    DATASET_REFRESH_SIGS,
+    "ds = Dataset.refresh(ds)",
+    &IN_BASE,
+    &OUT_DATASET
+);
+
+one_sig_descriptor!(
+    DATAARRAY_NAME_DESCRIPTOR,
+    DATAARRAY_NAME_SIGS,
+    "name = DataArray.name(arr)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATAARRAY_DTYPE_DESCRIPTOR,
+    DATAARRAY_DTYPE_SIGS,
+    "dtype = DataArray.dtype(arr)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATAARRAY_SHAPE_DESCRIPTOR,
+    DATAARRAY_SHAPE_SIGS,
+    "shape = DataArray.shape(arr)",
+    &IN_BASE,
+    &OUT_TENSOR
+);
+one_sig_descriptor!(
+    DATAARRAY_RANK_DESCRIPTOR,
+    DATAARRAY_RANK_SIGS,
+    "rank = DataArray.rank(arr)",
+    &IN_BASE,
+    &OUT_VALUE
+);
+one_sig_descriptor!(
+    DATAARRAY_CHUNK_SHAPE_DESCRIPTOR,
+    DATAARRAY_CHUNK_SHAPE_SIGS,
+    "chunkShape = DataArray.chunk_shape(arr)",
+    &IN_BASE,
+    &OUT_TENSOR
+);
+one_sig_descriptor!(
+    DATAARRAY_CODEC_DESCRIPTOR,
+    DATAARRAY_CODEC_SIGS,
+    "codec = DataArray.codec(arr)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATAARRAY_READ_DESCRIPTOR,
+    DATAARRAY_READ_SIGS,
+    "X = DataArray.read(arr, sliceSpec)",
+    &IN_BASE_SLICE_OPTIONAL,
+    &OUT_TENSOR
+);
+const DATAARRAY_WRITE_SIGS: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = DataArray.write(arr, values)",
+        inputs: &IN_BASE_VALUES,
+        outputs: &OUT_BOOL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = DataArray.write(arr, sliceSpec, values)",
+        inputs: &IN_BASE_SLICE_VALUES,
+        outputs: &OUT_BOOL,
+    },
+];
+pub const DATAARRAY_WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DATAARRAY_WRITE_SIGS,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DATA_DESCRIPTOR_ERRORS,
+};
+one_sig_descriptor!(
+    DATAARRAY_RESIZE_DESCRIPTOR,
+    DATAARRAY_RESIZE_SIGS,
+    "tf = DataArray.resize(arr, newShape, Name, Value, ...)",
+    &IN_BASE_NEW_SHAPE_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATAARRAY_FILL_DESCRIPTOR,
+    DATAARRAY_FILL_SIGS,
+    "tf = DataArray.fill(arr, value, Name, Value, ...)",
+    &IN_BASE_VALUE_REST,
+    &OUT_BOOL
+);
+
+one_sig_descriptor!(
+    DATATX_ID_DESCRIPTOR,
+    DATATX_ID_SIGS,
+    "id = DataTransaction.id(tx)",
+    &IN_BASE,
+    &OUT_STRING
+);
+one_sig_descriptor!(
+    DATATX_WRITE_DESCRIPTOR,
+    DATATX_WRITE_SIGS_1,
+    "tf = DataTransaction.write(tx, arrayName, sliceSpec, values, Name, Value, ...)",
+    &IN_TX_WRITE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_SET_ATTR_DESCRIPTOR,
+    DATATX_SET_ATTR_SIGS,
+    "tf = DataTransaction.set_attr(tx, key, value)",
+    &IN_BASE_KEY_VALUE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_SET_ATTRS_DESCRIPTOR,
+    DATATX_SET_ATTRS_SIGS,
+    "tf = DataTransaction.set_attrs(tx, attrs)",
+    &IN_BASE_ATTRS,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_RESIZE_DESCRIPTOR,
+    DATATX_RESIZE_SIGS,
+    "tf = DataTransaction.resize(tx, arrayName, newShape, Name, Value, ...)",
+    &IN_TX_ARRAY_SHAPE_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_FILL_DESCRIPTOR,
+    DATATX_FILL_SIGS,
+    "tf = DataTransaction.fill(tx, arrayName, value, sliceSpec)",
+    &IN_TX_ARRAY_VALUE_SLICE_OPT,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_DELETE_ARRAY_DESCRIPTOR,
+    DATATX_DELETE_ARRAY_SIGS,
+    "tf = DataTransaction.delete_array(tx, arrayName)",
+    &IN_TX_ARRAY_NAME,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_CREATE_ARRAY_DESCRIPTOR,
+    DATATX_CREATE_ARRAY_SIGS,
+    "tf = DataTransaction.create_array(tx, arrayName, meta)",
+    &IN_TX_ARRAY_META,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_COMMIT_DESCRIPTOR,
+    DATATX_COMMIT_SIGS,
+    "tf = DataTransaction.commit(tx, Name, Value, ...)",
+    &IN_TX_COMMIT_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    COMMIT_ALIAS_DESCRIPTOR,
+    COMMIT_ALIAS_SIGS,
+    "tf = commit(tx, Name, Value, ...)",
+    &IN_TX_COMMIT_REST,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_ABORT_DESCRIPTOR,
+    DATATX_ABORT_SIGS,
+    "tf = DataTransaction.abort(tx)",
+    &IN_BASE,
+    &OUT_BOOL
+);
+one_sig_descriptor!(
+    DATATX_STATUS_DESCRIPTOR,
+    DATATX_STATUS_SIGS,
+    "status = DataTransaction.status(tx)",
+    &IN_BASE,
+    &OUT_STRING
+);
+
 #[runtime_builtin(
     name = "data.create",
     category = "io/data",
@@ -56,6 +1013,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "data,dataset,create,persistence",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATA_CREATE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_create_builtin(
@@ -103,6 +1061,7 @@ async fn data_create_builtin(
     summary = "Open a dataset handle from a .data path.",
     keywords = "data,dataset,open,persistence",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATA_OPEN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -120,6 +1079,7 @@ async fn data_open_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Valu
     summary = "Check if dataset exists.",
     keywords = "data,dataset,exists",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_EXISTS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
@@ -138,6 +1098,7 @@ async fn data_exists_builtin(path: Value) -> BuiltinResult<Value> {
     keywords = "data,dataset,delete",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_DELETE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -161,6 +1122,7 @@ async fn data_delete_builtin(path: Value, _rest: Vec<Value>) -> BuiltinResult<Va
     keywords = "data,dataset,copy",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_COPY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_copy_builtin(
@@ -181,6 +1143,7 @@ async fn data_copy_builtin(
     keywords = "data,dataset,move",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_MOVE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_move_builtin(
@@ -207,6 +1170,7 @@ async fn data_move_builtin(
     keywords = "data,dataset,import",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATA_IMPORT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_import_builtin(
@@ -235,6 +1199,7 @@ async fn data_import_builtin(
     keywords = "data,dataset,export",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATA_EXPORT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_export_builtin(
@@ -261,6 +1226,7 @@ async fn data_export_builtin(
     summary = "List dataset paths under a prefix.",
     keywords = "data,dataset,list",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
+    descriptor(crate::builtins::io::data::DATA_LIST_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -300,6 +1266,7 @@ async fn data_list_builtin(path_prefix: Value, _rest: Vec<Value>) -> BuiltinResu
     summary = "Inspect dataset metadata and schema fields.",
     keywords = "data,dataset,inspect,schema",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
+    descriptor(crate::builtins::io::data::DATA_INSPECT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
@@ -325,6 +1292,7 @@ async fn data_inspect_builtin(path: Value) -> BuiltinResult<Value> {
     summary = "Return dataset path.",
     keywords = "dataset,path",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_PATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
@@ -336,6 +1304,7 @@ async fn dataset_path_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.id",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_ID_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -347,6 +1316,7 @@ async fn dataset_id_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.version",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_VERSION_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
@@ -358,6 +1328,7 @@ async fn dataset_version_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.arrays",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_cell_string_type),
+    descriptor(crate::builtins::io::data::DATASET_ARRAYS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
@@ -375,6 +1346,7 @@ async fn dataset_arrays_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.has_array",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATASET_HAS_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
@@ -388,6 +1360,7 @@ async fn dataset_has_array_builtin(base: Value, name: Value) -> BuiltinResult<Va
     name = "Dataset.array",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_array_type),
+    descriptor(crate::builtins::io::data::DATASET_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value> {
@@ -406,6 +1379,7 @@ async fn dataset_array_builtin(base: Value, name: Value) -> BuiltinResult<Value>
     name = "Dataset.attrs",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_struct_type),
+    descriptor(crate::builtins::io::data::DATASET_ATTRS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
@@ -418,6 +1392,7 @@ async fn dataset_attrs_builtin(base: Value) -> BuiltinResult<Value> {
     name = "Dataset.get_attr",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
+    descriptor(crate::builtins::io::data::DATASET_GET_ATTR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_get_attr_builtin(
@@ -439,6 +1414,7 @@ async fn dataset_get_attr_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATASET_SET_ATTR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -458,6 +1434,7 @@ async fn dataset_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATASET_SET_ATTRS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -480,6 +1457,7 @@ async fn dataset_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     name = "Dataset.begin",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tx_type),
+    descriptor(crate::builtins::io::data::DATASET_BEGIN_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -500,6 +1478,7 @@ async fn dataset_begin_builtin(base: Value, _rest: Vec<Value>) -> BuiltinResult<
     name = "Dataset.snapshot",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATASET_SNAPSHOT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_snapshot_builtin(
@@ -528,6 +1507,7 @@ async fn dataset_snapshot_builtin(
     name = "Dataset.refresh",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_dataset_type),
+    descriptor(crate::builtins::io::data::DATASET_REFRESH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
@@ -542,6 +1522,7 @@ async fn dataset_refresh_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.name",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_NAME_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
@@ -553,6 +1534,7 @@ async fn data_array_name_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.dtype",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_DTYPE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
@@ -569,6 +1551,7 @@ async fn data_array_dtype_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.shape",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_SHAPE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
@@ -588,6 +1571,7 @@ async fn data_array_shape_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.rank",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_int_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_RANK_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
@@ -604,6 +1588,7 @@ async fn data_array_rank_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.chunk_shape",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_shape_tensor_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_CHUNK_SHAPE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
@@ -627,6 +1612,7 @@ async fn data_array_chunk_shape_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.codec",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_CODEC_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
@@ -643,6 +1629,7 @@ async fn data_array_codec_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataArray.read",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_tensor_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_READ_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -669,6 +1656,7 @@ async fn data_array_read_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_WRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -691,6 +1679,7 @@ async fn data_array_write_builtin(base: Value, rest: Vec<Value>) -> BuiltinResul
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_RESIZE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_resize_builtin(
@@ -727,6 +1716,7 @@ async fn data_array_resize_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATAARRAY_FILL_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_array_fill_builtin(
@@ -761,6 +1751,7 @@ async fn data_array_fill_builtin(
     name = "DataTransaction.id",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATATX_ID_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
@@ -773,6 +1764,7 @@ async fn data_tx_id_builtin(base: Value) -> BuiltinResult<Value> {
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_WRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_write_builtin(
@@ -803,6 +1795,7 @@ async fn data_tx_write_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_SET_ATTR_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> BuiltinResult<Value> {
@@ -825,6 +1818,7 @@ async fn data_tx_set_attr_builtin(base: Value, key: Value, value: Value) -> Buil
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_SET_ATTRS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<Value> {
@@ -853,6 +1847,7 @@ async fn data_tx_set_attrs_builtin(base: Value, attrs: Value) -> BuiltinResult<V
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_RESIZE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_resize_builtin(
@@ -884,6 +1879,7 @@ async fn data_tx_resize_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_FILL_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_fill_builtin(
@@ -914,6 +1910,7 @@ async fn data_tx_fill_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_DELETE_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> BuiltinResult<Value> {
@@ -936,6 +1933,7 @@ async fn data_tx_delete_array_builtin(base: Value, array_name: Value) -> Builtin
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_CREATE_ARRAY_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_create_array_builtin(
@@ -966,6 +1964,7 @@ async fn data_tx_create_array_builtin(
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_COMMIT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1078,6 +2077,7 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::COMMIT_ALIAS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -1099,6 +2099,7 @@ async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinR
     category = "io/data",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    descriptor(crate::builtins::io::data::DATATX_ABORT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
@@ -1120,6 +2121,7 @@ async fn data_tx_abort_builtin(base: Value) -> BuiltinResult<Value> {
     name = "DataTransaction.status",
     category = "io/data",
     type_resolver(crate::builtins::io::type_resolvers::data_string_type),
+    descriptor(crate::builtins::io::data::DATATX_STATUS_DESCRIPTOR),
     builtin_path = "crate::builtins::io::data"
 )]
 async fn data_tx_status_builtin(base: Value) -> BuiltinResult<Value> {
@@ -2149,6 +3151,38 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .expect("data test serial lock poisoned")
+    }
+
+    #[test]
+    fn io_data_descriptors_cover_constructor_and_transaction_surface() {
+        let data_labels: Vec<&str> = DATA_CREATE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(data_labels.contains(&"ds = data.create(path, schema, Name, Value, ...)"));
+
+        let read_labels: Vec<&str> = DATAARRAY_READ_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(read_labels.contains(&"X = DataArray.read(arr, sliceSpec)"));
+
+        let write_labels: Vec<&str> = DATAARRAY_WRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(write_labels.contains(&"tf = DataArray.write(arr, values)"));
+        assert!(write_labels.contains(&"tf = DataArray.write(arr, sliceSpec, values)"));
+
+        let tx_labels: Vec<&str> = DATATX_COMMIT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(tx_labels.contains(&"tf = DataTransaction.commit(tx, Name, Value, ...)"));
     }
 
     #[derive(Default)]

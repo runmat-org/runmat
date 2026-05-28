@@ -3,7 +3,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::common::{build_strides, dims_from_tokens, materialize_value, parse_dims};
@@ -69,6 +73,115 @@ fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+const BUILTIN_NAME: &str = "sub2ind";
+
+const SUB2IND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ind",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Column-major linear indices corresponding to provided subscripts.",
+}];
+
+const SUB2IND_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Size vector describing source array dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "I1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First-dimension subscript values.",
+    },
+    BuiltinParamDescriptor {
+        name: "In",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Remaining per-dimension subscript arrays/scalars.",
+    },
+];
+
+const SUB2IND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "ind = sub2ind(sz, I1, In...)",
+    inputs: &SUB2IND_INPUTS,
+    outputs: &SUB2IND_OUTPUT,
+}];
+
+const SUB2IND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUB2IND.INVALID_INPUT",
+    identifier: Some("RunMat:sub2ind:InvalidInput"),
+    when: "Size vector, subscript count, or subscript types are invalid.",
+    message: "sub2ind: invalid input arguments",
+};
+
+const SUB2IND_ERROR_INDEX_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUB2IND.INDEX_BOUNDS",
+    identifier: Some("RunMat:sub2ind:IndexBounds"),
+    when: "At least one subscript lies outside bounds for its dimension.",
+    message: "sub2ind: subscript index exceeds dimension bounds",
+};
+
+const SUB2IND_ERROR_PROVIDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUB2IND.PROVIDER",
+    identifier: Some("RunMat:sub2ind:ProviderError"),
+    when: "GPU provider sub2ind hook fails.",
+    message: "sub2ind: provider execution failed",
+};
+
+const SUB2IND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUB2IND.INTERNAL",
+    identifier: Some("RunMat:sub2ind:InternalError"),
+    when: "Internal tensor conversion/output construction fails.",
+    message: "sub2ind: internal error",
+};
+
+const SUB2IND_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    SUB2IND_ERROR_INVALID_INPUT,
+    SUB2IND_ERROR_INDEX_BOUNDS,
+    SUB2IND_ERROR_PROVIDER,
+    SUB2IND_ERROR_INTERNAL,
+];
+
+pub const SUB2IND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SUB2IND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SUB2IND_ERRORS,
+};
+
+fn sub2ind_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn sub2ind_input_error(message: impl Into<String>) -> RuntimeError {
+    sub2ind_error_with_message(message, &SUB2IND_ERROR_INVALID_INPUT)
+}
+
+fn sub2ind_bounds_error(message: impl Into<String>) -> RuntimeError {
+    sub2ind_error_with_message(message, &SUB2IND_ERROR_INDEX_BOUNDS)
+}
+
+fn sub2ind_provider_error(message: impl Into<String>) -> RuntimeError {
+    sub2ind_error_with_message(message, &SUB2IND_ERROR_PROVIDER)
+}
+
+fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
+    sub2ind_error_with_message(message, &SUB2IND_ERROR_INTERNAL)
+}
+
 #[runtime_builtin(
     name = "sub2ind",
     category = "array/indexing",
@@ -76,6 +189,7 @@ fn sub2ind_type(args: &[Type], ctx: &ResolveContext) -> Type {
     keywords = "sub2ind,linear index,column major,gpu indexing",
     accel = "custom",
     type_resolver(sub2ind_type),
+    descriptor(crate::builtins::array::indexing::sub2ind::SUB2IND_DESCRIPTOR),
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
 async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -225,7 +339,7 @@ fn try_gpu_sub2ind(dims: &[usize], subs: &[Value]) -> crate::BuiltinResult<Optio
             &output_shape,
         ) {
             Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-            Err(err) => Err(sub2ind_error(err.to_string())),
+            Err(err) => Err(sub2ind_provider_error(err.to_string())),
         }
     }
 }
@@ -273,10 +387,10 @@ fn compute_indices(
             let term = coerced
                 .checked_sub(1)
                 .and_then(|v| v.checked_mul(strides[dim_index]))
-                .ok_or_else(|| sub2ind_error("Index exceeds array dimensions."))?;
+                .ok_or_else(|| sub2ind_bounds_error("Index exceeds array dimensions."))?;
             offset = offset
                 .checked_add(term)
-                .ok_or_else(|| sub2ind_error("Index exceeds array dimensions."))?;
+                .ok_or_else(|| sub2ind_bounds_error("Index exceeds array dimensions."))?;
         }
         output.push((offset + 1) as f64);
     }
@@ -322,7 +436,7 @@ fn dimension_bounds_error(dim_number: usize) -> RuntimeError {
         3 => format!("Index exceeds the number of pages in dimension {dim_number}."),
         _ => "Index exceeds array dimensions.".to_string(),
     };
-    sub2ind_error(message)
+    sub2ind_bounds_error(message)
 }
 
 fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> crate::BuiltinResult<Value> {
@@ -330,14 +444,15 @@ fn build_host_value(data: Vec<f64>, shape: Option<Vec<usize>>) -> crate::Builtin
     if data.len() == 1 && tensor::element_count(&shape) == 1 {
         Ok(Value::Num(data[0]))
     } else {
-        let tensor = Tensor::new(data, shape)
-            .map_err(|e| sub2ind_error(format!("Unable to construct sub2ind output: {e}")))?;
+        let tensor = Tensor::new(data, shape).map_err(|e| {
+            sub2ind_internal_error(format!("Unable to construct sub2ind output: {e}"))
+        })?;
         Ok(Value::Tensor(tensor))
     }
 }
 
 fn sub2ind_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("sub2ind").build()
+    sub2ind_input_error(message)
 }
 
 #[cfg(test)]
@@ -437,6 +552,10 @@ pub(crate) mod tests {
             err.to_string().contains("Index exceeds"),
             "expected index bounds error, got {err}"
         );
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INDEX_BOUNDS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -454,6 +573,10 @@ pub(crate) mod tests {
             err.to_string().contains("same size"),
             "expected size mismatch error, got {err}"
         );
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INVALID_INPUT.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -465,6 +588,10 @@ pub(crate) mod tests {
         assert!(
             err.to_string().contains("real positive integers"),
             "expected integer coercion error, got {err}"
+        );
+        assert_eq!(
+            err.identifier(),
+            super::SUB2IND_ERROR_INVALID_INPUT.identifier
         );
     }
 

@@ -17,6 +17,8 @@ use crate::{
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, Closure, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -73,29 +75,275 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because the callback can run arbitrary MATLAB code.",
 };
 
-fn arrayfun_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("arrayfun")
-        .build()
+const BUILTIN_NAME: &str = "arrayfun";
+
+const ARRAYFUN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise callback result (uniform array or cell array).",
+}];
+
+const ARRAYFUN_INPUTS_BASE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+];
+
+const ARRAYFUN_INPUTS_UNIFORM: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "UniformOutput",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"UniformOutput\""),
+        description: "Name-value key that toggles uniform output collection.",
+    },
+    BuiltinParamDescriptor {
+        name: "tf",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("true"),
+        description: "Logical true/false value for UniformOutput.",
+    },
+];
+
+const ARRAYFUN_INPUTS_HANDLER: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "ErrorHandler",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ErrorHandler\""),
+        description: "Name-value key that provides fallback callback on per-element failures.",
+    },
+    BuiltinParamDescriptor {
+        name: "handler",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Callback invoked with error struct and original scalar arguments.",
+    },
+];
+
+const ARRAYFUN_INPUTS_OPTIONS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "func",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Function handle or callable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValue",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs including UniformOutput and ErrorHandler.",
+    },
+];
+
+const ARRAYFUN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An...)",
+        inputs: &ARRAYFUN_INPUTS_BASE,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An..., \"UniformOutput\", tf)",
+        inputs: &ARRAYFUN_INPUTS_UNIFORM,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An..., \"ErrorHandler\", handler)",
+        inputs: &ARRAYFUN_INPUTS_HANDLER,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = arrayfun(func, A1, An..., nameValue...)",
+        inputs: &ARRAYFUN_INPUTS_OPTIONS,
+        outputs: &ARRAYFUN_OUTPUT,
+    },
+];
+
+const ARRAYFUN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.INVALID_INPUT",
+    identifier: Some("RunMat:arrayfun:InvalidInput"),
+    when: "Inputs, callable forms, or option tails violate arrayfun argument requirements.",
+    message: "arrayfun: invalid input arguments",
+};
+
+const ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.UNIFORM_OUTPUT_OPTION",
+    identifier: Some("RunMat:arrayfun:UniformOutputOption"),
+    when: "UniformOutput option value is not interpretable as logical true/false.",
+    message: "arrayfun: UniformOutput must be logical true or false",
+};
+
+const ARRAYFUN_ERROR_CALLBACK_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.CALLBACK_FAILED",
+    identifier: Some("RunMat:arrayfun:CallbackFailed"),
+    when: "Callback invocation fails and no ErrorHandler recovers the element.",
+    message: "arrayfun: callback execution failed",
+};
+
+const ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.UNIFORM_OUTPUT_TYPE",
+    identifier: Some("RunMat:arrayfun:UniformOutputType"),
+    when: "UniformOutput=true callback result is not a supported scalar type.",
+    message: "arrayfun: callback must return scalar values for UniformOutput=true",
+};
+
+const ARRAYFUN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.INTERNAL",
+    identifier: Some("RunMat:arrayfun:InternalError"),
+    when: "Internal shape/index/materialization/upload path fails.",
+    message: "arrayfun: internal error",
+};
+
+const ARRAYFUN_ERROR_UNDEFINED_FUNCTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ARRAYFUN.UNDEFINED_FUNCTION",
+    identifier: Some("RunMat:UndefinedFunction"),
+    when: "External callable identity cannot be resolved in semantic/runtime boundaries.",
+    message: "arrayfun: undefined function",
+};
+
+const ARRAYFUN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    ARRAYFUN_ERROR_INVALID_INPUT,
+    ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION,
+    ARRAYFUN_ERROR_CALLBACK_FAILED,
+    ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+    ARRAYFUN_ERROR_INTERNAL,
+    ARRAYFUN_ERROR_UNDEFINED_FUNCTION,
+];
+
+pub const ARRAYFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ARRAYFUN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ARRAYFUN_ERRORS,
+};
+
+fn arrayfun_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    arrayfun_error_with_message(error.message, error)
 }
 
-fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
+fn arrayfun_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn arrayfun_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    arrayfun_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn arrayfun_error_with_source(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
     let identifier = source.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(message)
-        .with_builtin("arrayfun")
+    let mut builder = build_runtime_error(message.into())
+        .with_builtin(BUILTIN_NAME)
         .with_source(source);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = identifier.as_deref().or(error.identifier) {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
 fn arrayfun_flow(message: impl Into<String>) -> RuntimeError {
-    arrayfun_error(message)
+    arrayfun_error_with_message(message, &ARRAYFUN_ERROR_INVALID_INPUT)
+}
+
+fn arrayfun_internal(message: impl Into<String>) -> RuntimeError {
+    arrayfun_error_with_message(message, &ARRAYFUN_ERROR_INTERNAL)
 }
 
 fn arrayfun_flow_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
-    arrayfun_error_with_source(message, source)
+    arrayfun_error_with_source(message, &ARRAYFUN_ERROR_CALLBACK_FAILED, source)
 }
 
 fn format_handler_error(err: &RuntimeError) -> String {
@@ -118,6 +366,7 @@ fn format_handler_error(err: &RuntimeError) -> String {
     keywords = "arrayfun,gpu,array,map,functional",
     accel = "host",
     type_resolver(arrayfun_type),
+    descriptor(crate::builtins::acceleration::gpu::arrayfun::ARRAYFUN_DESCRIPTOR),
     builtin_path = "crate::builtins::acceleration::gpu::arrayfun"
 )]
 async fn arrayfun_builtin(func: Value, mut rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -383,16 +632,16 @@ fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(n != 0.0),
         Value::Int(iv) => Ok(iv.to_f64() != 0.0),
         Value::String(s) => parse_bool_string(&s)
-            .ok_or_else(|| arrayfun_flow("arrayfun: UniformOutput must be logical true or false")),
+            .ok_or_else(|| arrayfun_error(&ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION)),
         Value::CharArray(ca) if ca.rows == 1 => {
             let text: String = ca.data.iter().collect();
-            parse_bool_string(&text).ok_or_else(|| {
-                arrayfun_flow("arrayfun: UniformOutput must be logical true or false")
-            })
+            parse_bool_string(&text)
+                .ok_or_else(|| arrayfun_error(&ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION))
         }
-        other => Err(arrayfun_flow(format!(
-            "arrayfun: UniformOutput must be logical true or false, got {other:?}"
-        ))),
+        other => Err(arrayfun_error_with_detail(
+            &ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION,
+            format!("got {other:?}"),
+        )),
     }
 }
 
@@ -565,10 +814,20 @@ impl ArrayData {
 #[derive(Clone)]
 enum Callable {
     Builtin { name: String },
+    ExternalName { name: String },
     Closure(Closure),
 }
 
 impl Callable {
+    fn resolved_semantic_handle(name: &str) -> Option<Self> {
+        let function = user_functions::resolve_semantic_function_by_name(name)?;
+        Some(Callable::Closure(Closure {
+            function_name: name.to_string(),
+            bound_function: Some(function),
+            captures: Vec::new(),
+        }))
+    }
+
     fn from_function(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(text) => Self::from_text(&text),
@@ -584,7 +843,30 @@ impl Callable {
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::from_text(&sa.data[0]),
             Value::FunctionHandle(name) => Self::from_text(&name),
-            Value::Closure(closure) => Ok(Callable::Closure(closure)),
+            Value::ExternalFunctionHandle(name) => {
+                if let Some(callable) = Self::resolved_semantic_handle(&name) {
+                    Ok(callable)
+                } else if crate::is_well_formed_qualified_name(&name) {
+                    Ok(Callable::ExternalName { name })
+                } else {
+                    Ok(Callable::Builtin { name })
+                }
+            }
+            Value::BoundFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
+                function_name: name,
+                bound_function: Some(function),
+                captures: Vec::new(),
+            })),
+            Value::Closure(mut closure) => {
+                if closure.bound_function.is_none() {
+                    if let Some(function) =
+                        user_functions::resolve_semantic_function_by_name(&closure.function_name)
+                    {
+                        closure.bound_function = Some(function);
+                    }
+                }
+                Ok(Callable::Closure(closure))
+            }
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(arrayfun_flow(
                 "arrayfun: expected function handle or builtin name, not a scalar value",
             )),
@@ -606,39 +888,96 @@ impl Callable {
             if name.is_empty() {
                 Err(arrayfun_flow("arrayfun: empty function handle"))
             } else {
+                if let Some(callable) = Self::resolved_semantic_handle(name) {
+                    return Ok(callable);
+                }
+                if crate::is_well_formed_qualified_name(name) {
+                    return Ok(Callable::ExternalName {
+                        name: name.to_string(),
+                    });
+                }
                 Ok(Callable::Builtin {
                     name: name.to_string(),
                 })
             }
         } else {
-            Ok(Callable::Builtin {
-                name: trimmed.to_ascii_lowercase(),
-            })
+            let name = trimmed.to_ascii_lowercase();
+            if let Some(callable) = Self::resolved_semantic_handle(&name) {
+                return Ok(callable);
+            }
+            if crate::is_well_formed_qualified_name(&name) {
+                return Ok(Callable::ExternalName { name });
+            }
+            Ok(Callable::Builtin { name })
         }
     }
 
     fn builtin_name(&self) -> Option<&str> {
         match self {
             Callable::Builtin { name } => Some(name.as_str()),
-            Callable::Closure(_) => None,
+            Callable::ExternalName { .. } | Callable::Closure(_) => None,
         }
     }
 
     async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
             Callable::Builtin { name } => {
-                if let Some(result) = user_functions::try_call_user_function(name, args).await {
+                let request = user_functions::CallableRequest::resolved(
+                    runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name.clone())),
+                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    args.to_vec(),
+                    1,
+                );
+                if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
                 }
                 crate::call_builtin_async(name, args).await
             }
+            Callable::ExternalName { name } => {
+                let identity = crate::external_callable_identity_for_name(name);
+                let request = user_functions::CallableRequest::resolved(
+                    identity.clone(),
+                    runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    args.to_vec(),
+                    1,
+                );
+                if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
+                    return result;
+                }
+                Err(arrayfun_error_with_message(
+                    format!("Undefined function for callable identity {identity:?}"),
+                    &ARRAYFUN_ERROR_UNDEFINED_FUNCTION,
+                ))
+            }
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
-                if let Some(result) =
-                    user_functions::try_call_user_function(&c.function_name, &merged).await
+                if let Some(function) = c.bound_function {
+                    let request =
+                        user_functions::CallableRequest::semantic(function, merged.clone(), 1);
+                    if let Some(result) =
+                        user_functions::try_call_semantic_descriptor(request).await
+                    {
+                        return result;
+                    }
+                    return Err(arrayfun_error_with_detail(
+                        &ARRAYFUN_ERROR_CALLBACK_FAILED,
+                        format!(
+                            "semantic closure '{}' ({function}) is unavailable",
+                            c.function_name
+                        ),
+                    ));
+                }
+                if let Some(function) =
+                    user_functions::resolve_semantic_function_by_name(&c.function_name)
                 {
-                    return result;
+                    let request =
+                        user_functions::CallableRequest::semantic(function, merged.clone(), 1);
+                    if let Some(result) =
+                        user_functions::try_call_semantic_descriptor(request).await
+                    {
+                        return result;
+                    }
                 }
                 crate::call_builtin_async(&c.function_name, &merged).await
             }
@@ -855,22 +1194,22 @@ impl UniformCollector {
             UniformCollector::Pending => {
                 let total = shape.iter().product();
                 let tensor = Tensor::new(vec![0.0; total], shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Double(data) => {
                 let tensor = Tensor::new(data, shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::Tensor(tensor))
             }
             UniformCollector::Logical(bits) => {
                 let logical = LogicalArray::new(bits, shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::LogicalArray(logical))
             }
             UniformCollector::Complex(entries) => {
                 let tensor = ComplexTensor::new(entries, shape.to_vec())
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::ComplexTensor(tensor))
             }
             UniformCollector::Char(chars) => {
@@ -881,20 +1220,22 @@ impl UniformCollector {
                 };
 
                 if normalized_shape.len() > 2 {
-                    return Err(arrayfun_flow(
-                        "arrayfun: character outputs with UniformOutput=true must be 2-D",
+                    return Err(arrayfun_error_with_detail(
+                        &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+                        "character outputs with UniformOutput=true must be 2-D",
                     ));
                 }
 
                 let rows = normalized_shape.first().copied().unwrap_or(1);
                 let cols = normalized_shape.get(1).copied().unwrap_or(1);
                 let expected = rows.checked_mul(cols).ok_or_else(|| {
-                    arrayfun_flow("arrayfun: character output size exceeds platform limits")
+                    arrayfun_internal("arrayfun: character output size exceeds platform limits")
                 })?;
 
                 if expected != chars.len() {
-                    return Err(arrayfun_flow(
-                        "arrayfun: callback returned the wrong number of characters",
+                    return Err(arrayfun_error_with_detail(
+                        &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+                        "callback returned the wrong number of characters",
                     ));
                 }
 
@@ -908,7 +1249,7 @@ impl UniformCollector {
                 }
 
                 let array = CharArray::new(row_major, rows, cols)
-                    .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
+                    .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(array))
             }
         }
@@ -935,9 +1276,12 @@ fn classify_value(value: &Value) -> BuiltinResult<ClassifiedValue> {
             let ch = ca.data.first().copied().unwrap_or('\0');
             Ok(ClassifiedValue::Char(ch))
         }
-        other => Err(arrayfun_flow(format!(
-            "arrayfun: callback must return scalar numeric, logical, character, or complex values for UniformOutput=true (got {other:?})"
-        ))),
+        other => Err(arrayfun_error_with_detail(
+            &ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE,
+            format!(
+                "callback must return scalar numeric, logical, character, or complex values for UniformOutput=true (got {other:?})"
+            ),
+        )),
     }
 }
 
@@ -1010,7 +1354,7 @@ fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
 
 fn dims_to_row_tensor(dims: &[usize]) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = dims.iter().map(|&d| d as f64).collect();
-    Tensor::new(data, vec![1, dims.len()]).map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))
+    Tensor::new(data, vec![1, dims.len()]).map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))
 }
 
 #[cfg(test)]
@@ -1020,6 +1364,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Tensor, Type};
+    use std::sync::Arc;
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(arrayfun_builtin(func, rest))
@@ -1042,6 +1387,258 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 78);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 10.0)) })
+            },
+        )));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        let handle = Value::BoundFunctionHandle {
+            name: "arrayfun_target".to_string(),
+            function: 78,
+        };
+
+        let result = call(handle, vec![Value::Tensor(tensor)]).expect("semantic arrayfun");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![11.0, 12.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_name_only_callback_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_arrayfun_target").then_some(80)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 80);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 20.0)) })
+            }),
+        ));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+
+        let result = call(
+            Value::String("resolved_arrayfun_target".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect("resolved name-only arrayfun");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![21.0, 22.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_qualified_text_callback_classifies_as_external_name() {
+        let callable =
+            Callable::from_text("pkg.callback").expect("qualified arrayfun callback should parse");
+        assert!(matches!(
+            callable,
+            Callable::ExternalName { name } if name == "pkg.callback"
+        ));
+    }
+
+    #[test]
+    fn arrayfun_external_handle_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(87)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 87);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 30.0)) })
+            }),
+        ));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+
+        let result = call(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect("resolved external-handle arrayfun");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![31.0, 32.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "callback").then_some(887)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 887);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 40.0)) })
+            }),
+        ));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+
+        let result = call(
+            Value::ExternalFunctionHandle("callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![41.0, 42.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(87)
+            })));
+        let callable =
+            Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".to_string()))
+                .expect("external handle should parse");
+        assert!(matches!(
+            callable,
+            Callable::Closure(Closure {
+                function_name,
+                bound_function: Some(87),
+                ..
+            }) if function_name == "pkg.callback"
+        ));
+    }
+
+    #[test]
+    fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(187)
+            })));
+        let callable = Callable::from_function(Value::Closure(Closure {
+            function_name: "pkg.callback".to_string(),
+            bound_function: None,
+            captures: vec![Value::Num(5.0)],
+        }))
+        .expect("closure callback should parse");
+        assert!(matches!(
+            callable,
+            Callable::Closure(Closure {
+                function_name,
+                bound_function: Some(187),
+                captures
+            }) if function_name == "pkg.callback" && captures == vec![Value::Num(5.0)]
+        ));
+    }
+
+    #[test]
+    fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(287)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 287);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(5.0), Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(9.0)) })
+            }),
+        ));
+        let callable = Callable::Closure(Closure {
+            function_name: "pkg.callback".to_string(),
+            bound_function: None,
+            captures: vec![Value::Num(5.0)],
+        });
+        let value = block_on(callable.call(&[Value::Num(4.0)])).expect("closure call");
+        assert_eq!(value, Value::Num(9.0));
+    }
+
+    #[test]
+    fn arrayfun_external_handle_errors_as_undefined_when_unresolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+
+        let err = call(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect_err("unresolved external callback should error");
+        assert_eq!(
+            err.identifier(),
+            ARRAYFUN_ERROR_UNDEFINED_FUNCTION.identifier,
+            "unexpected error: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("ExternalName(QualifiedName"),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            !err.message().contains("Undefined function 'pkg.callback'"),
+            "well-formed external callback should report typed identity: {err:?}"
+        );
+    }
+
+    #[test]
+    fn arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+
+        let err = call(
+            Value::ExternalFunctionHandle("pkg..callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect_err("malformed unresolved external callback should error");
+        assert_eq!(
+            err.identifier(),
+            ARRAYFUN_ERROR_UNDEFINED_FUNCTION.identifier,
+            "unexpected error: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("pkg..callback"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
@@ -1127,6 +1724,41 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn arrayfun_uniform_output_option_identifier() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let err = call(
+            Value::FunctionHandle("sin".to_string()),
+            vec![
+                Value::Tensor(tensor),
+                Value::String("UniformOutput".into()),
+                Value::String("maybe".into()),
+            ],
+        )
+        .expect_err("expected invalid uniform output option");
+        assert_eq!(
+            err.identifier(),
+            ARRAYFUN_ERROR_UNIFORM_OUTPUT_OPTION.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn arrayfun_unknown_name_value_identifier() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let err = call(
+            Value::FunctionHandle("sin".to_string()),
+            vec![
+                Value::Tensor(tensor),
+                Value::String("MysteryFlag".into()),
+                Value::Bool(true),
+            ],
+        )
+        .expect_err("expected unknown name-value error");
+        assert_eq!(err.identifier(), ARRAYFUN_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn arrayfun_size_mismatch_errors() {
         let taller = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let shorter = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
@@ -1148,6 +1780,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let handler = Value::Closure(Closure {
             function_name: "__arrayfun_test_handler".into(),
+            bound_function: None,
             captures: vec![Value::Num(42.0)],
         });
         let result = call(
@@ -1179,7 +1812,7 @@ pub(crate) mod tests {
         .expect_err("expected unresolved function error");
         assert_eq!(
             err.identifier(),
-            Some("RunMat:UndefinedFunction"),
+            ARRAYFUN_ERROR_UNDEFINED_FUNCTION.identifier,
             "unexpected error: {}",
             err.message()
         );
@@ -1383,8 +2016,55 @@ pub(crate) mod tests {
         let _ = provider.free(&out_handle);
     }
 
+    const ARRAYFUN_TEST_HELPER_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+    const ARRAYFUN_TEST_HELPER_OUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+        name: "out",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Helper output value.",
+    }];
+    const ARRAYFUN_TEST_HANDLER_INPUTS: [BuiltinParamDescriptor; 3] = [
+        BuiltinParamDescriptor {
+            name: "seed",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Seed value.",
+        },
+        BuiltinParamDescriptor {
+            name: "err",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Required,
+            default: None,
+            description: "Error context placeholder.",
+        },
+        BuiltinParamDescriptor {
+            name: "rest",
+            ty: BuiltinParamType::Any,
+            arity: BuiltinParamArity::Variadic,
+            default: None,
+            description: "Additional values.",
+        },
+    ];
+    const ARRAYFUN_TEST_HANDLER_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+        [BuiltinSignatureDescriptor {
+            label: "out = __arrayfun_test_handler(seed, err, ...)",
+            inputs: &ARRAYFUN_TEST_HANDLER_INPUTS,
+            outputs: &ARRAYFUN_TEST_HELPER_OUT,
+        }];
+    const ARRAYFUN_TEST_HANDLER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+        signatures: &ARRAYFUN_TEST_HANDLER_SIGNATURES,
+        output_mode: BuiltinOutputMode::Fixed,
+        completion_policy: BuiltinCompletionPolicy::HiddenInternal,
+        errors: &ARRAYFUN_TEST_HELPER_ERRORS,
+    };
+
     #[runmat_macros::runtime_builtin(
         name = "__arrayfun_test_handler",
+        descriptor(
+            crate::builtins::acceleration::gpu::arrayfun::tests::ARRAYFUN_TEST_HANDLER_DESCRIPTOR
+        ),
         type_resolver(arrayfun_type),
         builtin_path = "crate::builtins::acceleration::gpu::arrayfun::tests"
     )]

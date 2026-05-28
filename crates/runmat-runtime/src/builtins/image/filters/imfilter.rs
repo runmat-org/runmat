@@ -4,7 +4,11 @@
 use runmat_accelerate_api::{
     GpuTensorHandle, HostTensorView, ImfilterMode, ImfilterOptions, ImfilterPadding, ImfilterShape,
 };
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -44,8 +48,138 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const IMFILTER_BUILTIN: &str = "imfilter";
 
+const IMFILTER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Filtered image output.",
+}];
+
+const IMFILTER_INPUTS_CORE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input image/array.",
+    },
+    BuiltinParamDescriptor {
+        name: "H",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filter kernel.",
+    },
+];
+
+const IMFILTER_INPUTS_WITH_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input image/array.",
+    },
+    BuiltinParamDescriptor {
+        name: "H",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Filter kernel.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Optional mode/shape/padding flags and fill values (e.g. 'same', 'full', 'valid', 'replicate', 'symmetric', 'circular', 'fill', padval, 'conv', 'corr').",
+    },
+];
+
+const IMFILTER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = imfilter(A, H)",
+        inputs: &IMFILTER_INPUTS_CORE,
+        outputs: &IMFILTER_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = imfilter(A, H, options...)",
+        inputs: &IMFILTER_INPUTS_WITH_OPTIONS,
+        outputs: &IMFILTER_OUTPUT,
+    },
+];
+
+const IMFILTER_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMFILTER.INVALID_INPUT",
+    identifier: Some("RunMat:imfilter:InvalidInput"),
+    when: "Input/kernel tensors are invalid or cannot be converted.",
+    message: "imfilter: invalid input",
+};
+
+const IMFILTER_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMFILTER.INVALID_OPTION",
+    identifier: Some("RunMat:imfilter:InvalidOption"),
+    when: "One or more option flags or option values are invalid.",
+    message: "imfilter: invalid option",
+};
+
+const IMFILTER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMFILTER.INTERNAL",
+    identifier: Some("RunMat:imfilter:Internal"),
+    when: "Internal filtering operation fails.",
+    message: "imfilter: internal operation failed",
+};
+
+const IMFILTER_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    IMFILTER_ERROR_INVALID_INPUT,
+    IMFILTER_ERROR_INVALID_OPTION,
+    IMFILTER_ERROR_INTERNAL,
+];
+
+pub const IMFILTER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IMFILTER_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IMFILTER_ERRORS,
+};
+
 fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
+}
+
+fn imfilter_descriptor_error(
+    error: &'static BuiltinErrorDescriptor,
+    detail: Option<&str>,
+) -> RuntimeError {
+    let message = match detail {
+        Some(detail) => format!("{}: {}", error.message, detail),
+        None => error.message.to_string(),
+    };
+    let mut builder = build_runtime_error(message).with_builtin(IMFILTER_BUILTIN);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn imfilter_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    imfilter_descriptor_error(error, Some(detail.as_ref()))
+}
+
+fn imfilter_map_error(
+    err: RuntimeError,
+    fallback: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        imfilter_error_with_detail(fallback, err.message())
+    }
 }
 
 #[runtime_builtin(
@@ -55,6 +189,7 @@ fn filter_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     keywords = "imfilter,image,filter,convolution,correlation,padding",
     accel = "custom-imfilter",
     type_resolver(imfilter_type),
+    descriptor(crate::builtins::image::filters::imfilter::IMFILTER_DESCRIPTOR),
     builtin_path = "crate::builtins::image::filters::imfilter"
 )]
 async fn imfilter_builtin(
@@ -71,12 +206,14 @@ async fn imfilter_builtin(
             imfilter_gpu(image_handle, filter_value, options).await
         }
         (image_value, Value::GpuTensor(filter_handle)) => {
-            let filter_tensor = gpu_helpers::gather_tensor_async(&filter_handle).await?;
+            let filter_tensor = gpu_helpers::gather_tensor_async(&filter_handle)
+                .await
+                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
             imfilter_host_value(image_value, filter_tensor, options)
         }
         (image_value, filter_value) => {
             let filter_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, filter_value)
-                .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
+                .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
             imfilter_host_value(image_value, filter_tensor, options)
         }
     }
@@ -88,8 +225,9 @@ fn imfilter_host_value(
     options: ImfilterOptions,
 ) -> BuiltinResult<Value> {
     let image_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, image_value)
-        .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
-    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
+        .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
+    let result = apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)
+        .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
     Ok(tensor::tensor_into_value(result))
 }
 
@@ -110,27 +248,35 @@ async fn imfilter_gpu(
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => {
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                .await
+                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
             return match kernel_value {
                 Value::GpuTensor(handle) => {
-                    let kernel_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
+                    let kernel_tensor = gpu_helpers::gather_tensor_async(&handle)
+                        .await
+                        .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
                     let result = apply_imfilter_tensor(
                         &image_tensor,
                         &kernel_tensor,
                         &options,
                         IMFILTER_BUILTIN,
-                    )?;
+                    )
+                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
                     Ok(tensor::tensor_into_value(result))
                 }
                 other => {
                     let kernel_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
-                        .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
+                        .map_err(|err| {
+                            imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err)
+                        })?;
                     let result = apply_imfilter_tensor(
                         &image_tensor,
                         &kernel_tensor,
                         &options,
                         IMFILTER_BUILTIN,
-                    )?;
+                    )
+                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
                     Ok(tensor::tensor_into_value(result))
                 }
             };
@@ -141,7 +287,7 @@ async fn imfilter_gpu(
         Value::GpuTensor(handle) => (handle.clone(), None, None),
         other => {
             let tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, other)
-                .map_err(|err| filter_error(IMFILTER_BUILTIN, err))?;
+                .map_err(|err| imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, err))?;
             let view = HostTensorView {
                 data: &tensor.data,
                 shape: &tensor.shape,
@@ -149,9 +295,12 @@ async fn imfilter_gpu(
             match provider.upload(&view) {
                 Ok(uploaded) => (uploaded.clone(), Some(uploaded), Some(tensor)),
                 Err(_) => {
-                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+                    let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                        .await
+                        .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
                     let result =
-                        apply_imfilter_tensor(&image_tensor, &tensor, &options, IMFILTER_BUILTIN)?;
+                        apply_imfilter_tensor(&image_tensor, &tensor, &options, IMFILTER_BUILTIN)
+                            .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
                     return Ok(tensor::tensor_into_value(result));
                 }
             }
@@ -172,14 +321,19 @@ async fn imfilter_gpu(
             if let Some(uploaded) = uploaded_handle {
                 let _ = provider.free(&uploaded);
             }
-            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle).await?;
+            let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
+                .await
+                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
             let kernel_tensor = if let Some(tensor) = kernel_tensor_for_fallback {
                 tensor
             } else {
-                gpu_helpers::gather_tensor_async(&kernel_handle).await?
+                gpu_helpers::gather_tensor_async(&kernel_handle)
+                    .await
+                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?
             };
             let result =
-                apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)?;
+                apply_imfilter_tensor(&image_tensor, &kernel_tensor, &options, IMFILTER_BUILTIN)
+                    .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
             Ok(tensor::tensor_into_value(result))
         }
     }
@@ -191,7 +345,8 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
     while idx < args.len() {
         let mut consumed = 0usize;
         if matches_numeric_scalar(&args[idx]) {
-            let scalar = parse_scalar(IMFILTER_BUILTIN, &args[idx])?;
+            let scalar = parse_scalar(IMFILTER_BUILTIN, &args[idx])
+                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_OPTION))?;
             options.padding = ImfilterPadding::Constant;
             options.constant_value = scalar;
         } else if let Some(text) = tensor::value_to_string(&args[idx]) {
@@ -204,14 +359,16 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
                     options.padding = ImfilterPadding::Constant;
                     if let Some(next) = args.get(idx + 1) {
                         if matches_numeric_scalar(next) {
-                            let scalar = parse_scalar(IMFILTER_BUILTIN, next)?;
+                            let scalar = parse_scalar(IMFILTER_BUILTIN, next)
+                                .map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_OPTION))?;
                             options.constant_value = scalar;
                             consumed = 1;
                         } else if tensor::value_to_string(next).is_some() {
                             options.constant_value = 0.0;
                         } else {
-                            return Err(filter_error(IMFILTER_BUILTIN,
-                                "imfilter: expected numeric pad value after 'fill'",
+                            return Err(imfilter_error_with_detail(
+                                &IMFILTER_ERROR_INVALID_OPTION,
+                                "expected numeric pad value after 'fill'",
                             ));
                         }
                     } else {
@@ -224,19 +381,22 @@ fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
                 "conv" => options.mode = ImfilterMode::Convolution,
                 "corr" => options.mode = ImfilterMode::Correlation,
                 other => {
-                    return Err(filter_error(IMFILTER_BUILTIN, format!(
-                        "imfilter: unknown option '{}' (supported: 'same', 'full', 'valid', 'replicate', 'symmetric', 'circular', 'fill', 'conv', 'corr')",
-                        other
-                    )))
+                    return Err(imfilter_error_with_detail(
+                        &IMFILTER_ERROR_INVALID_OPTION,
+                        format!(
+                            "unknown option '{}' (supported: 'same', 'full', 'valid', 'replicate', 'symmetric', 'circular', 'fill', 'conv', 'corr')",
+                            other
+                        ),
+                    ))
                 }
             }
         } else {
-            return Err(filter_error(
-                IMFILTER_BUILTIN,
+            return Err(imfilter_error_with_detail(
+                &IMFILTER_ERROR_INVALID_OPTION,
                 format!(
-                "imfilter: unsupported option {:?}; expected string flags or numeric pad values",
-                args[idx]
-            ),
+                    "unsupported option {:?}; expected string flags or numeric pad values",
+                    args[idx]
+                ),
             ));
         }
         idx += 1 + consumed;
@@ -643,7 +803,7 @@ pub(crate) mod tests {
         Tensor::new(data.to_vec(), vec![rows, cols]).unwrap()
     }
 
-    fn error_message(err: crate::RuntimeError) -> String {
+    fn error_message(err: &crate::RuntimeError) -> String {
         err.message().to_string()
     }
 
@@ -861,7 +1021,8 @@ pub(crate) mod tests {
             vec![Value::from("unsupported-mode")],
         ))
         .expect_err("imfilter should error");
-        assert!(error_message(err).contains("unknown option"));
+        assert!(error_message(&err).contains("unknown option"));
+        assert_eq!(err.identifier(), IMFILTER_ERROR_INVALID_OPTION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -876,7 +1037,7 @@ pub(crate) mod tests {
             vec![Value::from("fill"), Value::Tensor(pad)],
         ))
         .expect_err("imfilter should error");
-        assert!(error_message(err).contains("scalar value"));
+        assert!(error_message(&err).contains("scalar value"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -965,5 +1126,28 @@ pub(crate) mod tests {
         for (a, b) in cpu.data.iter().zip(gathered.data.iter()) {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
+    }
+
+    #[test]
+    fn imfilter_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = IMFILTER_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"B = imfilter(A, H)"));
+        assert!(labels.contains(&"B = imfilter(A, H, options...)"));
+    }
+
+    #[test]
+    fn imfilter_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = IMFILTER_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.IMFILTER.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.IMFILTER.INVALID_OPTION"));
+        assert!(codes.contains(&"RM.IMFILTER.INTERNAL"));
     }
 }

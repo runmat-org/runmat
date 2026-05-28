@@ -12,19 +12,21 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-lexer = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-mir = { workspace = true }
 runmat-vm = { workspace = true }
+runmat-config = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-turbine = { workspace = true, optional = true }
 runmat-gc = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-async = { workspace = true }
 runmat-telemetry = { workspace = true }
 anyhow = "1.0"
 log = "0.4"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"], default-features = false }
 runmat-time = { workspace = true }
+runmat-filesystem = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
 version = "1"
@@ -49,3 +51,4 @@ runmat-snapshot = { workspace = true, features = ["compression-wasm", "validatio
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }
 futures = "0.3"
 wasm-bindgen-test = "0.3"
+tempfile = "3"

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `input` builtin for line-oriented console interaction.
 
-use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -13,12 +17,169 @@ use crate::{
 };
 
 const DEFAULT_PROMPT: &str = "Input: ";
+const BUILTIN_NAME: &str = "input";
 
-fn input_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(identifier.to_string())
-        .with_builtin("input")
-        .build()
+const INPUT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Parsed scalar/matrix value, or raw text when using string mode.",
+}];
+const INPUT_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const INPUT_INPUTS_PROMPT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prompt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prompt text shown to the user.",
+}];
+const INPUT_INPUTS_PROMPT_FLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "prompt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prompt text shown to the user.",
+    },
+    BuiltinParamDescriptor {
+        name: "stringFlag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Set to 's' to return the raw input text.",
+    },
+];
+const INPUT_INPUTS_FLAG_PROMPT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "stringFlag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Set to 's' to return the raw input text.",
+    },
+    BuiltinParamDescriptor {
+        name: "prompt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prompt text shown to the user.",
+    },
+];
+const INPUT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "value = input()",
+        inputs: &INPUT_INPUTS_NONE,
+        outputs: &INPUT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = input(prompt)",
+        inputs: &INPUT_INPUTS_PROMPT,
+        outputs: &INPUT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = input(prompt, stringFlag)",
+        inputs: &INPUT_INPUTS_PROMPT_FLAG,
+        outputs: &INPUT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = input(stringFlag, prompt)",
+        inputs: &INPUT_INPUTS_FLAG_PROMPT,
+        outputs: &INPUT_OUTPUT,
+    },
+];
+const INPUT_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:input:TooManyInputs"),
+    when: "More than two input arguments are passed to input.",
+    message: "input: too many inputs",
+};
+const INPUT_ERROR_INVALID_STRING_FLAG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.INVALID_STRING_FLAG",
+    identifier: Some("RunMat:input:InvalidStringFlag"),
+    when: "The string mode flag is not a scalar string/char 's'.",
+    message: "input: invalid string flag",
+};
+const INPUT_ERROR_PROMPT_ROW_VECTOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.PROMPT_ROW_VECTOR",
+    identifier: Some("RunMat:input:PromptMustBeRowVector"),
+    when: "Prompt char array is not 1-by-N.",
+    message: "input: prompt must be a row vector",
+};
+const INPUT_ERROR_PROMPT_SCALAR_STRING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.PROMPT_SCALAR_STRING",
+    identifier: Some("RunMat:input:PromptMustBeScalarString"),
+    when: "Prompt string array is not scalar.",
+    message: "input: prompt must be a scalar string",
+};
+const INPUT_ERROR_INVALID_PROMPT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.INVALID_PROMPT_TYPE",
+    identifier: Some("RunMat:input:InvalidPromptType"),
+    when: "Prompt is not a string scalar or row char vector.",
+    message: "input: invalid prompt type",
+};
+const INPUT_ERROR_INTERACTION_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.INTERACTION_FAILED",
+    identifier: Some("RunMat:input:InteractionFailed"),
+    when: "Interactive prompt callback fails.",
+    message: "input: interaction failed",
+};
+const INPUT_ERROR_EVAL_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.EVAL_FAILED",
+    identifier: Some("RunMat:input:EvalFailed"),
+    when: "Expression evaluation hook rejects the input expression.",
+    message: "input: invalid expression",
+};
+const INPUT_ERROR_INVALID_NUMERIC_EXPRESSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INPUT.INVALID_NUMERIC_EXPRESSION",
+    identifier: Some("RunMat:input:InvalidNumericExpression"),
+    when: "Numeric fallback parser rejects the input expression.",
+    message: "input: invalid numeric expression",
+};
+const INPUT_ERRORS: [BuiltinErrorDescriptor; 8] = [
+    INPUT_ERROR_TOO_MANY_INPUTS,
+    INPUT_ERROR_INVALID_STRING_FLAG,
+    INPUT_ERROR_PROMPT_ROW_VECTOR,
+    INPUT_ERROR_PROMPT_SCALAR_STRING,
+    INPUT_ERROR_INVALID_PROMPT_TYPE,
+    INPUT_ERROR_INTERACTION_FAILED,
+    INPUT_ERROR_EVAL_FAILED,
+    INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
+];
+pub const INPUT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INPUT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INPUT_ERRORS,
+};
+
+fn input_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    input_error_with(error, error.message)
+}
+
+fn input_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    builder.build()
+}
+
+fn input_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::input")]
@@ -51,14 +212,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "input",
     type_resolver(crate::builtins::io::type_resolvers::input_type),
+    descriptor(crate::builtins::io::input::INPUT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::input"
 )]
 async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
-        return Err(input_error(
-            "RunMat:input:TooManyInputs",
-            "input: too many inputs",
-        ));
+        return Err(input_error(&INPUT_ERROR_TOO_MANY_INPUTS));
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
@@ -95,11 +254,11 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .await
         .map_err(|err| {
             let message = err.message().to_string();
-            build_runtime_error(format!("input: {message}"))
-                .with_identifier("RunMat:input:InteractionFailed")
-                .with_source(err)
-                .with_builtin("input")
-                .build()
+            input_error_with_source(
+                &INPUT_ERROR_INTERACTION_FAILED,
+                format!("input: {message}"),
+                err,
+            )
         })?;
     if return_string {
         return Ok(Value::CharArray(CharArray::new_row(&line)));
@@ -112,10 +271,7 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
     match gathered {
         Value::CharArray(ca) => {
             if ca.rows != 1 {
-                Err(input_error(
-                    "RunMat:input:PromptMustBeRowVector",
-                    "input: prompt must be a row vector",
-                ))
+                Err(input_error(&INPUT_ERROR_PROMPT_ROW_VECTOR))
             } else {
                 Ok(ca.data.iter().collect())
             }
@@ -125,14 +281,11 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(input_error(
-                    "RunMat:input:PromptMustBeScalarString",
-                    "input: prompt must be a scalar string",
-                ))
+                Err(input_error(&INPUT_ERROR_PROMPT_SCALAR_STRING))
             }
         }
-        other => Err(input_error(
-            "RunMat:input:InvalidPromptType",
+        other => Err(input_error_with(
+            &INPUT_ERROR_INVALID_PROMPT_TYPE,
             format!("input: invalid prompt type ({other:?})"),
         )),
     }
@@ -145,8 +298,8 @@ async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
         Value::String(s) => s,
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         other => {
-            return Err(input_error(
-                "RunMat:input:InvalidStringFlag",
+            return Err(input_error_with(
+                &INPUT_ERROR_INVALID_STRING_FLAG,
                 format!("input: invalid string flag ({other:?})"),
             ))
         }
@@ -155,8 +308,8 @@ async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
     if trimmed.eq_ignore_ascii_case("s") {
         Ok(true)
     } else {
-        Err(input_error(
-            "RunMat:input:InvalidStringFlag",
+        Err(input_error_with(
+            &INPUT_ERROR_INVALID_STRING_FLAG,
             format!("input: invalid string flag ({trimmed})"),
         ))
     }
@@ -189,11 +342,11 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     if let Some(hook) = interaction::current_eval_hook() {
         return hook(trimmed.to_string()).await.map_err(|err| {
             let message = err.message().to_string();
-            build_runtime_error(format!("input: invalid expression ({message})"))
-                .with_identifier("RunMat:input:EvalFailed")
-                .with_source(err)
-                .with_builtin("input")
-                .build()
+            input_error_with_source(
+                &INPUT_ERROR_EVAL_FAILED,
+                format!("input: invalid expression ({message})"),
+                err,
+            )
         });
     }
 
@@ -202,11 +355,11 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
         .await
         .map_err(|err| {
             let message = err.message().to_string();
-            build_runtime_error(format!("input: invalid numeric expression ({message})"))
-                .with_identifier("RunMat:input:InvalidNumericExpression")
-                .with_source(err)
-                .with_builtin("input")
-                .build()
+            input_error_with_source(
+                &INPUT_ERROR_INVALID_NUMERIC_EXPRESSION,
+                format!("input: invalid numeric expression ({message})"),
+                err,
+            )
         })
 }
 
@@ -334,6 +487,19 @@ fn parse_matrix_literal(s: &str) -> Option<Value> {
 pub(crate) mod tests {
     use super::*;
     use crate::interaction::{push_queued_response, InteractionResponse};
+
+    #[test]
+    fn input_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = INPUT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"value = input()"));
+        assert!(labels.contains(&"value = input(prompt)"));
+        assert!(labels.contains(&"value = input(prompt, stringFlag)"));
+        assert!(labels.contains(&"value = input(stringFlag, prompt)"));
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

@@ -3,6 +3,8 @@
 //! Tests whether all input arrays have the same size, class, and content.
 
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
@@ -11,13 +13,71 @@ use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "isequal";
-const IDENT_NOT_ENOUGH_INPUTS: &str = "RunMat:isequal:NotEnoughInputs";
 
-fn isequal_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .build()
+const ISEQUAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when all inputs are equal in size, class, and content.",
+}];
+
+const ISEQUAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Values to compare (at least two).",
+}];
+
+const ISEQUAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isequal(A, B, ...)",
+    inputs: &ISEQUAL_INPUTS,
+    outputs: &ISEQUAL_OUTPUT,
+}];
+
+const ISEQUAL_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISEQUAL.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:isequal:NotEnoughInputs"),
+    when: "Fewer than two arguments are supplied.",
+    message: "isequal: requires at least two input arguments",
+};
+
+const ISEQUAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISEQUAL.INTERNAL",
+    identifier: Some("RunMat:isequal:Internal"),
+    when: "Internal gather/host normalization fails.",
+    message: "isequal: internal error",
+};
+
+const ISEQUAL_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [ISEQUAL_ERROR_NOT_ENOUGH_INPUTS, ISEQUAL_ERROR_INTERNAL];
+
+pub const ISEQUAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISEQUAL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISEQUAL_ERRORS,
+};
+
+fn isequal_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn isequal_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let message = format!("{}: {}", error.message, detail.as_ref());
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Compares all input values for equality.
@@ -30,14 +90,12 @@ fn isequal_error(message: impl Into<String>, identifier: &'static str) -> Runtim
     summary = "Test arrays for equality in size, class, and content.",
     keywords = "isequal,equality,comparison,logical",
     accel = "cpu",
+    descriptor(crate::builtins::logical::rel::isequal::ISEQUAL_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
 async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.len() < 2 {
-        return Err(isequal_error(
-            "isequal: requires at least two input arguments",
-            IDENT_NOT_ENOUGH_INPUTS,
-        ));
+        return Err(isequal_error(&ISEQUAL_ERROR_NOT_ENOUGH_INPUTS));
     }
 
     // Gather all values to host if needed
@@ -63,7 +121,7 @@ async fn gather_value(value: Value) -> crate::BuiltinResult<Value> {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| {
-                    isequal_error(format!("{BUILTIN_NAME}: {err}"), IDENT_NOT_ENOUGH_INPUTS)
+                    isequal_error_with_detail(&ISEQUAL_ERROR_INTERNAL, err.to_string())
                 })?;
             Ok(Value::Tensor(tensor))
         }
@@ -346,7 +404,7 @@ pub(crate) mod tests {
     fn isequal_not_enough_args() {
         let err = run_isequal(vec![Value::Num(5.0)]).unwrap_err();
         assert!(err.message().contains("at least two"));
-        assert_eq!(err.identifier(), Some(IDENT_NOT_ENOUGH_INPUTS));
+        assert_eq!(err.identifier(), ISEQUAL_ERROR_NOT_ENOUGH_INPUTS.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_hir::LoweringContext;
 use runmat_parser::ParserOptions;
-use runmat_vm::instr::Instr;
-use std::collections::HashMap;
+use runmat_vm::Instr;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::Write;
@@ -11,20 +11,44 @@ use std::path::PathBuf;
 
 use crate::diagnostics::parser_compat;
 
-pub fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
+pub fn emit_bytecode(
+    source: &str,
+    config: &RunMatRuntimeConfig,
+    source_name: Option<&str>,
+) -> Result<String> {
     let options = ParserOptions::new(parser_compat(config.language.compat));
     let ast = runmat_parser::parse_with_options(source, options)
         .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
-    let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
-        .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
-    let mut bytecode = runmat_vm::compile(&lowering.hir, &HashMap::new())
-        .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
-    bytecode.var_names = lowering
-        .var_names
-        .iter()
-        .map(|(id, name)| (id.0, name.clone()))
-        .collect();
+    let known_project_symbols = discover_known_project_symbols(source_name);
+    let lowering = runmat_hir::lower(
+        &ast,
+        &LoweringContext::empty().with_known_project_symbols(&known_project_symbols),
+    )
+    .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
+    let bytecode = compile_bytecode(&lowering)?;
     Ok(disassemble_bytecode(&bytecode))
+}
+
+fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
+    use runmat_config::project::discover_known_project_symbols_from_source_name;
+
+    let Ok(cwd) = std::env::current_dir() else {
+        return HashSet::new();
+    };
+    discover_known_project_symbols_from_source_name(source_name, &cwd)
+}
+
+fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::Bytecode> {
+    let entrypoint =
+        lowering.assembly.entrypoints.first().ok_or_else(|| {
+            anyhow::anyhow!("Compile error: semantic HIR assembly has no entrypoint")
+        })?;
+    let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
+        .map_err(|err| anyhow::anyhow!(format!("MIR lowering error: {err:?}")))?;
+    let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let bytecode = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
+        .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
+    Ok(bytecode)
 }
 
 pub fn write_bytecode_output(path: &PathBuf, output: &str) -> Result<()> {
@@ -78,5 +102,162 @@ fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
         }
         Instr::EmitStackTop { label: emit } => format!("EmitStackTop {:?}", emit),
         other => format!("{other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compile_bytecode, discover_known_project_symbols};
+    use crate::test_support::ScopedCurrentDir;
+    use std::fs;
+
+    #[test]
+    fn discover_known_project_symbols_reads_manifest_source_context() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+        fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let source_name = tmp.path().join("main.m");
+        let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
+
+        assert!(
+            symbols.contains("stats.summarize"),
+            "expected project symbol discovery to include package-qualified names"
+        );
+    }
+
+    #[test]
+    fn emit_bytecode_uses_source_context_project_symbols() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+        fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let source_name = tmp.path().join("main.m");
+        let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
+        let compat = runmat_config::runtime::RunMatRuntimeConfig::default()
+            .language
+            .compat;
+        let options = runmat_parser::ParserOptions::new(crate::diagnostics::parser_compat(compat));
+        let ast = runmat_parser::parse_with_options("import stats.*; y = summarize(1);", options)
+            .expect("parse source");
+        let lowering = runmat_hir::lower(
+            &ast,
+            &runmat_hir::LoweringContext::empty().with_known_project_symbols(&symbols),
+        )
+        .expect("lower source");
+        let bytecode = compile_bytecode(&lowering).expect("compile bytecode");
+
+        assert!(
+            lowering
+                .hir_index
+                .calls
+                .iter()
+                .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
+            "expected wildcard call to resolve as package function with source-context symbols"
+        );
+        assert!(
+            bytecode.instructions.iter().any(|instr| match instr {
+                runmat_vm::Instr::CallFunctionMulti { identity, .. } => {
+                    identity.display_name().as_deref() == Some("stats.summarize")
+                }
+                _ => false,
+            }),
+            "expected call instruction identity to resolve to exact package-qualified symbol"
+        );
+    }
+
+    #[test]
+    fn discover_known_project_symbols_requires_existing_local_source_path() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let symbols = discover_known_project_symbols(Some("virtual/nonexistent_remote.m"));
+
+        assert!(
+            symbols.is_empty(),
+            "nonexistent source names should not pull project symbols from local cwd"
+        );
+    }
+
+    #[test]
+    fn discover_known_project_symbols_rejects_colon_remote_name() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+        fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
+
+        let _cwd = ScopedCurrentDir::enter(tmp.path());
+        let symbols = discover_known_project_symbols(Some("remote:main.m"));
+
+        assert!(
+            symbols.is_empty(),
+            "colon-style remote source names should not pull project symbols from local cwd"
+        );
     }
 }

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `magic` builtin.
 
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -20,6 +24,74 @@ fn magic_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::tensor()
 }
 
+const MAGIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "n-by-n magic square matrix.",
+}];
+
+const MAGIC_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Order of the magic square.",
+}];
+
+const MAGIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "A = magic(n)",
+    inputs: &MAGIC_SIG_N_INPUTS,
+    outputs: &MAGIC_OUTPUT,
+}];
+
+const MAGIC_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    BuiltinErrorDescriptor {
+        code: "RM.MAGIC.ARG_COUNT",
+        identifier: None,
+        when: "The builtin is called with a number of arguments other than one.",
+        message: "magic: requires exactly one input argument",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.MAGIC.NON_SCALAR",
+        identifier: None,
+        when: "The input is not a numeric scalar.",
+        message: "magic: input must be a numeric scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.MAGIC.NON_FINITE",
+        identifier: None,
+        when: "The order argument is non-finite.",
+        message: "magic: dimension must be finite",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.MAGIC.NON_INTEGER",
+        identifier: None,
+        when: "The order argument is not an integer.",
+        message: "magic: dimension must be an integer",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.MAGIC.NEGATIVE",
+        identifier: None,
+        when: "The order argument is negative.",
+        message: "magic: dimension must be non-negative",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.MAGIC.ORDER_TWO_UNDEFINED",
+        identifier: None,
+        when: "The requested order is 2.",
+        message: "magic: magic squares of order 2 do not exist",
+    },
+];
+
+pub const MAGIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MAGIC_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MAGIC_ERRORS,
+};
+
 #[runtime_builtin(
     name = "magic",
     category = "array/creation",
@@ -27,6 +99,7 @@ fn magic_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     keywords = "magic,magic square,array",
     accel = "array_construct",
     type_resolver(magic_type),
+    descriptor(crate::builtins::array::creation::magic::MAGIC_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::magic"
 )]
 async fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -57,7 +57,7 @@ impl RunMatSession {
         self.stats = ExecutionStats::default();
     }
 
-    /// Control whether fusion plan snapshots are emitted in [`ExecutionResult`].
+    /// Control whether fusion plan snapshots are emitted in [`crate::abi::ExecutionOutcome`].
     pub fn set_emit_fusion_plan(&mut self, enabled: bool) {
         self.emit_fusion_plan = enabled;
     }
@@ -87,10 +87,6 @@ impl RunMatSession {
         self.error_namespace = namespace.clone();
         runmat_vm::set_error_namespace(&namespace);
         runmat_hir::set_error_namespace(&namespace);
-    }
-
-    pub fn set_source_name_override(&mut self, name: Option<String>) {
-        self.source_name_override = name;
     }
 
     /// Configure garbage collector

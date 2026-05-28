@@ -1,7 +1,11 @@
 //! MATLAB-compatible `tanh` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -14,6 +18,51 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "tanh";
+
+const TANH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise hyperbolic tangent result.",
+}];
+
+const TANH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const TANH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = tanh(X)",
+    inputs: &TANH_INPUTS,
+    outputs: &TANH_OUTPUT,
+}];
+
+const TANH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TANH.INVALID_INPUT",
+    identifier: Some("RunMat:tanh:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "tanh: invalid input",
+};
+
+const TANH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TANH.INTERNAL",
+    identifier: Some("RunMat:tanh:Internal"),
+    when: "Internal gather/conversion/allocation/provider flow failed.",
+    message: "tanh: internal error",
+};
+
+const TANH_ERRORS: [BuiltinErrorDescriptor; 2] = [TANH_ERROR_INVALID_INPUT, TANH_ERROR_INTERNAL];
+
+pub const TANH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TANH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TANH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,10 +81,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute tanh directly on the device; runtimes gather to the host when unary_tanh is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn tanh_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn tanh_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::tanh")]
@@ -63,6 +126,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "tanh,hyperbolic tangent,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::tanh::TANH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::tanh"
 )]
 async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -74,9 +138,7 @@ async fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(ct) => tanh_complex_tensor(ct),
         Value::CharArray(ca) => tanh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("tanh: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(tanh_error(&TANH_ERROR_INVALID_INPUT)),
         other => tanh_real(other),
     }
 }
@@ -92,13 +154,15 @@ async fn tanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn tanh_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("tanh", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("tanh", value)
+        .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INVALID_INPUT, e))?;
     tanh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn tanh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.tanh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("tanh: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e))
 }
 
 fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -108,7 +172,7 @@ fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| tanh_complex_parts(re, im))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| runtime_error_for(format!("tanh: {e}")))?;
+        .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -119,7 +183,7 @@ fn tanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).tanh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("tanh: {e}")))?;
+        .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -146,6 +210,16 @@ pub(crate) mod tests {
 
     fn tanh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::tanh_builtin(value))
+    }
+
+    #[test]
+    fn tanh_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = TANH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = tanh(X)"));
     }
 
     #[test]
@@ -234,6 +308,14 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tanh_string_errors() {
+        let err = tanh_builtin(Value::from("not numeric")).expect_err("expected error");
+        assert!(err.message().contains("invalid input"));
+        assert_eq!(err.identifier(), TANH_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

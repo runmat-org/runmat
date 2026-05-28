@@ -2,7 +2,7 @@ mod client;
 mod transport;
 
 use once_cell::sync::OnceCell;
-use runmat_config::TelemetryConfig as RuntimeTelemetryConfig;
+use runmat_config::runtime::TelemetryConfig as RuntimeTelemetryConfig;
 use runmat_core::TelemetrySink;
 use std::sync::Arc;
 

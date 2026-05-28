@@ -1,15 +1,160 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::extract_dims;
 use crate::builtins::common::tensor;
-use runmat_builtins::ResolveContext;
-use runmat_builtins::Type;
 
-fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("unifrnd").build()
+const BUILTIN_NAME: &str = "unifrnd";
+
+const UNIFRND_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "r",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Random sample array from uniform distribution.",
+}];
+
+const UNIFRND_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower bound parameter.",
+    },
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound parameter (must be > a).",
+    },
+];
+
+const UNIFRND_INPUTS_A_B_SZ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower bound parameter.",
+    },
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound parameter (must be > a).",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Size scalar or size vector argument.",
+    },
+];
+
+const UNIFRND_INPUTS_A_B_DIMS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "a",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Lower bound parameter.",
+    },
+    BuiltinParamDescriptor {
+        name: "b",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper bound parameter (must be > a).",
+    },
+    BuiltinParamDescriptor {
+        name: "sz",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension extents for output shape.",
+    },
+];
+
+const UNIFRND_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "r = unifrnd(a, b)",
+        inputs: &UNIFRND_INPUTS_A_B,
+        outputs: &UNIFRND_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "r = unifrnd(a, b, sz)",
+        inputs: &UNIFRND_INPUTS_A_B_SZ,
+        outputs: &UNIFRND_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "r = unifrnd(a, b, sz1, sz2, ...)",
+        inputs: &UNIFRND_INPUTS_A_B_DIMS,
+        outputs: &UNIFRND_OUTPUT_R,
+    },
+];
+
+const UNIFRND_ERROR_LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.UNIFRND.LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND",
+        identifier: Some("RunMat:unifrnd:LowerBoundMustBeLessThanUpperBound"),
+        when: "a is greater than or equal to b.",
+        message: "unifrnd: a must be less than b",
+    };
+
+const UNIFRND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNIFRND.INVALID_ARGUMENT",
+    identifier: Some("RunMat:unifrnd:InvalidArgument"),
+    when: "Input parameters or size arguments are missing or malformed.",
+    message: "unifrnd: invalid argument",
+};
+
+const UNIFRND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNIFRND.INTERNAL",
+    identifier: Some("RunMat:unifrnd:Internal"),
+    when: "Internal conversion/allocation/provider decode fails.",
+    message: "unifrnd: internal operation failed",
+};
+
+const UNIFRND_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    UNIFRND_ERROR_LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND,
+    UNIFRND_ERROR_INVALID_ARGUMENT,
+    UNIFRND_ERROR_INTERNAL,
+];
+
+pub const UNIFRND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &UNIFRND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &UNIFRND_ERRORS,
+};
+
+fn unifrnd_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn unifrnd_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    unifrnd_error_with(error, error.message)
+}
+
+fn unifrnd_internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    unifrnd_error_with(&UNIFRND_ERROR_INTERNAL, message)
 }
 
 fn unifrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -26,25 +171,30 @@ fn unifrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     summary = "Uniformly-distributed random numbers on the interval [a, b).",
     keywords = "unifrnd,uniform,random,distribution,statistics",
     type_resolver(unifrnd_type),
+    descriptor(crate::builtins::stats::random::unifrnd::UNIFRND_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::random::unifrnd"
 )]
 async fn unifrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (a, b, shape) = parse_args(args).await?;
     if a >= b {
-        return Err(builtin_error("unifrnd: a must be less than b"));
+        return Err(unifrnd_error(
+            &UNIFRND_ERROR_LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND,
+        ));
     }
     if let Some(value) = try_gpu_unifrnd(a, b, &shape)? {
         return Ok(value);
     }
     let len = tensor::element_count(&shape);
     let data = random::generate_uniform_scaled(a, b, len, "unifrnd")?;
-    let t = Tensor::new(data, shape).map_err(|e| builtin_error(format!("unifrnd: {e}")))?;
+    let t =
+        Tensor::new(data, shape).map_err(|e| unifrnd_internal_error(format!("unifrnd: {e}")))?;
     Ok(tensor::tensor_into_value(t))
 }
 
 async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<(f64, f64, Vec<usize>)> {
     if args.len() < 2 {
-        return Err(builtin_error(
+        return Err(unifrnd_error_with(
+            &UNIFRND_ERROR_INVALID_ARGUMENT,
             "unifrnd: requires at least two arguments (a, b)",
         ));
     }
@@ -59,9 +209,10 @@ fn scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
         Value::Num(v) => Ok(*v),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        other => Err(builtin_error(format!(
-            "unifrnd: expected scalar parameter, got {other:?}"
-        ))),
+        other => Err(unifrnd_error_with(
+            &UNIFRND_ERROR_INVALID_ARGUMENT,
+            format!("unifrnd: expected scalar parameter, got {other:?}"),
+        )),
     }
 }
 
@@ -74,9 +225,10 @@ async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
         match extract_dims(arg, "unifrnd").await? {
             Some(d) => dims.extend(d),
             None => {
-                return Err(builtin_error(format!(
-                    "unifrnd: invalid size argument: {arg:?}"
-                )))
+                return Err(unifrnd_error_with(
+                    &UNIFRND_ERROR_INVALID_ARGUMENT,
+                    format!("unifrnd: invalid size argument: {arg:?}"),
+                ))
             }
         }
     }
@@ -173,13 +325,21 @@ mod tests {
     #[test]
     fn unifrnd_rejects_a_ge_b() {
         let args = vec![Value::Num(5.0), Value::Num(2.0)];
-        assert!(block_on(unifrnd_builtin(args)).is_err());
+        let err = block_on(unifrnd_builtin(args)).expect_err("a >= b should error");
+        assert_eq!(
+            err.identifier(),
+            UNIFRND_ERROR_LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND.identifier
+        );
     }
 
     #[test]
     fn unifrnd_rejects_a_eq_b() {
         let args = vec![Value::Num(3.0), Value::Num(3.0)];
-        assert!(block_on(unifrnd_builtin(args)).is_err());
+        let err = block_on(unifrnd_builtin(args)).expect_err("a == b should error");
+        assert_eq!(
+            err.identifier(),
+            UNIFRND_ERROR_LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND.identifier
+        );
     }
 
     #[test]

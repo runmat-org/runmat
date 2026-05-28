@@ -1,6 +1,6 @@
-pub mod arithmetic;
-pub mod arrays;
-pub mod cells;
-pub mod comparison;
-pub mod control_flow;
-pub mod stack;
+pub(crate) mod arithmetic;
+pub(crate) mod arrays;
+pub(crate) mod cells;
+pub(crate) mod comparison;
+pub(crate) mod control_flow;
+pub(crate) mod stack;

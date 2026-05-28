@@ -40,6 +40,12 @@ pub fn whos_type(_args: &[Type], _context: &ResolveContext) -> Type {
     })
 }
 
+pub fn clearvars_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Tensor {
+        shape: Some(vec![Some(0), Some(0)]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +112,16 @@ mod tests {
                     "persistent".to_string(),
                 ])
             })
+        );
+    }
+
+    #[test]
+    fn clearvars_type_reports_empty_tensor() {
+        assert_eq!(
+            clearvars_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![Some(0), Some(0)])
+            }
         );
     }
 }

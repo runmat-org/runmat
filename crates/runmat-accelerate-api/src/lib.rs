@@ -503,6 +503,33 @@ pub enum ProviderPrecision {
     F64,
 }
 
+/// Declares how provider-owned GPU handles may cross async spawn boundaries.
+///
+/// This is a runtime/provider policy surface (not a semantic type fact) used by
+/// VM/runtime spawn handling to prevent unsynchronized device-handle races.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpawnHandleConcurrency {
+    /// Provider supports immutable sharing of handle-backed values across spawned tasks.
+    ImmutableShare,
+    /// Provider supports copy-on-write semantics when spawned and parent tasks diverge.
+    CopyOnWrite,
+    /// Provider supports synchronized mutation for shared handles.
+    SynchronizedMutation,
+    /// Provider rejects spawned sharing of raw handles.
+    Reject,
+}
+
+impl SpawnHandleConcurrency {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpawnHandleConcurrency::ImmutableShare => "immutable_share",
+            SpawnHandleConcurrency::CopyOnWrite => "copy_on_write",
+            SpawnHandleConcurrency::SynchronizedMutation => "synchronized_mutation",
+            SpawnHandleConcurrency::Reject => "reject",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReductionTwoPassMode {
     Auto,
@@ -952,6 +979,15 @@ pub trait AccelProvider: Send + Sync {
     fn device_info(&self) -> String;
     fn device_id(&self) -> u32 {
         0
+    }
+
+    /// Declares provider policy for sharing `GpuTensorHandle` values across
+    /// spawned async boundaries.
+    ///
+    /// Default is conservative rejection. Providers that can safely support
+    /// cross-task sharing should override this.
+    fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+        SpawnHandleConcurrency::Reject
     }
 
     /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
@@ -2581,15 +2617,30 @@ pub fn clear_provider() {
 }
 
 pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
-    PROVIDER_REGISTRY
+    if let Some(thread_provider) = current_thread_provider() {
+        return Some(thread_provider);
+    }
+    if let Some(registered) = PROVIDER_REGISTRY
         .read()
         .ok()
         .and_then(|guard| guard.get(&device_id).copied())
-        .or_else(|| provider())
+    {
+        return Some(registered);
+    }
+    // Preserve legacy behavior: when no explicit per-device registration exists,
+    // fall back to the globally active provider regardless of handle device id.
+    GLOBAL_PROVIDER
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
     provider_for_device(handle.device_id)
+}
+
+pub fn spawn_handle_concurrency_for(handle: &GpuTensorHandle) -> Option<SpawnHandleConcurrency> {
+    provider_for_handle(handle).map(AccelProvider::spawn_handle_concurrency)
 }
 
 pub fn next_device_id() -> u32 {

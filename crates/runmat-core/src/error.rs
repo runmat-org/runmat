@@ -1,4 +1,4 @@
-use runmat_hir::SemanticError;
+use runmat_hir::HirError;
 use runmat_parser::SyntaxError;
 use runmat_runtime::RuntimeError;
 use runmat_vm::CompileError;
@@ -8,7 +8,7 @@ use crate::telemetry::TelemetryFailureInfo;
 #[derive(Debug)]
 pub enum RunError {
     Syntax(SyntaxError),
-    Semantic(SemanticError),
+    Semantic(HirError),
     Compile(CompileError),
     Runtime(RuntimeError),
 }
@@ -32,8 +32,8 @@ impl From<SyntaxError> for RunError {
     }
 }
 
-impl From<SemanticError> for RunError {
-    fn from(value: SemanticError) -> Self {
+impl From<HirError> for RunError {
+    fn from(value: HirError) -> Self {
         RunError::Semantic(value)
     }
 }
@@ -64,7 +64,7 @@ impl RunError {
                 code: err
                     .identifier
                     .clone()
-                    .unwrap_or_else(|| "RunMat:SemanticError".to_string()),
+                    .unwrap_or_else(|| "RunMat:HirError".to_string()),
                 has_span: err.span.is_some(),
                 component: telemetry_component_for_identifier(err.identifier.as_deref()),
             },

@@ -142,13 +142,13 @@
 | Completed | Path              | Name(s)        | Purpose      | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                       |
 |-----------|-------------------|--------------- |------------- |-----|--------|------------------|-----------------------------|
 |     ✅     | io/image          | imread, imwrite, imfinfo | Image I/O     | —   | —      | —                | All image formats in `imread` / `imwrite` / `imfinfo` on MATLAB are supported, including PNG/JPEG.          |
-|     ✅     | plot/images (gui) | imshow, imagesc         | Display       | —   | —      | —                | Behind gui/jupyter features.|
+|     ✅     | plot/images (gui) | imshow, imagesc         | Display       | —   | —      | —                | Behind gui/headless plotting features.|
 
 ## Plotting & visualization (feature‑gated)
 
 | Completed | Path        | Name(s)                                                                                          | Purpose         | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                          |
 |-----------|-------------|--------------------------------------------------------------------------------------------------|-----------------|-----|--------|------------------|------------------------------------------------|
-|           | plot/core   | plot, scatter, semilogx, semilogy, loglog, bar, histogram, stairs, stem, subplot, figure, hold, title, sgtitle, xlabel, ylabel, legend, xlim, ylim, axis | 2D plotting    | —   | —      | —                | Provided by runmat-plot (gui/jupyter).         |
+|           | plot/core   | plot, scatter, semilogx, semilogy, loglog, bar, histogram, stairs, stem, subplot, figure, hold, title, sgtitle, xlabel, ylabel, legend, xlim, ylim, axis | 2D plotting    | —   | —      | —                | Provided by runmat-plot (gui/headless).         |
 |           | plot/3d     | surf, mesh, contour, contourf                                                                    | 3D/surfaces     | —   | —      | —                |                                                |
 
 ## Constants

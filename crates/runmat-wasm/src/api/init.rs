@@ -13,22 +13,12 @@ use crate::api::session::RunMatWasm;
 use crate::runtime::config::{apply_plotting_overrides, InitOptions, SessionConfig};
 use crate::runtime::filesystem::install_js_fs_provider;
 use crate::runtime::gpu::{
-    capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider, GpuStatus,
+    capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider,
+    validate_webgpu_runtime, GpuStatus,
 };
 use crate::runtime::logging::{init_logging_once, set_log_filter_override};
 use crate::runtime::snapshot::resolve_snapshot_bytes;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
-
-#[wasm_bindgen(js_name = registerFsProvider)]
-pub fn register_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
-    install_fs_provider_value(bindings).map_err(|err| {
-        init_error_with_details(
-            InitErrorCode::FilesystemProvider,
-            "Failed to register filesystem provider",
-            Some(err),
-        )
-    })
-}
 
 #[wasm_bindgen(js_name = initRunMat)]
 pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
@@ -111,7 +101,6 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     session.set_compat_mode(config.language_compat);
     session.set_callstack_limit(config.callstack_limit);
     session.set_error_namespace(config.error_namespace.clone());
-    session.set_source_name_override(Some("<wasm>".to_string()));
 
     let mut gpu_status = GpuStatus {
         requested: config.enable_gpu,
@@ -121,29 +110,39 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     };
 
     if config.enable_gpu {
-        match initialize_gpu_provider(&config).await {
-            Ok(_) => {
-                gpu_status.active = true;
-                gpu_status.adapter = capture_gpu_adapter_info();
-                #[cfg(target_arch = "wasm32")]
-                {
-                    if let Err(err) =
-                        runmat_runtime::builtins::plotting::context::ensure_context_from_provider()
+        match validate_webgpu_runtime() {
+            Ok(()) => match initialize_gpu_provider(&config).await {
+                Ok(_) => {
+                    gpu_status.active = true;
+                    gpu_status.adapter = capture_gpu_adapter_info();
+                    #[cfg(target_arch = "wasm32")]
                     {
-                        let message = err.message().to_string();
-                        log::warn!(
-                            "RunMat wasm: unable to install shared plotting context: {message}"
-                        );
-                        gpu_status.error = Some(message);
+                        if let Err(err) =
+                            runmat_runtime::builtins::plotting::context::ensure_context_from_provider(
+                            )
+                        {
+                            let message = err.message().to_string();
+                            log::warn!(
+                                "RunMat wasm: unable to install shared plotting context: {message}"
+                            );
+                            gpu_status.error = Some(message);
+                        }
                     }
                 }
-            }
-            Err(err) => {
-                let message = js_value_to_string(err.clone());
+                Err(err) => {
+                    let message = js_value_to_string(err.clone());
+                    log::warn!(
+                        "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
+                    );
+                    gpu_status.error = Some(message);
+                    install_cpu_provider(&config);
+                }
+            },
+            Err(reason) => {
                 log::warn!(
-                    "RunMat wasm: GPU initialization failed (falling back to CPU): {message}"
+                    "RunMat wasm: WebGPU capability preflight failed (falling back to CPU): {reason}"
                 );
-                gpu_status.error = Some(message);
+                gpu_status.error = Some(reason);
                 install_cpu_provider(&config);
             }
         }
@@ -216,7 +215,7 @@ pub(crate) fn install_fs_provider_value(bindings: JsValue) -> Result<(), JsValue
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn install_fs_provider_value(_bindings: JsValue) -> Result<(), JsValue> {
     Err(crate::wire::errors::js_error(
-        "registerFsProvider is only available when targeting wasm32",
+        "filesystem provider installation is only available when targeting wasm32",
     ))
 }
 
@@ -229,50 +228,9 @@ fn ensure_getrandom_js() {
 }
 
 fn ensure_internal_builtins() {
-    if runmat_builtins::builtin_function_by_name("make_handle").is_none() {
-        register_make_handle_fallback();
-    }
     if runmat_builtins::builtin_function_by_name("make_anon").is_none() {
         register_make_anon_fallback();
     }
-}
-
-fn register_make_handle_fallback() {
-    use runmat_builtins::wasm_registry::submit_builtin_function;
-    use runmat_builtins::{BuiltinFunction, Type};
-
-    fn make_handle_impl(args: &[Value]) -> runmat_builtins::BuiltinFuture {
-        let args = args.to_vec();
-        Box::pin(async move {
-            if args.len() != 1 {
-                return Err(build_runtime_error("make_handle: expected 1 input")
-                    .with_identifier("RunMat:make_handle:InvalidInput")
-                    .build());
-            }
-            let name: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
-                build_runtime_error(format!("make_handle: {err}"))
-                    .with_identifier("RunMat:make_handle:InvalidInput")
-                    .build()
-            })?;
-            Ok(Value::FunctionHandle(name))
-        })
-    }
-
-    let builtin = BuiltinFunction::new(
-        "make_handle",
-        "",
-        "",
-        "",
-        "",
-        vec![Type::String],
-        Type::Unknown,
-        None,
-        make_handle_impl,
-        &[],
-        false,
-        true,
-    );
-    submit_builtin_function(builtin);
 }
 
 fn register_make_anon_fallback() {

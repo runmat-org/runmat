@@ -7,7 +7,11 @@
 //! for `tand(-90 + 180k)`). Non-finite inputs propagate as `NaN`.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -19,10 +23,69 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "tand";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const TAND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise tangent result with degree input semantics.",
+}];
+
+const TAND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, logical array, complex value, or gpuArray.",
+}];
+
+const TAND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = tand(X)",
+    inputs: &TAND_INPUTS,
+    outputs: &TAND_OUTPUT,
+}];
+
+const TAND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAND.INVALID_INPUT",
+    identifier: Some("RunMat:tand:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
+    message: "tand: invalid input",
+};
+
+const TAND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TAND.INTERNAL",
+    identifier: Some("RunMat:tand:Internal"),
+    when: "Internal gather/conversion/allocation flow failed.",
+    message: "tand: internal error",
+};
+
+const TAND_ERRORS: [BuiltinErrorDescriptor; 2] = [TAND_ERROR_INVALID_INPUT, TAND_ERROR_INTERNAL];
+
+pub const TAND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TAND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TAND_ERRORS,
+};
+
+fn tand_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn tand_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Element-wise scalar implementation. Snaps to exact MATLAB values at
@@ -68,6 +131,7 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
     keywords = "tand,tangent,degrees,trigonometry",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::tand::TAND_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::tand"
 )]
 async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
@@ -78,9 +142,7 @@ async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(ct) => tand_complex_tensor(ct),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("tand: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(tand_error(&TAND_ERROR_INVALID_INPUT)),
         other => tand_real(other),
     }
 }
@@ -91,7 +153,8 @@ async fn tand_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn tand_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|e| tand_error_with_detail(&TAND_ERROR_INVALID_INPUT, e))?;
     tand_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -101,7 +164,8 @@ fn tand_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&value| tand_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|err| builtin_error(format!("tand: {err}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err))
 }
 
 fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -111,7 +175,7 @@ fn tand_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| tand_complex(re, im))
         .collect::<Vec<_>>();
     let converted = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|err| builtin_error(format!("tand: {err}")))?;
+        .map_err(|err| tand_error_with_detail(&TAND_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
 }
 
@@ -125,8 +189,18 @@ pub(crate) mod tests {
         block_on(super::tand_builtin(value))
     }
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn tand_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = TAND_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = tand(X)"));
     }
 
     fn expect_num(value: Value) -> f64 {
@@ -300,6 +374,7 @@ pub(crate) mod tests {
     #[test]
     fn tand_string_errors() {
         let err = tand_builtin(Value::String("90".into())).expect_err("expected error");
-        assert!(error_message(err).contains("tand: expected numeric input"));
+        assert!(error_message(&err).contains("invalid input"));
+        assert_eq!(err.identifier(), TAND_ERROR_INVALID_INPUT.identifier);
     }
 }

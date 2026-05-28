@@ -1330,7 +1330,10 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Struct(_) => "Struct",
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
-        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_) => "FunctionHandle",
+        Value::BoundFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::Complex(_, _) => "Complex",
@@ -1824,8 +1827,7 @@ fn compare_matmul(
     };
     let a = Value::Tensor(ta.clone());
     let b = Value::Tensor(tb.clone());
-    let cpu_time =
-        time(|| futures::executor::block_on(runmat_runtime::matrix::value_matmul(&a, &b)))?;
+    let cpu_time = time(|| futures::executor::block_on(runmat_runtime::value_matmul(&a, &b)))?;
     let flops = (n * n * n) as f64;
     update_cpu_cost(cpu_cost_slot, cpu_time.as_secs_f64() / flops);
     if let Some(model) = profile_cost_model() {

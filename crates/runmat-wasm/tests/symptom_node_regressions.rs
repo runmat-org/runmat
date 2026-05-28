@@ -1,0 +1,18 @@
+#![cfg(target_arch = "wasm32")]
+
+use wasm_bindgen_test::wasm_bindgen_test;
+
+#[path = "support/symptom_regressions_shared.rs"]
+mod shared;
+
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_node_experimental);
+
+#[wasm_bindgen_test(async)]
+async fn impedance_loop_executes_without_runtime_error() {
+    shared::assert_impedance_loop_executes_without_runtime_error().await;
+}
+
+#[wasm_bindgen_test(async)]
+async fn slice_end_arithmetic_executes_without_runtime_error() {
+    shared::assert_slice_end_arithmetic_executes_without_runtime_error().await;
+}

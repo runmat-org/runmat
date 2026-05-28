@@ -1,7 +1,11 @@
 //! MATLAB-compatible `sinh` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -14,6 +18,51 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sinh";
+
+const SINH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise hyperbolic sine result.",
+}];
+
+const SINH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const SINH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = sinh(X)",
+    inputs: &SINH_INPUTS,
+    outputs: &SINH_OUTPUT,
+}];
+
+const SINH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINH.INVALID_INPUT",
+    identifier: Some("RunMat:sinh:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "sinh: invalid input",
+};
+
+const SINH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SINH.INTERNAL",
+    identifier: Some("RunMat:sinh:Internal"),
+    when: "Internal gather/conversion/allocation/provider flow failed.",
+    message: "sinh: internal error",
+};
+
+const SINH_ERRORS: [BuiltinErrorDescriptor; 2] = [SINH_ERROR_INVALID_INPUT, SINH_ERROR_INTERNAL];
+
+pub const SINH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SINH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SINH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::sinh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,10 +81,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute sinh directly on the device; runtimes gather to the host when unary_sinh is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn sinh_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn sinh_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::sinh")]
@@ -62,6 +125,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "sinh,hyperbolic,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::sinh::SINH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::sinh"
 )]
 async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -73,9 +137,7 @@ async fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         )),
         Value::ComplexTensor(ct) => sinh_complex_tensor(ct),
         Value::CharArray(ca) => sinh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("sinh: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(sinh_error(&SINH_ERROR_INVALID_INPUT)),
         other => sinh_real(other),
     }
 }
@@ -91,13 +153,15 @@ async fn sinh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn sinh_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("sinh", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("sinh", value)
+        .map_err(|e| sinh_error_with_detail(&SINH_ERROR_INVALID_INPUT, e))?;
     sinh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn sinh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.sinh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("sinh: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| sinh_error_with_detail(&SINH_ERROR_INTERNAL, e))
 }
 
 fn sinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -107,7 +171,7 @@ fn sinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| (sinh_complex_re(re, im), sinh_complex_im(re, im)))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| runtime_error_for(format!("sinh: {e}")))?;
+        .map_err(|e| sinh_error_with_detail(&SINH_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -118,7 +182,7 @@ fn sinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).sinh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("sinh: {e}")))?;
+        .map_err(|e| sinh_error_with_detail(&SINH_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -142,6 +206,16 @@ pub(crate) mod tests {
 
     fn sinh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sinh_builtin(value))
+    }
+
+    #[test]
+    fn sinh_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = SINH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = sinh(X)"));
     }
 
     #[test]
@@ -256,6 +330,15 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![4, 1]);
             assert_eq!(gathered.data, expected);
         });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sinh_string_errors() {
+        let err = sinh_builtin(Value::from("not numeric")).expect_err("expected error");
+        let message = err.message().to_string();
+        assert!(message.contains("invalid input"));
+        assert_eq!(err.identifier(), SINH_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

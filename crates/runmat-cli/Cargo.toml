@@ -8,7 +8,7 @@ license-file = "../../LICENSE.md"
 readme = "../../README.md"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
-keywords = ["matlab", "octave", "jupyter", "kernel", "interpreter"]
+keywords = ["matlab", "octave", "interpreter", "runtime", "compiler"]
 categories = ["science", "development-tools"]
 
 [[bin]]
@@ -21,13 +21,11 @@ clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-serde_yaml = "0.9"
 toml = "0.8"
 dirs = "5.0"
 atty = "0.2"
 env_logger = { workspace = true }
 log = { workspace = true }
-thiserror = { workspace = true }
 anyhow = { workspace = true }
 miette = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
@@ -36,13 +34,6 @@ once_cell = "1.19"
 ureq = { version = "2.9", default-features = false, features = ["tls", "json"] }
 rustyline = "14.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-progenitor-client = "0.11"
-keyring = "2.3"
-url = "2.5"
-base64 = "0.22"
-rand = "0.8"
-sha2 = "0.10"
-webbrowser = "0.8"
 owo-colors = "4.3.0"
 supports-color = "3.0.2"
 
@@ -51,13 +42,12 @@ openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
-runmat-kernel = { version = "=0.4.1", path = "../runmat-kernel" }
 runmat-core = { version = "=0.4.1", path = "../runmat-core" }
 runmat-parser = { version = "=0.4.1", path = "../runmat-parser" }
 runmat-hir = { version = "=0.4.1", path = "../runmat-hir" }
+runmat-mir = { version = "=0.4.1", path = "../runmat-mir" }
 runmat-vm = { version = "=0.4.1", path = "../runmat-vm" }
 runmat-runtime = { version = "=0.4.1", path = "../runmat-runtime" }
-runmat-turbine = { version = "=0.4.1", path = "../runmat-turbine" }
 runmat-gc = { version = "=0.4.1", path = "../runmat-gc" }
 runmat-builtins = { version = "=0.4.1", path = "../runmat-builtins" }
 runmat-snapshot = { version = "=0.4.1", path = "../runmat-snapshot" }
@@ -84,3 +74,4 @@ vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 tempfile = "3.12" 
 serde_json = { workspace = true }
 openapiv3 = "2.0"
+serde_yaml = "0.9"

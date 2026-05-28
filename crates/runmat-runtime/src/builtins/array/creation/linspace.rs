@@ -2,7 +2,11 @@
 
 use log::trace;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -37,6 +41,28 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
+fn linspace_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    linspace_error_with_message(error.message, error)
+}
+
+fn linspace_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    linspace_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn linspace_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("linspace");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::linspace")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "linspace",
@@ -52,6 +78,126 @@ fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     row_vector_type(ctx)
 }
 
+const LINSPACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Row vector of linearly spaced values.",
+}];
+
+const LINSPACE_SIG_2_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Starting value.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Ending value.",
+    },
+];
+
+const LINSPACE_SIG_3_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Starting value.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Ending value.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("100"),
+        description: "Number of points.",
+    },
+];
+
+const LINSPACE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "x = linspace(start, stop)",
+        inputs: &LINSPACE_SIG_2_INPUTS,
+        outputs: &LINSPACE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = linspace(start, stop, n)",
+        inputs: &LINSPACE_SIG_3_INPUTS,
+        outputs: &LINSPACE_OUTPUT,
+    },
+];
+
+const LINSPACE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSPACE.ARG_COUNT",
+    identifier: None,
+    when: "More than three input arguments are provided.",
+    message: "linspace: expected at most three input arguments",
+};
+
+const LINSPACE_ERROR_COUNT_NOT_SCALAR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSPACE.COUNT_NOT_SCALAR",
+    identifier: None,
+    when: "The count argument is not a numeric scalar value.",
+    message: "linspace: number of points must be a scalar",
+};
+
+const LINSPACE_ERROR_COUNT_NOT_INTEGER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSPACE.COUNT_NOT_INTEGER",
+    identifier: None,
+    when: "The count argument is not an integer value.",
+    message: "linspace: number of points must be an integer",
+};
+
+const LINSPACE_ERROR_COUNT_NEGATIVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSPACE.COUNT_NEGATIVE",
+    identifier: None,
+    when: "The count argument is negative.",
+    message: "linspace: number of points must be >= 0",
+};
+
+const LINSPACE_ERROR_COUNT_NOT_FINITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSPACE.COUNT_NOT_FINITE",
+    identifier: None,
+    when: "The count argument is not finite.",
+    message: "linspace: number of points must be finite",
+};
+
+const LINSPACE_ERROR_COUNT_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSPACE.COUNT_TOO_LARGE",
+    identifier: None,
+    when: "The count argument exceeds platform limits.",
+    message: "linspace: number of points is too large for this platform",
+};
+
+const LINSPACE_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    LINSPACE_ERROR_ARG_COUNT,
+    LINSPACE_ERROR_COUNT_NOT_SCALAR,
+    LINSPACE_ERROR_COUNT_NOT_INTEGER,
+    LINSPACE_ERROR_COUNT_NEGATIVE,
+    LINSPACE_ERROR_COUNT_NOT_FINITE,
+    LINSPACE_ERROR_COUNT_TOO_LARGE,
+];
+
+pub const LINSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LINSPACE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LINSPACE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "linspace",
     category = "array/creation",
@@ -60,6 +206,7 @@ fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",
     type_resolver(linspace_type),
+    descriptor(crate::builtins::array::creation::linspace::LINSPACE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::linspace"
 )]
 async fn linspace_builtin(
@@ -68,9 +215,7 @@ async fn linspace_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error(
-            "linspace: expected at most three input arguments",
-        ));
+        return Err(linspace_error(&LINSPACE_ERROR_ARG_COUNT));
     }
 
     let (start_scalar, start_gpu) = parse_scalar("linspace", start).await?;
@@ -159,7 +304,7 @@ async fn parse_count(value: &Value) -> crate::BuiltinResult<usize> {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(handle).await?;
             if !tensor::is_scalar_tensor(&tensor) {
-                return Err(builtin_error("linspace: number of points must be a scalar"));
+                return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_SCALAR));
             }
             parse_numeric_count(tensor.data[0])
         }
@@ -172,44 +317,39 @@ fn parse_count_host(value: &Value) -> crate::BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(builtin_error("linspace: number of points must be >= 0"));
+                return Err(linspace_error(&LINSPACE_ERROR_COUNT_NEGATIVE));
             }
-            usize::try_from(raw).map_err(|_| {
-                builtin_error("linspace: number of points is too large for this platform")
-            })
+            usize::try_from(raw).map_err(|_| linspace_error(&LINSPACE_ERROR_COUNT_TOO_LARGE))
         }
         Value::Num(n) => parse_numeric_count(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if !tensor::is_scalar_tensor(t) {
-                return Err(builtin_error("linspace: number of points must be a scalar"));
+                return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_SCALAR));
             }
             parse_numeric_count(t.data[0])
         }
         Value::GpuTensor(_) => unreachable!("GpuTensor handled by parse_count"),
-        other => Err(builtin_error(format!(
-            "linspace: number of points must be numeric, got {other:?}"
-        ))),
+        other => Err(linspace_error_with_detail(
+            &LINSPACE_ERROR_COUNT_NOT_SCALAR,
+            format!("got {other:?}"),
+        )),
     }
 }
 
 fn parse_numeric_count(raw: f64) -> crate::BuiltinResult<usize> {
     if !raw.is_finite() {
-        return Err(builtin_error("linspace: number of points must be finite"));
+        return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_FINITE));
     }
     let rounded = raw.round();
     if (rounded - raw).abs() > f64::EPSILON {
-        return Err(builtin_error(
-            "linspace: number of points must be an integer",
-        ));
+        return Err(linspace_error(&LINSPACE_ERROR_COUNT_NOT_INTEGER));
     }
     if rounded < 0.0 {
-        return Err(builtin_error("linspace: number of points must be >= 0"));
+        return Err(linspace_error(&LINSPACE_ERROR_COUNT_NEGATIVE));
     }
     if rounded > usize::MAX as f64 {
-        return Err(builtin_error(
-            "linspace: number of points is too large for this platform",
-        ));
+        return Err(linspace_error(&LINSPACE_ERROR_COUNT_TOO_LARGE));
     }
     Ok(rounded as usize)
 }

@@ -5,7 +5,11 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -19,6 +23,51 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 
 const BUILTIN_NAME: &str = "acosh";
 const ZERO_EPS: f64 = 1.0e-12;
+
+const ACOSH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise inverse hyperbolic cosine result.",
+}];
+
+const ACOSH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const ACOSH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = acosh(X)",
+    inputs: &ACOSH_INPUTS,
+    outputs: &ACOSH_OUTPUT,
+}];
+
+const ACOSH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACOSH.INVALID_INPUT",
+    identifier: Some("RunMat:acosh:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "acosh: invalid input",
+};
+
+const ACOSH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ACOSH.INTERNAL",
+    identifier: Some("RunMat:acosh:Internal"),
+    when: "Internal gather/reduction/conversion/allocation/provider flow failed.",
+    message: "acosh: internal error",
+};
+
+const ACOSH_ERRORS: [BuiltinErrorDescriptor; 2] = [ACOSH_ERROR_INVALID_INPUT, ACOSH_ERROR_INTERNAL];
+
+pub const ACOSH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ACOSH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ACOSH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,10 +85,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may execute acosh directly on device buffers when inputs stay within the real domain (x ≥ 1); otherwise the runtime gathers to the host for complex promotion.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn acosh_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn acosh_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::acosh")]
@@ -66,6 +129,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "acosh,inverse hyperbolic cosine,arccosh,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::acosh::ACOSH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::acosh"
 )]
 async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -74,9 +138,7 @@ async fn acosh_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(acosh_complex_scalar(re, im)),
         Value::ComplexTensor(ct) => acosh_complex_tensor(ct),
         Value::CharArray(ca) => acosh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("acosh: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(acosh_error(&ACOSH_ERROR_INVALID_INPUT)),
         other => acosh_real(other),
     }
 }
@@ -106,15 +168,17 @@ async fn detect_gpu_requires_complex(
     provider: &'static dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<bool> {
-    let min_handle = provider
-        .reduce_min(handle)
-        .await
-        .map_err(|e| runtime_error_for(format!("acosh: reduce_min failed: {e}")))?;
+    let min_handle = provider.reduce_min(handle).await.map_err(|e| {
+        acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, format!("reduce_min failed: {e}"))
+    })?;
     let min_host = download_handle_async(provider, &min_handle)
         .await
         .map_err(|e| {
             let _ = provider.free(&min_handle);
-            runtime_error_for(format!("acosh: reduce_min download failed: {e}"))
+            acosh_error_with_detail(
+                &ACOSH_ERROR_INTERNAL,
+                format!("reduce_min download failed: {e}"),
+            )
         })?;
     let _ = provider.free(&min_handle);
     let min_value = min_host.data.iter().copied().fold(f64::INFINITY, f64::min);
@@ -126,7 +190,8 @@ async fn detect_gpu_requires_complex(
 }
 
 fn acosh_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("acosh", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("acosh", value)
+        .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INVALID_INPUT, e))?;
     acosh_tensor_real(tensor)
 }
 
@@ -177,12 +242,12 @@ fn acosh_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
             Ok(Value::Complex(re, im))
         } else {
             let tensor = ComplexTensor::new(complex_data, tensor.shape.clone())
-                .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
+                .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
             Ok(Value::ComplexTensor(tensor))
         }
     } else {
         let tensor = Tensor::new(real_data, tensor.shape.clone())
-            .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
+            .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
         Ok(tensor::tensor_into_value(tensor))
     }
 }
@@ -201,7 +266,7 @@ fn acosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         Ok(Value::Complex(re, im))
     } else {
         let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-            .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
+            .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -214,12 +279,12 @@ fn acosh_complex_scalar(re: f64, im: f64) -> Value {
 fn acosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     if ca.data.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
-            .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
+            .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
     let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("acosh: {e}")))?;
+        .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
     acosh_tensor_real(tensor)
 }
 
@@ -243,8 +308,18 @@ pub(crate) mod tests {
         block_on(super::acosh_builtin(value))
     }
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn acosh_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = ACOSH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = acosh(X)"));
     }
 
     #[test]
@@ -473,8 +548,9 @@ pub(crate) mod tests {
     #[test]
     fn acosh_string_errors() {
         let err = acosh_builtin(Value::from("oops")).expect_err("expected error");
-        let message = error_message(err);
-        assert!(message.contains("expected numeric input"));
+        let message = error_message(&err);
+        assert!(message.contains("invalid input"));
+        assert_eq!(err.identifier(), ACOSH_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

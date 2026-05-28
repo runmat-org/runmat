@@ -199,6 +199,34 @@ pub fn tensor_to_surface_grid(
     Ok(grid)
 }
 
+/// Convert a MATLAB surface matrix Z (rows x cols) into the plot grid layout expected by
+/// `SurfacePlot::new(x_axis, y_axis, z_grid)` where x indexes columns and y indexes rows.
+pub fn tensor_to_surface_grid_matlab_xy(
+    z: Tensor,
+    rows: usize,
+    cols: usize,
+    context: &'static str,
+) -> BuiltinResult<Vec<Vec<f64>>> {
+    let expected_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| plotting_error(context, format!("{context}: grid dimensions overflowed")))?;
+    if z.rows != rows || z.cols != cols || z.data.len() != expected_len {
+        return Err(plotting_error(
+            context,
+            format!("{context}: Z must have shape {rows}x{cols} to match X({cols}) and Y({rows})"),
+        ));
+    }
+
+    let mut grid = vec![vec![0.0; rows]; cols];
+    for (x_col, x_col_values) in grid.iter_mut().enumerate() {
+        for (y_row, cell) in x_col_values.iter_mut().enumerate() {
+            let idx = y_row + rows * x_col;
+            *cell = z.data[idx];
+        }
+    }
+    Ok(grid)
+}
+
 pub fn default_figure(title: &str, x_label: &str, y_label: &str) -> Figure {
     Figure::new()
         .with_title(title)

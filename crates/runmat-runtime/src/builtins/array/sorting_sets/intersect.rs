@@ -9,7 +9,11 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::set_values_output_type;
@@ -55,10 +59,214 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`intersect` materialises its inputs and terminates fusion chains; upstream GPU tensors are gathered when necessary.",
 };
 
-fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("intersect")
-        .build()
+const BUILTIN_NAME: &str = "intersect";
+
+const INTERSECT_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Intersection values or rows.",
+}];
+
+const INTERSECT_OUTPUT_C_IA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Intersection values or rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "ia",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting matching elements/rows in A.",
+    },
+];
+
+const INTERSECT_OUTPUT_C_IA_IB: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Intersection values or rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "ia",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting matching elements/rows in A.",
+    },
+    BuiltinParamDescriptor {
+        name: "ib",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting matching elements/rows in B.",
+    },
+];
+
+const INTERSECT_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+];
+
+const INTERSECT_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option tokens: 'rows'|'sorted'|'stable'.",
+    },
+];
+
+const INTERSECT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "C = intersect(A, B)",
+        inputs: &INTERSECT_INPUTS_A_B,
+        outputs: &INTERSECT_OUTPUT_C,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = intersect(A, B, option...)",
+        inputs: &INTERSECT_INPUTS_A_B_OPTIONS,
+        outputs: &INTERSECT_OUTPUT_C,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia] = intersect(A, B)",
+        inputs: &INTERSECT_INPUTS_A_B,
+        outputs: &INTERSECT_OUTPUT_C_IA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia] = intersect(A, B, option...)",
+        inputs: &INTERSECT_INPUTS_A_B_OPTIONS,
+        outputs: &INTERSECT_OUTPUT_C_IA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia, ib] = intersect(A, B)",
+        inputs: &INTERSECT_INPUTS_A_B,
+        outputs: &INTERSECT_OUTPUT_C_IA_IB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia, ib] = intersect(A, B, option...)",
+        inputs: &INTERSECT_INPUTS_A_B_OPTIONS,
+        outputs: &INTERSECT_OUTPUT_C_IA_IB,
+    },
+];
+
+const INTERSECT_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.LEGACY_OPTION_UNSUPPORTED",
+    identifier: Some("RunMat:intersect:LegacyOptionUnsupported"),
+    when: "Legacy compatibility options are requested.",
+    message: "intersect: the 'legacy' behaviour is not supported",
+};
+
+const INTERSECT_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.CONFLICTING_ORDER_OPTIONS",
+    identifier: Some("RunMat:intersect:ConflictingOrderOptions"),
+    when: "Both 'sorted' and 'stable' options are provided.",
+    message: "intersect: cannot combine 'sorted' with 'stable'",
+};
+
+const INTERSECT_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.UNKNOWN_OPTION",
+    identifier: Some("RunMat:intersect:UnknownOption"),
+    when: "An unsupported option token is provided.",
+    message: "intersect: unrecognised option",
+};
+
+const INTERSECT_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.ROWS_COLUMN_MISMATCH",
+    identifier: Some("RunMat:intersect:RowsColumnMismatch"),
+    when: "'rows' mode is used and column counts differ.",
+    message: "intersect: inputs must have the same number of columns when using 'rows'",
+};
+
+const INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.UNSUPPORTED_INPUT_TYPE",
+    identifier: Some("RunMat:intersect:UnsupportedInputType"),
+    when: "Input values cannot be converted into supported intersect domains.",
+    message: "intersect: unsupported input type",
+};
+
+const INTERSECT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:intersect:InvalidArgument"),
+    when: "Option arguments are not string-like where required.",
+    message: "intersect: expected string option arguments",
+};
+
+const INTERSECT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERSECT.INTERNAL",
+    identifier: Some("RunMat:intersect:Internal"),
+    when: "Internal conversion/allocation/provider decode fails.",
+    message: "intersect: internal operation failed",
+};
+
+const INTERSECT_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    INTERSECT_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    INTERSECT_ERROR_CONFLICTING_ORDER_OPTIONS,
+    INTERSECT_ERROR_UNKNOWN_OPTION,
+    INTERSECT_ERROR_ROWS_COLUMN_MISMATCH,
+    INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE,
+    INTERSECT_ERROR_INVALID_ARGUMENT,
+    INTERSECT_ERROR_INTERNAL,
+];
+
+pub const INTERSECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTERSECT_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INTERSECT_ERRORS,
+};
+
+fn intersect_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn intersect_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    intersect_error_with(error, error.message)
+}
+
+fn intersect_internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    intersect_error_with(&INTERSECT_ERROR_INTERNAL, message)
 }
 
 #[runtime_builtin(
@@ -69,6 +277,7 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
     accel = "array_construct",
     sink = true,
     type_resolver(set_values_output_type),
+    descriptor(crate::builtins::array::sorting_sets::intersect::INTERSECT_DESCRIPTOR),
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -138,9 +347,8 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IntersectOptions> {
         let text = match token {
             crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
             _ => {
-                let text = tensor::value_to_string(arg).ok_or_else(|| {
-                    intersect_error("intersect: expected string option arguments")
-                })?;
+                let text = tensor::value_to_string(arg)
+                    .ok_or_else(|| intersect_error(&INTERSECT_ERROR_INVALID_ARGUMENT))?;
                 let lowered = text.trim().to_ascii_lowercase();
                 parse_intersect_option(&mut opts, &mut seen_order, &lowered)?;
                 continue;
@@ -162,9 +370,7 @@ fn parse_intersect_option(
         "sorted" => {
             if let Some(prev) = seen_order {
                 if *prev != IntersectOrder::Sorted {
-                    return Err(intersect_error(
-                        "intersect: cannot combine 'sorted' with 'stable'",
-                    ));
+                    return Err(intersect_error(&INTERSECT_ERROR_CONFLICTING_ORDER_OPTIONS));
                 }
             }
             *seen_order = Some(IntersectOrder::Sorted);
@@ -173,23 +379,20 @@ fn parse_intersect_option(
         "stable" => {
             if let Some(prev) = seen_order {
                 if *prev != IntersectOrder::Stable {
-                    return Err(intersect_error(
-                        "intersect: cannot combine 'sorted' with 'stable'",
-                    ));
+                    return Err(intersect_error(&INTERSECT_ERROR_CONFLICTING_ORDER_OPTIONS));
                 }
             }
             *seen_order = Some(IntersectOrder::Stable);
             opts.order = IntersectOrder::Stable;
         }
         "legacy" | "r2012a" => {
-            return Err(intersect_error(
-                "intersect: the 'legacy' behaviour is not supported",
-            ));
+            return Err(intersect_error(&INTERSECT_ERROR_LEGACY_OPTION_UNSUPPORTED));
         }
         other => {
-            return Err(intersect_error(format!(
-                "intersect: unrecognised option '{other}'"
-            )))
+            return Err(intersect_error_with(
+                &INTERSECT_ERROR_UNKNOWN_OPTION,
+                format!("intersect: unrecognised option '{other}'"),
+            ))
         }
     }
     Ok(())
@@ -212,8 +415,8 @@ async fn intersect_gpu_mixed(
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
-    let tensor_other =
-        tensor::value_into_tensor_for("intersect", other).map_err(|e| intersect_error(e))?;
+    let tensor_other = tensor::value_into_tensor_for("intersect", other)
+        .map_err(|e| intersect_internal_error(e))?;
     if gpu_is_a {
         intersect_numeric(tensor_gpu, tensor_other, opts)
     } else {
@@ -267,27 +470,27 @@ fn intersect_host(
         }
         (Value::StringArray(astring), Value::String(b)) => {
             let bstring = StringArray::new(vec![b], vec![1, 1])
-                .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+                .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
             let astring = StringArray::new(vec![a], vec![1, 1])
-                .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+                .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
             let astring = StringArray::new(vec![a], vec![1, 1])
-                .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+                .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             let bstring = StringArray::new(vec![b], vec![1, 1])
-                .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+                .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
 
         (left, right) => {
-            let tensor_a =
-                tensor::value_into_tensor_for("intersect", left).map_err(|e| intersect_error(e))?;
+            let tensor_a = tensor::value_into_tensor_for("intersect", left)
+                .map_err(|e| intersect_error_with(&INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
             let tensor_b = tensor::value_into_tensor_for("intersect", right)
-                .map_err(|e| intersect_error(e))?;
+                .map_err(|e| intersect_error_with(&INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
             intersect_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -346,14 +549,12 @@ fn intersect_numeric_rows(
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(intersect_error(
+        return Err(intersect_internal_error(
             "intersect: 'rows' option requires 2-D numeric matrices",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_error(&INTERSECT_ERROR_ROWS_COLUMN_MISMATCH));
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -452,14 +653,12 @@ fn intersect_complex_rows(
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(intersect_error(
+        return Err(intersect_internal_error(
             "intersect: 'rows' option requires 2-D complex matrices",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_error(&INTERSECT_ERROR_ROWS_COLUMN_MISMATCH));
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -558,9 +757,7 @@ fn intersect_char_rows(
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     if a.cols != b.cols {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_error(&INTERSECT_ERROR_ROWS_COLUMN_MISMATCH));
     }
     let rows_a = a.rows;
     let rows_b = b.rows;
@@ -669,14 +866,12 @@ fn intersect_string_rows(
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(intersect_error(
+        return Err(intersect_internal_error(
             "intersect: 'rows' option requires 2-D string arrays",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_error(&INTERSECT_ERROR_ROWS_COLUMN_MISMATCH));
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -851,11 +1046,11 @@ fn assemble_numeric_intersect(
     }
 
     let value_tensor = Tensor::new(values, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -897,11 +1092,11 @@ fn assemble_numeric_row_intersect(
     }
 
     let value_tensor = Tensor::new(values, vec![rows_out, cols])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -935,11 +1130,11 @@ fn assemble_complex_intersect(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -981,11 +1176,11 @@ fn assemble_complex_row_intersect(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![rows_out, cols])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1021,11 +1216,11 @@ fn assemble_char_intersect(
     }
 
     let value_array = CharArray::new(values, order.len(), 1)
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::CharArray(value_array),
@@ -1067,11 +1262,11 @@ fn assemble_char_row_intersect(
     }
 
     let value_array = CharArray::new(values, rows_out, cols)
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::CharArray(value_array),
@@ -1105,11 +1300,11 @@ fn assemble_string_intersect(
     }
 
     let value_array = StringArray::new(values, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![order.len(), 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::StringArray(value_array),
@@ -1151,11 +1346,11 @@ fn assemble_string_row_intersect(
     }
 
     let value_array = StringArray::new(values, vec![rows_out, cols])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ib_tensor = Tensor::new(ib, vec![rows_out, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))?;
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
 
     Ok(IntersectEvaluation::new(
         Value::StringArray(value_array),
@@ -1208,13 +1403,13 @@ impl RowStringKey {
 
 fn scalar_complex_tensor(re: f64, im: f64) -> crate::BuiltinResult<ComplexTensor> {
     ComplexTensor::new(vec![(re, im)], vec![1, 1])
-        .map_err(|e| intersect_error(format!("intersect: {e}")))
+        .map_err(|e| intersect_internal_error(format!("intersect: {e}")))
 }
 
 fn tensor_to_complex_owned(name: &str, tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
     let Tensor { data, shape, .. } = tensor;
     let complex: Vec<(f64, f64)> = data.into_iter().map(|re| (re, 0.0)).collect();
-    ComplexTensor::new(complex, shape).map_err(|e| intersect_error(format!("{name}: {e}")))
+    ComplexTensor::new(complex, shape).map_err(|e| intersect_internal_error(format!("{name}: {e}")))
 }
 
 fn value_into_complex_tensor(value: Value) -> crate::BuiltinResult<ComplexTensor> {
@@ -1223,7 +1418,7 @@ fn value_into_complex_tensor(value: Value) -> crate::BuiltinResult<ComplexTensor
         Value::Complex(re, im) => scalar_complex_tensor(re, im),
         other => {
             let tensor = tensor::value_into_tensor_for("intersect", other)
-                .map_err(|e| intersect_error(e))?;
+                .map_err(|e| intersect_internal_error(e))?;
             tensor_to_complex_owned("intersect", tensor)
         }
     }
@@ -1324,10 +1519,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Type};
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
 
     fn evaluate_sync(
         a: Value,
@@ -1544,15 +1735,45 @@ pub(crate) mod tests {
     #[test]
     fn intersect_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(
-                Value::Tensor(tensor.clone()),
-                Value::Tensor(tensor),
-                &[Value::from("legacy")],
-            )
-            .unwrap_err(),
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("legacy")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            INTERSECT_ERROR_LEGACY_OPTION_UNSUPPORTED.identifier
         );
-        assert!(err.contains("legacy"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn intersect_rejects_conflicting_order_options() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("stable"), Value::from("sorted")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            INTERSECT_ERROR_CONFLICTING_ORDER_OPTIONS.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn intersect_rejects_unknown_option() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("bogus")],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), INTERSECT_ERROR_UNKNOWN_OPTION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1560,18 +1781,19 @@ pub(crate) mod tests {
     fn intersect_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            intersect_numeric_rows(
-                a,
-                b,
-                &IntersectOptions {
-                    rows: true,
-                    order: IntersectOrder::Sorted,
-                },
-            )
-            .unwrap_err(),
+        let err = intersect_numeric_rows(
+            a,
+            b,
+            &IntersectOptions {
+                rows: true,
+                order: IntersectOrder::Sorted,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            INTERSECT_ERROR_ROWS_COLUMN_MISMATCH.identifier
         );
-        assert!(err.contains("same number of columns"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1579,18 +1801,19 @@ pub(crate) mod tests {
     fn intersect_mixed_types_error() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = CharArray::new(vec!['a', 'b'], 1, 2).unwrap();
-        let err = error_message(
-            intersect_host(
-                Value::Tensor(a),
-                Value::CharArray(b),
-                &IntersectOptions {
-                    rows: false,
-                    order: IntersectOrder::Sorted,
-                },
-            )
-            .unwrap_err(),
+        let err = intersect_host(
+            Value::Tensor(a),
+            Value::CharArray(b),
+            &IntersectOptions {
+                rows: false,
+                order: IntersectOrder::Sorted,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            INTERSECT_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
         );
-        assert!(err.contains("unsupported input type"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

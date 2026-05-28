@@ -3,7 +3,11 @@ use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
 
-pub use crate::backend::wgpu::provider_impl::{WgpuProvider, WgpuProviderOptions};
+mod backend;
+
+#[cfg(test)]
+pub(crate) use backend::backend_shared::host_tensor_from_value;
+pub use backend::backend_types::{WgpuProvider, WgpuProviderOptions};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn register_wgpu_provider(opts: WgpuProviderOptions) -> Result<&'static WgpuProvider> {
