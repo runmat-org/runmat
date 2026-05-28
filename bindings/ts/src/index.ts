@@ -598,7 +598,6 @@ export interface RunMatSessionHandle {
   telemetryClientId(): string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution(): void;
-  cancelPendingRequests(): void;
   setInputHandler(handler: InputHandler | null): Promise<void>;
   materializeVariable(
     selector: WorkspaceMaterializeSelector,
@@ -658,7 +657,6 @@ interface RunMatNativeSession {
   telemetryClientId?: () => string | undefined;
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
-  cancelPendingRequests?: () => void;
   setInputHandler?: (handler: InputHandler | null) => void;
   materializeVariable?: (
     selector: WorkspaceMaterializeSelectorWire,
@@ -1372,15 +1370,6 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
     if (typeof this.native.cancelExecution === "function") {
       this.native.cancelExecution();
-    }
-  }
-
-  cancelPendingRequests(): void {
-    if (this.disposed) {
-      return;
-    }
-    if (typeof this.native.cancelPendingRequests === "function") {
-      this.native.cancelPendingRequests();
     }
   }
 

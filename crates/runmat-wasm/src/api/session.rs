@@ -357,9 +357,6 @@ impl RunMatWasm {
         self.session.borrow().cancel_execution();
     }
 
-    #[wasm_bindgen(js_name = cancelPendingRequests)]
-    pub fn cancel_pending_requests(&self) {}
-
     #[wasm_bindgen(js_name = "setLanguageCompat")]
     pub fn set_language_compat(&self, mode: String) {
         if self.disposed.get() {

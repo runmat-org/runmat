@@ -18,7 +18,6 @@ import {
   type ExecuteResult,
   type GpuStatus,
   type SessionStats,
-  type PendingStdinRequest,
   type InputRequest,
   setSignalTraceHandler,
   withSignalTrace
@@ -73,8 +72,6 @@ function createSessionHandleMock(
     gpuStatus: vi.fn(() => ({ requested: false, active: false })),
     cancelExecution: vi.fn(),
     setInputHandler: vi.fn(async () => {}),
-    resumeInput: vi.fn(async () => baseExecuteResult),
-    pendingStdinRequests: vi.fn(async () => []),
     materializeVariable: vi.fn(async () => undefined),
     setFusionPlanEnabled: vi.fn(),
     ...overrides
@@ -201,8 +198,6 @@ interface NativeSession {
   gpuStatus(): GpuStatus;
   cancelExecution?: () => void;
   setInputHandler?: (handler: ((req: InputRequest) => unknown) | null) => void;
-  resumeInput?: (requestId: string, value: unknown) => ExecuteResult;
-  pendingStdinRequests?: () => PendingStdinRequest[];
 }
 
 const baseExecuteResult: ExecuteResult = {
@@ -232,7 +227,6 @@ function createMockNativeSession(overrides: Partial<NativeSession> = {}): Native
     telemetryClientId: () => undefined,
     memoryUsage: () => ({ bytes: 0, pages: 0 }),
     gpuStatus: () => ({ requested: false, active: false }),
-    pendingStdinRequests: () => [],
     ...overrides
   };
 }
@@ -602,7 +596,7 @@ describe("figure scene bindings", () => {
     expect(spy).toHaveBeenCalledWith("./.artifacts/objects/aa/scene.scene.json");
   });
 
-  it("returns null when figure scene import throws", async () => {
+  it("rejects with a coerced figure error when figure scene import throws", async () => {
     const native: NativeModule = {
       default: async () => {},
       importFigureScene: vi.fn(() => {
@@ -611,7 +605,9 @@ describe("figure scene bindings", () => {
     } as NativeModule;
     __internals.setNativeModuleOverride(native);
 
-    await expect(importFigureScene(new Uint8Array([9, 9, 9]))).resolves.toBeNull();
+    await expect(importFigureScene(new Uint8Array([9, 9, 9]))).rejects.toMatchObject({
+      code: "ReplayDecodeFailed"
+    });
   });
 
   it("returns null when figure scene bindings are unavailable", async () => {
@@ -722,32 +718,6 @@ describe("ExecuteResult passthroughs", () => {
   afterEach(() => {
     __internals.setNativeModuleOverride(null);
     vi.restoreAllMocks();
-  });
-
-  it("preserves stdinRequested.waitingMs from the native session", async () => {
-    const request = {
-      id: "req",
-      request: { prompt: ">> ", kind: "line", echo: true },
-      waitingMs: 1500
-    };
-    const native: NativeModule = {
-      default: async () => {},
-      initRunMat: async () =>
-        createMockNativeSession({
-          executeRequest: () => ({
-            ...baseExecuteResult,
-            stdinRequested: request
-          })
-        })
-    } as NativeModule;
-    __internals.setNativeModuleOverride(native);
-
-    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
-    const result = await session.executeRequest({
-      source: { kind: "text", name: "<test>", text: "disp('prompt')" }
-    });
-    expect(result.stdinRequested).toEqual(request);
-    expect(result.stdinRequested?.waitingMs).toBe(1500);
   });
 
   it("preserves clear-screen stdout control entries from the native session", async () => {
