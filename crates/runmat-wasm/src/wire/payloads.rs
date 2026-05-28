@@ -8,7 +8,8 @@ use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 use runmat_builtins::Value;
 use runmat_core::{
     abi::{
-        DiagnosticSeverity, ExecutionOutcome, RuntimeDiagnostic, RuntimeFlow, WorkspaceBindingKey,
+        DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, RuntimeDiagnostic,
+        RuntimeFlow, WorkspaceBindingKey,
     },
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
     value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
@@ -44,6 +45,7 @@ struct MaterializeSlicePayload {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExecutionPayload {
     pub(crate) flow: JsonValue,
+    pub(crate) display_events: Vec<DisplayEventPayload>,
     pub(crate) value_text: Option<String>,
     pub(crate) value_json: Option<JsonValue>,
     pub(crate) type_info: Option<String>,
@@ -78,6 +80,11 @@ impl ExecutionPayload {
             .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source));
         Self {
             flow,
+            display_events: outcome
+                .display_events
+                .into_iter()
+                .map(DisplayEventPayload::from)
+                .collect(),
             value_text: value.as_ref().map(|value| value.to_string()),
             value_json: value.as_ref().map(|value| value_to_json(value, 0)),
             type_info: outcome.type_info,
@@ -104,6 +111,40 @@ impl ExecutionPayload {
                 .collect(),
             profiling: outcome.profiling.map(ProfilingPayload::from),
             fusion_plan: outcome.fusion_plan.map(FusionPlanPayload::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisplayEventPayload {
+    pub(crate) label: String,
+    pub(crate) value_text: String,
+    pub(crate) value_json: JsonValue,
+    pub(crate) span: DisplaySpanPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisplaySpanPayload {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+impl From<DisplayEvent> for DisplayEventPayload {
+    fn from(event: DisplayEvent) -> Self {
+        Self {
+            label: match event.label {
+                DisplayLabel::Binding(name) => name.0,
+                DisplayLabel::Literal(label) => label,
+                DisplayLabel::Anonymous => "ans".to_string(),
+            },
+            value_text: event.value.to_string(),
+            value_json: value_to_json(&event.value, 0),
+            span: DisplaySpanPayload {
+                start: event.span.start,
+                end: event.span.end,
+            },
         }
     }
 }

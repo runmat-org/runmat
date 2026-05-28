@@ -66,6 +66,8 @@ struct RawProjectManifest {
     entrypoints: BTreeMap<String, RawProjectEntrypoint>,
     #[serde(default, rename = "runtime")]
     _runtime: Option<IgnoredAny>,
+    #[serde(default, rename = "desktop")]
+    _desktop: Option<IgnoredAny>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -382,6 +382,7 @@ export interface ExecuteRequest {
 
 export interface ExecuteResult {
   flow: RuntimeFlow;
+  displayEvents: DisplayEvent[];
   valueText?: string;
   valueJson?: unknown;
   typeInfo?: string;
@@ -395,6 +396,16 @@ export interface ExecuteResult {
   stdinEvents: StdinEventLog[];
   profiling?: ProfilingSummary;
   fusionPlan?: FusionPlanSnapshot;
+}
+
+export interface DisplayEvent {
+  label: string;
+  valueText: string;
+  valueJson: unknown;
+  span: {
+    start: number;
+    end: number;
+  };
 }
 
 export type RunMatErrorKind = "syntax" | "semantic" | "compile" | "runtime";
@@ -442,7 +453,7 @@ export interface WorkspaceSnapshot {
   full: boolean;
   version: number;
   values: WorkspaceEntry[];
-  removals: string[];
+  removals?: string[];
 }
 
 export interface WorkspaceEntry {

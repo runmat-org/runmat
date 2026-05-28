@@ -35,3 +35,24 @@ verbosee = true
         .expect_err("unknown runtime keys should fail validation");
     assert!(err.to_string().contains("Failed to parse TOML config"));
 }
+
+#[test]
+fn runtime_loader_ignores_desktop_section() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("runmat.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[desktop]
+artifact_root = ".cache/artifacts"
+notebook_run_mode = "continue_on_error"
+
+[runtime]
+callstack_limit = 64
+"#,
+    )
+    .unwrap();
+
+    let runtime = ConfigLoader::load_from_file(&config_path).unwrap();
+    assert_eq!(runtime.runtime.callstack_limit, 64);
+}

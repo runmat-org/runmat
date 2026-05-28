@@ -68,6 +68,28 @@ verbose = true
 }
 
 #[test]
+fn parses_manifest_with_desktop_section() {
+    let parsed = parse_project_manifest_toml(
+        r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[sources]
+roots = ["src"]
+
+[desktop]
+artifact_root = ".artifacts"
+notebook_run_mode = "stop_on_error"
+"#,
+    )
+    .expect("manifest with desktop section should parse");
+
+    assert_eq!(parsed.package.name, "demo");
+    assert_eq!(parsed.sources.roots, vec![std::path::PathBuf::from("src")]);
+}
+
+#[test]
 fn validation_rejects_unsatisfied_runmat_version() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();

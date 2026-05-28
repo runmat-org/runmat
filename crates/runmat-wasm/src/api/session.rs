@@ -234,6 +234,7 @@ impl RunMatWasm {
                 used_jit: false,
                 error: Some(run_error_payload(&err, &source)),
                 stdout: Vec::new(),
+                display_events: Vec::new(),
                 workspace: WorkspacePayload {
                     full: false,
                     version: 0,
