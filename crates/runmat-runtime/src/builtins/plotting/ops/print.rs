@@ -1,7 +1,9 @@
 //! MATLAB-compatible `print` builtin for exporting figures.
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -52,6 +54,7 @@ const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
 const DEFAULT_DPI: u32 = 150;
 const MAX_EXPORT_DIMENSION: u32 = 8192;
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const PRINT_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
@@ -437,45 +440,102 @@ async fn render_png(_handle: FigureHandle, _width: u32, _height: u32) -> Builtin
 }
 
 async fn write_bytes(path: &Path, payload: &[u8]) -> BuiltinResult<()> {
-    let mut options = OpenOptions::new();
-    options.create(true).write(true).truncate(true);
-    let mut file = options.open_async(path).await.map_err(|err| {
-        print_error_with_source(
-            format!(
-                "{}: unable to open '{}': {}",
-                PRINT_ERROR_IO.message,
-                path.display(),
-                err
-            ),
-            &PRINT_ERROR_IO,
-            err,
-        )
-    })?;
-    file.write_all(payload).map_err(|err| {
-        print_error_with_source(
-            format!(
-                "{}: unable to write '{}': {}",
-                PRINT_ERROR_IO.message,
-                path.display(),
-                err
-            ),
-            &PRINT_ERROR_IO,
-            err,
-        )
-    })?;
-    file.flush_async().await.map_err(|err| {
-        print_error_with_source(
-            format!(
-                "{}: unable to flush '{}': {}",
-                PRINT_ERROR_IO.message,
-                path.display(),
-                err
-            ),
-            &PRINT_ERROR_IO,
-            err,
-        )
-    })?;
-    Ok(())
+    let temp_path = temporary_output_path(path);
+    let mut created_temp = false;
+
+    let result: BuiltinResult<()> = async {
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        let mut file = options.open_async(&temp_path).await.map_err(|err| {
+            print_error_with_source(
+                format!(
+                    "{}: unable to open temporary file '{}': {}",
+                    PRINT_ERROR_IO.message,
+                    temp_path.display(),
+                    err
+                ),
+                &PRINT_ERROR_IO,
+                err,
+            )
+        })?;
+        created_temp = true;
+        file.write_all(payload).map_err(|err| {
+            print_error_with_source(
+                format!(
+                    "{}: unable to write temporary file '{}': {}",
+                    PRINT_ERROR_IO.message,
+                    temp_path.display(),
+                    err
+                ),
+                &PRINT_ERROR_IO,
+                err,
+            )
+        })?;
+        file.flush_async().await.map_err(|err| {
+            print_error_with_source(
+                format!(
+                    "{}: unable to flush temporary file '{}': {}",
+                    PRINT_ERROR_IO.message,
+                    temp_path.display(),
+                    err
+                ),
+                &PRINT_ERROR_IO,
+                err,
+            )
+        })?;
+        file.sync_all_async().await.map_err(|err| {
+            print_error_with_source(
+                format!(
+                    "{}: unable to sync temporary file '{}': {}",
+                    PRINT_ERROR_IO.message,
+                    temp_path.display(),
+                    err
+                ),
+                &PRINT_ERROR_IO,
+                err,
+            )
+        })?;
+        drop(file);
+
+        runmat_filesystem::rename_async(&temp_path, path)
+            .await
+            .map_err(|err| {
+                print_error_with_source(
+                    format!(
+                        "{}: unable to replace '{}' with temporary file '{}': {}",
+                        PRINT_ERROR_IO.message,
+                        path.display(),
+                        temp_path.display(),
+                        err
+                    ),
+                    &PRINT_ERROR_IO,
+                    err,
+                )
+            })?;
+        Ok(())
+    }
+    .await;
+
+    if result.is_err() && created_temp {
+        let _ = runmat_filesystem::remove_file_async(&temp_path).await;
+    }
+
+    result
+}
+
+fn temporary_output_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(OsString::from)
+        .unwrap_or_else(|| OsString::from("print-output"));
+    let mut temp_name = OsString::from(".");
+    temp_name.push(file_name);
+    temp_name.push(format!(
+        ".{}.tmp",
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+
+    path.with_file_name(temp_name)
 }
 
 fn print_error_with_detail(
