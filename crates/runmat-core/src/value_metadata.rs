@@ -1,4 +1,4 @@
-use runmat_builtins::{LogicalArray, Value};
+use runmat_builtins::{LogicalArray, SparseTensor, Value};
 
 /// MATLAB-style class name for a runtime value.
 pub fn matlab_class_name(value: &Value) -> String {
@@ -95,7 +95,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         Value::Int(iv) => Some((vec![iv.to_f64()], false)),
         Value::Bool(flag) => Some((vec![if *flag { 1.0 } else { 0.0 }], false)),
         Value::Tensor(t) => Some(preview_f64_slice(&t.data, limit)),
-        Value::SparseTensor(s) => Some(preview_f64_slice(&s.values, limit)),
+        Value::SparseTensor(s) => Some(preview_sparse_tensor(s, limit)),
         Value::LogicalArray(arr) => Some(preview_logical_slice(arr, limit)),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
         Value::ComplexTensor(_) | Value::Complex(_, _) => None,
@@ -122,6 +122,21 @@ fn preview_f64_slice(data: &[f64], limit: usize) -> (Vec<f64>, bool) {
     } else {
         (data.to_vec(), false)
     }
+}
+
+fn preview_sparse_tensor(sparse: &SparseTensor, limit: usize) -> (Vec<f64>, bool) {
+    let total_len = sparse.rows.saturating_mul(sparse.cols);
+    let preview_len = total_len.min(limit);
+    let mut preview = Vec::with_capacity(preview_len);
+    if sparse.rows == 0 {
+        return (preview, false);
+    }
+    for linear_index in 0..preview_len {
+        let row = linear_index % sparse.rows;
+        let col = linear_index / sparse.rows;
+        preview.push(sparse.get(row, col).unwrap_or(0.0));
+    }
+    (preview, total_len > limit)
 }
 
 fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<f64>, bool) {
@@ -162,5 +177,26 @@ mod tests {
         );
 
         assert_eq!(value_shape(&Value::Object(object)), Some(vec![2, 1]));
+    }
+
+    #[test]
+    fn sparse_preview_uses_logical_column_major_values() {
+        let sparse = SparseTensor::new(3, 3, vec![0, 1, 1, 3], vec![1, 0, 2], vec![4.0, 5.0, 6.0])
+            .expect("sparse");
+
+        assert_eq!(
+            preview_numeric_values(&Value::SparseTensor(sparse), 9),
+            Some((vec![0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 6.0], false))
+        );
+    }
+
+    #[test]
+    fn sparse_preview_truncates_by_logical_element_count() {
+        let sparse = SparseTensor::zeros(1000, 1000);
+
+        assert_eq!(
+            preview_numeric_values(&Value::SparseTensor(sparse), 3),
+            Some((vec![0.0, 0.0, 0.0], true))
+        );
     }
 }
