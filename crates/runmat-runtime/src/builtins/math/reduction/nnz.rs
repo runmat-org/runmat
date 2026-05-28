@@ -17,7 +17,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type, Value,
+    CharArray, ComplexTensor, LogicalArray, ResolveContext, SparseTensor, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -293,6 +293,7 @@ fn nnz_host_value(value: Value, dim: Option<usize>) -> BuiltinResult<Value> {
 fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(count_nonzero_tensor(tensor)),
+        Value::SparseTensor(sparse) => Ok(sparse.nnz()),
         Value::ComplexTensor(ct) => Ok(count_nonzero_complex_tensor(ct)),
         Value::LogicalArray(logical) => Ok(count_nonzero_logical(logical)),
         Value::CharArray(chars) => Ok(count_nonzero_char(chars)),
@@ -375,6 +376,7 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
                 .collect();
             Ok(Mask { bits, shape })
         }
+        Value::SparseTensor(sparse) => mask_from_sparse(sparse),
         Value::LogicalArray(logical) => Ok(Mask {
             bits: logical
                 .data
@@ -489,6 +491,22 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
         .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
 }
 
+fn mask_from_sparse(sparse: &SparseTensor) -> BuiltinResult<Mask> {
+    let mut bits = vec![0u8; sparse.rows.saturating_mul(sparse.cols)];
+    for col in 0..sparse.cols {
+        for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            let row = sparse.row_indices[idx];
+            if row < sparse.rows {
+                bits[row + col * sparse.rows] = 1;
+            }
+        }
+    }
+    Ok(Mask {
+        bits,
+        shape: vec![sparse.rows, sparse.cols],
+    })
+}
+
 fn mask_to_tensor(mask: &Mask) -> BuiltinResult<Tensor> {
     let data = mask.bits.iter().map(|&b| b as f64).collect::<Vec<_>>();
     Tensor::new(data, canonical_shape(&mask.shape, mask.bits.len()))
@@ -519,6 +537,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::StringArray(_) => "string array".to_string(),
         Value::CharArray(_) => "char array".to_string(),
         Value::Tensor(_) => "numeric tensor".to_string(),
+        Value::SparseTensor(_) => "sparse tensor".to_string(),
         Value::ComplexTensor(_) => "complex tensor".to_string(),
         Value::Cell(_) => "cell array".to_string(),
         Value::Struct(_) => "struct".to_string(),

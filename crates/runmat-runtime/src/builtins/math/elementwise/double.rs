@@ -196,6 +196,7 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Int(i) => Ok(Value::Num(i.to_f64())),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) => Ok(Value::Tensor(tensor)),
+        Value::SparseTensor(sparse) => Ok(Value::SparseTensor(sparse)),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::ComplexTensor(tensor) => Ok(Value::ComplexTensor(tensor)),
         Value::LogicalArray(array) => double_from_logical(array),

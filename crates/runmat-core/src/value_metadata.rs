@@ -5,6 +5,7 @@ pub fn matlab_class_name(value: &Value) -> String {
     match value {
         Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
         Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
+        Value::SparseTensor(_) => "double".to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
@@ -43,6 +44,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::String(s) => Some(vec![1, s.chars().count()]),
         Value::CharArray(ca) => Some(vec![ca.rows, ca.cols]),
         Value::Tensor(t) => Some(t.shape.clone()),
+        Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
@@ -73,6 +75,11 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::Bool(_) => 1,
         Value::LogicalArray(arr) => arr.data.len() as u64,
         Value::Tensor(t) => (t.data.len() * 8) as u64,
+        Value::SparseTensor(s) => {
+            ((s.values.len() * std::mem::size_of::<f64>())
+                + (s.row_indices.len() * std::mem::size_of::<usize>())
+                + (s.col_ptrs.len() * std::mem::size_of::<usize>())) as u64
+        }
         Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
@@ -88,6 +95,7 @@ pub fn preview_numeric_values(value: &Value, limit: usize) -> Option<(Vec<f64>, 
         Value::Int(iv) => Some((vec![iv.to_f64()], false)),
         Value::Bool(flag) => Some((vec![if *flag { 1.0 } else { 0.0 }], false)),
         Value::Tensor(t) => Some(preview_f64_slice(&t.data, limit)),
+        Value::SparseTensor(s) => Some(preview_f64_slice(&s.values, limit)),
         Value::LogicalArray(arr) => Some(preview_logical_slice(arr, limit)),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => None,
         Value::ComplexTensor(_) | Value::Complex(_, _) => None,

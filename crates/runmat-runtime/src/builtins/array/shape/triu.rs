@@ -245,6 +245,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)

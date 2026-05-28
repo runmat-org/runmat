@@ -288,6 +288,7 @@ async fn circshift_builtin(
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -458,6 +459,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
             "circshift: shifts must be real integers",
         )),
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -560,6 +562,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             "circshift: dimensions must be real integers",
         )),
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)

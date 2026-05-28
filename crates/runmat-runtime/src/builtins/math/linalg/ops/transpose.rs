@@ -175,6 +175,7 @@ async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => transpose_gpu(handle).await,
         Value::Tensor(t) => Ok(tensor::tensor_into_value(transpose_tensor(t)?)),
+        Value::SparseTensor(s) => Ok(Value::SparseTensor(transpose_sparse_tensor(s)?)),
         Value::ComplexTensor(ct) => Ok(Value::ComplexTensor(transpose_complex_tensor(ct)?)),
         Value::LogicalArray(la) => Ok(Value::LogicalArray(transpose_logical_array(la)?)),
         Value::CharArray(ca) => Ok(Value::CharArray(transpose_char_array(ca)?)),
@@ -199,6 +200,36 @@ fn transpose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         let order = transpose_order(rank);
         permute_tensor(NAME, tensor, &order)
     }
+}
+
+fn transpose_sparse_tensor(
+    sparse: runmat_builtins::SparseTensor,
+) -> BuiltinResult<runmat_builtins::SparseTensor> {
+    let mut triplets = Vec::with_capacity(sparse.nnz());
+    for col in 0..sparse.cols {
+        for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            triplets.push((col, sparse.row_indices[idx], sparse.values[idx]));
+        }
+    }
+    triplets.sort_by_key(|&(row, col, _)| (col, row));
+
+    let rows = sparse.cols;
+    let cols = sparse.rows;
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::with_capacity(triplets.len());
+    let mut values = Vec::with_capacity(triplets.len());
+    col_ptrs.push(0);
+    let mut next = 0usize;
+    for col in 0..cols {
+        while next < triplets.len() && triplets[next].1 == col {
+            row_indices.push(triplets[next].0);
+            values.push(triplets[next].2);
+            next += 1;
+        }
+        col_ptrs.push(values.len());
+    }
+    runmat_builtins::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn transpose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<ComplexTensor> {

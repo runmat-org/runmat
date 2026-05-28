@@ -459,6 +459,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::Int(_) => "Int",
         Value::Bool(_) => "Bool",
         Value::Tensor(_) => "Tensor",
+        Value::SparseTensor(_) => "SparseTensor",
         Value::LogicalArray(_) => "LogicalArray",
         Value::GpuTensor(_) => "GpuTensor",
         Value::Complex(_, _) => "Complex",

@@ -358,12 +358,14 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             &RDIVIDE_ERROR_INVALID_ARGUMENT,
             "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
-            Err(rdivide_error_with_detail(
-                &RDIVIDE_ERROR_INVALID_ARGUMENT,
-                "unsupported prototype conversion to GPU output",
-            ))
-        }
+        Value::String(_)
+        | Value::StringArray(_)
+        | Value::SparseTensor(_)
+        | Value::Cell(_)
+        | Value::Struct(_) => Err(rdivide_error_with_detail(
+            &RDIVIDE_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
+        )),
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)

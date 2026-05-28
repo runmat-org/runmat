@@ -954,11 +954,13 @@ fn materialize_for_max(name: &str, value: Value) -> BuiltinResult<InputData> {
             Ok(InputData::Complex(tensor))
         }
         Value::ComplexTensor(ct) => Ok(InputData::Complex(ct)),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
-            Err(max_invalid_input(format!(
-                "{name}: expected numeric or logical input, received non-numeric value"
-            )))
-        }
+        Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::SparseTensor(_)
+        | Value::Cell(_) => Err(max_invalid_input(format!(
+            "{name}: expected numeric or logical dense input"
+        ))),
         Value::GpuTensor(_) => Err(max_internal_error(format!(
             "{name}: internal error – GPU tensors must be gathered before host execution"
         ))),

@@ -180,6 +180,7 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
         Value::Complex(re, im) => ctranspose_complex_scalar(re, im),
         Value::ComplexTensor(ct) => ctranspose_complex_tensor(ct),
         Value::Tensor(t) => Ok(tensor::tensor_into_value(ctranspose_tensor(t)?)),
+        Value::SparseTensor(s) => Ok(Value::SparseTensor(ctranspose_sparse_tensor(s)?)),
         Value::LogicalArray(la) => Ok(Value::LogicalArray(ctranspose_logical_array(la)?)),
         Value::CharArray(ca) => Ok(Value::CharArray(ctranspose_char_array(ca)?)),
         Value::StringArray(sa) => Ok(Value::StringArray(ctranspose_string_array(sa)?)),
@@ -202,6 +203,36 @@ fn ctranspose_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         let order = ctranspose_order(rank);
         permute_tensor(NAME, tensor, &order)
     }
+}
+
+fn ctranspose_sparse_tensor(
+    sparse: runmat_builtins::SparseTensor,
+) -> BuiltinResult<runmat_builtins::SparseTensor> {
+    let mut triplets = Vec::with_capacity(sparse.nnz());
+    for col in 0..sparse.cols {
+        for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
+            triplets.push((col, sparse.row_indices[idx], sparse.values[idx]));
+        }
+    }
+    triplets.sort_by_key(|&(row, col, _)| (col, row));
+
+    let rows = sparse.cols;
+    let cols = sparse.rows;
+    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
+    let mut row_indices = Vec::with_capacity(triplets.len());
+    let mut values = Vec::with_capacity(triplets.len());
+    col_ptrs.push(0);
+    let mut next = 0usize;
+    for col in 0..cols {
+        while next < triplets.len() && triplets[next].1 == col {
+            row_indices.push(triplets[next].0);
+            values.push(triplets[next].2);
+            next += 1;
+        }
+        col_ptrs.push(values.len());
+    }
+    runmat_builtins::SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
+        .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn ctranspose_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {

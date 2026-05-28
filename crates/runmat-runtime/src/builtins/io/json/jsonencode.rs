@@ -415,6 +415,7 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::Bool(b) => Ok(JsonValue::Bool(*b)),
         Value::LogicalArray(logical) => logical_array_to_json(logical, options),
         Value::Tensor(tensor) => tensor_to_json(tensor, options),
+        Value::SparseTensor(sparse) => tensor_to_json(&sparse.to_dense(), options),
         Value::Complex(re, im) => complex_scalar_to_json(*re, *im, options),
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
         Value::String(s) => Ok(JsonValue::String(s.clone())),

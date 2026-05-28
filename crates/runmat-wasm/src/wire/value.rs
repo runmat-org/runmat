@@ -116,6 +116,21 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                 "truncated": truncated,
             })
         }
+        Value::SparseTensor(st) => {
+            let (entry_preview, truncated) = sparse_entry_preview(st, MAX_DATA_PREVIEW);
+            json!({
+                "kind": "sparse-tensor",
+                "shape": vec![st.rows, st.cols],
+                "rows": st.rows,
+                "cols": st.cols,
+                "nnz": st.nnz(),
+                "colPtrs": st.col_ptrs,
+                "rowIndices": st.row_indices,
+                "values": st.values,
+                "preview": entry_preview,
+                "truncated": truncated,
+            })
+        }
         Value::Cell(ca) => json!({
             "kind": "cell",
             "shape": ca.shape,
@@ -252,6 +267,28 @@ fn rows_cols_from_shape(shape: &[usize]) -> (usize, usize) {
         1
     };
     (rows, cols)
+}
+
+fn sparse_entry_preview(
+    st: &runmat_builtins::SparseTensor,
+    limit: usize,
+) -> (Vec<JsonValue>, bool) {
+    let mut entries = Vec::with_capacity(st.nnz().min(limit));
+    for col in 0..st.cols {
+        let start = st.col_ptrs[col];
+        let end = st.col_ptrs[col + 1];
+        for idx in start..end {
+            if entries.len() >= limit {
+                return (entries, true);
+            }
+            entries.push(json!({
+                "row": st.row_indices[idx] + 1,
+                "col": col + 1,
+                "value": st.values[idx],
+            }));
+        }
+    }
+    (entries, false)
 }
 
 fn preview_slice<T: Clone>(data: &[T], limit: usize) -> (Vec<T>, bool) {

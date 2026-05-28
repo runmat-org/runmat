@@ -160,6 +160,7 @@ async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
 fn value_kind(value: &Value) -> &'static str {
     match value {
         Value::Tensor(_) => "tensor",
+        Value::SparseTensor(_) => "sparse tensor",
         Value::ComplexTensor(_) => "complex tensor",
         Value::LogicalArray(_) => "logical array",
         Value::StringArray(_) => "string array",

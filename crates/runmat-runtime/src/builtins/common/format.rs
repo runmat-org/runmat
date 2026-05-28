@@ -1132,6 +1132,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::Object(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)

@@ -494,6 +494,7 @@ fn string_payload(data: &Value) -> BuiltinResult<Payload> {
 fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(t) => Ok(t.data.clone()),
+        Value::SparseTensor(s) => Ok(s.to_dense().data),
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(iv) => Ok(vec![iv.to_f64()]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),

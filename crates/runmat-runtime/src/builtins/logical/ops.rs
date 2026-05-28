@@ -160,6 +160,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::Int(i) => Ok(Value::Bool(!i.is_zero())),
         Value::Complex(re, im) => Ok(Value::Bool(!complex_is_zero(re, im))),
         Value::Tensor(tensor) => logical_from_tensor(tensor),
+        Value::SparseTensor(_) => Err(conversion_error("sparse")),
         Value::ComplexTensor(tensor) => logical_from_complex_tensor(tensor),
         Value::CharArray(chars) => logical_from_char_array(chars),
         Value::StringArray(strings) => logical_from_string_array(strings),

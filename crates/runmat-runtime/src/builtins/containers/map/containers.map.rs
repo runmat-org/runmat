@@ -1533,6 +1533,7 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
             Ok(Value::Tensor(tensor))
         }
         Value::Cell(_)
+        | Value::SparseTensor(_)
         | Value::Struct(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -1573,6 +1574,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
             Ok(Value::LogicalArray(logical))
         }
         Value::CharArray(_)
+        | Value::SparseTensor(_)
         | Value::String(_)
         | Value::StringArray(_)
         | Value::Struct(_)
