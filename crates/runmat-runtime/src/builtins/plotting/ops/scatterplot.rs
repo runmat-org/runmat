@@ -246,18 +246,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 pub async fn scatterplot_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
     let options = ScatterplotOptions::parse(rest)?;
     let (x_value, y_value, limits) = extract_scatter_values(x, options.n, options.offset).await?;
-    let mut scatter_rest = Vec::new();
-    if let Some(ax) = options.axes {
-        scatter_rest.push(Value::Num(ax));
-    }
     let marker = options
         .marker
         .unwrap_or_else(|| Value::String(DEFAULT_MARKER.to_string()));
-    scatter_rest.push(marker);
 
-    let handle = scatter_builtin(x_value, y_value, scatter_rest)
-        .await
-        .map_err(scatterplot_map_plot_error)?;
+    let handle = if let Some(ax) = options.axes {
+        scatter_builtin(Value::Num(ax), x_value, vec![y_value, marker]).await
+    } else {
+        scatter_builtin(x_value, y_value, vec![marker]).await
+    }
+    .map_err(scatterplot_map_plot_error)?;
     set_axis_equal(true);
     set_grid_enabled(true);
     if let Some(limit) = limits {
@@ -585,6 +583,7 @@ mod tests {
         configure_subplot(1, 2, 1).unwrap();
         let fig_handle = current_figure_handle();
         let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        configure_subplot(1, 2, 0).unwrap();
         let data = complex_tensor(&[(1.0, 2.0), (3.0, 4.0)]);
         let _ = run_scatterplot(
             Value::ComplexTensor(data),
@@ -594,7 +593,8 @@ mod tests {
                 Value::String("x".into()),
                 Value::Num(ax),
             ],
-        );
+        )
+        .unwrap();
         let fig = clone_figure(fig_handle).unwrap();
         assert_eq!(fig.plot_axes_indices(), &[1]);
     }
