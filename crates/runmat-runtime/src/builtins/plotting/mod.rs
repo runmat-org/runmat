@@ -102,6 +102,8 @@ pub(crate) mod quiver;
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
 pub(crate) mod scatter3;
+#[path = "ops/scatterplot.rs"]
+pub(crate) mod scatterplot;
 #[path = "ops/semilogx.rs"]
 pub(crate) mod semilogx;
 #[path = "ops/semilogy.rs"]
