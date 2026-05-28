@@ -804,8 +804,8 @@ pub(crate) mod tests {
         let u = tensor_from_value(eval.upper());
         let p = tensor_from_value(eval.permutation_matrix());
 
-        let pa = crate::matrix::matrix_mul(&p, &a).expect("P*A");
-        let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
+        let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
@@ -837,8 +837,8 @@ pub(crate) mod tests {
 
         assert!(u.data.iter().any(|&v| v.abs() <= 1e-12));
 
-        let pa = crate::matrix::matrix_mul(&p, &a).expect("P*A");
-        let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
+        let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
@@ -888,8 +888,8 @@ pub(crate) mod tests {
         assert_eq!(u.shape, vec![2, 3]);
         assert_eq!(p.shape, vec![2, 2]);
 
-        let pa = crate::matrix::matrix_mul(&p, &a).expect("P*A");
-        let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+        let pa = crate::builtins::common::matrix::matrix_mul(&p, &a).expect("P*A");
+        let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
         assert_tensor_close(&pa, &lu_product, 1e-9);
     }
 
@@ -968,8 +968,8 @@ pub(crate) mod tests {
             let l = test_support::gather(lower_val).expect("gather lower");
             let u = test_support::gather(upper_val).expect("gather upper");
             let p = test_support::gather(perm_val).expect("gather permutation");
-            let pa = crate::matrix::matrix_mul(&p, &host).expect("P*A");
-            let lu_product = crate::matrix::matrix_mul(&l, &u).expect("L*U");
+            let pa = crate::builtins::common::matrix::matrix_mul(&p, &host).expect("P*A");
+            let lu_product = crate::builtins::common::matrix::matrix_mul(&l, &u).expect("L*U");
             assert_tensor_close(&pa, &lu_product, 1e-9);
         });
     }

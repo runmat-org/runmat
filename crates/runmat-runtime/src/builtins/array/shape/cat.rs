@@ -1,6 +1,7 @@
 //! MATLAB-compatible `cat` builtin with GPU-aware semantics for RunMat.
 
 use crate::builtins::common::arg_tokens::{tokens_from_context, tokens_from_values, ArgToken};
+use crate::builtins::common::concatenation::char_array_from_f64_with_prefix;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -8,7 +9,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::concatenation::char_array_from_f64_with_prefix;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{

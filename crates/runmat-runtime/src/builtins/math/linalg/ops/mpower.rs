@@ -180,8 +180,8 @@ pub(crate) async fn mpower_eval(base: &Value, exponent: &Value) -> BuiltinResult
     let exponent_host = crate::dispatcher::gather_if_needed_async(exponent)
         .await
         .map_err(map_control_flow)?;
-    let result =
-        crate::elementwise::power(&base_host, &exponent_host).map_err(map_host_power_error)?;
+    let result = crate::builtins::common::elementwise::power(&base_host, &exponent_host)
+        .map_err(map_host_power_error)?;
 
     if matches!(base, Value::GpuTensor(_)) {
         if let Value::Tensor(tensor) = result {
@@ -272,7 +272,7 @@ fn gpu_identity_like(
     match provider.eye_like(prototype) {
         Ok(handle) => Ok(Some(handle)),
         Err(_) => {
-            let eye = crate::matrix::matrix_eye(size);
+            let eye = crate::builtins::common::matrix::matrix_eye(size);
             let view = HostTensorView {
                 data: &eye.data,
                 shape: &eye.shape,

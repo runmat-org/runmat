@@ -3,7 +3,7 @@
 //! This module implements language-compatible element-wise operations (.*,  ./,  .^)
 //! These operations work element-by-element on matrices and support scalar broadcasting.
 
-use crate::matrix::matrix_power;
+use crate::builtins::common::matrix::matrix_power;
 use runmat_builtins::{Tensor, Value};
 
 fn complex_pow_scalar(base_re: f64, base_im: f64, exp_re: f64, exp_im: f64) -> (f64, f64) {
@@ -527,14 +527,15 @@ pub fn power(a: &Value, b: &Value) -> Result<Value, String> {
         (Value::ComplexTensor(m), Value::Num(s)) => {
             if s.fract() == 0.0 {
                 let n = *s as i32;
-                let result = crate::matrix::complex_matrix_power(m, n)?;
+                let result = crate::builtins::common::matrix::complex_matrix_power(m, n)?;
                 Ok(Value::ComplexTensor(result))
             } else {
                 Err("Matrix power requires integer exponent".to_string())
             }
         }
         (Value::ComplexTensor(m), Value::Int(s)) => {
-            let result = crate::matrix::complex_matrix_power(m, s.to_i64() as i32)?;
+            let result =
+                crate::builtins::common::matrix::complex_matrix_power(m, s.to_i64() as i32)?;
             Ok(Value::ComplexTensor(result))
         }
 

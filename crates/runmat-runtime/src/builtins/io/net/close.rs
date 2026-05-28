@@ -5,7 +5,6 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     StructValue, Value,
 };
-use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -152,16 +151,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Networking builtins execute eagerly on the CPU; close participates only in host bookkeeping.",
 };
 
-#[runtime_builtin(
-    name = "close",
-    category = "io/net",
-    summary = "Close TCP clients or servers created by tcpclient, tcpserver, or accept.",
-    keywords = "close,tcpclient,tcpserver,networking",
-    type_resolver(crate::builtins::io::type_resolvers::close_type),
-    descriptor(crate::builtins::io::net::close::CLOSE_DESCRIPTOR),
-    builtin_path = "crate::builtins::io::net::close"
-)]
-async fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn close_network_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         let closed = close_everything();
         return Ok(Value::Num(if closed { 1.0 } else { 0.0 }));
@@ -176,6 +166,32 @@ async fn close_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     Ok(Value::Num(if any_closed { 1.0 } else { 0.0 }))
+}
+
+pub(crate) async fn close_if_network_targets(args: &[Value]) -> BuiltinResult<Option<f64>> {
+    if args.is_empty() {
+        return Ok(None);
+    }
+
+    let mut gathered_args = Vec::with_capacity(args.len());
+    for raw in args {
+        let gathered = gather_if_needed_async(raw)
+            .await
+            .map_err(|flow| map_close_flow(flow, &CLOSE_ERROR_INTERNAL))?;
+        if !is_network_target_value(&gathered) {
+            return Ok(None);
+        }
+        gathered_args.push(gathered);
+    }
+
+    let status = close_network_builtin(gathered_args).await?;
+    match status {
+        Value::Num(value) => Ok(Some(value)),
+        other => Err(close_flow(
+            &CLOSE_ERROR_INTERNAL,
+            format!("close: internal status type mismatch {other:?}"),
+        )),
+    }
 }
 
 fn close_value(value: &Value) -> BuiltinResult<bool> {
@@ -269,6 +285,41 @@ fn close_everything() -> bool {
     clients > 0 || servers > 0
 }
 
+fn is_network_target_value(value: &Value) -> bool {
+    match value {
+        Value::Struct(st) => {
+            st.fields.contains_key(CLIENT_HANDLE_FIELD) || st.fields.contains_key(HANDLE_ID_FIELD)
+        }
+        Value::String(text) => is_network_command_token(text),
+        Value::CharArray(chars) => {
+            if chars.data.is_empty() {
+                false
+            } else if chars.rows == 1 {
+                let text: String = chars.data.iter().collect();
+                is_network_command_token(&text)
+            } else {
+                false
+            }
+        }
+        Value::StringArray(sa) => sa.data.len() == 1 && is_network_command_token(&sa.data[0]),
+        Value::Cell(cell) => {
+            !cell.data.is_empty()
+                && cell
+                    .data
+                    .iter()
+                    .all(|element| is_network_target_value(unsafe { &*element.as_raw() }))
+        }
+        _ => false,
+    }
+}
+
+fn is_network_command_token(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "clients" | "client" | "servers" | "server"
+    )
+}
+
 fn value_to_u64(value: &Value) -> Option<u64> {
     match value {
         Value::Int(int) => {
@@ -323,7 +374,7 @@ pub(crate) mod tests {
     }
 
     fn run_close(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(close_builtin(args))
+        futures::executor::block_on(close_network_builtin(args))
     }
 
     fn run_accept(server: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

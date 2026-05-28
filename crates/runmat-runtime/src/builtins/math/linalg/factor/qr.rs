@@ -1144,8 +1144,8 @@ pub(crate) mod tests {
         .unwrap();
         tensor_close(&qtq, &identity, 1e-10);
 
-        let qr = crate::matrix::matrix_mul(&q, &r).expect("Q*R");
-        let ae = crate::matrix::matrix_mul(&a, &e).expect("A*E");
+        let qr = crate::builtins::common::matrix::matrix_mul(&q, &r).expect("Q*R");
+        let ae = crate::builtins::common::matrix::matrix_mul(&a, &e).expect("A*E");
         tensor_close(&qr, &ae, 1e-10);
     }
 
@@ -1341,7 +1341,7 @@ pub(crate) mod tests {
         tensor_close(&qtq, &identity, 1e-3);
 
         // Q*R reconstructs the input (no pivoting)
-        let qr_product = crate::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
+        let qr_product = crate::builtins::common::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
         let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
         tensor_close(&qr_product, &a_matrix, 1e-3);
     }

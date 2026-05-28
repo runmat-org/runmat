@@ -1,12 +1,12 @@
 //! MATLAB-compatible `getfield` builtin with struct array and object support.
 
+use crate::builtins::common::indexing::perform_indexing;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::structs::type_resolvers::getfield_type;
-use crate::indexing::perform_indexing;
 use crate::make_cell_with_shape;
 use crate::{
     build_runtime_error, call_builtin_async, gather_if_needed_async, object_property_getter_name,

@@ -3230,7 +3230,7 @@ mod tests {
             ("prod([1 2 3], 1);", "B = prod(A, dim)"),
             ("any([1 0 1], 1);", "B = any(A, dim)"),
             ("all([1 1 1], 1);", "B = all(A, dim)"),
-            ("warning('msg %d', 1);", "status = warning(fmt, varargin)"),
+            ("warning('msg %d', 1);", "state = warning(message, A...)"),
             (
                 "getmethod(classref('Point'), 'move');",
                 "fh = getmethod(obj_or_class, name)",

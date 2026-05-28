@@ -59,7 +59,7 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::Mul => {
             arithmetic_ops::mul(stack, call_operator_method, |a, b| async move {
                 let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
-                runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await
+                runmat_runtime::value_matmul(&a_acc, &b_acc).await
             })
             .await?;
             Ok(true)
