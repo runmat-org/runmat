@@ -198,7 +198,11 @@ impl PrintRequest {
         let path = Path::new(&self.filename);
         match self.device {
             PrintDevice::Png if has_extension(path, "png") => path.to_path_buf(),
-            PrintDevice::Png => path.with_extension("png"),
+            PrintDevice::Png => {
+                let mut out = path.as_os_str().to_os_string();
+                out.push(".png");
+                PathBuf::from(out)
+            }
         }
     }
 }
