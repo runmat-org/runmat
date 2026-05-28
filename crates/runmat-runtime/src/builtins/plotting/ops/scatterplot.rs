@@ -15,7 +15,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::plotting::state::{
+    axes_handle_exists, decode_axes_handle, figure_handle_exists,
+};
 use crate::builtins::plotting::state::{set_axis_equal, set_axis_limits, set_grid_enabled};
+use crate::builtins::plotting::style::{parse_line_style_args, LineStyleParseOptions};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -304,9 +308,12 @@ impl ScatterplotOptions {
                 &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
             ));
         }
-        let marker = rest.get(2).cloned();
+        let marker = match rest.get(2) {
+            Some(value) => Some(parse_marker(value)?),
+            None => None,
+        };
         let axes = match rest.get(3) {
-            Some(value) => Some(parse_numeric_scalar(value, "ax")?),
+            Some(value) => Some(parse_axes_handle(value)?),
             None => None,
         };
         Ok(Self {
@@ -316,6 +323,78 @@ impl ScatterplotOptions {
             axes,
         })
     }
+}
+
+fn parse_marker(value: &Value) -> BuiltinResult<Value> {
+    match value {
+        Value::String(_) => {}
+        Value::CharArray(chars) if chars.rows == 1 => {}
+        Value::CharArray(_) => {
+            return Err(scatterplot_error(
+                "scatterplot: marker must be a character row vector or string scalar",
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        other => {
+            return Err(scatterplot_error(
+                format!("scatterplot: marker must be a LineSpec string, got {other:?}"),
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            ));
+        }
+    }
+
+    let opts = LineStyleParseOptions {
+        builtin_name: BUILTIN_NAME,
+        forbid_leading_numeric: true,
+        forbid_interleaved_numeric: true,
+    };
+    parse_line_style_args(std::slice::from_ref(value), &opts).map_err(|err| {
+        scatterplot_error(
+            format!("scatterplot: invalid marker LineSpec: {}", err.message()),
+            &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    Ok(value.clone())
+}
+
+fn parse_axes_handle(value: &Value) -> BuiltinResult<f64> {
+    let scalar = match value {
+        Value::Num(v) => *v,
+        Value::Int(v) => v.to_f64(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        Value::Tensor(_) => {
+            return Err(scatterplot_error(
+                "scatterplot: ax must be a scalar axes handle",
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            ));
+        }
+        other => {
+            return Err(scatterplot_error(
+                format!("scatterplot: ax must be a scalar axes handle, got {other:?}"),
+                &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+            ));
+        }
+    };
+    if !scalar.is_finite() || scalar <= 0.0 || scalar.fract() != 0.0 || scalar > (u64::MAX as f64) {
+        return Err(scatterplot_error(
+            "scatterplot: ax must be a valid axes handle",
+            &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+
+    let (figure, axes_index) = decode_axes_handle(scalar).map_err(|err| {
+        scatterplot_error(
+            format!("scatterplot: invalid axes handle: {err}"),
+            &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
+    if !figure_handle_exists(figure) || !axes_handle_exists(figure, axes_index) {
+        return Err(scatterplot_error(
+            "scatterplot: ax must be an existing axes handle",
+            &SCATTERPLOT_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    Ok(scalar)
 }
 
 async fn extract_scatter_values(
@@ -541,6 +620,42 @@ mod tests {
     fn scatterplot_rejects_offset_equal_to_decimation() {
         let err = ScatterplotOptions::parse(vec![Value::Num(2.0), Value::Num(2.0)]).unwrap_err();
         assert!(err.to_string().contains("offset must be less than n"));
+    }
+
+    #[test]
+    fn scatterplot_rejects_invalid_marker_at_parse_time() {
+        let err =
+            ScatterplotOptions::parse(vec![Value::Num(1.0), Value::Num(0.0), Value::Num(7.0)])
+                .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
+        assert!(!err.to_string().contains("PlotFailed"));
+    }
+
+    #[test]
+    fn scatterplot_rejects_invalid_axes_at_parse_time() {
+        let err = ScatterplotOptions::parse(vec![
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::String("x".into()),
+            Value::Num(1.0),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
+        assert!(!err.to_string().contains("PlotFailed"));
+    }
+
+    #[test]
+    fn scatterplot_rejects_nonscalar_axes_at_parse_time() {
+        let ax = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
+        let err = ScatterplotOptions::parse(vec![
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::String("x".into()),
+            Value::Tensor(ax),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
+        assert!(!err.to_string().contains("PlotFailed"));
     }
 
     #[test]
