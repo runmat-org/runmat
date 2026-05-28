@@ -489,6 +489,12 @@ fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
             format!("sparse: {name} must be a nonnegative integer"),
         ));
     }
+    if raw > max_usize_cast_value() {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("sparse: {name} exceeds the maximum supported size"),
+        ));
+    }
     Ok(raw as usize)
 }
 
@@ -499,7 +505,21 @@ fn parse_subscript(raw: f64, name: &str) -> BuiltinResult<usize> {
             format!("sparse: {name} indices must be positive integers"),
         ));
     }
+    if raw > max_usize_cast_value() {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!("sparse: {name} index exceeds the maximum supported size"),
+        ));
+    }
     Ok(raw as usize)
+}
+
+fn max_usize_cast_value() -> f64 {
+    if usize::BITS <= f64::MANTISSA_DIGITS {
+        usize::MAX as f64
+    } else {
+        f64::from_bits((usize::MAX as f64).to_bits() - 1)
+    }
 }
 
 fn is_stored_value(value: f64) -> bool {
@@ -584,5 +604,18 @@ pub(crate) mod tests {
             assert_eq!(sparse.get(1, 0), Some(8.0));
             assert_eq!(sparse.get(1, 1), Some(3.0));
         });
+    }
+
+    #[test]
+    fn sparse_rejects_size_and_subscript_values_too_large_for_usize() {
+        let too_large = max_usize_cast_value() * 2.0;
+
+        let size_err = parse_size_arg(&Value::Num(too_large), "m").unwrap_err();
+        assert_eq!(size_err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(size_err.message().contains("maximum supported size"));
+
+        let index_err = parse_subscript(too_large, "row").unwrap_err();
+        assert_eq!(index_err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(index_err.message().contains("maximum supported size"));
     }
 }
