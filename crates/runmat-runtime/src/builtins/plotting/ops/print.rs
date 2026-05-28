@@ -164,7 +164,7 @@ pub fn print_type(_args: &[Type], _context: &runmat_builtins::ResolveContext) ->
 pub async fn print_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
     let args = gather_values(&args).await?;
     let request = parse_print_args(&args)?;
-    let path = request.output_path();
+    let path = request.output_path()?;
     let bytes = render_png(request.figure, request.width, request.height).await?;
     write_bytes(&path, &bytes).await?;
     Ok(true)
@@ -197,14 +197,20 @@ struct PrintRequest {
 }
 
 impl PrintRequest {
-    fn output_path(&self) -> PathBuf {
+    fn output_path(&self) -> BuiltinResult<PathBuf> {
         let path = Path::new(&self.filename);
         match self.device {
-            PrintDevice::Png if has_extension(path, "png") => path.to_path_buf(),
+            PrintDevice::Png if has_extension(path, "png") => Ok(path.to_path_buf()),
             PrintDevice::Png => {
-                let mut out = path.as_os_str().to_os_string();
-                out.push(".png");
-                PathBuf::from(out)
+                let Some(file_name) = path.file_name() else {
+                    return Err(print_error_with_detail(
+                        &PRINT_ERROR_INVALID_INPUT,
+                        "filename must include a file name before appending '.png'",
+                    ));
+                };
+                let mut file_name = OsString::from(file_name);
+                file_name.push(".png");
+                Ok(path.with_file_name(file_name))
             }
         }
     }
@@ -670,9 +676,30 @@ mod tests {
         let request = parse_print_args(&[Value::from("-dpng"), Value::from("command_style_name")])
             .expect("parse");
         assert_eq!(
-            request.output_path(),
+            request.output_path().expect("output path"),
             PathBuf::from("command_style_name.png")
         );
         assert_eq!(request.device, PrintDevice::Png);
+    }
+
+    #[test]
+    fn print_appends_png_to_filename_component_only() {
+        let request = parse_print_args(&[Value::from("exports/report"), Value::from("-dpng")])
+            .expect("parse");
+        assert_eq!(
+            request.output_path().expect("output path"),
+            PathBuf::from("exports/report.png")
+        );
+    }
+
+    #[test]
+    fn print_rejects_directory_like_png_output_path() {
+        let request = parse_print_args(&[Value::from("/"), Value::from("-dpng")]).expect("parse");
+        let err = request
+            .output_path()
+            .expect_err("root path has no filename component");
+        assert!(err
+            .message()
+            .contains("filename must include a file name before appending '.png'"));
     }
 }
