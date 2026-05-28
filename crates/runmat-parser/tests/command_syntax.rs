@@ -279,6 +279,25 @@ fn clearvars_except_stringifies_dash_option_and_names() {
 }
 
 #[test]
+fn print_command_form_stringifies_dash_options_and_dotted_filename() {
+    let program = parse_with_options(
+        "print -dpng -r300 command_style_plot.png",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "print");
+            assert_eq!(args.len(), 3);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"-dpng\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"-r300\""));
+            assert!(matches!(args[2], Expr::String(ref s, _) if s == "\"command_style_plot.png\""));
+        }
+        other => panic!("expected print command form, got {other:?}"),
+    }
+}
+
+#[test]
 fn invalid_keyword_rejected() {
     let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
     assert!(err.is_err());

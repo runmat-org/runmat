@@ -37,10 +37,18 @@ pub trait FileHandle: Read + Write + Seek + Send + Sync {
     async fn flush_async(&mut self) -> io::Result<()> {
         self.flush()
     }
+
+    async fn sync_all_async(&mut self) -> io::Result<()> {
+        self.flush_async().await
+    }
 }
 
 #[async_trait(?Send)]
-impl FileHandle for std::fs::File {}
+impl FileHandle for std::fs::File {
+    async fn sync_all_async(&mut self) -> io::Result<()> {
+        std::fs::File::sync_all(self)
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct OpenFlags {
@@ -390,6 +398,10 @@ impl File {
 
     pub async fn flush_async(&mut self) -> io::Result<()> {
         self.inner.flush_async().await
+    }
+
+    pub async fn sync_all_async(&mut self) -> io::Result<()> {
+        self.inner.sync_all_async().await
     }
 }
 
