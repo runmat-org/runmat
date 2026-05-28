@@ -3831,8 +3831,7 @@ fn feval_expand_cell_fractional_index_errors() {
 }
 
 #[test]
-fn varargout_expand_into_outer_call() {
-    // h returns varargout with three numbers; max(h()) should consume two (max takes two args)
+fn varargout_argument_supplies_first_output_without_implicit_expansion() {
     let program = r#"
         function varargout = h(x)
             varargout = {x+1, x+2, x+3};
@@ -3840,15 +3839,13 @@ fn varargout_expand_into_outer_call() {
         r = max(h(10));
     "#;
     let vars = execute_source(program);
-    // max(11,12) = 12
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-12.0).abs()<1e-9)));
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-11.0).abs()<1e-9)));
 }
 
 #[test]
-fn user_function_consumes_varargout_exact_needed() {
-    // f takes three args; g returns varargout [1,2,3]; call f(g())
+fn user_function_does_not_infer_varargout_argument_spread() {
     let program = r#"
         function y = f(a,b,c)
             y = a + 10*b + 100*c;
@@ -3858,11 +3855,9 @@ fn user_function_consumes_varargout_exact_needed() {
         end
         r = f(g());
     "#;
-    let vars = execute_source(program);
-    // 1 + 20 + 300 = 321
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-321.0).abs()<1e-9)));
+    let err =
+        execute_source_result(program).expect_err("f(g()) should pass only g()'s first output");
+    assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 }
 
 #[test]
@@ -4014,24 +4009,19 @@ fn bitwise_or_row_vectors() {
 }
 
 #[test]
-fn function_return_propagation_partial_fill() {
-    // g returns [1,2,3]; h takes 2 inputs; ensure leftmost two feed h
+fn ordinary_function_argument_supplies_first_output_only() {
     let program = "function [a,b,c] = g(); a=1; b=2; c=3; end; function y = h(x1,x2); y = x1*10 + x2; end; r = h(g());";
-    let vars = execute_source(program);
-    // 1*10 + 2 = 12
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 12.0).abs() < 1e-9)));
+    let err =
+        execute_source_result(program).expect_err("h(g()) should pass only g()'s first output");
+    assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 }
 
 #[test]
-fn nested_function_return_propagation_mixed_with_fixed() {
-    // g()->[4,5]; f(x,p,z)=x+p+z; call f(1, g()) => 1+4+5=10
+fn ordinary_nested_function_argument_does_not_spread_outputs() {
     let program = "function [a,b] = g(); a=4; b=5; end; function y = f(x,p,z); y = x + p + z; end; r = f(1, g());";
-    let vars = execute_source(program);
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+    let err =
+        execute_source_result(program).expect_err("f(1, g()) should pass only g()'s first output");
+    assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 }
 
 #[test]

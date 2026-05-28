@@ -383,19 +383,13 @@ fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
 }
 
 #[test]
-fn atan2_multi_output_argument_path_unpacks_before_call() {
-    let input = r#"
-        function [a,b] = g()
-          a = 1;
-          b = 2;
-        end
-        x = atan2(g());
-    "#;
+fn atan2_explicit_comma_list_argument_path_unpacks_before_call() {
+    let input = "C = {1, 2}; x = atan2(C{:});";
     let vars = execute_source(input);
-    let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
+    let x: f64 = (&vars[1]).try_into().expect("convert x to f64");
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
-    let bytecode = compile_source(input).expect("compile atan2 multi-output script");
+    let bytecode = compile_source(input).expect("compile atan2 comma-list script");
     let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
         matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
             if name == "atan2"
@@ -407,13 +401,13 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
     });
     assert!(
         has_output_list_expansion,
-        "expected semantic CallBuiltinExpandMultiOutput(atan2) expansion in bytecode"
+        "expected explicit CallBuiltinExpandMultiOutput(atan2) expansion in bytecode"
     );
     assert!(
         !bytecode.instructions.iter().any(
             |instr| matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
         ),
-        "atan2(g()) should lower through expand-multi-output call shape, not fixed-arity builtin call"
+        "atan2(C{{:}}) should lower through expand-multi-output call shape, not fixed-arity builtin call"
     );
 }
 
