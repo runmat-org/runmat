@@ -17,5 +17,19 @@
 
 ## Virtual Machine (VM)
 
-## GPU Acceleration and Fusion
+- [Virtual Machine (VM)](/docs/runtime/vm)
+- [Bytecode Compilation (MIR → Bytecode)](/docs/runtime/vm/bytecode)
+- [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter)
+- [Indexing Subsystem](/docs/runtime/vm/indexing)
+- [Callable Resolution & Function Dispatch](/docs/runtime/vm/dispatch)
 
+## GPU Acceleration & Fusion Engine
+
+- [GPU Acceleration & Fusion Engine](/docs/runtime/gpu)
+- [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion)
+- [wgpu Backend & Accelerate Provider](/docs/runtime/gpu/wgpu)
+
+## Turbine JIT Compiler
+
+- [Turbine JIT Compiler](/docs/runtime/jit)
+- [JIT Compilation Pipeline](/docs/runtime/jit/pipeline)

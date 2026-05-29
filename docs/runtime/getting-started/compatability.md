@@ -23,7 +23,7 @@ RunMat provides three distinct compatibility modes to balance parity with MATLAB
 
 ## Language Feature Coverage
 
-RunMat implements the core grammar of the MATLAB language, moving from raw source to a High-Level IR (HIR) that preserves MATLAB's unique scoping and resolution rules. See the [compiler pipeline](/docs/runtime/compilation-pipeline) for more details.
+RunMat implements the core grammar of the MATLAB language, moving from raw source to a High-Level IR (HIR) that preserves MATLAB's unique scoping and resolution rules. See the [compiler pipeline](/docs/runtime/compiler) for more details.
 
 ### Core Syntax & Semantics
 
@@ -41,7 +41,7 @@ RunMat implements the core grammar of the MATLAB language, moving from raw sourc
 
 ### Advanced Indexing
 
-RunMat implements a robust indexing subsystem that handles N-D numeric and logical indexing, linear indexing, and `end` arithmetic. For details, see the [indexing subsystem](/docs/runtime/vm-interpreter-and-bytecode/indexing) documentation.
+RunMat implements a robust indexing subsystem that handles N-D numeric and logical indexing, linear indexing, and `end` arithmetic. For details, see the [indexing subsystem](/docs/runtime/vm/indexing) documentation.
 
 - Expansion: Supports function and cell expansion into slice targets with dynamic packing.
 - L-Value Handling: The HIR lowering stage distinguishes between standard assignments, indexed assignments (`A(1)=2`), and cell assignments (`C{1}=3`).
@@ -58,4 +58,4 @@ Unlike many alternative MATLAB syntax-based runtimes, RunMat provides full `clas
 
 The compatibility layer is primarily enforced during the "Lowering" phase, where the `runmat-parser` AST is converted into `runmat-hir`. This stage resolves identifiers based on MATLAB's complex precedence rules.
 
-See the [compiler pipeline](/docs/runtime/compilation-pipeline) for a full breakdown of the compiler pipeline.
+See the [compiler pipeline](/docs/runtime/compiler) for a full breakdown of the compiler pipeline.
