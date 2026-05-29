@@ -492,12 +492,28 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
 }
 
 fn mask_from_sparse(sparse: &SparseTensor) -> BuiltinResult<Mask> {
-    let mut bits = vec![0u8; sparse.rows.saturating_mul(sparse.cols)];
+    let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse dimensions overflow usize")
+    })?;
+    let mut bits = Vec::new();
+    bits.try_reserve_exact(total).map_err(|err| {
+        nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INTERNAL,
+            format!("sparse mask allocation failed: {err}"),
+        )
+    })?;
+    bits.resize(total, 0);
     for col in 0..sparse.cols {
+        let col_off = col.checked_mul(sparse.rows).ok_or_else(|| {
+            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse column offset overflow")
+        })?;
         for idx in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
             let row = sparse.row_indices[idx];
             if row < sparse.rows {
-                bits[row + col * sparse.rows] = 1;
+                let bit_idx = col_off.checked_add(row).ok_or_else(|| {
+                    nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse index overflow")
+                })?;
+                bits[bit_idx] = 1;
             }
         }
     }
@@ -703,6 +719,24 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mask_from_sparse_rejects_overflowing_logical_size() {
+        let sparse = SparseTensor {
+            rows: usize::MAX,
+            cols: 2,
+            col_ptrs: vec![0, 0, 0],
+            row_indices: Vec::new(),
+            values: Vec::new(),
+        };
+
+        let err = match mask_from_sparse(&sparse) {
+            Ok(_) => panic!("expected sparse mask overflow error"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), NNZ_ERROR_INTERNAL.identifier);
+        assert!(err.message().contains("sparse dimensions overflow usize"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
