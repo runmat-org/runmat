@@ -448,21 +448,47 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
 
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.data.clone()),
-        Value::SparseTensor(sparse) => Ok(sparse.to_dense().data),
-        Value::LogicalArray(logical) => Ok(logical
-            .data
-            .iter()
-            .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
-            .collect()),
+        Value::Tensor(tensor) => {
+            if !is_vector_shape(&tensor.shape) {
+                return Err(numeric_vector_error(value, name));
+            }
+            Ok(tensor.data.clone())
+        }
+        Value::SparseTensor(sparse) => {
+            if !is_vector_shape(&[sparse.rows, sparse.cols]) {
+                return Err(numeric_vector_error(value, name));
+            }
+            Ok(sparse.to_dense().data)
+        }
+        Value::LogicalArray(logical) => {
+            if !is_vector_shape(&logical.shape) {
+                return Err(numeric_vector_error(value, name));
+            }
+            Ok(logical
+                .data
+                .iter()
+                .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
+                .collect())
+        }
         Value::Num(n) => Ok(vec![*n]),
         Value::Int(i) => Ok(vec![i.to_f64()]),
         Value::Bool(b) => Ok(vec![if *b { 1.0 } else { 0.0 }]),
-        other => Err(sparse_error(
-            &SPARSE_ERROR_INVALID_INPUT,
-            format!("sparse: {name} must be a real numeric vector, got {other:?}"),
-        )),
+        other => Err(numeric_vector_error(other, name)),
     }
+}
+
+fn numeric_vector_error(value: &Value, name: &str) -> RuntimeError {
+    sparse_error(
+        &SPARSE_ERROR_INVALID_INPUT,
+        format!("sparse: {name} must be a real numeric vector, got {value:?}"),
+    )
+}
+
+fn is_vector_shape(shape: &[usize]) -> bool {
+    if shape.len() > 2 {
+        return false;
+    }
+    shape.iter().filter(|&&dim| dim != 1).count() <= 1
 }
 
 fn parse_size_arg(value: &Value, name: &str) -> BuiltinResult<usize> {
@@ -578,6 +604,41 @@ pub(crate) mod tests {
         assert_eq!(sparse.nnz(), 2);
         assert_eq!(sparse.get(0, 0), Some(7.0));
         assert_eq!(sparse.get(1, 2), Some(9.0));
+    }
+
+    #[test]
+    fn sparse_triplets_reject_matrix_inputs() {
+        let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let vector = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
+        let err = sparse_builtin(vec![
+            Value::Tensor(matrix),
+            Value::Tensor(vector.clone()),
+            Value::Tensor(vector.clone()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err.message().contains("i must be a real numeric vector"));
+
+        let sparse_matrix =
+            SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![1.0, 2.0]).unwrap();
+        let err = sparse_builtin(vec![
+            Value::SparseTensor(sparse_matrix),
+            Value::Tensor(vector.clone()),
+            Value::Tensor(vector.clone()),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err.message().contains("i must be a real numeric vector"));
+
+        let logical_matrix = LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap();
+        let err = sparse_builtin(vec![
+            Value::LogicalArray(logical_matrix),
+            Value::Tensor(vector.clone()),
+            Value::Tensor(vector),
+        ])
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err.message().contains("i must be a real numeric vector"));
     }
 
     #[test]
