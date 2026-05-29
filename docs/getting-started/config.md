@@ -1,7 +1,7 @@
 ---
 title: "Configuration Reference"
 category: "Getting Started"
-section: "1.2"
+section: "1.3"
 last_updated: "May 28, 2026"
 ---
 
@@ -340,4 +340,3 @@ require_ingestion_key = true
 level = "warn"
 debug = false
 ```
-

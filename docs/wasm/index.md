@@ -21,7 +21,7 @@ The public entrypoint is `initRunMat`. It loads the WASM module, resolves option
 import { initRunMat } from "runmat";
 
 const session = await initRunMat({
-  language: { compat: "runmat" }
+  language: { compat: "matlab" }
 });
 
 const result = await session.executeRequest({

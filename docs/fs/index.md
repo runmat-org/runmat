@@ -39,6 +39,31 @@ flowchart TD
   Provider --> Remote
 ```
 
+```
+           ┌────────────────────┐
+           │ RunMat Runtime     │
+           │ (wasm/native)      │
+           ├────────────────────┤
+           │ Virtual FS (VFS)   │  <-- filesystem abstraction
+           │  • open/read/write │
+           │  • metadata        │
+           │  • directory ops   │
+           └────────┬───────────┘
+                    │
+        ┌───────────┴─────────────────────────────────────────────────────┐
+        │                Backends                                         │
+        │                                                                 │
+   ┌────┴────┐   ┌────────────┐   ┌─────────────┐   ┌─────────────────┐   │
+   │ Native  │   │ Browser    │   │ Desktop     │   │ Remote          │   │
+   │ Std FS  │   │ Storage    │   │ Host Proxy  │   │ Gateway         │   │
+   └─────────┘   └────────────┘   └─────────────┘   └─────────────────┘   │
+   - std::fs      - IndexedDB       - Native shell    - Signed URL fetch  │
+   - mmap         - OPFS            - Native FS       - Chunked streaming │
+   - async disk   - In-memory       - Cache layer     - Cred mgmt         │
+        │                │                 │                 │            │
+        └────────────────┴─────────────────┴─────────────────┴────────────┘
+```
+
 The active provider is stored as a global `Arc<dyn FsProvider>` behind a lock. `set_provider` installs a provider for the process, while `replace_provider` and `with_provider_override` install scoped providers for tests or host-specific execution. On WASM, relative paths are resolved against a runtime-managed current directory; on native targets, current-directory behavior delegates to `std::env`.
 
 ## Provider Contract

@@ -6,6 +6,7 @@
 ## Getting Started
 
 - [Installation](/docs/runtime/getting-started/install)
+- [Command Line Interface](/docs/runtime/getting-started/cli)
 - [Configuration](/docs/runtime/getting-started/config)
 - [Language Compatability](/docs/runtime/getting-started/compatability)
 - [Hello World](/docs/runtime/getting-started/hello-world)
