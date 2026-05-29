@@ -33,3 +33,8 @@
 
 - [Turbine JIT Compiler](/docs/runtime/jit)
 - [JIT Compilation Pipeline](/docs/runtime/jit/pipeline)
+
+## Builtins
+
+- [Builtins](/docs/runtime/builtins)
+- [Authoring Builtins](/docs/runtime/builtins/authoring)
