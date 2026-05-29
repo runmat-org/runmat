@@ -7,7 +7,11 @@ last_updated: "May 28, 2026"
 
 # Replay & Export
 
-Replay and export both start from a figure. Replay preserves a live graphics scene: plot objects, axes metadata, subplot layout, legends, labels, limits, color settings, view-related state, and enough plot data to reconstruct a `Figure`. Export preserves pixels: one rendered observation of that scene at a particular size, theme, and camera state.
+Replay and export both start from a figure. 
+
+Replay preserves a live graphics scene: plot objects, axes metadata, subplot layout, legends, labels, limits, color settings, view-related state, and enough plot data to reconstruct a `Figure`. 
+
+Export preserves pixels: one rendered observation of that scene at a particular size, theme, and camera state.
 
 ## Scene Versus Image
 
@@ -26,7 +30,7 @@ flowchart TD
   Render --> RGBA
 ```
 
-A replayed figure remains editable and renderable. An exported image is a fixed artifact. This difference matters most for multi-panel and 3-D figures. Replay preserves each axes and its state. Export preserves the composed pixels from the current observation.
+A replayed figure remains editable and renderable. An exported image is a fixed artifact. Replay preserves each axes and its state. Export preserves the composed pixels from the current observation.
 
 ## Replay Payload
 

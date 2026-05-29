@@ -61,3 +61,18 @@
 
 - [WASM & TypeScript/JavaScript](/docs/runtime/wasm)
 
+## Language Server Protocol (LSP)
+
+- [Language Server Protocol (LSP)](/docs/runtime/lsp)
+- [Diagnostics & Highlighting](/docs/runtime/lsp/diagnostics-and-highlighting)
+- [Editor Features](/docs/runtime/lsp/features)
+
+## Memory Management
+
+- [Memory Management](/docs/runtime/gc)
+
+## Execution
+
+- [Execution](/docs/runtime/execution)
+- [Async Execution](/docs/runtime/execution/async)
+- [Errors & Diagnostics](/docs/runtime/execution/errors)
