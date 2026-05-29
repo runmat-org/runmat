@@ -76,3 +76,8 @@
 - [Execution](/docs/runtime/execution)
 - [Async Execution](/docs/runtime/execution/async)
 - [Errors & Diagnostics](/docs/runtime/execution/errors)
+
+## Filesystem
+
+- [Filesystem Abstraction](/docs/runtime/fs)
+- [Datasets API](/docs/runtime/fs/datasets)
