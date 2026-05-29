@@ -75,17 +75,35 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::Bool(_) => 1,
         Value::LogicalArray(arr) => arr.data.len() as u64,
         Value::Tensor(t) => (t.data.len() * 8) as u64,
-        Value::SparseTensor(s) => {
-            ((s.values.len() * std::mem::size_of::<f64>())
-                + (s.row_indices.len() * std::mem::size_of::<usize>())
-                + (s.col_ptrs.len() * std::mem::size_of::<usize>())) as u64
-        }
+        Value::SparseTensor(s) => sparse_tensor_memory_bytes(s),
         Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
         Value::CharArray(ca) => (ca.rows * ca.cols) as u64,
         _ => return None,
     })
+}
+
+/// Rough estimate of the sparse tensor storage footprint, in bytes.
+pub fn sparse_tensor_memory_bytes(sparse: &SparseTensor) -> u64 {
+    sparse_tensor_memory_bytes_from_lengths(
+        sparse.values.len(),
+        sparse.row_indices.len(),
+        sparse.col_ptrs.len(),
+    )
+}
+
+fn sparse_tensor_memory_bytes_from_lengths(
+    values_len: usize,
+    row_indices_len: usize,
+    col_ptrs_len: usize,
+) -> u64 {
+    (values_len as u64)
+        .saturating_mul(std::mem::size_of::<f64>() as u64)
+        .saturating_add(
+            (row_indices_len as u64).saturating_mul(std::mem::size_of::<usize>() as u64),
+        )
+        .saturating_add((col_ptrs_len as u64).saturating_mul(std::mem::size_of::<usize>() as u64))
 }
 
 /// Produce a numeric preview (up to `limit` elements) for scalars and dense arrays.
@@ -166,6 +184,21 @@ mod tests {
         assert_eq!(approximate_size_bytes(&Value::Tensor(u8_tensor)), Some(24));
         assert_eq!(approximate_size_bytes(&Value::Tensor(u16_tensor)), Some(24));
         assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(24));
+    }
+
+    #[test]
+    fn sparse_tensor_memory_bytes_uses_saturating_arithmetic() {
+        let sparse =
+            SparseTensor::new(3, 2, vec![0, 1, 2], vec![0, 2], vec![4.0, 5.0]).expect("sparse");
+        let expected = (2 * std::mem::size_of::<f64>())
+            + (2 * std::mem::size_of::<usize>())
+            + (3 * std::mem::size_of::<usize>());
+
+        assert_eq!(sparse_tensor_memory_bytes(&sparse), expected as u64);
+        assert_eq!(
+            sparse_tensor_memory_bytes_from_lengths(usize::MAX, usize::MAX, usize::MAX),
+            u64::MAX
+        );
     }
 
     #[test]
