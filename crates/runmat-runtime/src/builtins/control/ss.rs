@@ -291,7 +291,7 @@ async fn ss_builtin(
         .insert("Ts".to_string(), Value::Num(options.sample_time));
     object.properties.insert(
         "InputDelay".to_string(),
-        zero_tensor_value(vec![1, input_count])?,
+        zero_tensor_value(vec![input_count, 1])?,
     );
     object.properties.insert(
         "OutputDelay".to_string(),
@@ -594,7 +594,7 @@ mod tests {
         assert_tensor(property(&sys, "B"), &[1, 2], &[1.0, 2.0]);
         assert_tensor(property(&sys, "C"), &[2, 1], &[3.0, 4.0]);
         assert_tensor(property(&sys, "D"), &[2, 2], &[0.0, 0.1, 0.2, 0.3]);
-        assert_tensor(property(&sys, "InputDelay"), &[1, 2], &[0.0, 0.0]);
+        assert_tensor(property(&sys, "InputDelay"), &[2, 1], &[0.0, 0.0]);
         assert_tensor(property(&sys, "OutputDelay"), &[2, 1], &[0.0, 0.0]);
     }
 
