@@ -44,19 +44,19 @@ Key Capabilities:
 
 ## Quick Start
 
-Install the CLI:
+The quickest way to get started with RunMat is to download the [RunMat Desktop](https://runmat.com/download) application.
+
+Alternatively, you can install the CLI:
 
 ```bash
+# Linux/macOS
 curl -fsSL https://runmat.com/install.sh | sh
-```
 
-Windows PowerShell:
-
-```powershell
+# Windows PowerShell
 iwr https://runmat.com/install.ps1 | iex
 ```
 
-Create `hello.m`:
+Create a script `hello.m`:
 
 ```matlab
 disp("Hello, World!");
@@ -64,30 +64,25 @@ A = magic(3);
 disp(sum(A));
 ```
 
-Run it:
+Run the script:
 
 ```bash
 runmat hello.m
 ```
 
-Or start the REPL:
+See [Hello World](/docs/getting-started/hello-world.md) for more examples, and the [Command Line Interface](/docs/getting-started/cli.md) for the full command surface.
+
+## Other Installation Options
 
 ```bash
-runmat
-```
-
-Other install paths:
-
-```bash
+# Homebrew (macOS/Linux)
 brew install runmat-org/tap/runmat
+
+# Cargo (Rust)
 cargo install runmat --features gui
-```
 
-Build from source:
-
-```bash
-git clone https://github.com/runmat-org/runmat.git
-cd runmat
+# Build from source
+git clone https://github.com/runmat-org/runmat.git && cd runmat
 cargo build -p runmat --release --features gui
 ```
 
@@ -98,6 +93,7 @@ The CLI runs local scripts, named project entrypoints, benchmarks, snapshots, an
 ```bash
 runmat analysis.m
 runmat run analysis.m
+runmat repl
 runmat info
 runmat accel-info
 ```
