@@ -1,14 +1,9 @@
 # RunMat CLI
 
-RunMat ships with a task-oriented command-line interface for running scripts,
-working interactively, and managing remote project-backed storage. Use this
-page as a workflow guide first, then fall back
-to `runmat --help` and `runmat <command> --help` for the full generated
-reference.
+RunMat ships with a task-oriented command-line interface for running scripts, working interactively, and managing remote project-backed storage.
 
-**Try RunMat without installing:** the [browser sandbox](https://runmat.com/sandbox)
-runs in your browser with no CLI. For installation and broader product setup,
-see [Getting Started](/docs/getting-started).
+**Use RunMat without installing:** the [browser sandbox](https://runmat.com/sandbox)
+runs in your browser with no CLI.
 
 ## Installation
 
@@ -20,40 +15,26 @@ curl -fsSL https://runmat.com/install.sh | sh
 
 ## Windows PowerShell
 iwr https://runmat.com/install.ps1 | iex
-
-# Alternative installation methods
-
-## Homebrew (macOS/Linux)
-brew install runmat-org/tap/runmat
-
-## Cargo
-cargo install runmat --features gui
-
-## Build from source
-git clone https://github.com/runmat-org/runmat.git
-cd runmat && cargo build --release --features gui
 ```
 
-## Quick start
+For more details, see the [Installation](/docs/runtime/getting-started/install) documentation.
+
+## Quick Start
 
 ```sh
-# Start the REPL
+# Run the REPL
 runmat
 
 # Run a local script
 runmat model.m
 ```
 
-## Usage
+## CLI Usage
 
 ```text
 runmat [GLOBAL OPTIONS] [COMMAND] [ARGS]
 runmat [GLOBAL OPTIONS] <script.m>
 ```
-
-RunMat supports both:
-- direct script execution: `runmat my_script.m`
-- explicit subcommands: `runmat repl`, `runmat benchmark ...`, `runmat project fs ls ...`
 
 ## Core workflows
 
@@ -66,7 +47,7 @@ runmat run <file.m> [-- arg1 arg2 ...]
 runmat <file.m>
 ```
 
-Useful variants:
+Advanced usage:
 
 ```sh
 # Emit bytecode to stdout
@@ -84,7 +65,7 @@ runmat model.m \
 
 When `--artifacts-dir` or `--artifacts-manifest` is set, RunMat writes a JSON
 manifest describing execution metadata, stream sizes, touched figure handles,
-and exported figure paths.
+and exported figure paths, along with figure images if `--capture-figures` is set.
 
 ### Interactive REPL
 
@@ -93,16 +74,6 @@ runmat
 runmat repl
 runmat repl --verbose
 ```
-
-Built-in REPL commands:
-- `.info`: detailed system information
-- `.stats`: execution statistics
-- `.gc`: garbage collector summary
-- `.gc-info`: garbage collector summary with header
-- `.gc-collect`: force garbage collection
-- `.reset-stats`: reset execution statistics
-- `help`: show REPL help
-- `exit`, `quit`: leave the REPL
 
 ### Diagnostics
 
@@ -119,7 +90,7 @@ runmat version --detailed
 
 ## Remote and project workflows
 
-Remote commands are project-scoped. A typical flow is:
+RunMat supports running scripts on remote filesystems. This is useful when you want to run a script on a different machine, such as CI/CD pipelines and large GPU remote servers, or if you need elastic scale for large datasets.
 
 1. authenticate with `runmat login`
 2. inspect orgs and projects

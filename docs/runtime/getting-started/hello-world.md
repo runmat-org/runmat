@@ -1,0 +1,79 @@
+---
+title: "Hello World"
+category: "Getting Started"
+section: "1.4"
+last_updated: "May 28, 2026"
+---
+
+# RunMat Hello World
+
+The RunMat Hello World example is a simple program that prints "Hello, World!" to the console.
+
+## RunMat Hello World in RunMat
+
+Save the file as `hello.m` and add the following content:
+
+```matlab
+disp("Hello, World!");
+```
+
+Run the example with:
+
+```bash
+runmat hello.m
+```
+
+This should output:
+
+```
+Hello, World!
+```
+
+You have now successfully run your first RunMat program!
+
+## Running a Project
+
+You can create multi-file projects by adding a `runmat.toml` file to the project root.
+
+```toml
+[package]
+name = "my-project"
+
+[entrypoints.analysis]
+path = "hello.m"
+```
+
+You can then run the project with:
+
+```bash
+runmat run analysis
+```
+
+This should output:
+
+```
+Hello, World!
+```
+
+## Remote Projects
+
+You can run RunMat projects hosted on a remote filesystem without copying the files to your local machine. This is useful when you want to run a project on a different machine, such as CI/CD pipelines, need to run scripts on a large GPU remote server, or if you need elastic scale for large datasets. 
+
+RunMat server projects can scale to petabytes of data, with the virtual filesystem materializing the subset of data needed for the current script execution into the local filesystem temporarily as they are accessed, with an LRU cache to avoid unnecessary re-downloads.
+
+To run a remote project, you need to authenticate with the remote server and select the project.
+
+```bash
+runmat login
+runmat project select <project-id>
+```
+
+You can then run a script within the project with:
+
+```bash
+runmat remote run /scripts/analysis.m
+```
+
+This will run the `analysis.m` script on the your local machine, with a virtual filesystem backed by the remote server mounted in the runtime's filesystem abstraction.
+
+For more details, see the [filesystem](/docs/runtime/filesystem) documentation.
