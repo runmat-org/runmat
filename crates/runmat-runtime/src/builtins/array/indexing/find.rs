@@ -539,7 +539,12 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
             Ok((DataStorage::Real(tensor), true))
         }
         Value::Tensor(tensor) => Ok((DataStorage::Real(tensor), false)),
-        Value::SparseTensor(sparse) => Ok((DataStorage::Real(sparse.to_dense()), false)),
+        Value::SparseTensor(sparse) => Ok((
+            DataStorage::Real(sparse.to_dense().map_err(|e| {
+                find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+            })?),
+            false,
+        )),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
                 .map_err(|message| find_error_with_message(message, &FIND_ERROR_INTERNAL))?;

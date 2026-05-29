@@ -579,15 +579,22 @@ impl SparseTensor {
         vec![self.rows, self.cols]
     }
 
-    pub fn to_dense(&self) -> Tensor {
-        let mut data = vec![0.0; self.rows.saturating_mul(self.cols)];
+    pub fn to_dense(&self) -> Result<Tensor, String> {
+        let len = self
+            .rows
+            .checked_mul(self.cols)
+            .ok_or_else(|| "SparseTensor dense dimensions overflow usize".to_string())?;
+        let mut data = Vec::new();
+        data.try_reserve_exact(len)
+            .map_err(|err| format!("SparseTensor dense allocation failed: {err}"))?;
+        data.resize(len, 0.0);
         for col in 0..self.cols {
             for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
                 let row = self.row_indices[idx];
                 data[row + col * self.rows] = self.values[idx];
             }
         }
-        Tensor::new(data, self.shape()).expect("valid sparse tensor should densify")
+        Tensor::new(data, self.shape())
     }
 
     pub fn get(&self, row: usize, col: usize) -> Option<f64> {
@@ -600,6 +607,25 @@ impl SparseTensor {
             .binary_search(&row)
             .ok()
             .map(|offset| self.values[start + offset])
+    }
+}
+
+#[cfg(test)]
+mod sparse_tensor_tests {
+    use super::*;
+
+    #[test]
+    fn to_dense_rejects_overflowing_dimensions() {
+        let sparse = SparseTensor {
+            rows: usize::MAX,
+            cols: 2,
+            col_ptrs: vec![0, 0, 0],
+            row_indices: Vec::new(),
+            values: Vec::new(),
+        };
+
+        let err = sparse.to_dense().unwrap_err();
+        assert!(err.contains("overflow"));
     }
 }
 

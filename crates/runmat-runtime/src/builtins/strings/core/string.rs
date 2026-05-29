@@ -545,7 +545,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             shape: t.shape,
         }),
         Value::SparseTensor(s) => {
-            let dense = s.to_dense();
+            let dense = s.to_dense().map_err(string_flow)?;
             Ok(ArgumentData {
                 values: dense.data.into_iter().map(Value::Num).collect(),
                 shape: dense.shape,
@@ -682,7 +682,7 @@ async fn convert_to_string_array(
         Value::StringArray(sa) => Ok(sa),
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
-        Value::SparseTensor(sparse) => tensor_to_string_array(sparse.to_dense()),
+        Value::SparseTensor(sparse) => tensor_to_string_array(sparse.to_dense().map_err(string_flow)?),
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
         Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,

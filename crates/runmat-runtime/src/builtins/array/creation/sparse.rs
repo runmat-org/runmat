@@ -458,7 +458,10 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
             if !is_vector_shape(&[sparse.rows, sparse.cols]) {
                 return Err(numeric_vector_error(value, name));
             }
-            Ok(sparse.to_dense().data)
+            sparse
+                .to_dense()
+                .map(|dense| dense.data)
+                .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
         }
         Value::LogicalArray(logical) => {
             if !is_vector_shape(&logical.shape) {

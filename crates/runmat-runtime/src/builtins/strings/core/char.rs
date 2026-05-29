@@ -232,7 +232,10 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
             Ok(vec![vec![number_to_char(code)?]])
         }
         Value::Tensor(t) => tensor_rows(t),
-        Value::SparseTensor(s) => tensor_rows(&s.to_dense()),
+        Value::SparseTensor(s) => {
+            let dense = s.to_dense().map_err(char_flow)?;
+            tensor_rows(&dense)
+        }
         Value::LogicalArray(la) => logical_rows(la),
         Value::Cell(ca) => cell_rows(ca),
         Value::GpuTensor(_) => Err(char_error(&CHAR_ERROR_INVALID_INPUT)),
