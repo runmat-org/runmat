@@ -81,7 +81,7 @@ The execution path resets and drains per-thread runtime buffers around every req
 
 | Page | Purpose |
 | --- | --- |
-| [Async Execution](/docs/runtime/execution/async) | Where execution awaits host input, builtin futures, GPU/provider work, filesystem/network work, and async semantic calls. |
+| [Async Execution](/docs/runtime/execution/async) | Where execution awaits host input, builtin futures, GPU/provider work, filesystem/network work, async semantic calls, and current RunMat async extensions. |
 | [Errors & Diagnostics](/docs/runtime/execution/errors) | How syntax, semantic, compile, runtime, warning, `MException`, catch/rethrow, and WASM error payloads are represented. |
 
 For request and workspace details, see [Session Engine](/docs/runtime/session). For instruction-level behavior, see [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter). For JIT behavior, see [JIT Compiler](/docs/runtime/jit).

@@ -65,6 +65,7 @@ The interpreter is an asynchronous loop that processes instructions using a `dis
 
 - Modular Handlers: Dispatch is divided into specialized sub-modules for arithmetic, array construction, control flow, and exception handling
 - Try/Catch Stack: The VM maintains a `try_stack` to manage MATLAB-compatible `try...catch` blocks and exception redirection
+- Runtime Values: The stack and local slots carry `runmat_builtins::Value`; see [Runtime Values & Type Model](/docs/runtime/values) for the value families and host metadata model.
 
 For details on the execution loop and instruction semantics, see [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter).
 

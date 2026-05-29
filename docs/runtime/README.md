@@ -1,5 +1,8 @@
 # RunMat Runtime Documentation
 
+- [Glossary](/docs/runtime/glossary)
+- [Runtime Values & Type Model](/docs/runtime/values)
+
 ## Getting Started
 
 - [Installation](/docs/runtime/getting-started/install)
@@ -81,3 +84,12 @@
 
 - [Filesystem Abstraction](/docs/runtime/fs)
 - [Datasets API](/docs/runtime/fs/datasets)
+
+## Development
+
+- [Development](/docs/runtime/development)
+- [Build System](/docs/runtime/development/build-system)
+- [Supported Architectures](/docs/runtime/development/supported-architectures)
+- [Testing Strategy](/docs/runtime/development/testing)
+- [Benchmarking](/docs/runtime/development/benchmarking)
+- [Telemetry](/docs/runtime/development/telemetry)

@@ -68,6 +68,8 @@ Builtins receive and return `runmat_builtins::Value`. Keep MATLAB compatibility 
 - Gather GPU-resident values only when the builtin has no device implementation or must inspect host-only metadata.
 - Keep filesystem, networking, and interactive builtins compatible with async suspend/resume where applicable.
 
+For the runtime value families, GC ownership rules, GPU residency, and host metadata helpers, see [Runtime Values & Type Model](/docs/runtime/values).
+
 ## GPU and Fusion Metadata
 
 Acceleration metadata should describe real runtime behavior, not a future intent. If a builtin can run on device, document which provider hook or fusion pattern owns that path. If a builtin is host-only but accepts GPU inputs, it should gather explicitly and preserve the expected value semantics.

@@ -412,16 +412,20 @@ Collapse opportunity:
 
 Current state:
 
-- MIR contains `Future`, `Spawn`, and `Await` shapes, but bytecode lowering is incomplete.
-- These are RunMat extensions and should not be rushed as VM op patches.
+- Parser/HIR/MIR/bytecode contain active `async function`, `await`, `spawn`, `Future`, `Spawn`, and `Await` shapes.
+- Async calls currently use lazy future descriptors. The async function body does not run until the descriptor is awaited or spawned.
+- `spawn` currently resolves the future immediately at the spawn point and wraps the completed value in a single-use task handle. It is not true background parallel execution yet.
+- These remain RunMat extensions and must stay gated out of MATLAB-strict mode.
 
 Design needed before implementation:
 
 - Runtime `Future`/task value representation.
-- Suspension/resume ABI for `Await` terminators.
+- Actual task registry/scheduler for background execution, including provider-handle concurrency, live-root retention, task drop/cancellation, and error propagation.
+- Suspension/resume ABI for `Await` terminators if the host should receive resumable execution tokens.
 - Workspace/export behavior for top-level await versus function-local await.
 - Cancellation, diagnostics, and call-stack metadata across suspension.
 - Compatibility policy: MATLAB-strict should reject unsupported async syntax before MIR/VM.
+- Native I/O async cleanup: local filesystem, native remote filesystem, and native HTTP paths expose async-shaped APIs but can still block internally. Move blocking native work behind a runtime-aware blocking pool or true async clients while preserving remote filesystem chunk parallelism for large reads.
 
 Accepted resolution (A/A/A/A/A):
 

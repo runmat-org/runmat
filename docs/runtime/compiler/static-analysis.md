@@ -9,6 +9,8 @@ last_updated: "May 28, 2026"
 
 Mid-Level IR (MIR) Analysis is the primary stage for dataflow reasoning and validation in the RunMat compilation pipeline. This layer bridges the gap between the structural representation of the High-Level IR (HIR) and the execution-ready bytecode. It performs type/shape inference, definite assignment checking, and spawn-safety validation to ensure program correctness before runtime.
 
+These facts approximate runtime values; they are not the runtime value representation itself. For the concrete `Value` type passed through the VM, builtins, session, GC, GPU, and host adapters, see [Runtime Values & Type Model](/docs/runtime/values).
+
 ## MIR Analysis Architecture
 
 The analysis system operates on the `MirAssembly` structure, iterating through `MirBody` objects. The core of the analysis is a fixed-point dataflow engine that propagates "facts" across the Control Flow Graph (CFG).

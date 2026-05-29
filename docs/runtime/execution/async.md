@@ -7,78 +7,94 @@ last_updated: "May 28, 2026"
 
 # Async Execution
 
-RunMat uses async execution to keep host interaction, provider work, and runtime builtins composable.
+RunMat's execution entrypoints are async so a host can await a complete request while the VM and runtime await host interaction, builtin futures, GPU/provider work, and selected host/provider callbacks.
 
-## Async Boundaries
+The current session path still returns one `ExecutionOutcome` for each request. `ExecutionOutcome::suspension` is reserved in the ABI, but normal execution awaits internally and returns `None`.
+
+## Request Flow
 
 ```mermaid
 flowchart TD
-  Host["host await<br/>execute_request"]
+  Host["host awaits<br/>execute_request"]
   Source["source input<br/>path or text"]
-  Compile["compile_input"]
-  VM["async interpreter"]
-  Call["call_builtin_async_with_outputs"]
-  Builtin["async runtime builtin"]
-  Input["host interaction<br/>input / keypress"]
-  GPU["GPU provider<br/>upload, download, gather"]
-  IO["filesystem, network, plotting export"]
-  Outcome["ExecutionOutcome"]
+  Compile["compile_input<br/>parse / HIR / MIR / analysis / bytecode"]
+  VM["async VM interpreter"]
+  Runtime["runtime services"]
+  Outcome["ExecutionOutcome<br/>suspension = None"]
 
-  Host --> Source --> Compile --> VM --> Call --> Builtin
-  Builtin --> Input
-  Builtin --> GPU
-  Builtin --> IO
-  Input --> VM
-  GPU --> VM
-  IO --> VM
+  Host --> Source
+  Source --> Compile
+  Compile --> VM
+  VM --> Runtime
+  Runtime --> VM
   VM --> Outcome
 ```
 
-The host awaits `RunMatSession::execute_request`. Inside that call, RunMat resolves the source, compiles synchronously with respect to the current request, and then awaits the interpreter or runtime operations that may suspend on host or provider work.
+`RunMatSession::execute_request` is async at the host boundary. It resolves the request source, compiles the request synchronously with respect to that execution, and then awaits the interpreter and any runtime operations reached by the bytecode.
 
-## Builtin Futures
+A session allows one active execution at a time. The active execution guard prevents overlapping requests from mutating the same workspace concurrently.
 
-Runtime builtins are dispatched through `call_builtin_async_with_outputs`. Builtins can be plain synchronous Rust functions or `async fn` implementations registered through the runtime builtin macro system. The dispatcher keeps the public call surface uniform: VM call instructions await the runtime dispatcher, and the dispatcher awaits the selected implementation.
+## Runtime Await Points
 
-MIR records async behavior with `AsyncBehaviorFact`:
-
-| Fact | Meaning |
+| Boundary | What can be awaited |
 | --- | --- |
-| `NeverSuspends` | The call is known not to require async runtime behavior. |
-| `MaySuspend` | The call may await host, provider, or other runtime work. |
-| `RequiresAsyncRuntime` | The call must run in an async context. |
+| Builtins | Runtime builtins dispatched through `call_builtin_async_with_outputs`, including async Rust builtin implementations. |
+| Host input | `request_line_async` and `wait_for_key_async`, with prompts recorded as `StdinEvent` entries. |
+| GPU/provider work | Provider gathers, downloads, and builtin dispatch paths that need to materialize GPU-resident values. |
+| Filesystem, remote I/O, and HTTP | Async API surfaces for source/data I/O and network-backed work. Some native local, remote, and HTTP paths still use blocking internals; remote filesystem reads parallelize chunks for throughput. |
+| Semantic callbacks | Runtime paths such as `feval`, closures, object dispatch, and builtin callbacks can call bytecode-defined functions through async semantic-function hooks. |
 
-MIR also has explicit async constructs: `MirRvalue::Future` represents a future-producing call and `MirTerminatorKind::Await` records the await boundary. The VM bytecode carries async metadata for spawn and await sites, and the interpreter logs that metadata when debug tracing is enabled.
+Runtime builtins can be plain synchronous Rust functions or `async fn` implementations registered through the builtin macro system. The dispatcher keeps the call surface uniform: VM call instructions await the runtime dispatcher, and the dispatcher awaits the selected implementation when needed.
+
+If a host-only builtin receives GPU values and the first implementation fails on GPU input, the dispatcher can gather arguments and retry a compatible implementation. `gather_if_needed_async` recursively materializes tensors, logical arrays, cells, structs, objects, closures, and output lists.
+
+## RunMat Async Extensions
+
+RunMat accepts `async function` and `await(...)` as RunMat extensions to the MATLAB language. MATLAB-strict compatibility mode rejects these forms before execution (see [Configuration Reference](/docs/runtime/getting-started/config) for more details on setting the compatibility mode).
+
+Calling an async function returns a future. The function body does not run when the future is created; it runs when the future is awaited.
+
+`await(value)` is allowed inside async functions and at top level when the host policy enables top-level await. It resolves a future or spawn handle, and passes through ordinary values.
+
+```matlab
+async function y = ask()
+  input("ready: ");
+  y = 1;
+end
+
+f = ask();    % no prompt yet
+y = await(f); % prompt happens here
+```
+
+## Spawn Handles
+
+`spawn(value)` is also a RunMat extension. It accepts a future and returns a single-use spawn handle, but it currently resolves the future before returning the handle.
+
+```matlab
+async function y = ask()
+  input("ready: ");
+  y = 1;
+end
+
+f = ask();      % no prompt yet
+t = spawn(f);   % prompt happens here in the current runtime
+y = await(t);   % consumes the spawn handle
+```
+
+Spawn handles are retired when they are awaited, replaced, dropped from the stack, or removed from scope. Awaiting the same spawn handle twice is an error.
 
 ## Host Interaction
 
-The runtime interaction subsystem exposes two awaited operations:
+Each execution installs the session's async interaction handler as a scoped runtime guard. If the host provides a handler, the runtime awaits it and records the prompt, input kind, echo flag, returned value, or error. If no handler exists, native execution falls back to terminal helpers. WASM execution has no default stdin, so browser or JavaScript hosts provide interaction through the WASM API.
 
-| Operation | Runtime function | Host value |
-| --- | --- | --- |
-| Line input | `request_line_async(prompt, echo)` | `InteractionResponse::Line` |
-| Keypress-style input | `wait_for_key_async(prompt)` | `InteractionResponse::KeyPress` |
+`input()` expression parsing uses a separate eval hook. When expression mode is needed, the hook compiles the typed expression through the normal parser, HIR, MIR, and bytecode path. Native hosts run that nested interpretation on a dedicated thread with a larger stack and return the result through a one-shot channel. WASM awaits the nested interpreter directly.
 
-Each execution installs the session's async input handler as a scoped runtime guard. If a host handler exists, the runtime awaits it and records a `StdinEvent` containing the prompt, kind, echo flag, value, or error. If no handler exists, native execution falls back to default terminal helpers. WASM execution has no default stdin, so hosts must provide interaction through the WASM-facing API.
+## Current Limits
 
-`input()` expression parsing uses a separate eval hook. When numeric expression mode is needed, the hook compiles the typed expression through the normal parser, HIR, MIR, and bytecode path. Native hosts run that nested interpretation on a dedicated thread with a larger stack and return the result through a one-shot channel. WASM awaits the nested interpreter directly.
+`ExecutionOutcome::suspension` is not active for normal execution. Await points complete inside `execute_request`; hosts do not receive a resumable execution token today.
 
-The older suspend/resume interaction model has been removed. `ExecutionOutcome::suspension` remains in the ABI for future resumable operations, but the current session implementation awaits host interaction internally and returns `None`.
+`spawn` is not a background scheduler yet; it resolves work before returning the spawn handle.
 
-## Provider And I/O Work
+Native local filesystem, native remote filesystem, and native HTTP code expose async-shaped APIs but can block internally. The remote filesystem path is still designed for throughput: large reads can be split across worker threads and issued in parallel chunks.
 
-GPU values can require async provider work during builtin execution or result materialization. `gather_if_needed_async` recursively downloads GPU-resident tensors and materializes host values for tensors, logical arrays, cells, structs, objects, closures, and output lists. If a host-only builtin receives GPU values and the first implementation fails on GPU input, the dispatcher can gather arguments and retry a compatible implementation.
-
-Other awaited runtime work includes plotting import/export, filesystem-backed source or data operations, network-backed providers, and host object or method dispatch that calls back into semantic functions.
-
-## Semantic Function Calls
-
-The interpreter installs thread-local semantic function invoker and resolver hooks before entering the instruction loop. Runtime paths such as `feval`, closures, object dispatch, and builtin callbacks can use those hooks to call bytecode-defined functions while the interpreter is active.
-
-These hooks return futures, so a runtime builtin can call back into user MATLAB code and await the result without leaving the session execution model.
-
-## Cancellation
-
-Cancellation is cooperative. `RunMatSession` owns an `Arc<AtomicBool>` interrupt flag. Each execution resets the flag and installs it into the runtime interrupt hook with `replace_interrupt`. `cancel_execution` flips the flag, and the VM/runtime observe it at polling boundaries through `is_cancelled`.
-
-Long native calls, provider kernels, filesystem work, or JIT code can only stop once control returns to a polling boundary. Hosts should treat cancellation as a request to stop promptly, not as preemptive thread termination.
+Cancellation is cooperative. `RunMatSession` owns an interrupt flag, resets it for each execution, and installs it into the runtime interrupt hook. Long native calls, provider kernels, filesystem work, or JIT code stop only after control reaches a polling boundary.

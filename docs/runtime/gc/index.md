@@ -9,6 +9,8 @@ last_updated: "May 28, 2026"
 
 `runmat-gc` provides garbage-collected storage for runtime values that need stable identity or shared ownership across the VM and runtime. It is used for cell contents, handle-object targets, listener callbacks, selected struct/object payloads, and JIT/runtime bridge values.
 
+For the broader runtime value model, see [Runtime Values & Type Model](/docs/runtime/values). This page focuses on the subset of values that need GC-managed identity or reachability.
+
 The collector is non-moving. A `GcPtr<Value>` is an address-stable pointer to a `Value` allocated by the GC. Collection marks reachable values from registered roots, drops unreachable values in place, and keeps the outer pointer identity stable for surviving objects.
 
 ## Runtime Shape
