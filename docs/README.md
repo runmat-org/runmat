@@ -1,96 +1,97 @@
 # RunMat Runtime Documentation
 
-- [Glossary](/docs/runtime/glossary)
-- [Runtime Values & Type Model](/docs/runtime/values)
+- [Changelog](./changelog.md)
+- [Values & Type Model](./values.md)
+- [Glossary](./glossary.md)
 
 ## Getting Started
 
-- [Installation](/docs/runtime/getting-started/install)
-- [Command Line Interface](/docs/runtime/getting-started/cli)
-- [Configuration](/docs/runtime/getting-started/config)
-- [Language Compatability](/docs/runtime/getting-started/compatability)
-- [Hello World](/docs/runtime/getting-started/hello-world)
+- [Installation](./getting-started/install.md)
+- [Command Line Interface](./getting-started/cli.md)
+- [Configuration](./getting-started/config)
+- [Language Compatability](./getting-started/compatability.md)
+- [Hello World](./getting-started/hello-world.md)
 
 ## Compilation Pipeline
 
-- [Compilation Pipeline](/docs/runtime/compiler)
-- [Lexer & Parser](/docs/runtime/compiler/lexer-and-parser)
-- [High-Level IR (HIR)](/docs/runtime/compiler/hir)
-- [Mid-Level IR (MIR)](/docs/runtime/compiler/mir)
-- [MIR & Static Analysis](/docs/runtime/compiler/static-analysis)
+- [Compilation Pipeline](./compiler)
+- [Lexer & Parser](./compiler/lexer-and-parser.md)
+- [High-Level IR (HIR)](./compiler/hir.md)
+- [Mid-Level IR (MIR)](./compiler/mir.md)
+- [MIR & Static Analysis](./compiler/static-analysis.md)
 
 ## Virtual Machine (VM)
 
-- [Virtual Machine (VM)](/docs/runtime/vm)
-- [Bytecode Compilation (MIR → Bytecode)](/docs/runtime/vm/bytecode)
-- [Interpreter Dispatch & Execution Loop](/docs/runtime/vm/interpreter)
-- [Indexing Subsystem](/docs/runtime/vm/indexing)
-- [Callable Resolution & Function Dispatch](/docs/runtime/vm/dispatch)
+- [Virtual Machine (VM)](./vm)
+- [Bytecode Compilation (MIR → Bytecode)](./vm/bytecode)
+- [Interpreter Dispatch & Execution Loop](./vm/interpreter.md)
+- [Indexing Subsystem](./vm/indexing.md)
+- [Callable Resolution & Function Dispatch](./vm/dispatch.md)
 
 ## GPU Acceleration & Fusion Engine
 
-- [GPU Acceleration & Fusion Engine](/docs/runtime/gpu)
-- [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion)
-- [wgpu Backend & Accelerate Provider](/docs/runtime/gpu/wgpu)
+- [GPU Acceleration & Fusion Engine](./gpu)
+- [Fusion Engine & Residency Management](./gpu/fusion.md)
+- [wgpu Backend & Accelerate Provider](./gpu/wgpu.md)
 
 ## JIT Compiler
 
-- [JIT Compiler](/docs/runtime/jit)
-- [JIT Pipeline](/docs/runtime/jit/pipeline)
+- [JIT Compiler](./jit)
+- [JIT Pipeline](./jit/pipeline.md)
 
 ## Builtins
 
-- [Builtins](/docs/runtime/builtins)
-- [Authoring Builtins](/docs/runtime/builtins/authoring)
+- [Builtins](./builtins)
+- [Authoring Builtins](./builtins/authoring.md)
 
 ## Session Engine
 
-- [Session Engine](/docs/runtime/session)
-- [Execution Requests](/docs/runtime/session/execution-requests)
-- [Workspace State](/docs/runtime/session/workspace)
-- [Variable Inspection](/docs/runtime/session/variable-inspection)
-- [Snapshots & Replay](/docs/runtime/session/snapshots)
-- [Interaction & Streams](/docs/runtime/session/interaction-and-streams)
-- [Host Integration](/docs/runtime/session/host-integration)
+- [Session Engine](./session)
+- [Execution Requests](./session/execution-requests.md)
+- [Workspace State](./session/workspace.md)
+- [Variable Inspection](./session/variable-inspection.md)
+- [Snapshots & Replay](./session/snapshots.md)
+- [Interaction & Streams](./session/interaction-and-streams.md)
+- [Host Integration](./session/host-integration.md)
 
 ## Plotting System
 
-- [Plotting System](/docs/runtime/plotting)
-- [Figure State & Handles](/docs/runtime/plotting/state-and-handles)
-- [Rendering Pipeline](/docs/runtime/plotting/rendering)
-- [Replay & Export](/docs/runtime/plotting/replay-and-export)
-- [Host Integration](/docs/runtime/plotting/host-integration)
+- [Plotting System](./plotting)
+- [Figure State & Handles](./plotting/state-and-handles.md)
+- [Rendering Pipeline](./plotting/rendering.md)
+- [Replay & Export](./plotting/replay-and-export.md)
+- [Host Integration](./plotting/host-integration.md)
 
 ## WebAssembly & TypeScript
 
-- [WASM & TypeScript/JavaScript](/docs/runtime/wasm)
+- [WASM & TypeScript/JavaScript](./wasm)
 
 ## Language Server Protocol (LSP)
 
-- [Language Server Protocol (LSP)](/docs/runtime/lsp)
-- [Diagnostics & Highlighting](/docs/runtime/lsp/diagnostics-and-highlighting)
-- [Editor Features](/docs/runtime/lsp/features)
+- [Language Server Protocol (LSP)](./lsp)
+- [Diagnostics & Highlighting](./lsp/diagnostics-and-highlighting.md)
+- [Editor Features](./lsp/features.md)
 
 ## Memory Management
 
-- [Memory Management](/docs/runtime/gc)
+- [Memory Management](./gc)
 
 ## Execution
 
-- [Execution](/docs/runtime/execution)
-- [Async Execution](/docs/runtime/execution/async)
-- [Errors & Diagnostics](/docs/runtime/execution/errors)
+- [Execution](./execution)
+- [Async Execution](./execution/async.md)
+- [Errors & Diagnostics](./execution/errors.md)
 
 ## Filesystem
 
-- [Filesystem Abstraction](/docs/runtime/fs)
-- [Datasets API](/docs/runtime/fs/datasets)
+- [Filesystem Abstraction](./fs)
+- [Datasets API](./fs/datasets.md)
 
 ## Development
 
-- [Development](/docs/runtime/development)
-- [Build System](/docs/runtime/development/build-system)
-- [Supported Architectures](/docs/runtime/development/supported-architectures)
-- [Testing Strategy](/docs/runtime/development/testing)
-- [Benchmarking](/docs/runtime/development/benchmarking)
-- [Telemetry](/docs/runtime/development/telemetry)
+- [Development](./development)
+- [Build System](./development/build-system.md)
+- [Supported Architectures](./development/supported-architectures.md)
+- [Testing Strategy](./development/testing.md)
+- [Benchmarking](./development/benchmarking.md)
+- [Telemetry](./development/telemetry.md)
