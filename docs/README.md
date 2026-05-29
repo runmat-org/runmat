@@ -1,8 +1,8 @@
 # RunMat Runtime Documentation
 
-- [Changelog](./changelog.md)
-- [Values & Type Model](./values.md)
-- [Glossary](./glossary.md)
+- [Changelog](./CHANGELOG.md)
+- [Values & Type Model](./VALUES.md)
+- [Glossary](./GLOSSARY.md)
 
 ## Getting Started
 
