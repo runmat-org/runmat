@@ -29,12 +29,35 @@
 - [Fusion Engine & Residency Management](/docs/runtime/gpu/fusion)
 - [wgpu Backend & Accelerate Provider](/docs/runtime/gpu/wgpu)
 
-## Turbine JIT Compiler
+## JIT Compiler
 
-- [Turbine JIT Compiler](/docs/runtime/jit)
-- [JIT Compilation Pipeline](/docs/runtime/jit/pipeline)
+- [JIT Compiler](/docs/runtime/jit)
+- [JIT Pipeline](/docs/runtime/jit/pipeline)
 
 ## Builtins
 
 - [Builtins](/docs/runtime/builtins)
 - [Authoring Builtins](/docs/runtime/builtins/authoring)
+
+## Session Engine
+
+- [Session Engine](/docs/runtime/session)
+- [Execution Requests](/docs/runtime/session/execution-requests)
+- [Workspace State](/docs/runtime/session/workspace)
+- [Variable Inspection](/docs/runtime/session/variable-inspection)
+- [Snapshots & Replay](/docs/runtime/session/snapshots)
+- [Interaction & Streams](/docs/runtime/session/interaction-and-streams)
+- [Host Integration](/docs/runtime/session/host-integration)
+
+## Plotting System
+
+- [Plotting System](/docs/runtime/plotting)
+- [Figure State & Handles](/docs/runtime/plotting/state-and-handles)
+- [Rendering Pipeline](/docs/runtime/plotting/rendering)
+- [Replay & Export](/docs/runtime/plotting/replay-and-export)
+- [Host Integration](/docs/runtime/plotting/host-integration)
+
+## WebAssembly & TypeScript
+
+- [WASM & TypeScript/JavaScript](/docs/runtime/wasm)
+

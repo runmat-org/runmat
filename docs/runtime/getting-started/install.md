@@ -7,7 +7,9 @@ last_updated: "May 28, 2026"
 
 # Installation
 
-The quickest to get started with RunMat is to use RunMat Desktop. [Download RunMat Desktop](/download/latest). If you prefer to use the command line, you can install RunMat via package managers or build from source.
+The quickest to get started with RunMat is to use RunMat Desktop: [Download RunMat Desktop](/download/latest)
+
+If you prefer to use the command line, you can install RunMat via package managers or build from source.
 
 ## Command Line Installation
 
