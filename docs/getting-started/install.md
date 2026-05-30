@@ -27,11 +27,10 @@ RunMat can be installed via pre-compiled binaries, package managers, or built fr
 
 ### Build from Source
 
-Building from source requires the Rust toolchain. The `gui` feature enables the `wgpu`-based plotting and windowing system.
+- Clone repository: `git clone https://github.com/runmat-org/runmat.git`
+- Build with GUI features: `cargo build --release --features gui`
 
-```bash
-git clone https://github.com/runmat-org/runmat.gitcd runmat && cargo build --release --features gui
-```
+Note: Building from source requires the Rust toolchain. The `gui` feature enables the `wgpu`-based plotting and windowing system.
 
 # Next Steps
 

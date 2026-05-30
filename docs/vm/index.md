@@ -9,44 +9,6 @@ last_updated: "May 28, 2026"
 
 The `runmat-vm` crate provides the core execution engine for RunMat. It defines the custom bytecode format, the compiler that lowers Mid-Level IR (MIR) into that format, and the asynchronous interpreter that executes it. The VM is designed as the middle tier of a tiered execution model, sitting between high-level semantic analysis and low-level JIT or GPU acceleration.
 
-### System Architecture & Code Entities
-
-The following diagram bridges the conceptual execution flow to the specific code entities within the `runmat-vm` crate.
-
-Execution Lifecycle: Source to Runtime
-
-```mermaid
-flowchart TD
-  %% Subgraph: Execution Space (runmat-vm::interpreter)
-  %% Subgraph: Entity Space (runmat-vm::bytecode)
-  %% Subgraph: Compilation Space (runmat-vm::compiler)
-  %% Subgraph: Code Entities
-  C_Path["crates/runmat-vm/src/compiler/core.rs"]
-  I_Path["crates/runmat-vm/src/interpreter/runner.rs"]
-  B_Path["crates/runmat-vm/src/bytecode/program.rs"]
-  A["MirAssembly"]
-  B["Compiler::new()"]
-  C["Compiler::compile()"]
-  D["Instr (Bytecode)"]
-  E["FunctionRegistry"]
-  F["Bytecode (Container)"]
-  G["run_interpreter_inner()"]
-  H["ExecutionContext"]
-  I["dispatch_instruction()"]
-  J["Sub-module Handlers (Arithmetic, Indexing, etc.)"]
-  A --> B
-  B --> C
-  C --> D
-  D --> E
-  E --> F
-  F --> G
-  G --> H
-  H --> I
-  I --> J
-```
-
----
-
 ## Bytecode Compilation (MIR → Bytecode)
 
 The `Compiler` struct is responsible for the final lowering of `MirAssembly` into a sequence of `Instr` opcodes This process includes:
