@@ -564,7 +564,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
 
 #[cfg(target_arch = "wasm32")]
 fn runtime_flow_to_js(err: RuntimeError) -> JsValue {
-    serde_wasm_bindgen::to_value(&runtime_error_payload(&err, None))
+    serde_wasm_bindgen::to_value(&runtime_error_payload(&err, None, None))
         .unwrap_or_else(|_| js_error(err.message()))
 }
 
