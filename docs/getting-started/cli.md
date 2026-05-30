@@ -1,7 +1,7 @@
 ---
 title: "Command Line Interface"
 category: "Getting Started"
-section: "1.2"
+section: "1.3"
 last_updated: "May 29, 2026"
 ---
 

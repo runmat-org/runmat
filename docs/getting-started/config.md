@@ -1,7 +1,7 @@
 ---
 title: "Configuration Reference"
 category: "Getting Started"
-section: "1.3"
+section: "1.4"
 last_updated: "May 28, 2026"
 ---
 
