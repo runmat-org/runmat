@@ -1,7 +1,7 @@
 ---
 title: "Command Line Interface"
 category: "Getting Started"
-section: "1.2"
+section: "1.3"
 last_updated: "May 29, 2026"
 ---
 
@@ -9,15 +9,15 @@ last_updated: "May 29, 2026"
 
 The RunMat CLI is a fast and easy way to run `.m` files locally, open an interactive REPL, inspect runtime behavior, and work with remote project filesystems.
 
-Install RunMat first if the `runmat` command is not already on your `PATH`.
+Install RunMat first if the `runmat` command is not already on your `PATH`. See [Installation](/docs/runtime/getting-started/install) for install options.
+
+To check the version of RunMat, run:
 
 ```bash
 runmat --version
 ```
 
-See [Installation](/docs/runtime/getting-started/install) for install options.
-
-## Start A REPL
+## REPL
 
 Run `runmat` with no command to open the interactive REPL.
 
@@ -57,7 +57,7 @@ The REPL also accepts piped input:
 printf "1 + 1\n" | runmat repl
 ```
 
-## Run Scripts
+## Run
 
 Run a local `.m` file by passing the path directly:
 
@@ -100,21 +100,21 @@ Common options:
 
 | Option | Use |
 | --- | --- |
-| `--config <path>` | Load a specific `runmat.toml` or `runmat.json`. |
+| `--config PATH` | Load a specific `runmat.toml` or `runmat.json`. |
 | `--debug` | Enable debug logging. |
-| `--log-level <error|warn|info|debug|trace>` | Set log verbosity. |
+| `--log-level LEVEL` | Set log verbosity. |
 | `--verbose` | Print more execution detail. |
-| `--snapshot <path>` | Preload a runtime snapshot. |
+| `--snapshot PATH` | Preload a runtime snapshot. |
 | `--no-jit` | Use the interpreter only. |
-| `--jit-threshold <n>` | Set the execution count before JIT tiering. |
-| `--jit-opt-level <none|size|speed|aggressive>` | Set JIT optimization policy. |
-| `--gc-preset <low-latency|high-throughput|low-memory|debug>` | Select a GC tuning preset. |
-| `--gc-young-size <MB>` | Override young generation size. |
-| `--gc-threads <n>` | Override GC worker count. |
+| `--jit-threshold N` | Set the execution count before JIT tiering. |
+| `--jit-opt-level LEVEL` | Set JIT optimization policy. |
+| `--gc-preset PRESET` | Select a GC tuning preset. |
+| `--gc-young-size MB` | Override young generation size. |
+| `--gc-threads N` | Override GC worker count. |
 | `--gc-stats` | Collect GC statistics. |
-| `--plot-mode <auto|gui|headless>` | Select plotting mode. |
+| `--plot-mode MODE` | Select plotting mode (auto | gui | headless). |
 | `--plot-headless` | Force headless plotting. |
-| `--plot-backend <auto|wgpu|static|web>` | Select plotting backend. |
+| `--plot-backend BACKEND` | Select plotting backend (auto | wgpu | static | web). |
 
 Configuration is resolved from built-in defaults, project files, environment variables, and CLI flags. CLI flags have the highest precedence. See [Configuration Reference](/docs/runtime/getting-started/config).
 
@@ -152,13 +152,13 @@ Artifact options:
 
 | Option | Use |
 | --- | --- |
-| `--artifacts-dir <path>` | Directory for run artifacts. |
-| `--artifacts-manifest <path>` | Exact JSON manifest path. |
-| `--capture-figures <off|auto|on>` | Figure export policy. |
-| `--figure-size <WIDTHxHEIGHT>` | Figure export dimensions. |
-| `--max-figures <n>` | Maximum number of touched figures to export. |
+| `--artifacts-dir PATH` | Directory for run artifacts. |
+| `--artifacts-manifest PATH` | Exact JSON manifest path. |
+| `--capture-figures MODE` | Figure export policy (off | auto | on). |
+| `--figure-size WIDTHxHEIGHT` | Figure export dimensions. |
+| `--max-figures N` | Maximum number of touched figures to export. |
 
-## Inspect The Runtime
+## Inspect Runtime
 
 Use these commands when filing issues, tuning performance, or checking what runtime configuration is active.
 
@@ -179,7 +179,7 @@ runmat accel-info
 | `accel-info` | Print acceleration provider and telemetry details. |
 | `accel-info --json` | Emit acceleration details as JSON. |
 
-## Manage Configuration
+## Configuration
 
 Generate a starter config:
 
@@ -203,7 +203,7 @@ runmat config paths
 
 `config generate` writes both project and runtime sections, so the generated file can be used as a starting point for named entrypoints and runtime tuning.
 
-## Benchmark Scripts
+## Benchmark
 
 Benchmark a script or named entrypoint with repeated execution in one session.
 
@@ -214,7 +214,7 @@ runmat benchmark main --iterations 25 --jit
 
 The benchmark command performs warmup runs, then reports total iterations, JIT executions, interpreter executions, total time, average time, and throughput.
 
-## Snapshot Commands
+## Snapshots
 
 Snapshots preload runtime assets so startup does less work.
 

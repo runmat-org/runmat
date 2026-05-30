@@ -1,15 +1,13 @@
 ---
 title: "Hello World"
 category: "Getting Started"
-section: "1.5"
+section: "1.6"
 last_updated: "May 28, 2026"
 ---
 
-# RunMat Hello World
+# Run your first script
 
-The RunMat Hello World example is a simple program that prints "Hello, World!" to the console.
-
-## RunMat Hello World in RunMat
+## Hello World in RunMat
 
 Save the file as `hello.m` and add the following content:
 

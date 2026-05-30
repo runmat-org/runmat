@@ -1,12 +1,9 @@
 # RunMat Runtime Documentation
 
-- [Changelog](./CHANGELOG.md)
-- [Values & Type Model](./VALUES.md)
-- [Glossary](./GLOSSARY.md)
-
 ## Getting Started
 
 - [Installation](./getting-started/install.md)
+- [Desktop](./getting-started/desktop.md)
 - [Command Line Interface](./getting-started/cli.md)
 - [Configuration](./getting-started/config)
 - [Language Compatability](./getting-started/compatability.md)
@@ -95,3 +92,9 @@
 - [Testing Strategy](./development/testing.md)
 - [Benchmarking](./development/benchmarking.md)
 - [Telemetry](./development/telemetry.md)
+
+## Reference
+
+- [Changelog](./CHANGELOG.md)
+- [Values & Type Model](./VALUES.md)
+- [Glossary](./GLOSSARY.md)
