@@ -3,7 +3,7 @@ name = "runmat-config"
 version = "0.4.1"
 edition = "2021"
 description = "Shared configuration schema and loaders for RunMat"
-license = "Apache-2.0"
+license = "MIT"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
