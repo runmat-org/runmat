@@ -1,8 +1,8 @@
 ---
 title: "Hello World"
 category: "Getting Started"
-section: "1.6"
-last_updated: "May 28, 2026"
+section: "1.7"
+last_updated: "May 30, 2026"
 ---
 
 # Run your first script
@@ -23,7 +23,7 @@ runmat hello.m
 
 This should output:
 
-```
+```text
 Hello, World!
 ```
 
@@ -37,6 +37,9 @@ You can create multi-file projects by adding a `runmat.toml` file to the project
 [package]
 name = "my-project"
 
+[sources]
+roots = ["."]
+
 [entrypoints.analysis]
 path = "hello.m"
 ```
@@ -49,7 +52,7 @@ runmat run analysis
 
 This should output:
 
-```
+```text
 Hello, World!
 ```
 
@@ -72,6 +75,6 @@ You can then run a script within the project with:
 runmat remote run /scripts/analysis.m
 ```
 
-This will run the `analysis.m` script on the your local machine, with a virtual filesystem backed by the remote server mounted in the runtime's filesystem abstraction.
+This will run the `analysis.m` script on your local machine, with a virtual filesystem backed by the remote server mounted in the runtime's filesystem abstraction.
 
-For more details, see the [filesystem](/docs/runtime/filesystem) documentation.
+For a full project layout with source roots, packages, private functions, and class folders, see [Projects](/docs/runtime/getting-started/projects). For more details on remote filesystems, see the [Filesystem Abstraction](/docs/runtime/fs) documentation.

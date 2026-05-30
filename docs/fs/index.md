@@ -39,7 +39,7 @@ flowchart TD
   Provider --> Remote
 ```
 
-```
+```text
            ┌────────────────────┐
            │ RunMat Runtime     │
            │ (wasm/native)      │

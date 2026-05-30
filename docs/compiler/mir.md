@@ -1,7 +1,7 @@
 ---
 title: "Mid-Level IR (MIR)"
 category: "Compilation Pipeline"
-section: "2.3"
+section: "2.4"
 last_updated: "May 28, 2026"
 ---
 
@@ -9,7 +9,7 @@ last_updated: "May 28, 2026"
 
 The Mid-Level IR (MIR) represents the stage in the RunMat compilation pipeline where High-Level IR (HIR) is lowered into a Control-Flow Graph (CFG) of Basic Blocks. While HIR maintains a structure close to the original MATLAB AST (nested loops, if-statements), MIR flattens these into explicit jumps, branch targets, and local variable slots (locals). This representation is used for dataflow analysis, type inference, and as the primary input for bytecode generation.
 
-The process of lowering HIR to MIR is a process used in modern compiler such as the Rust compiler. It allows for the compiler to perform dataflow analysis, type inference, and as the primary input for bytecode generation, enabling static analysis and optimizations of runtime branches prior to execution.
+Lowering HIR to MIR mirrors the approach used by modern compilers such as the Rust compiler. The flattened control-flow graph lets RunMat perform dataflow analysis and type inference, and it serves as the primary input for bytecode generation, enabling static analysis and optimization of runtime branches before execution.
 
 ---
 
@@ -22,7 +22,22 @@ A MIR program is organized into a `MirAssembly`, which contains a collection of 
 Every `BasicBlock` contains a sequence of `MirStmt` and exactly one `MirTerminator`.
 
 - `MirStmt`: Linear operations like assignments (`Assign`), multi-assignments (`MultiAssign`), or expressions evaluated for side effects (`Expr`).
-- `MirTerminator`: Dictates the transfer of control. Kinds include `Goto`, `Branch` (conditional), `Switch`, `Return`, `Await`, and `TryCatch`.
+- `MirTerminator`: Dictates the transfer of control out of the block.
+
+The terminator kind makes every exit edge explicit:
+
+```rust
+pub enum MirTerminatorKind {
+    Goto(BasicBlockId),
+    Branch { cond, then_block, else_block },
+    Switch { discr, cases, otherwise },
+    For { binding, iterable, body_block, exit_block },
+    TryCatch { try_block, catch_block, catch_binding },
+    Return(Vec<MirOperand>),
+    Await { future, result, resume },
+    Unreachable,
+}
+```
 
 ### MIR Data Entity Mapping
 
@@ -53,7 +68,7 @@ flowchart LR
 
 ---
 
-## MIR Lowering (HIR → MIR)
+## MIR Lowering (HIR to MIR)
 
 Lowering is performed by the `lower_assembly` function, which iterates through HIR functions and utilizes a `ControlFlowBuilder` to construct the CFG.
 
@@ -97,7 +112,7 @@ MATLAB indexing is complex (supporting `end`, `:`, and logical masks). MIR lower
 | Binary / Unary | Arithmetic and logical operations. |
 | Call | Function invocation with MirCallee (Static or Dynamic). |
 | Aggregate | Construction of Tensors or Cell arrays. |
-| ShortCircuit | Logical && and ` |
+| ShortCircuit | Short-circuit logical `&&` and `\|\|` with their own branch evaluation. |
 
 ---
 

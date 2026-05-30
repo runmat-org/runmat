@@ -1,7 +1,7 @@
 ---
 title: "MATLAB Language Compatability"
 category: "Getting Started"
-section: "1.5"
+section: "1.6"
 last_updated: "May 28, 2026"
 ---
 
@@ -29,7 +29,7 @@ RunMat implements the core grammar of the MATLAB language, moving from raw sourc
 
 | Category | Support |
 | :--- | :--- |
-| Variables & data types |`double`, `single`, char arrays, string arrays, logicals, integers (`int8`…`uint64`), complex numbers, `global`, `persistent` |
+| Variables & data types |`double`, `single`, char arrays, string arrays, logicals, integers (`int8` to `uint64`), complex numbers, `global`, `persistent` |
 | Operators | Arithmetic, element-wise, relational, logical (element-wise and short-circuit), transpose (`'` and `.'`), colon ranges |
 | Control flow | `if/elseif/else`, `for`, `while`, `switch/case/otherwise`, `break`, `continue`, `return`, `try/catch/end`, `rethrow` |
 | Functions | Named functions, multiple returns (`[a,b]=f()`), anonymous functions with closures, `varargin`/`varargout`, `nargin`/`nargout` |

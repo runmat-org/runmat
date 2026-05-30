@@ -77,6 +77,8 @@ RunMat also resolves configured project entrypoints. If a project has `runmat.to
 runmat run main
 ```
 
+See [Projects](/docs/runtime/getting-started/projects) for project layout and entrypoint configuration.
+
 For relative source paths, RunMat can infer a missing `.m` extension:
 
 ```bash

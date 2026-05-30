@@ -7,7 +7,7 @@ last_updated: "May 28, 2026"
 
 # Installation
 
-The quickest to get started with RunMat is to use RunMat Desktop: [Download RunMat Desktop](/download/latest)
+The quickest way to get started with RunMat is to use RunMat Desktop: [Download RunMat Desktop](/download/latest)
 
 If you prefer to use the command line, you can install RunMat via package managers or build from source.
 
@@ -32,6 +32,6 @@ RunMat can be installed via pre-compiled binaries, package managers, or built fr
 
 Note: Building from source requires the Rust toolchain. The `gui` feature enables the `wgpu`-based plotting and windowing system.
 
-# Next Steps
+### Next Steps
 
 Read the [Configuration Reference](/docs/runtime/getting-started/config) to learn how to configure RunMat, or the [Hello World](/docs/runtime/getting-started/hello-world) example to get started with RunMat.

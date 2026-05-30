@@ -71,9 +71,25 @@ RunMat uses a robust binding system to represent MATLAB's complex variable seman
 
 ### Binding Metadata
 
-- `BindingRole`: Defines the purpose of the binding (e.g., `Parameter`, `Output`, `Local`, `ModuleBinding`)
-- `BindingStorage`: Defines the lifetime and storage class (`Lexical`, `Global`, `Persistent`)
-- `WorkspaceVisibility`: Controls whether the binding is exported to the user's workspace (`Hidden`, `TopLevel`, `ModuleVisible`)
+Three small enums capture the semantics of a binding:
+
+```rust
+pub enum BindingRole {
+    Parameter, Output, Local, ModuleBinding, ImplicitAns,
+}
+
+pub enum BindingStorage {
+    Lexical, Global, Persistent,
+}
+
+pub enum WorkspaceVisibility {
+    Hidden, TopLevel, ModuleVisible, ImplicitAns,
+}
+```
+
+- `BindingRole`: Defines the purpose of the binding (parameter, output, ordinary local, module-level binding, or the implicit `ans`).
+- `BindingStorage`: Defines the lifetime and storage class.
+- `WorkspaceVisibility`: Controls whether the binding is exported to the user's workspace.
 
 ### Resolution Logic
 
@@ -136,18 +152,30 @@ During lowering, calls are resolved into `HirCall` nodes. Because MATLAB allows 
 
 This enum defines how a callee is identified:
 
-- `BoundFunction(FunctionId)`: A direct reference to a function in the assembly
-- `Builtin(BuiltinId)`: A reference to a host-provided built-in function
-- `ExternalName(QualifiedName)`: A name that must be resolved across module boundaries
-- `DynamicName(SymbolName)`: A name that can only be resolved at runtime (e.g., `eval` or dynamic shadowing)
+```rust
+pub enum CallableIdentity {
+    BoundFunction(FunctionId),     // direct reference to a function in the assembly
+    Builtin(BuiltinId),            // host-provided built-in function
+    Imported(DefPath),             // resolved through an import
+    Method(MethodId),              // typed method identity
+    AnonymousFunction(FunctionId), // @(...) lambda lowered to a function
+    DynamicName(SymbolName),       // resolved only at runtime (e.g. eval, shadowing)
+    ExternalName(QualifiedName),   // resolved across module boundaries
+}
+```
 
 ### CallableFallbackPolicy
 
 Determines what the VM should do if the primary identity fails to resolve:
 
-- `None`: No fallback allowed.
-- `ExternalBoundary`: Look for the function in the external project/path
-- `RuntimeNameResolution`: Perform a full search of the workspace and path at runtime
+```rust
+pub enum CallableFallbackPolicy {
+    None,                   // no fallback allowed
+    RuntimeNameResolution,  // full workspace/path search at runtime
+    ObjectDispatch,         // resolve through object method dispatch
+    ExternalBoundary,       // look for the function in the external project/path
+}
+```
 
 ## Next Steps
 

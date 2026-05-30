@@ -1,7 +1,7 @@
 ---
 title: "MIR & Static Analysis"
 category: "Compilation Pipeline"
-section: "2.3"
+section: "2.5"
 last_updated: "May 28, 2026"
 ---
 

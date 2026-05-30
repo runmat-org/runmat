@@ -15,9 +15,10 @@ The pipeline follows a linear progression through several intermediate represent
 
 1. Lexer & Parser: Converts raw text into a Concrete Syntax Tree (CST) and then an Abstract Syntax Tree (AST).
 2. High-Level IR (HIR): Resolves scopes, performs variable binding, and handles MATLAB-specific constructs like command-form syntax and closure captures.
-3. Mid-Level IR (MIR): Lowers the HIR into a Control-Flow Graph (CFG) consisting of basic blocks, suitable for dataflow analysis.
-4. Static Analysis: Performs type/shape inference and definite assignment checks on the MIR.
-5. Bytecode Compilation: Translates the MIR and analysis facts into optimized bytecode for the RunMat Virtual Machine (VM).
+3. Module Composition: Applies project source roots, package folders, class folders, private functions, dependencies, and entrypoints to source-aware resolution.
+4. Mid-Level IR (MIR): Lowers the HIR into a Control-Flow Graph (CFG) consisting of basic blocks, suitable for dataflow analysis.
+5. Static Analysis: Performs type/shape inference and definite assignment checks on the MIR.
+6. Bytecode Compilation: Translates the MIR and analysis facts into optimized bytecode for the RunMat Virtual Machine (VM).
 
 ### System Architecture Diagram
 
@@ -35,6 +36,7 @@ flowchart TD
   Parser["runmat_parser::parse()"]
   AST["runmat_parser::Program"]
   LoweringCtx["LoweringContext"]
+  ProjectSymbols["Project symbols"]
   HIR_Lower["runmat_hir::lower()"]
   Assembly["HirAssembly"]
   MIR_Lower["runmat_mir::lowering::lower_assembly()"]
@@ -45,6 +47,7 @@ flowchart TD
   Input --> Lexer
   Lexer --> Parser
   Parser --> AST
+  ProjectSymbols -.-> LoweringCtx
   AST --> HIR_Lower
   LoweringCtx -.-> HIR_Lower
   HIR_Lower --> Assembly
@@ -74,13 +77,19 @@ The HIR lowering stage transforms the AST into a `HirAssembly`. This process use
 
 For details, see [High-Level IR (HIR)](/docs/runtime/compiler/hir).
 
-#### 2.3 Mid-Level IR (MIR)
+#### 2.3 Module Composition
+
+Project source roots and dependencies provide the known symbols used for cross-file calls, package-qualified names, class-folder methods, private functions, imports, and named entrypoints.
+
+For details, see [Module Composition](/docs/runtime/compiler/modules).
+
+#### 2.4 Mid-Level IR (MIR)
 
 The `runmat-mir` crate flattens the HIR into a Control-Flow Graph (CFG). The MIR is organized into `BasicBlock` structures and uses `MirLocal` slots to represent stack locations. This representation is critical for optimizations and subsequent JIT lowering.
 
 For details, see [Mid-Level IR (MIR)](/docs/runtime/compiler/mir).
 
-#### 2.4 MIR Analysis & Static Analysis
+#### 2.5 MIR Analysis & Static Analysis
 
 Before bytecode generation, the `AnalysisStore` is populated by running dataflow passes over the MIR. This includes:
 

@@ -11,31 +11,32 @@ last_updated: "May 29, 2026"
 
 The compiler does not execute `Value` directly. HIR and MIR use static facts to approximate value type, shape, flow, and async state before bytecode runs. At execution time, those facts become concrete `Value` instances moving through the VM and runtime.
 
-## Where Values Flow
-
-```mermaid
-flowchart TD
-  HIR["HIR / MIR facts<br/>TypeFact, ShapeFact, ValueFlowFact"]
-  Bytecode["VM bytecode"]
-  VM["VM stack and variables<br/>Vec<Value>"]
-  Builtins["runtime builtins<br/>Value inputs and outputs"]
-  Workspace["session workspace<br/>workspace_values"]
-  GC["GC-managed identity<br/>GcPtr<Value>"]
-  GPU["Accelerate provider<br/>Value::GpuTensor"]
-  Host["host ABI<br/>ExecutionOutcome / WASM wire"]
-
-  HIR --> Bytecode --> VM
-  VM <--> Builtins
-  VM <--> Workspace
-  VM <--> GC
-  Builtins <--> GPU
-  Workspace --> Host
-  Builtins --> Host
-```
-
-`Value` is intentionally broad. It represents ordinary program data, identity-bearing handles, function-like values, acceleration handles, and a few internal execution helpers that should not normally surface as workspace values.
-
 ## Value Families
+
+The `Value` enum groups loosely into scalars, dense arrays, aggregates, objects/handles, callables, the GPU handle, and a couple of internal execution helpers:
+
+```rust
+pub enum Value {
+    // Scalars
+    Int(IntValue), Num(f64), Complex(f64, f64), Bool(bool), String(String),
+    // Dense arrays
+    Tensor(Tensor), ComplexTensor(ComplexTensor),
+    LogicalArray(LogicalArray), StringArray(StringArray), CharArray(CharArray),
+    // Aggregates
+    Cell(CellArray), Struct(StructValue),
+    // Objects and handles
+    Object(ObjectInstance), HandleObject(HandleRef), Listener(Listener),
+    ClassRef(String), MException(MException),
+    // Callables
+    FunctionHandle(String), ExternalFunctionHandle(String),
+    MethodFunctionHandle(String), BoundFunctionHandle { name: String, function: usize },
+    Closure(Closure),
+    // Acceleration
+    GpuTensor(GpuTensorHandle),
+    // Execution helper (internal multi-output/destructuring)
+    OutputList(Vec<Value>),
+}
+```
 
 | Family | Runtime variants | Notes |
 | --- | --- | --- |
@@ -52,6 +53,16 @@ The enum lives in `runmat-builtins` because builtins, VM dispatch, runtime servi
 ## Dense Arrays And Shape
 
 RunMat stores dense numeric arrays as `Tensor` or `ComplexTensor`. A `Tensor` owns:
+
+```rust
+pub struct Tensor {
+    pub data: Vec<f64>,       // contiguous host data (column-major)
+    pub shape: Vec<usize>,    // MATLAB-visible N-D shape
+    pub rows: usize,          // cached 2-D dimensions for matrix paths
+    pub cols: usize,
+    pub dtype: NumericDType,  // logical numeric class over f64 storage
+}
+```
 
 | Field | Meaning |
 | --- | --- |
@@ -104,7 +115,7 @@ Function-like values preserve the policy needed to call them later:
 
 `OutputList` is different. It is an internal value used to carry multiple outputs through bytecode, builtin dispatch, and destructuring. Session outcome assembly turns public results into `RuntimeFlow` shapes such as single value, output list, comma list, dynamic list, or no value.
 
-## Static Facts Are Separate
+## Static Facts
 
 Compile-time type information is deliberately separate from runtime `Value`.
 
@@ -120,7 +131,7 @@ For details on static facts, see [MIR & Static Analysis](/docs/runtime/compiler/
 
 ## Host Metadata
 
-Hosts usually do not need the full internal value graph. Session and WASM APIs derive host-facing metadata from `Value`:
+Hosts usually do not need the full internal value graph for presentation layers, such as a variable inspector. Session and WASM APIs derive host-facing metadata from `Value`:
 
 | Metadata | Source |
 | --- | --- |
@@ -131,3 +142,25 @@ Hosts usually do not need the full internal value graph. Session and WASM APIs d
 | Preview | `preview_numeric_values(value, limit)` extracts bounded numeric previews for workspace inspection. |
 
 Workspace inspection uses those helpers to avoid materializing large values unnecessarily. GPU tensors are previewed through provider-aware gather paths so hosts can inspect slices without downloading an entire device buffer.
+
+## Where Values Flow
+
+```mermaid
+flowchart TD
+  HIR["HIR / MIR facts<br/>TypeFact, ShapeFact, ValueFlowFact"]
+  Bytecode["VM bytecode"]
+  VM["VM stack and variables<br/>Vec<Value>"]
+  Builtins["runtime builtins<br/>Value inputs and outputs"]
+  Workspace["session workspace<br/>workspace_values"]
+  GC["GC-managed identity<br/>GcPtr<Value>"]
+  GPU["Accelerate provider<br/>Value::GpuTensor"]
+  Host["host ABI<br/>ExecutionOutcome / WASM wire"]
+
+  HIR --> Bytecode --> VM
+  VM <--> Builtins
+  VM <--> Workspace
+  VM <--> GC
+  Builtins <--> GPU
+  Workspace --> Host
+  Builtins --> Host
+```

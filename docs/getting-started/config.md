@@ -1,13 +1,15 @@
 ---
 title: "Configuration Reference"
 category: "Getting Started"
-section: "1.4"
-last_updated: "May 28, 2026"
+section: "1.5"
+last_updated: "May 30, 2026"
 ---
 
 # Configuration Reference
 
 RunMat utilizes a hierarchical configuration system that manages project-level metadata, source organization, and runtime execution parameters. The configuration is primarily driven by a manifest file (`runmat.toml` or `runmat.json`) and can be overridden by environment variables and CLI arguments.
+
+For a user-facing guide to project layout, source roots, dependencies, and named entrypoints, see [Projects](/docs/runtime/getting-started/projects). This page is the reference for manifest and runtime settings.
 
 ## Configuration Resolution Order
 
@@ -42,7 +44,7 @@ You can then execute the project's `hello` entrypoint with:
 runmat run hello
 ```
 
-## Individual Section References
+## Project Reference
 
 Project sections describe package identity, source layout, dependencies, and named entrypoints.
 

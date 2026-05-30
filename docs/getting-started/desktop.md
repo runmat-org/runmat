@@ -75,6 +75,9 @@ RunMat Desktop reads the same project manifests used by the CLI:
 [package]
 name = "my-project"
 
+[sources]
+roots = ["."]
+
 [entrypoints.analysis]
 path = "analysis.m"
 ```
@@ -85,7 +88,7 @@ Save this as `runmat.toml` in your project root. The CLI can run the same entryp
 runmat run analysis
 ```
 
-Desktop also stores app-specific project preferences, such as artifact location, notebook behavior, GPU preference, and run history settings. See the [Configuration Reference](/docs/runtime/getting-started/config) for the shared runtime settings.
+Desktop also stores app-specific project preferences, such as artifact location, notebook behavior, GPU preference, and run history settings. See [Projects](/docs/runtime/getting-started/projects) for project layout and [Configuration Reference](/docs/runtime/getting-started/config) for shared runtime settings.
 
 ## Desktop, Browser, and CLI
 

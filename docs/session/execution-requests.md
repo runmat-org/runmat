@@ -11,6 +11,16 @@ The primary session boundary is `RunMatSession::execute_request`. Hosts submit a
 
 ## Request Shape
 
+```rust
+pub struct ExecutionRequest {
+    pub source: SourceInput,                 // inline text or a path to read
+    pub compatibility: CompatMode,           // parser/language mode for this request
+    pub host_policy: HostExecutionPolicy,    // host-controlled execution policy
+    pub requested_outputs: RequestedOutputCount,
+    pub workspace: WorkspaceHandle,          // stable identity for binding keys
+}
+```
+
 | Field | Role |
 | --- | --- |
 | `source` | Either `SourceInput::Text { name, text }` or `SourceInput::Path(path)`. Path sources are read before execution. |
@@ -45,6 +55,25 @@ sequenceDiagram
 `compile_input` always follows the normal compiler stack for submitted source: parser, HIR lowering, MIR lowering, MIR analysis, and VM bytecode compilation. The session contributes current workspace bindings, known semantic function names, project symbols, compatibility mode, and top-level await policy to lowering.
 
 ## Outcome Shape
+
+```rust
+pub struct ExecutionOutcome {
+    pub flow: RuntimeFlow,                 // public result value
+    pub workspace_delta: WorkspaceDelta,   // versioned upserts/removals
+    pub display_events: Vec<DisplayEvent>,
+    pub streams: Vec<ExecutionStreamEntry>,
+    pub diagnostics: Vec<RuntimeDiagnostic>,
+    pub effects: Vec<ObservedEffect>,
+    pub suspension: Option<Suspension>,    // reserved for resumable work
+    pub profiling: Option<ExecutionProfiling>,
+    pub execution_time_ms: u64,
+    pub used_jit: bool,
+    pub figures_touched: Vec<u32>,
+    pub stdin_events: Vec<StdinEvent>,
+    pub fusion_plan: Option<FusionPlanSnapshot>,
+    // ...
+}
+```
 
 | Field | Role |
 | --- | --- |
