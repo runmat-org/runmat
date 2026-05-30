@@ -7,7 +7,9 @@ last_updated: "May 29, 2026"
 
 # RunMat Desktop
 
-RunMat Desktop is the full local RunMat experience: an editor, file tree, console, plots, variable inspector, notebooks, and project settings in one native app. It runs MATLAB-syntax code with the same RunMat runtime used by the CLI and browser, but adds native file access and hardware GPU support for local projects.
+RunMat Desktop is the full local RunMat experience: an editor, file tree, console, plots, variable inspector, notebooks, and project settings in a high-performance native app. 
+
+It runs MATLAB-syntax code with the same RunMat runtime used by the CLI and browser, but adds native file access and hardware GPU support for local projects.
 
 Use Desktop when you want to work on files on your machine, inspect results interactively, and keep plots, stdout, variables, and run history visible while you iterate.
 

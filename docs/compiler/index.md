@@ -31,15 +31,15 @@ flowchart TD
   %% Subgraph: runmat-lexer & runmat-parser
   %% Subgraph: Natural Language / Source Space
   Input["MATLAB Source Text"]
-  Lexer["tokenize_detailed()"]
-  Parser["parse_with_options()"]
+  Lexer["runmat_lexer::tokenize()"]
+  Parser["runmat_parser::parse()"]
   AST["runmat_parser::Program"]
   LoweringCtx["LoweringContext"]
   HIR_Lower["runmat_hir::lower()"]
   Assembly["HirAssembly"]
-  MIR_Lower["lower_assembly()"]
+  MIR_Lower["runmat_mir::lowering::lower_assembly()"]
   MIR_Data["MirAssembly"]
-  Analysis["analyze_assembly()"]
+  Analysis["runmat_mir::analysis::analyze_assembly()"]
   Compiler["runmat_vm::compile()"]
   Bytecode["runmat_vm::Bytecode"]
   Input --> Lexer
