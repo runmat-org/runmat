@@ -136,7 +136,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "path",
     category = "io/repl_fs",
-    summary = "Query or replace the MATLAB search path used by RunMat.",
+    summary = "Query or replace the active MATLAB search path string.",
     keywords = "path,search path,matlab path,addpath,rmpath",
     accel = "cpu",
     suppress_auto_output = true,

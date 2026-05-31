@@ -325,7 +325,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "histogram",
     category = "plotting",
-    summary = "Plot a MATLAB-compatible histogram.",
+    summary = "Create histogram chart objects.",
     keywords = "histogram,hist,histcounts,frequency",
     sink = true,
     suppress_auto_output = true,

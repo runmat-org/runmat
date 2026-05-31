@@ -188,7 +188,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cos",
     category = "math/trigonometry",
-    summary = "Cosine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute cosine element-wise.",
     keywords = "cos,cosine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

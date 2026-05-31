@@ -155,7 +155,7 @@ fn gather_error_with_message(
 #[runtime_builtin(
     name = "gather",
     category = "acceleration/gpu",
-    summary = "Bring gpuArray data back to host memory.",
+    summary = "Gather gpuArray data back to host memory.",
     keywords = "gather,gpuArray,accelerate,download",
     accel = "sink",
     type_resolver(gather_type),

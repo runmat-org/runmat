@@ -129,7 +129,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rgb2gray",
     category = "image/color",
-    summary = "Convert an RGB image to grayscale using luminance weights.",
+    summary = "Convert RGB image data to grayscale using luminance weighting.",
     keywords = "rgb2gray,rgb,gray,grayscale,luminance,image",
     accel = "sink",
     type_resolver(rgb2gray_type),

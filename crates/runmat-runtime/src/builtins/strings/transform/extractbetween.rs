@@ -249,7 +249,7 @@ enum BoundariesMode {
 #[runtime_builtin(
     name = "extractBetween",
     category = "strings/transform",
-    summary = "Extract substrings between boundary markers using MATLAB-compatible semantics.",
+    summary = "Extract substrings between boundary markers.",
     keywords = "extractBetween,substring,boundaries,strings",
     accel = "sink",
     type_resolver(text_preserve_type),

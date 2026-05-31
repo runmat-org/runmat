@@ -120,7 +120,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "acos",
     category = "math/trigonometry",
-    summary = "Element-wise inverse cosine with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse cosine, with complex promotion outside [-1, 1].",
     keywords = "acos,inverse cosine,arccos,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

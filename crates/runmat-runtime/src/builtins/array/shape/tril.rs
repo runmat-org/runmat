@@ -189,7 +189,7 @@ fn tril_error_with_message(
 #[runtime_builtin(
     name = "tril",
     category = "array/shape",
-    summary = "Lower triangular portion of a matrix or paged tensor.",
+    summary = "Extract lower-triangular portions of matrices or paged tensors.",
     keywords = "tril,lower triangular,matrix,diagonal,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),

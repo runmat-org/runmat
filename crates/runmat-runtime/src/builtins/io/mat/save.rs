@@ -218,7 +218,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "save",
     category = "io/mat",
-    summary = "Persist workspace variables to a MAT-file.",
+    summary = "Save workspace variables to a MAT-file.",
     keywords = "save,mat,workspace",
     sink = true,
     type_resolver(crate::builtins::io::type_resolvers::save_type),

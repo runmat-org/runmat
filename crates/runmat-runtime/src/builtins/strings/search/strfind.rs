@@ -208,7 +208,7 @@ fn remap_strfind_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strfind",
     category = "strings/search",
-    summary = "Return the starting indices of pattern matches in text inputs.",
+    summary = "Return starting indices of substring matches within text inputs.",
     keywords = "strfind,substring,index,positions,string search",
     accel = "sink",
     type_resolver(text_search_indices_type),

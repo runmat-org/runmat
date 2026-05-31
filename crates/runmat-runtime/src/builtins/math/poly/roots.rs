@@ -116,7 +116,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "roots",
     category = "math/poly",
-    summary = "Compute the roots of a polynomial specified by its coefficients.",
+    summary = "Compute polynomial roots from a coefficient vector.",
     keywords = "roots,polynomial,eigenvalues,companion",
     accel = "sink",
     type_resolver(roots_type),

@@ -373,7 +373,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "plot3",
     category = "plotting",
-    summary = "Create MATLAB-compatible 3-D line plots.",
+    summary = "Create 3-D line plots.",
     keywords = "plot3,line,3d,visualization",
     sink = true,
     suppress_auto_output = true,

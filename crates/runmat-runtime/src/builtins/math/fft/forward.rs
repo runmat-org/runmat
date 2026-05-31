@@ -215,7 +215,7 @@ fn fft_error_with_message(
 #[runtime_builtin(
     name = "fft",
     category = "math/fft",
-    summary = "Compute the discrete Fourier transform (DFT) of numeric or complex data.",
+    summary = "Compute discrete Fourier transforms.",
     keywords = "fft,fourier transform,complex,gpu",
     type_resolver(fft_type),
     descriptor(crate::builtins::math::fft::forward::FFT_DESCRIPTOR),

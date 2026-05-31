@@ -478,7 +478,7 @@ fn strsplit_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "split",
     category = "strings/transform",
-    summary = "Split strings, character arrays, and cell arrays into substrings using delimiters.",
+    summary = "Split text inputs into substrings using delimiter rules.",
     keywords = "split,strsplit,delimiter,CollapseDelimiters,IncludeDelimiters",
     accel = "sink",
     type_resolver(string_array_type),
@@ -500,7 +500,7 @@ async fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "strsplit",
     category = "strings/transform",
-    summary = "Split a string scalar or character vector into substrings using delimiters.",
+    summary = "Split scalar text into substrings using simple or regex delimiters.",
     keywords = "strsplit,split,delimiter,CollapseDelimiters,DelimiterType,matches",
     accel = "sink",
     type_resolver(unknown_type),

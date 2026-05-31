@@ -165,7 +165,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "imshow",
     category = "plotting",
-    summary = "Display grayscale, binary, truecolor, or file-backed images.",
+    summary = "Display images.",
     keywords = "imshow,plotting,image,grayscale,rgb,binary",
     sink = true,
     suppress_auto_output = true,

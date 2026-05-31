@@ -120,7 +120,7 @@ pub const AND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "and",
     category = "logical/bit",
-    summary = "Element-wise logical AND for scalars, arrays, and gpuArray values.",
+    summary = "Element-wise logical AND for scalars and arrays.",
     keywords = "logical,and,elementwise,boolean,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

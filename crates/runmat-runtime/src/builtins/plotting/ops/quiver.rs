@@ -431,7 +431,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "quiver",
     category = "plotting",
-    summary = "Render MATLAB-compatible quiver plots.",
+    summary = "Render 2-D quiver vector-field plots.",
     keywords = "quiver,plotting,vector field,arrows",
     sink = true,
     suppress_auto_output = true,

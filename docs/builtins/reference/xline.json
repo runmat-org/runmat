@@ -1,0 +1,40 @@
+{
+  "title": "xline",
+  "category": "plotting",
+  "keywords": [
+    "xline",
+    "vertical reference line",
+    "constant line",
+    "plot annotation"
+  ],
+  "summary": "Draw vertical reference lines on current or specified axes with MATLAB-compatible styling forms.",
+  "description": "`xline` adds one or more vertical reference lines with optional labels, line specs, and name-value styling, following MATLAB-compatible plotting behavior.",
+  "behaviors": [
+    "`xline(x)` adds a vertical reference line at each coordinate in `x`.",
+    "Reference lines append to the current axes without replacing existing plot content.",
+    "Line spans follow the active axes limits, including later `xlim` and `ylim` changes.",
+    "The returned handle supports `get` and `set` for `Value`, `Color`, `LineWidth`, `LineStyle`, `Label`, `LabelOrientation`, `DisplayName`, and `Visible`."
+  ],
+  "examples": [
+    {
+      "description": "Add a dashed threshold line",
+      "input": "plot(1:10, rand(1, 10));\nxline(5, '--r', 'Threshold');",
+      "output": "% Adds a red dashed vertical reference line at x = 5"
+    },
+    {
+      "description": "Add multiple reference lines",
+      "input": "plot(1:10, rand(1, 10));\nxline([2 5 8], ':');",
+      "output": "% Adds three dotted vertical reference lines"
+    }
+  ],
+  "links": [
+    {
+      "label": "yline",
+      "url": "./yline"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ]
+}

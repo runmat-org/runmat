@@ -243,7 +243,7 @@ fn ensure_tf_class_registered() {
 #[runtime_builtin(
     name = "tf",
     category = "control",
-    summary = "Create a SISO transfer-function object from numerator and denominator coefficient vectors.",
+    summary = "Create SISO transfer-function objects from numerator and denominator coefficients.",
     keywords = "tf,transfer function,control system,filter,polynomial",
     type_resolver(tf_type),
     descriptor(crate::builtins::control::tf::TF_DESCRIPTOR),

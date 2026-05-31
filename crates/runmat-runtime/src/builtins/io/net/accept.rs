@@ -325,7 +325,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "accept",
     category = "io/net",
-    summary = "Accept a pending client connection on a TCP server.",
+    summary = "Accept pending TCP client connections with MATLAB-compatible socket semantics.",
     keywords = "accept,tcpserver,tcpclient",
     type_resolver(crate::builtins::io::type_resolvers::accept_type),
     descriptor(crate::builtins::io::net::accept::ACCEPT_DESCRIPTOR),

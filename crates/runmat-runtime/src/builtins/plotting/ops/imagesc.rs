@@ -213,7 +213,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "imagesc",
     category = "plotting",
-    summary = "Render a MATLAB-compatible scaled image plot.",
+    summary = "Display scaled matrix images.",
     keywords = "imagesc,plotting,image,colormap",
     sink = true,
     suppress_auto_output = true,

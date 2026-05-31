@@ -255,7 +255,7 @@ fn ensure_ss_class_registered() {
 #[runtime_builtin(
     name = "ss",
     category = "control",
-    summary = "Create a state-space model object from A, B, C, and D matrices.",
+    summary = "Create state-space model objects from A, B, C, and D matrices.",
     keywords = "ss,state space,control system,model,matrices",
     type_resolver(ss_type),
     descriptor(crate::builtins::control::ss::SS_DESCRIPTOR),

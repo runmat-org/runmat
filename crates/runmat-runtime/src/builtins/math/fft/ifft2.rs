@@ -312,7 +312,7 @@ fn ifft2_error_with_message(
 #[runtime_builtin(
     name = "ifft2",
     category = "math/fft",
-    summary = "Compute the two-dimensional inverse discrete Fourier transform (IDFT) of numeric or complex data.",
+    summary = "Compute two-dimensional inverse Fourier transforms.",
     keywords = "ifft2,inverse fft,image reconstruction,gpu",
     type_resolver(ifft2_type),
     descriptor(crate::builtins::math::fft::ifft2::IFFT2_DESCRIPTOR),

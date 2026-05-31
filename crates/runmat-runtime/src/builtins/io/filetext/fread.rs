@@ -427,7 +427,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fread",
     category = "io/filetext",
-    summary = "Read binary data from a file identifier.",
+    summary = "Read binary data from file identifiers.",
     keywords = "fread,file,io,binary,precision",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fread_type),

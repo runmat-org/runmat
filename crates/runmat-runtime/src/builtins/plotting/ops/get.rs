@@ -102,7 +102,7 @@ fn map_get_error(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "get",
     category = "plotting",
-    summary = "Get properties from plotting handles.",
+    summary = "Get graphics object properties.",
     keywords = "get,plotting,handle,property",
     type_resolver(get_type),
     descriptor(crate::builtins::plotting::get::GET_DESCRIPTOR),

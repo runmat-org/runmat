@@ -111,7 +111,7 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "conj",
     category = "math/elementwise",
-    summary = "Compute the complex conjugate of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute complex conjugates element-wise.",
     keywords = "conj,complex conjugate,complex,elementwise,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

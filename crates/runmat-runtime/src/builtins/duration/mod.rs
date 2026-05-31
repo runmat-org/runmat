@@ -732,7 +732,7 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
     descriptor(crate::builtins::duration::DURATION_DESCRIPTOR),
     builtin_path = "crate::builtins::duration",
     category = "datetime",
-    summary = "Create MATLAB-compatible duration arrays from hour, minute, and second components.",
+    summary = "Create duration arrays from hour, minute, and second components.",
     keywords = "duration,time span,elapsed time,Format",
     related = "datetime,string,char,disp",
     examples = "t = duration(1, 30, 45);"

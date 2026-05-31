@@ -299,7 +299,7 @@ impl PatternSpec {
 #[runtime_builtin(
     name = "strip",
     category = "strings/transform",
-    summary = "Remove leading and trailing characters from strings, character arrays, and cell arrays.",
+    summary = "Remove leading and trailing characters from supported text containers.",
     keywords = "strip,trim,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),

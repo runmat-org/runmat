@@ -211,7 +211,7 @@ fn rmfield_error_with_message(
 #[runtime_builtin(
     name = "rmfield",
     category = "structs/core",
-    summary = "Remove one or more fields from scalar structs or struct arrays.",
+    summary = "Remove one or more named fields from structs or struct arrays.",
     keywords = "rmfield,struct,remove field,struct array",
     type_resolver(rmfield_type),
     descriptor(crate::builtins::structs::core::rmfield::RMFIELD_DESCRIPTOR),

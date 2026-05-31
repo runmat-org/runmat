@@ -122,7 +122,7 @@ fn disp_error_with(
 #[runtime_builtin(
     name = "disp",
     category = "io",
-    summary = "Display value in the Command Window without returning output.",
+    summary = "Display values without returning output.",
     keywords = "disp,display,print,gpu",
     sink = true,
     accel = "sink",

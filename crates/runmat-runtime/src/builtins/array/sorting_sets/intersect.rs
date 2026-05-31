@@ -272,7 +272,7 @@ fn intersect_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "intersect",
     category = "array/sorting_sets",
-    summary = "Return common elements or rows across arrays with MATLAB-compatible ordering and index outputs.",
+    summary = "Return common elements or rows across arrays with index outputs.",
     keywords = "intersect,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,

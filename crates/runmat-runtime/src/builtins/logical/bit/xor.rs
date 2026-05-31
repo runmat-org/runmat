@@ -128,7 +128,7 @@ pub const XOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "xor",
     category = "logical/bit",
-    summary = "Element-wise logical XOR for scalars, arrays, and gpuArray values.",
+    summary = "Compute element-wise logical XOR across scalar or array inputs.",
     keywords = "logical,xor,exclusive,boolean,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

@@ -175,7 +175,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "delete",
     category = "io/repl_fs",
-    summary = "Remove files using MATLAB-compatible wildcard expansion, array inputs, and error diagnostics.",
+    summary = "Remove files.",
     keywords = "delete,remove file,wildcard delete,cleanup,temporary files,MATLAB delete",
     accel = "cpu",
     sink = true,

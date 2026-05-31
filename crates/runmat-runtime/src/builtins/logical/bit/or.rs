@@ -125,7 +125,7 @@ pub const OR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "or",
     category = "logical/bit",
-    summary = "Element-wise logical OR for scalars, arrays, and gpuArray values.",
+    summary = "Compute element-wise logical OR across scalar or array inputs.",
     keywords = "logical,or,elementwise,boolean,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

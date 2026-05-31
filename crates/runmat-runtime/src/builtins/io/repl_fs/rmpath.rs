@@ -181,7 +181,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "rmpath",
     category = "io/repl_fs",
-    summary = "Remove folders from the MATLAB search path used by RunMat.",
+    summary = "Remove folders from the active MATLAB search path.",
     keywords = "rmpath,search path,matlab path,remove folder",
     accel = "cpu",
     suppress_auto_output = true,

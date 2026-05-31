@@ -295,7 +295,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fminbnd",
     category = "math/optim",
-    summary = "Find a local minimum of a scalar function on a bounded interval using Brent's method.",
+    summary = "Find bounded scalar minima with Brent's method.",
     keywords = "fminbnd,bounded minimization,brent,golden section,parabolic interpolation,optimization",
     accel = "sink",
     type_resolver(scalar_root_type),

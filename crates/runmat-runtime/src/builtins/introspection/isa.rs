@@ -95,7 +95,7 @@ pub const ISA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "isa",
     category = "introspection",
-    summary = "Test whether a value belongs to a specified MATLAB class or abstract category.",
+    summary = "Test whether a value belongs to a specified class or category.",
     keywords = "isa,type checking,class comparison,numeric category,gpuArray",
     accel = "metadata",
     type_resolver(isa_type),

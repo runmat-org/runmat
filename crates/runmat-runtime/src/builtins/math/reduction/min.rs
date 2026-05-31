@@ -434,7 +434,7 @@ impl MinEvaluation {
 #[runtime_builtin(
     name = "min",
     category = "math/reduction",
-    summary = "Return the minimum elements of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Return minimum elements along dimensions or pairwise comparisons.",
     keywords = "min,minimum,reduction,gpu,comparisonmethod,omitnan",
     accel = "reduction",
     type_resolver(min_type),

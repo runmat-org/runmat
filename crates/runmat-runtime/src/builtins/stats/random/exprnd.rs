@@ -144,7 +144,7 @@ fn exprnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "exprnd",
     category = "stats/random",
-    summary = "Exponentially-distributed random numbers with mean mu.",
+    summary = "Generate exponentially distributed random samples with mean `mu`.",
     keywords = "exprnd,exponential,random,distribution,statistics",
     type_resolver(exprnd_type),
     descriptor(crate::builtins::stats::random::exprnd::EXPRND_DESCRIPTOR),

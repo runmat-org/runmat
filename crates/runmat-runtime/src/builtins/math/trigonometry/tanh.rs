@@ -122,7 +122,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "tanh",
     category = "math/trigonometry",
-    summary = "Hyperbolic tangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute element-wise hyperbolic tangent values.",
     keywords = "tanh,hyperbolic tangent,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

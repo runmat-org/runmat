@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "writematrix",
     category = "io/tabular",
-    summary = "Write numeric or string matrices to delimited text files with MATLAB-compatible defaults.",
+    summary = "Write numeric or string matrices to delimited text files.",
     keywords = "writematrix,csv,delimited text,write,append,quote strings",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),

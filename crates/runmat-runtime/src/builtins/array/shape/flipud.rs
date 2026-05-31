@@ -162,7 +162,7 @@ fn remap_flipud_error(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "flipud",
     category = "array/shape",
-    summary = "Flip an array up-to-down along the first dimension.",
+    summary = "Flip arrays up-to-down.",
     keywords = "flipud,flip,vertical,matrix,gpu",
     accel = "custom",
     type_resolver(preserve_matrix_type),

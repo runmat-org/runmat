@@ -127,7 +127,7 @@ fn strtrim_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "strtrim",
     category = "strings/transform",
-    summary = "Remove leading and trailing whitespace from strings, character arrays, and cell arrays.",
+    summary = "Remove leading and trailing whitespace from text inputs.",
     keywords = "strtrim,trim,whitespace,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),

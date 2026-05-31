@@ -136,7 +136,7 @@ pub const YLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "yline",
     category = "plotting",
-    summary = "Draw horizontal reference lines on the current axes.",
+    summary = "Draw horizontal reference lines on current or specified axes.",
     keywords = "yline,reference,line,plotting",
     sink = true,
     suppress_auto_output = true,

@@ -340,7 +340,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cov",
     category = "stats/summary",
-    summary = "Compute covariance matrices for vectors, matrices, or paired data sets.",
+    summary = "Compute covariance matrices.",
     keywords = "cov,covariance,statistics,weights,gpu",
     accel = "reduction",
     type_resolver(cov_type),

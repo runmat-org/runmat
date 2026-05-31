@@ -132,7 +132,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "string",
     category = "strings/core",
-    summary = "Convert numeric, logical, and text inputs into MATLAB string arrays.",
+    summary = "Convert numeric, logical, and text inputs into string arrays.",
     keywords = "string,convert,text,char,gpu",
     accel = "sink",
     type_resolver(string_array_type),

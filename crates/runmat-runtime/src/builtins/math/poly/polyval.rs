@@ -235,7 +235,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "polyval",
     category = "math/poly",
-    summary = "Evaluate a polynomial at given points with MATLAB-compatible options.",
+    summary = "Evaluate polynomials at specified points.",
     keywords = "polyval,polynomial,polyfit,delta,gpu",
     accel = "sink",
     sink = true,

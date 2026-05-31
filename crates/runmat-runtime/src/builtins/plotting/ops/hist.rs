@@ -476,7 +476,7 @@ impl HistWeightsInput {
 #[runtime_builtin(
     name = "hist",
     category = "plotting",
-    summary = "Plot a histogram with MATLAB-compatible defaults.",
+    summary = "Create legacy center-based histograms.",
     keywords = "hist,histogram,frequency",
     sink = true,
     suppress_auto_output = true,

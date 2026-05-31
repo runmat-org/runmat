@@ -219,7 +219,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "hann",
     category = "math/signal",
-    summary = "Generate a Hann window as an N-by-1 real column vector.",
+    summary = "Generate Hann windows.",
     keywords = "hann,window,signal processing,dsp,fft",
     type_resolver(window_vector_type),
     descriptor(crate::builtins::math::signal::hann::HANN_DESCRIPTOR),

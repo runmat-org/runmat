@@ -1,0 +1,114 @@
+{
+  "title": "imagesc",
+  "category": "plotting",
+  "keywords": [
+    "imagesc",
+    "scaled image",
+    "heatmap",
+    "matrix visualization",
+    "matlab imagesc",
+    "colormap image"
+  ],
+  "summary": "Display scaled matrix images in MATLAB and RunMat.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-imagesc-scaler-field-heatmap.webp",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`imagesc` uses the same modern image/surface path as `image`, but applies scaled color-mapped visualization semantics for matrix data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::imagesc::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`imagesc` displays matrix data using scaled colormap mapping and returns an image handle. Color-limit behavior and axes integration follow MATLAB semantics.",
+  "behaviors": [
+    "`imagesc(C)` displays a matrix using implicit axes and scaled color mapping.",
+    "`imagesc(X, Y, C)` places the scaled image explicitly on the axes using the provided coordinate extents.",
+    "Unlike `image`, `imagesc` is fundamentally about colormap-driven value visualization rather than direct indexed/truecolor graphics-object placement.",
+    "The returned value is still an image-handle object in the shared plotting handle system.",
+    "`imagesc` works naturally with `colormap`, `colorbar`, `caxis`, and subplot-local axes state."
+  ],
+  "examples": [
+    {
+      "description": "Display a matrix as a heatmap-style scaled image",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 60), linspace(-3, 3, 60));\nA = sin(X) .* cos(Y);\nimagesc(A);\ncolorbar;"
+    },
+    {
+      "description": "Place a scaled image on explicit axes",
+      "input": "A = reshape(1:100, 10, 10);\nimagesc([-5 5], [0 1], A);\ncolormap('parula');"
+    },
+    {
+      "description": "Use subplot-local color workflows",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nimagesc(Z);\ncolormap('jet');\ncolorbar;\nsubplot(1, 2, 2);\nimagesc(magic(20));\ncolormap('gray');"
+    },
+    {
+      "description": "Dense matrix as a heatmap",
+      "input": "[X, Y] = meshgrid(linspace(-pi, pi, 300), linspace(-pi, pi, 300));\nZ = sin(3*X) .* cos(2*Y) + cos(X.*Y);\n\nimagesc(Z);\ncolormap('turbo');\ncolorbar;\ntitle('Scalar Field Heatmap');\nxlabel('Column');\nylabel('Row');\naxis equal;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-imagesc-scaler-field-heatmap.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What's the difference between imagesc and image?",
+      "answer": "`imagesc` maps a 2-D matrix through the colormap with automatic scaling — the min value maps to the bottom of the colormap and the max to the top. `image` treats input as direct indexed or truecolor data without automatic scaling. Use `imagesc` for heatmaps and value visualization; use `image` when you have actual image pixel data (RGB arrays or pre-indexed values)."
+    },
+    {
+      "question": "How does colormap scaling work with imagesc?",
+      "answer": "`imagesc` sets the color limits (`caxis`) to `[min(C(:)), max(C(:))]` automatically. Every value in the matrix maps linearly into that range across the active colormap. To override the auto-scaling, call `caxis([lo hi])` after `imagesc`.\n\n```matlab\nimagesc(A);\ncaxis([-1 1]);\ncolorbar;\n```"
+    },
+    {
+      "question": "How do I display a matrix as a heatmap?",
+      "answer": "Pass the matrix directly to `imagesc` and add a colorbar for the legend. Pair with a colormap that suits your data — diverging maps like `'coolwarm'` work well for data centered around zero, sequential maps like `'parula'` for positive-only ranges.\n\n```matlab\nimagesc(myMatrix);\ncolormap('parula');\ncolorbar;\n```"
+    }
+  ],
+  "links": [
+    {
+      "label": "image",
+      "url": "./image"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/imagesc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/imagesc.rs"
+  }
+}

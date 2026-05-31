@@ -211,7 +211,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "write",
     category = "io/net",
-    summary = "Write numeric or text data to a TCP/IP client.",
+    summary = "Write numeric or text payloads to TCP client connections.",
     keywords = "write,tcpclient,networking",
     type_resolver(crate::builtins::io::type_resolvers::write_type),
     descriptor(crate::builtins::io::net::write::WRITE_DESCRIPTOR),

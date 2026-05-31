@@ -1,0 +1,119 @@
+{
+  "title": "image",
+  "category": "plotting",
+  "keywords": [
+    "image",
+    "image display",
+    "truecolor image",
+    "indexed image",
+    "matlab image",
+    "imshow style image"
+  ],
+  "summary": "Display indexed or truecolor images in MATLAB and RunMat.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`image` uses the shared image/surface path and supports GPU-backed paths for indexed and truecolor image inputs."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::image::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`image` displays indexed or truecolor data as a graphics object and returns an image handle. Axes placement, handle properties, and rendering semantics follow MATLAB behavior.",
+  "behaviors": [
+    "`image(C)` displays image data using implicit axes; `image(X, Y, C)` places the image explicitly on the target axes.",
+    "Indexed images and truecolor images both use the shared surface/image rendering architecture.",
+    "The returned value is an image-handle object that works with `get` and `set`.",
+    "`image` is object-oriented and placement-oriented; use `imagesc` when you specifically want scaled matrix visualization with color mapping semantics.",
+    "Dedicated GPU-backed paths cover both indexed and truecolor image inputs when plotting-compatible buffers are available."
+  ],
+  "examples": [
+    {
+      "description": "Display a simple indexed image",
+      "input": "C = [1 2 3; 3 2 1; 2 3 1];\nimage(C);\ncolormap('jet');"
+    },
+    {
+      "description": "Display a truecolor RGB image",
+      "input": "img = zeros(100, 100, 3);\nimg(:,:,1) = 1;\nimg(25:75,25:75,2) = 1;\nimage(img);",
+      "output": "% Displays a truecolor image object"
+    },
+    {
+      "description": "Position an image explicitly on axes and inspect the handle",
+      "input": "C = reshape(1:16, 4, 4);\nh = image([0 3], [10 40], C);\nget(h, 'Type')",
+      "output": "ans =\n    'image'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I display RGB data with image?",
+      "answer": "Pass an MxNx3 array where the third dimension holds red, green, and blue channels. Values should be in `[0, 1]` for doubles or `[0, 255]` for uint8.\n\n```matlab\nimg = zeros(100, 100, 3);\nimg(:,:,1) = 1;           % full red\nimg(30:70, 30:70, 2) = 1; % green square\nimage(img);\n```"
+    },
+    {
+      "question": "When should I use image vs imagesc?",
+      "answer": "`image` displays pixel data as-is — either indexed colors through a colormap or direct RGB truecolor. `imagesc` automatically scales a 2-D matrix so its min and max span the full colormap range. If you're showing actual image pixels or pre-indexed data, use `image`. If you're visualizing a matrix of computed values as a heatmap, use `imagesc`."
+    },
+    {
+      "question": "Why does my image appear upside down?",
+      "answer": "By default, `image` sets the y-axis to go from top to bottom (row 1 at the top), which matches matrix indexing. If your coordinate system expects y to increase upward, call `axis xy` after `image` to flip the axis direction. Use `axis ij` to restore the default matrix-style orientation."
+    }
+  ],
+  "links": [
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/image.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/image.rs"
+  },
+  "gpu_residency": "`image` preserves GPU residency when the image pipeline can consume exported indexed or truecolor image buffers directly. If the active combination cannot stay on the direct path, RunMat gathers once and renders the same image-object semantics on the fallback path.",
+  "gpu_behavior": [
+    "Indexed images and truecolor images both have dedicated GPU-aware rendering paths in the image stack.",
+    "Image handle behavior, axes placement, and replay/export semantics remain aligned across GPU and fallback paths."
+  ]
+}

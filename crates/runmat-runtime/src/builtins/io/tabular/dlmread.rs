@@ -355,7 +355,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "dlmread",
     category = "io/tabular",
-    summary = "Read numeric data from a delimiter-separated text file.",
+    summary = "Read numeric data from delimiter-separated text files.",
     keywords = "dlmread,delimiter,ascii import,range",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tensor_type),

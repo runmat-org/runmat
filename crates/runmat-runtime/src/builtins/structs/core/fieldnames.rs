@@ -114,7 +114,7 @@ fn fieldnames_error_with_message(
 #[runtime_builtin(
     name = "fieldnames",
     category = "structs/core",
-    summary = "List the field names of scalar structs or struct arrays.",
+    summary = "List struct or object field names.",
     keywords = "fieldnames,struct,introspection,fields",
     type_resolver(fieldnames_type),
     descriptor(crate::builtins::structs::core::fieldnames::FIELDNAMES_DESCRIPTOR),

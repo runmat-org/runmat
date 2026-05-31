@@ -168,7 +168,7 @@ fn unifrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "unifrnd",
     category = "stats/random",
-    summary = "Uniformly-distributed random numbers on the interval [a, b).",
+    summary = "Generate uniform random samples on interval [a, b).",
     keywords = "unifrnd,uniform,random,distribution,statistics",
     type_resolver(unifrnd_type),
     descriptor(crate::builtins::stats::random::unifrnd::UNIFRND_DESCRIPTOR),

@@ -192,7 +192,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "diff",
     category = "math/reduction",
-    summary = "Forward finite differences of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute forward finite differences.",
     keywords = "diff,difference,finite difference,nth difference,gpu",
     accel = "diff",
     type_resolver(diff_type),

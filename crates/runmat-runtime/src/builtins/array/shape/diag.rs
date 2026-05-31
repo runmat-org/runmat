@@ -611,7 +611,7 @@ async fn try_parse_size_override(value: &Value) -> BuiltinResult<Option<(usize, 
 #[runtime_builtin(
     name = "diag",
     category = "array/shape",
-    summary = "Extract or create a diagonal from a vector or matrix.",
+    summary = "Create diagonal matrices or extract diagonals.",
     keywords = "diag,diagonal,matrix",
     type_resolver(diag_type),
     descriptor(crate::builtins::array::shape::diag::DIAG_DESCRIPTOR),

@@ -158,7 +158,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "mpower",
     category = "math/linalg/ops",
-    summary = "Matrix power with MATLAB-compatible semantics.",
+    summary = "Raise scalars or square matrices to powers.",
     keywords = "mpower,matrix power,linear algebra,gpu",
     accel = "matmul",
     type_resolver(matrix_unary_type),

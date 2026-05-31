@@ -191,7 +191,7 @@ fn spline_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "spline",
     category = "math/interpolation",
-    summary = "Cubic spline interpolation and piecewise-polynomial construction.",
+    summary = "Construct or evaluate cubic spline interpolants.",
     keywords = "spline,cubic interpolation,pp,ppval",
     accel = "sink",
     sink = true,

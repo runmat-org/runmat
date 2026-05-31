@@ -344,7 +344,7 @@ where
 #[runtime_builtin(
     name = "warning",
     category = "diagnostics",
-    summary = "Display formatted warnings, control warning state, and query per-identifier settings.",
+    summary = "Emit warnings and manage warning states by identifier.",
     keywords = "warning,diagnostics,state,query,backtrace",
     accel = "metadata",
     sink = true,

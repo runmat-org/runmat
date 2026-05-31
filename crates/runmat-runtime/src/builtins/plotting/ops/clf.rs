@@ -70,7 +70,7 @@ pub const CLF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "clf",
     category = "plotting",
-    summary = "Clear figure contents, optionally targeting specific handles.",
+    summary = "Clear figure contents.",
     keywords = "clf,clear figure,plotting",
     sink = true,
     suppress_auto_output = true,

@@ -494,7 +494,7 @@ enum NormParse {
 #[runtime_builtin(
     name = "std",
     category = "math/reduction",
-    summary = "Standard deviation of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute sample or population standard deviation across array data.",
     keywords = "std,standard deviation,statistics,gpu,omitnan,all,like,native",
     accel = "reduction",
     type_resolver(std_type),

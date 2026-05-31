@@ -150,7 +150,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "mrdivide",
     category = "math/linalg/ops",
-    summary = "Solve X * B = A using MATLAB-compatible right division.",
+    summary = "Solve linear systems using right division.",
     keywords = "mrdivide,matrix division,linear algebra,least squares,gpu",
     accel = "mrdivide",
     type_resolver(right_divide_type),

@@ -147,7 +147,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "mtimes",
     category = "math/linalg/ops",
-    summary = "Matrix multiplication with MATLAB-compatible semantics.",
+    summary = "Multiply arrays with matrix-product semantics.",
     keywords = "mtimes,matrix multiplication,linear algebra,gpu",
     accel = "matmul",
     type_resolver(matmul_type),

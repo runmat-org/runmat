@@ -69,7 +69,7 @@ pub const CLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "close",
     category = "general",
-    summary = "Close plotting figures or networking resources.",
+    summary = "Close figures or networking resources.",
     keywords = "close,figure,tcpclient,tcpserver,networking",
     sink = true,
     suppress_auto_output = true,

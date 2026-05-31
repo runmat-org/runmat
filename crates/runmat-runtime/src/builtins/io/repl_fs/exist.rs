@@ -161,7 +161,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "exist",
     category = "io/repl_fs",
-    summary = "Determine whether a variable, file, folder, built-in, or class exists.",
+    summary = "Determine whether variables, files, folders, or symbols exist.",
     keywords = "exist,file,dir,var,builtin,class",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::exist_type),

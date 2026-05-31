@@ -177,7 +177,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "polyder",
     category = "math/poly",
-    summary = "Differentiate polynomials, products, and ratios with MATLAB-compatible coefficient vectors.",
+    summary = "Differentiate polynomials, products, and ratios.",
     keywords = "polyder,polynomial,derivative,product,quotient",
     type_resolver(polyder_type),
     descriptor(crate::builtins::math::poly::polyder::POLYDER_DESCRIPTOR),

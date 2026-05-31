@@ -124,7 +124,7 @@ fn sqrt_error_with_detail(
 #[runtime_builtin(
     name = "sqrt",
     category = "math/elementwise",
-    summary = "Element-wise square root of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute principal square roots element-wise across array inputs.",
     keywords = "sqrt,square root,elementwise,gpu,complex",
     accel = "unary",
     type_resolver(numeric_unary_type),

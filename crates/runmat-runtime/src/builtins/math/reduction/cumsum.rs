@@ -303,7 +303,7 @@ enum CumsumNanMode {
 #[runtime_builtin(
     name = "cumsum",
     category = "math/reduction",
-    summary = "Cumulative sum of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute cumulative sums.",
     keywords = "cumsum,cumulative sum,running total,reverse,omitnan,gpu",
     accel = "reduction",
     type_resolver(cumsum_type),

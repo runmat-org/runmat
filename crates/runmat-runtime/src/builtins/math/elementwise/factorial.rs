@@ -177,7 +177,7 @@ fn factorial_error_with_detail(
 #[runtime_builtin(
     name = "factorial",
     category = "math/elementwise",
-    summary = "Element-wise factorial for non-negative integers.",
+    summary = "Compute element-wise factorial values.",
     keywords = "factorial,n!,permutation,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

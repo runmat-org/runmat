@@ -149,7 +149,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "cd",
     category = "io/repl_fs",
-    summary = "Change the current working folder or query the folder that RunMat is executing in.",
+    summary = "Change or query the current working folder.",
     keywords = "cd,change directory,current folder,working directory,pwd",
     accel = "cpu",
     suppress_auto_output = true,

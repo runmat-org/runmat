@@ -316,7 +316,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
 #[runtime_builtin(
     name = "setfield",
     category = "structs/core",
-    summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
+    summary = "Assign values into struct fields, nested fields, or struct-array elements.",
     keywords = "setfield,struct,assignment,object property",
     type_resolver(setfield_type),
     descriptor(crate::builtins::structs::core::setfield::SETFIELD_DESCRIPTOR),

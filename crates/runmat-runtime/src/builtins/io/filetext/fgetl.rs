@@ -137,7 +137,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fgetl",
     category = "io/filetext",
-    summary = "Read the next line from a file, excluding newline characters.",
+    summary = "Read the next line without newline characters.",
     keywords = "fgetl,file,io,line,newline",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fgetl_type),

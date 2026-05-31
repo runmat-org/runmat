@@ -292,7 +292,7 @@ fn is_undefined_function(err: &RuntimeError) -> bool {
 #[runtime_builtin(
     name = "getfield",
     category = "structs/core",
-    summary = "Access a field or property from structs, struct arrays, or MATLAB-style objects.",
+    summary = "Access struct or object fields.",
     keywords = "getfield,struct,object,field access",
     type_resolver(getfield_type),
     descriptor(crate::builtins::structs::core::getfield::GETFIELD_DESCRIPTOR),

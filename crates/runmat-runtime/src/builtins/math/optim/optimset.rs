@@ -157,7 +157,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "optimset",
     category = "math/optim",
-    summary = "Create or update an optimization options structure for fzero and fsolve.",
+    summary = "Create or update optimization options structures.",
     keywords = "optimset,options,TolX,TolFun,MaxIter,Display",
     type_resolver(optim_options_type),
     descriptor(crate::builtins::math::optim::optimset::OPTIMSET_DESCRIPTOR),

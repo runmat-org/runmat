@@ -190,7 +190,7 @@ fn map_surfc_internal(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "surfc",
     category = "plotting",
-    summary = "Render a MATLAB-compatible surface with contour overlay.",
+    summary = "Create composite surface plots with projected contour overlays.",
     keywords = "surfc,plotting,surface,contour",
     sink = true,
     suppress_auto_output = true,

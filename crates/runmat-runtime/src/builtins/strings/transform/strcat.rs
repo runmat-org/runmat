@@ -349,7 +349,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
 #[runtime_builtin(
     name = "strcat",
     category = "strings/transform",
-    summary = "Concatenate strings, character arrays, or cell arrays of character vectors element-wise.",
+    summary = "Concatenate text inputs element-wise across compatible array sizes.",
     keywords = "strcat,string concatenation,character arrays,cell arrays",
     accel = "sink",
     type_resolver(text_concat_type),

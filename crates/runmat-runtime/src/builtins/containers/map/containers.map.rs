@@ -735,7 +735,7 @@ struct KeyCandidate {
 #[runtime_builtin(
     name = "containers.Map",
     category = "containers/map",
-    summary = "Create MATLAB-style dictionary objects that map keys to values.",
+    summary = "Create key-value dictionary objects.",
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
     sink = true,

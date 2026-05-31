@@ -53,7 +53,7 @@ fn nyquist_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "nyquist",
     category = "control",
-    summary = "Compute or plot the Nyquist frequency response of a SISO transfer-function model.",
+    summary = "Compute or plot Nyquist frequency responses of SISO transfer-function models.",
     keywords = "nyquist,frequency response,control system,transfer function,tf",
     sink = true,
     suppress_auto_output = true,

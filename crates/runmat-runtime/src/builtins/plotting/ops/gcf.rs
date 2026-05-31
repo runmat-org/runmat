@@ -37,7 +37,7 @@ pub const GCF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "gcf",
     category = "plotting",
-    summary = "Return the handle of the current figure.",
+    summary = "Return the current figure handle.",
     keywords = "gcf,figure,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),

@@ -268,7 +268,7 @@ fn remap_error_flow(err: RuntimeError, error: &'static BuiltinErrorDescriptor) -
 #[runtime_builtin(
     name = "error",
     category = "diagnostics",
-    summary = "Throw an exception with an identifier and a formatted diagnostic message.",
+    summary = "Throw exceptions with identifiers and formatted messages.",
     keywords = "error,exception,diagnostics,throw",
     accel = "metadata",
     type_resolver(error_type),

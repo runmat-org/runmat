@@ -465,7 +465,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
 #[runtime_builtin(
     name = "cat",
     category = "array/shape",
-    summary = "Concatenate arrays along a specified dimension while preserving MATLAB semantics.",
+    summary = "Concatenate arrays along a chosen dimension.",
     keywords = "cat,concatenate,array,dimension,gpu",
     accel = "array_construct",
     type_resolver(cat_type),

@@ -188,7 +188,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "sin",
     category = "math/trigonometry",
-    summary = "Sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute element-wise sine values in radians.",
     keywords = "sin,sine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

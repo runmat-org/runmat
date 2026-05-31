@@ -99,7 +99,7 @@ fn pwd_error_with_detail(
 #[runtime_builtin(
     name = "pwd",
     category = "io/repl_fs",
-    summary = "Return the absolute path to the folder where RunMat is currently executing.",
+    summary = "Return the absolute path of the current working folder.",
     keywords = "pwd,current directory,working folder,present working directory",
     accel = "cpu",
     suppress_auto_output = true,

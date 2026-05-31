@@ -126,7 +126,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atanh",
     category = "math/trigonometry",
-    summary = "Inverse hyperbolic tangent with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse hyperbolic tangent, with complex promotion for |x| > 1.",
     keywords = "atanh,inverse hyperbolic tangent,artanh,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

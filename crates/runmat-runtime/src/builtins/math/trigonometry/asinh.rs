@@ -124,7 +124,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "asinh",
     category = "math/trigonometry",
-    summary = "Inverse hyperbolic sine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Element-wise inverse hyperbolic sine.",
     keywords = "asinh,arcsinh,inverse hyperbolic sine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

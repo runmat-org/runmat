@@ -233,7 +233,7 @@ impl FileEncoding {
 #[runtime_builtin(
     name = "fileread",
     category = "io/filetext",
-    summary = "Read the entire contents of a text file into a 1-by-N character vector.",
+    summary = "Read full text files into character vectors.",
     keywords = "fileread,io,read file,text file,character vector",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fileread_type),

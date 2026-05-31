@@ -127,7 +127,7 @@ fn cosd_complex(re: f64, im: f64) -> (f64, f64) {
 #[runtime_builtin(
     name = "cosd",
     category = "math/trigonometry",
-    summary = "Cosine of input expressed in degrees.",
+    summary = "Compute cosine of degree-valued inputs.",
     keywords = "cosd,cosine,degrees,trigonometry",
     accel = "unary",
     type_resolver(numeric_unary_type),

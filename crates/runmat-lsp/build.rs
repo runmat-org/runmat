@@ -4,15 +4,15 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let builtins_dir = manifest_dir.join("../runmat-runtime/src/builtins/builtins-json");
+    let builtins_dir = manifest_dir.join("../../docs/builtins/reference");
 
-    // Re-run when builtins-json changes (best-effort: per-file + directory).
+    // Re-run when builtin reference JSON changes (best-effort: per-file + directory).
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
 
     let mut entries: Vec<(String, String)> = Vec::new(); // (lookup key, file name)
     let read_dir = fs::read_dir(&builtins_dir).unwrap_or_else(|e| {
         panic!(
-            "failed to read builtins-json at {}: {e}",
+            "failed to read builtin reference JSON at {}: {e}",
             builtins_dir.display()
         )
     });
@@ -53,7 +53,7 @@ fn main() {
     for (key, file_name) in &entries {
         // include_str! must be a compile-time constant; use concat! with CARGO_MANIFEST_DIR.
         out.push_str(&format!(
-            "        {:?} => Some(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../runmat-runtime/src/builtins/builtins-json/{}\"))),\n",
+            "        {:?} => Some(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../docs/builtins/reference/{}\"))),\n",
             key, file_name
         ));
     }

@@ -425,7 +425,7 @@ fn map_plot_internal(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "plot",
     category = "plotting",
-    summary = "Create MATLAB-compatible 2-D line plots.",
+    summary = "Create 2-D line plots.",
     keywords = "plot,line,2d,visualization",
     sink = true,
     suppress_auto_output = true,

@@ -269,7 +269,7 @@ fn union_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "union",
     category = "array/sorting_sets",
-    summary = "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
+    summary = "Return unions of input arrays with ordering and index-output controls.",
     keywords = "union,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,

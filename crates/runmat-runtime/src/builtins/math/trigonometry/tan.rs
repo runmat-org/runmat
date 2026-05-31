@@ -188,7 +188,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "tan",
     category = "math/trigonometry",
-    summary = "Tangent of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute element-wise tangent values in radians.",
     keywords = "tan,tangent,trigonometry,radians,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

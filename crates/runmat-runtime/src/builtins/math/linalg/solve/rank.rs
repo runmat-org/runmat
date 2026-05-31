@@ -175,7 +175,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rank",
     category = "math/linalg/solve",
-    summary = "Compute the numerical rank of a matrix using SVD with MATLAB-compatible tolerance handling.",
+    summary = "Compute a matrix's numerical rank using SVD-based tolerance rules.",
     keywords = "rank,svd,tolerance,matrix,gpu",
     accel = "rank",
     type_resolver(numeric_scalar_type),

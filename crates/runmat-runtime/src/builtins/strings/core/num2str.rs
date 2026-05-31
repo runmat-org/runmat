@@ -220,7 +220,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "num2str",
     category = "strings/core",
-    summary = "Convert numeric scalars, vectors, and matrices into MATLAB-style character arrays using general or custom formats.",
+    summary = "Convert numeric values to character arrays.",
     keywords = "num2str,number to string,format,precision",
     examples = "txt = num2str([1 2 3]);",
     type_resolver(string_scalar_type),

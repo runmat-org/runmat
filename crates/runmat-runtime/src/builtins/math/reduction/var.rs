@@ -276,7 +276,7 @@ enum NormParse {
 #[runtime_builtin(
     name = "var",
     category = "math/reduction",
-    summary = "Variance of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute sample or population variance across array data.",
     keywords = "var,variance,statistics,gpu,omitnan,all",
     accel = "reduction",
     type_resolver(var_type),

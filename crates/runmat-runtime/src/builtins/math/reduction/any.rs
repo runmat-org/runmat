@@ -277,7 +277,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "any",
     category = "math/reduction",
-    summary = "Test whether any element of an array is nonzero with MATLAB-compatible options.",
+    summary = "Test whether any elements are nonzero along a dimension.",
     keywords = "any,logical,reduction,omitnan,all,gpu",
     accel = "reduction",
     type_resolver(any_type),

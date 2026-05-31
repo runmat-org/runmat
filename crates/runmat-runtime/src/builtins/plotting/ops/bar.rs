@@ -257,7 +257,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "bar",
     category = "plotting",
-    summary = "Render a MATLAB-compatible bar chart.",
+    summary = "Create bar charts.",
     keywords = "bar,barchart,plotting",
     sink = true,
     suppress_auto_output = true,

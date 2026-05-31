@@ -235,7 +235,7 @@ fn remap_contains_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "contains",
     category = "strings/search",
-    summary = "Return logical values indicating whether text inputs contain specific patterns.",
+    summary = "Test whether text inputs contain patterns.",
     keywords = "contains,substring,text,ignorecase,search",
     accel = "sink",
     type_resolver(logical_text_match_type),

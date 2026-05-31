@@ -394,7 +394,7 @@ impl PadOptions {
 #[runtime_builtin(
     name = "pad",
     category = "strings/transform",
-    summary = "Pad strings, character arrays, and cell arrays to a target length.",
+    summary = "Pad text values to target lengths with configurable direction and fill characters.",
     keywords = "pad,align,strings,character array",
     accel = "sink",
     type_resolver(text_preserve_type),

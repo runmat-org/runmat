@@ -132,7 +132,7 @@ pub const TITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "title",
     category = "plotting",
-    summary = "Set the current axes title.",
+    summary = "Set the title text for the current or specified axes.",
     keywords = "title,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),

@@ -225,7 +225,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rand",
     category = "array/creation",
-    summary = "Uniform random numbers on (0, 1).",
+    summary = "Generate uniformly distributed pseudorandom numbers on the open interval (0, 1).",
     keywords = "rand,random,uniform,gpu,like",
     accel = "array_construct",
     type_resolver(rand_type),

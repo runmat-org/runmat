@@ -193,7 +193,7 @@ pub const WHO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "who",
     category = "introspection",
-    summary = "List the names of variables in the workspace or MAT-files (MATLAB-compatible).",
+    summary = "List variable names in workspaces or MAT-files.",
     keywords = "who,workspace,variables,introspection",
     accel = "cpu",
     type_resolver(who_type),

@@ -246,7 +246,7 @@ fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "horzcat",
     category = "array/shape",
-    summary = "Concatenate inputs horizontally (dimension 2) just like MATLAB square brackets.",
+    summary = "Concatenate arrays horizontally.",
     keywords = "horzcat,horizontal concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(horzcat_type),
