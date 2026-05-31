@@ -26,6 +26,12 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Language Compatibility](./getting-started/compatability.md)
 - [Hello World](./getting-started/hello-world.md)
 
+## Reference
+
+- [Changelog](./CHANGELOG.md)
+- [Values & Type Model](./VALUES.md)
+- [Glossary](./GLOSSARY.md)
+
 ## Compilation Pipeline
 
 - [Compilation Pipeline](./compiler/index.md)
@@ -110,9 +116,3 @@ If you want to understand how the runtime works internally, start with the [Comp
 - [Testing Strategy](./development/testing.md)
 - [Benchmarking](./development/benchmarking.md)
 - [Telemetry](./development/telemetry.md)
-
-## Reference
-
-- [Changelog](./CHANGELOG.md)
-- [Values & Type Model](./VALUES.md)
-- [Glossary](./GLOSSARY.md)

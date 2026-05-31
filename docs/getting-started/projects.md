@@ -13,7 +13,7 @@ Typically, you should use a project with a manifest once a single script is no l
 
 ## Direct Files And Named Entrypoints
 
-You can always run a file directly:
+In RunMat, you can always run a `.m` file directly:
 
 ```bash
 runmat src/analyze_sales.m
@@ -22,7 +22,7 @@ runmat run src/analyze_sales
 
 The second form can infer `.m` for local paths. Direct file execution is the simplest way to run one script and does not require an entrypoint declaration.
 
-Named entrypoints are useful when a project has one or more canonical entrypoints that you want to run by name:
+Named entrypoints are useful when a project has one or more canonical entrypoints that you want to be able to run by name:
 
 ```bash
 runmat run analysis
@@ -39,13 +39,10 @@ version = "0.1.0"
 roots = ["src"]
 
 [entrypoints.analysis]
-path = "src/analyze_sales"
-
-[runtime.language]
-compat = "runmat"
+path = "src/analyze_sales.m"
 ```
 
-`path` targets point at a source file. The `.m` extension may be omitted. An entrypoint can also target a discovered module/function pair:
+`path` targets point at a source file. Like with direct file execution, the `.m` extension may be omitted. An entrypoint can also target a discovered module/function pair:
 
 ```toml
 [entrypoints.summary]
@@ -65,6 +62,17 @@ roots = ["src", "tests"]
 ```
 
 Source roots are relative to the manifest directory. They must exist and cannot use parent-directory traversal. Files outside configured roots can still be run directly by path, but they are not part of the project source index used for module/function entrypoints and cross-file symbol discovery.
+
+Source roots make functions and symbols in another directory discoverable by name at compile time. RunMat uses them for project discovery, named entrypoints, module/function resolution, package/class/private indexing, LSP analysis, and dependency composition.
+
+In this way, it is similar to `addpath` in MATLAB:
+
+```matlab
+addpath("src")
+addpath("lib")
+```
+
+You can continue to use `addpath` to dynamically add folders to the search path while the project is running in RunMat as well, but is a runtime/environment operation. As such, static analysis tools like the LSP will not be able to see the symbols in the dynamically added folders. It is recommended to add source roots to the project manifest to get the most benefit from RunMat's static analysis capabilities.
 
 ## Local Dependencies
 

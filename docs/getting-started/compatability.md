@@ -56,6 +56,6 @@ Unlike many alternative MATLAB syntax-based runtimes, RunMat provides full `clas
 
 ## Compiler Pipeline
 
-The compatibility layer is primarily enforced during the "Lowering" phase, where the `runmat-parser` AST is converted into `runmat-hir`. This stage resolves identifiers based on MATLAB's complex precedence rules.
+The compatibility layer is primarily enforced during the "Lowering" phase, where the `runmat-parser` AST is converted into `runmat-hir`, and then into a control-flow graph in the [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) stage. These stages resolve identifiers based on MATLAB's complex precedence rules.
 
-See the [compiler pipeline](/docs/runtime/compiler) for a full breakdown of how RunMat resolves identifiers and implements the MATLAB language.
+See the [compiler pipeline](/docs/runtime/compiler) for a full breakdown of how RunMat resolves and implements MATLAB language semantics.
