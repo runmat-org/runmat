@@ -253,9 +253,13 @@ async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
                     let next_solver = solver_from_options(&existing)?;
                     let skip_defaults_from;
                     if next_solver != Solver::Generic && next_solver != solver {
+                        options = if solver == Solver::Generic {
+                            merge_generic_into_defaults(&options, next_solver)?
+                        } else {
+                            default_options(next_solver)
+                        };
                         solver = next_solver;
-                        options = default_options(solver);
-                        skip_defaults_from = None;
+                        skip_defaults_from = Some(next_solver);
                     } else if next_solver != Solver::Generic {
                         solver = next_solver;
                         skip_defaults_from = Some(next_solver);
@@ -429,6 +433,27 @@ fn canonicalize_existing_options(
         default_options(solver)
     };
     apply_struct_fields(existing, &mut out, solver, true, None)?;
+    Ok(out)
+}
+
+fn merge_generic_into_defaults(
+    generic: &StructValue,
+    solver: Solver,
+) -> BuiltinResult<StructValue> {
+    let mut out = default_options(solver);
+    for (key, value) in &generic.fields {
+        if key.eq_ignore_ascii_case("Solver") {
+            continue;
+        }
+        let canonical = canonical_option_name(key);
+        if !solver.accepts_option(&canonical) {
+            continue;
+        }
+        if canonical == "Display" && display_value(solver, value).is_err() {
+            continue;
+        }
+        set_option_field(&mut out, solver, key, value)?;
+    }
     Ok(out)
 }
 
@@ -813,6 +838,31 @@ mod tests {
         assert_eq!(string_field(&options, "Solver"), "fsolve");
         assert_eq!(num_field(&options, "TolX"), 1.0e-8);
         assert_eq!(num_field(&options, "MaxFunEvals"), 2000.0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_generic_to_concrete_solver_preserves_valid_generic_overrides() {
+        let mut generic = StructValue::new();
+        generic.insert("MaxFunEvals", Value::Num(2000.0));
+        generic.insert("Display", Value::from("final"));
+
+        let later = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("TolX"),
+            Value::Num(1.0e-8),
+        ])
+        .expect("later options");
+
+        let options = struct_result(
+            run_optimoptions(vec![Value::Struct(generic), later]).expect("merged options"),
+        );
+
+        assert_eq!(string_field(&options, "Solver"), "fsolve");
+        assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "TolFun"), 1.0e-6);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 2000.0);
+        assert_eq!(string_field(&options, "Display"), "final");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
