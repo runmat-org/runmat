@@ -517,6 +517,12 @@ fn positive_integer_scalar(field: &str, value: &Value) -> BuiltinResult<usize> {
             format!("optimoptions: option {field} must be an integer scalar"),
         ));
     }
+    if parsed >= 2f64.powi(usize::BITS as i32) {
+        return Err(optimoptions_error_with(
+            &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+            format!("optimoptions: option {field} is too large"),
+        ));
+    }
     Ok(parsed as usize)
 }
 
@@ -841,6 +847,21 @@ mod tests {
             Value::Num(1.5),
         ])
         .expect_err("noninteger MaxIter should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:optimoptions:InvalidOptionValue")
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_rejects_out_of_range_integer_options() {
+        let err = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("MaxIter"),
+            Value::Num(2f64.powi(usize::BITS as i32)),
+        ])
+        .expect_err("out-of-range MaxIter should fail");
         assert_eq!(
             err.identifier(),
             Some("RunMat:optimoptions:InvalidOptionValue")
