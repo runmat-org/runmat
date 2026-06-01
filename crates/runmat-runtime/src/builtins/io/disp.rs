@@ -190,11 +190,17 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             RenderMode::TopLevel => format_numeric_tensor(tensor),
             RenderMode::Nested => format_numeric_tensor_nested(tensor),
         },
-        Value::SparseTensor(sparse) => sparse
-            .to_string()
-            .lines()
-            .map(|line| line.to_string())
-            .collect(),
+        Value::SparseTensor(sparse) => match mode {
+            RenderMode::TopLevel => sparse
+                .to_string()
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => {
+                let nnz = sparse.data.len();
+                vec![format!("<sparse {}x{} nnz={}>", sparse.rows, sparse.cols, nnz)]
+            }
+        },
         Value::Complex(re, im) => vec![format!("{}", Value::Complex(*re, *im))],
         Value::ComplexTensor(tensor) => match mode {
             RenderMode::TopLevel => format_complex_tensor(tensor),

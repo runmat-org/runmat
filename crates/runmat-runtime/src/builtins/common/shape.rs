@@ -40,7 +40,7 @@ fn normalize_shape(shape: &[usize]) -> Vec<usize> {
 pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     let dims = match value {
         Value::Tensor(t) => normalize_shape(&t.shape),
-        Value::SparseTensor(t) => vec![t.rows, t.cols],
+        Value::SparseTensor(t) => normalize_shape(&[t.rows, t.cols]),
         Value::ComplexTensor(t) => normalize_shape(&t.shape),
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
