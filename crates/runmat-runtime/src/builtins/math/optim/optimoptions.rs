@@ -217,12 +217,15 @@ async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     })?;
 
     let mut solver;
+    let explicit_solver;
     let mut options = match first {
         Value::Struct(existing) => {
+            explicit_solver = false;
             solver = solver_from_options(&existing)?;
             canonicalize_existing_options(&existing, solver)?
         }
         other => {
+            explicit_solver = true;
             solver = parse_solver(&other)?;
             default_options(solver)
         }
@@ -231,12 +234,34 @@ async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     while let Some(arg) = queue.pop_front() {
         match arg {
             Value::Struct(existing) => {
-                let next_solver = solver_from_options(&existing)?;
-                if next_solver != Solver::Generic {
-                    solver = next_solver;
-                    options = default_options(solver);
+                let copy_solver_field = if explicit_solver {
+                    let next_solver = solver_from_options(&existing)?;
+                    let skip_defaults_from = match next_solver {
+                        Solver::Generic => None,
+                        other if other == solver => None,
+                        other => Some(other),
+                    };
+                    apply_struct_fields(
+                        &existing,
+                        &mut options,
+                        solver,
+                        false,
+                        skip_defaults_from,
+                    )?;
+                    options.insert("Solver", Value::from(solver.name()));
+                    continue;
+                } else {
+                    let next_solver = solver_from_options(&existing)?;
+                    if next_solver != Solver::Generic {
+                        solver = next_solver;
+                        options = default_options(solver);
+                    }
+                    true
+                };
+                apply_struct_fields(&existing, &mut options, solver, copy_solver_field, None)?;
+                if explicit_solver {
+                    options.insert("Solver", Value::from(solver.name()));
                 }
-                apply_struct_fields(&existing, &mut options, solver)?;
             }
             name_value => {
                 let name = expect_string_scalar(
@@ -400,7 +425,7 @@ fn canonicalize_existing_options(
     } else {
         default_options(solver)
     };
-    apply_struct_fields(existing, &mut out, solver)?;
+    apply_struct_fields(existing, &mut out, solver, true, None)?;
     Ok(out)
 }
 
@@ -408,12 +433,25 @@ fn apply_struct_fields(
     source: &StructValue,
     target: &mut StructValue,
     solver: Solver,
+    copy_solver_field: bool,
+    skip_defaults_from: Option<Solver>,
 ) -> BuiltinResult<()> {
+    let source_defaults = skip_defaults_from.map(default_options);
     for (key, value) in &source.fields {
         if key.eq_ignore_ascii_case("Solver") {
+            if !copy_solver_field {
+                continue;
+            }
             let parsed = parse_solver(value)?;
             target.insert("Solver", Value::from(parsed.name()));
             continue;
+        }
+        let canonical = canonical_option_name(key);
+        if let Some(defaults) = &source_defaults {
+            if lookup_case_insensitive(defaults, &canonical).is_some_and(|default| default == value)
+            {
+                continue;
+            }
         }
         set_option_field(target, solver, key, value)?;
     }
@@ -718,6 +756,30 @@ mod tests {
         let options = struct_result(run_optimoptions(vec![first, second]).expect("merged options"));
         assert_eq!(num_field(&options, "TolX"), 1.0e-8);
         assert_eq!(num_field(&options, "MaxIter"), 30.0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_solver_form_keeps_requested_solver_when_struct_has_solver() {
+        let fzero_options = run_optimoptions(vec![
+            Value::from("fzero"),
+            Value::from("TolX"),
+            Value::Num(1.0e-8),
+            Value::from("MaxIter"),
+            Value::Num(30.0),
+        ])
+        .expect("fzero options");
+
+        let options = struct_result(
+            run_optimoptions(vec![Value::from("fsolve"), fzero_options])
+                .expect("merged into fsolve options"),
+        );
+
+        assert_eq!(string_field(&options, "Solver"), "fsolve");
+        assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "MaxIter"), 30.0);
+        assert_eq!(num_field(&options, "TolFun"), 1.0e-6);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 40000.0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
