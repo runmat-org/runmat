@@ -94,10 +94,7 @@ pub(crate) async fn dispatch_call_method(
     match base {
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
-                crate::runtime_descriptor_error(
-                    "call_method",
-                    &CALL_METHOD_ERROR_RECEIVER_INVALID,
-                )
+                crate::runtime_descriptor_error("call_method", &CALL_METHOD_ERROR_RECEIVER_INVALID)
             })?;
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(receiver.clone());

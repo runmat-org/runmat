@@ -275,7 +275,13 @@ fn class_constructor_call_is_tagged_as_constructor_call_kind() {
         .hir_index
         .calls
         .iter()
-        .map(|call| format!("{:?}:{}", call.kind, call.name.display_name().unwrap_or_default()))
+        .map(|call| {
+            format!(
+                "{:?}:{}",
+                call.kind,
+                call.name.display_name().unwrap_or_default()
+            )
+        })
         .collect::<Vec<_>>();
     assert!(
         result

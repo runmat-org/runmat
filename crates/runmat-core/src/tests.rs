@@ -166,18 +166,15 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
         let is_h = match &upsert.key {
             abi::WorkspaceBindingKey::Interactive { name, .. } => name.0 == "h",
             abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == "h",
-            abi::WorkspaceBindingKey::Global { .. } | abi::WorkspaceBindingKey::Persistent { .. } => {
-                false
-            }
+            abi::WorkspaceBindingKey::Global { .. }
+            | abi::WorkspaceBindingKey::Persistent { .. } => false,
         };
         if !is_h {
             return false;
         }
         match &upsert.value {
             runmat_builtins::Value::Bool(_) => true,
-            runmat_builtins::Value::LogicalArray(array) => {
-                array.shape == vec![1, 1]
-            }
+            runmat_builtins::Value::LogicalArray(array) => array.shape == vec![1, 1],
             _ => false,
         }
     });
@@ -237,17 +234,19 @@ fn execute_request_supports_warning_off_all_command_rewrite() {
 #[test]
 fn execute_request_supports_clearvars_name_command_rewrite() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
-        source: abi::SourceInput::Text {
-            name: "command-clearvars-name.m".to_string(),
-            text: "x = 1; y = 2; clearvars x; ex = exist('x', 'var'); ey = exist('y', 'var');"
-                .to_string(),
-        },
-        compatibility: CompatMode::Matlab,
-        host_policy: abi::HostExecutionPolicy::default(),
-        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
-        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(20)),
-    }))
+    let outcome = block_on(
+        session.execute_request(abi::ExecutionRequest {
+            source: abi::SourceInput::Text {
+                name: "command-clearvars-name.m".to_string(),
+                text: "x = 1; y = 2; clearvars x; ex = exist('x', 'var'); ey = exist('y', 'var');"
+                    .to_string(),
+            },
+            compatibility: CompatMode::Matlab,
+            host_policy: abi::HostExecutionPolicy::default(),
+            requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+            workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(20)),
+        }),
+    )
     .expect("clearvars command syntax should execute");
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -330,13 +329,9 @@ fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
     }))
     .expect("request should complete with runtime diagnostic");
     assert!(
-        outcome
-            .diagnostics
-            .iter()
-            .any(|diag| diag
-                .message
-            .contains("clearvars: -except requires at least one variable name"),
-        ),
+        outcome.diagnostics.iter().any(|diag| diag
+            .message
+            .contains("clearvars: -except requires at least one variable name"),),
         "missing clearvars -except diagnostic: {:?}",
         outcome.diagnostics
     );
@@ -835,7 +830,11 @@ end
         .expect("execute script");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "cls", &runmat_builtins::Value::String("Vec2".into())),
+        outcome_has_named_upsert(
+            &outcome,
+            "cls",
+            &runmat_builtins::Value::String("Vec2".into())
+        ),
         "expected class() result to be Vec2"
     );
     assert!(
@@ -1587,11 +1586,8 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "c = Color.Red; cls = class(c);",
-    )
-    .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "c = Color.Red; cls = class(c);")
+        .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -1703,7 +1699,11 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        !outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("BAD".into())
+        ),
         "sealed class inheritance should fail"
     );
     assert!(
@@ -1779,7 +1779,11 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        !outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("BAD".into())
+        ),
         "abstract class instantiation should fail"
     );
 }
@@ -1856,7 +1860,11 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        !outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("BAD".into())
+        ),
         "concrete subclass missing abstract method should fail"
     );
     assert!(
@@ -1953,7 +1961,11 @@ end
         .expect("execute script");
 
     assert!(
-        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        !outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("BAD".into())
+        ),
         "overriding sealed method should fail"
     );
     assert!(
@@ -2141,21 +2153,13 @@ end
     let empty = runmat_builtins::Value::Tensor(
         runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
     );
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "a",
-        &empty
-    ));
+    assert!(outcome_has_named_upsert(&outcome, "a", &empty));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
         &runmat_builtins::Value::String("RunMat:PropertyReadOnly".into())
     ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "b",
-        &empty
-    ));
+    assert!(outcome_has_named_upsert(&outcome, "b", &empty));
 }
 
 #[test]
@@ -2413,7 +2417,7 @@ end
 
 #[test]
 fn execute_path_request_supports_qualified_superclass_constructor_syntax() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
     std::fs::create_dir_all(root.join("+pkg1")).expect("create package");
@@ -2547,8 +2551,7 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(tmp.path().join("main.m"), "b = B(); v = b.f();")
-        .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "b = B(); v = b.f();").expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -2643,8 +2646,7 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(tmp.path().join("main.m"), "b = B(); v = f(b);")
-        .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "b = B(); v = f(b);").expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -2754,8 +2756,11 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(tmp.path().join("main.m"), "p = P(6); a = p.twice(); b = twice(p);")
-        .expect("write script source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "p = P(6); a = p.twice(); b = twice(p);",
+    )
+    .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -3092,11 +3097,8 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "a = S.f(3); b = f(3);",
-    )
-    .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "a = S.f(3); b = f(3);")
+        .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -3129,11 +3131,8 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "import S.*; a = f(3);",
-    )
-    .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "import S.*; a = f(3);")
+        .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -3250,11 +3249,8 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "import S.*; h = @f; a = h(3);",
-    )
-    .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "import S.*; h = @f; a = h(3);")
+        .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -3285,11 +3281,8 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "import S.f; h = @f; a = h(3);",
-    )
-    .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "import S.f; h = @f; a = h(3);")
+        .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -3333,11 +3326,8 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "import A.*; import B.*; h = @f;",
-    )
-    .expect("write script source");
+    std::fs::write(tmp.path().join("main.m"), "import A.*; import B.*; h = @f;")
+        .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -3694,7 +3684,7 @@ end
 
 #[test]
 fn execute_path_request_supports_source_class_subsref_signature() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -3743,7 +3733,7 @@ y = o(2);
 
 #[test]
 fn execute_path_request_supports_source_class_subsasgn_signature() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -3801,7 +3791,7 @@ y = o(2);
 
 #[test]
 fn execute_path_request_supports_source_class_subsref_and_member_index_chains() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -3929,7 +3919,11 @@ total = c.amount;
         .expect("execute script");
 
     assert!(
-        outcome_has_named_upsert(&outcome, "t", &runmat_builtins::Value::String("Vec2".to_string())),
+        outcome_has_named_upsert(
+            &outcome,
+            "t",
+            &runmat_builtins::Value::String("Vec2".to_string())
+        ),
         "class() should preserve source class identity"
     );
     assert!(
@@ -4433,8 +4427,11 @@ end
 "#,
     )
     .expect("write class source");
-    std::fs::write(tmp.path().join("main.m"), "import pkg.C; fh = @C.g; y = fh(2);")
-        .expect("write script source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.C; fh = @C.g; y = fh(2);",
+    )
+    .expect("write script source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
@@ -4755,7 +4752,10 @@ end
         })
         .expect("spawn protected-getmethod-subclass test thread")
         .join();
-    assert!(result.is_ok(), "protected getmethod subclass thread panicked");
+    assert!(
+        result.is_ok(),
+        "protected getmethod subclass thread panicked"
+    );
 }
 
 #[test]

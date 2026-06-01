@@ -360,7 +360,10 @@ fn class_name_from_base(base: &Value) -> Option<&str> {
 fn build_matlab_substruct_arg(descriptor: &ObjectIndexDescriptor) -> Result<Value, RuntimeError> {
     let subs_value = match &descriptor.selector {
         ObjectIndexSelector::ScalarIndices { indices } => {
-            let values = indices.iter().map(|index| Value::Num(*index as f64)).collect();
+            let values = indices
+                .iter()
+                .map(|index| Value::Num(*index as f64))
+                .collect();
             build_protocol_index_cell(values)?
         }
         ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values.clone())?,
@@ -501,27 +504,32 @@ pub(crate) async fn call_object_index_descriptor_method_with_outputs(
         if let Some((method, owner)) =
             runmat_builtins::lookup_method(class_name, descriptor.op.protocol_name())
         {
-            let mut semantic_args = vec![descriptor.base.clone(), build_matlab_substruct_arg(&descriptor)?];
+            let mut semantic_args = vec![
+                descriptor.base.clone(),
+                build_matlab_substruct_arg(&descriptor)?,
+            ];
             if let Some(rhs) = descriptor.rhs.clone() {
                 semantic_args.push(rhs);
             }
-            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function_by_name(
-                &method.function_name,
-                &semantic_args,
-                requested_outputs,
-            )
-            .await
+            if let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_function_by_name(
+                    &method.function_name,
+                    &semantic_args,
+                    requested_outputs,
+                )
+                .await
             {
                 return result;
             }
             let owner_qualified = format!("{}.{}", owner, descriptor.op.protocol_name());
             if owner_qualified != method.function_name {
-                if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function_by_name(
-                    &owner_qualified,
-                    &semantic_args,
-                    requested_outputs,
-                )
-                .await
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_function_by_name(
+                        &owner_qualified,
+                        &semantic_args,
+                        requested_outputs,
+                    )
+                    .await
                 {
                     return result;
                 }

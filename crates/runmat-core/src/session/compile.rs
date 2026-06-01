@@ -110,11 +110,15 @@ fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name
     }
 }
 
-fn source_index_qualified_class_name(source: &runmat_config::project::ProjectSourceFile) -> Option<&str> {
-    source
-        .package_path
-        .as_ref()
-        .and_then(|_| source.qualified_name.contains('.').then_some(source.qualified_name.as_str()))
+fn source_index_qualified_class_name(
+    source: &runmat_config::project::ProjectSourceFile,
+) -> Option<&str> {
+    source.package_path.as_ref().and_then(|_| {
+        source
+            .qualified_name
+            .contains('.')
+            .then_some(source.qualified_name.as_str())
+    })
 }
 
 async fn discover_companion_from_composition_graph_async(
@@ -144,7 +148,8 @@ async fn discover_companion_from_composition_graph_async(
                     if file_path == primary_source_path {
                         continue;
                     }
-                    let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await else {
+                    let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await
+                    else {
                         continue;
                     };
                     if !contents.contains("classdef") {

@@ -11,9 +11,7 @@
 )]
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
-use runmat_builtins::{
-    BuiltinErrorDescriptor, Value,
-};
+use runmat_builtins::{BuiltinErrorDescriptor, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_gc_api::GcPtr;
 
@@ -451,25 +449,32 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
     fn resolve_text_handle(text: &str) -> Option<Value> {
         let name = normalize_handle_name(text)?;
         let function = crate::user_functions::resolve_semantic_function_by_name(&name)?;
-        Some(Value::BoundFunctionHandle {
-            name,
-            function,
-        })
+        Some(Value::BoundFunctionHandle { name, function })
     }
 
     match callback {
-        Value::String(text) => resolve_text_handle(&text)
-            .unwrap_or_else(|| crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String(text.clone())).unwrap_or(Value::String(text))),
+        Value::String(text) => resolve_text_handle(&text).unwrap_or_else(|| {
+            crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String(
+                text.clone(),
+            ))
+            .unwrap_or(Value::String(text))
+        }),
         Value::StringArray(array) if array.data.len() == 1 => {
             let text = &array.data[0];
             resolve_text_handle(text).unwrap_or_else(|| {
-                crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(array.clone())).unwrap_or(Value::StringArray(array))
+                crate::builtins::introspection::function_handle_text::dispatch_str2func(
+                    Value::StringArray(array.clone()),
+                )
+                .unwrap_or(Value::StringArray(array))
             })
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             let text: String = chars.data.iter().collect();
             resolve_text_handle(&text).unwrap_or_else(|| {
-                crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::CharArray(chars.clone())).unwrap_or(Value::CharArray(chars))
+                crate::builtins::introspection::function_handle_text::dispatch_str2func(
+                    Value::CharArray(chars.clone()),
+                )
+                .unwrap_or(Value::CharArray(chars))
             })
         }
         Value::FunctionHandle(name) => {
@@ -629,12 +634,12 @@ pub(crate) async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
                 Ok(Value::Num(0.0))
             }
         }
-        other => Err(
-            build_runtime_error(format!("get.p: requires object receiver (got {other:?})"))
-                .with_builtin("get.p")
-                .with_identifier("RunMat:GetPReceiverInvalid")
-                .build(),
-        ),
+        other => Err(build_runtime_error(format!(
+            "get.p: requires object receiver (got {other:?})"
+        ))
+        .with_builtin("get.p")
+        .with_identifier("RunMat:GetPReceiverInvalid")
+        .build()),
     }
 }
 
@@ -644,12 +649,12 @@ pub(crate) async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResul
             o.properties.insert("p_backing".to_string(), val);
             Ok(Value::Object(o))
         }
-        other => Err(
-            build_runtime_error(format!("set.p: requires object receiver (got {other:?})"))
-                .with_builtin("set.p")
-                .with_identifier("RunMat:SetPReceiverInvalid")
-                .build(),
-        ),
+        other => Err(build_runtime_error(format!(
+            "set.p: requires object receiver (got {other:?})"
+        ))
+        .with_builtin("set.p")
+        .with_identifier("RunMat:SetPReceiverInvalid")
+        .build()),
     }
 }
 
@@ -659,11 +664,12 @@ pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::Bu
 
 pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Value> {
     if runmat_builtins::is_class_abstract(&class_name) {
-        return Err(
-            build_runtime_error(format!("Cannot instantiate abstract class '{}'.", class_name))
-                .with_identifier("RunMat:AbstractMethodMissing")
-                .build(),
-        );
+        return Err(build_runtime_error(format!(
+            "Cannot instantiate abstract class '{}'.",
+            class_name
+        ))
+        .with_identifier("RunMat:AbstractMethodMissing")
+        .build());
     }
     if let Some(def) = runmat_builtins::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
@@ -704,14 +710,15 @@ pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Val
         for cd in chain {
             for (k, p) in cd.properties.iter() {
                 if !p.is_static {
-                    obj.properties
-                        .insert(k.clone(), p.default_value.clone().unwrap_or_else(empty_default));
+                    obj.properties.insert(
+                        k.clone(),
+                        p.default_value.clone().unwrap_or_else(empty_default),
+                    );
                 }
             }
         }
         if is_handle_class {
-            let gc = runmat_gc::gc_allocate(Value::Object(obj))
-                .map_err(|e| format!("gc: {e}"))?;
+            let gc = runmat_gc::gc_allocate(Value::Object(obj)).map_err(|e| format!("gc: {e}"))?;
             Ok(Value::HandleObject(runmat_builtins::HandleRef {
                 class_name: def.name.clone(),
                 target: gc,
@@ -841,12 +848,11 @@ pub async fn call_super_method(
         crate::user_functions::try_call_semantic_function_by_name(&method.function_name, &args, 1)
             .await
     else {
-        return Err(build_runtime_error(format!(
-            "Undefined function: {}",
-            method.function_name
-        ))
-        .with_identifier("RunMat:UndefinedFunction")
-        .build());
+        return Err(
+            build_runtime_error(format!("Undefined function: {}", method.function_name))
+                .with_identifier("RunMat:UndefinedFunction")
+                .build(),
+        );
     };
     result
 }
@@ -1302,7 +1308,9 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
                 let mut method_args = c.captures.iter().skip(2).cloned().collect::<Vec<_>>();
                 method_args.extend(rest);
                 return crate::builtins::introspection::call_method::dispatch_call_method(
-                    base, method, method_args,
+                    base,
+                    method,
+                    method_args,
                 )
                 .await;
             }
@@ -1698,8 +1706,10 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(145)
             })));
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("resolved_target".to_string()))
-            .expect("str2func should succeed");
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::String("resolved_target".to_string()),
+        )
+        .expect("str2func should succeed");
         assert_eq!(
             value,
             Value::BoundFunctionHandle {
@@ -1712,16 +1722,20 @@ mod tests {
     #[test]
     fn str2func_returns_dynamic_handle_when_resolver_cannot_resolve() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("@missing_target".to_string()))
-            .expect("str2func should succeed");
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::String("@missing_target".to_string()),
+        )
+        .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("missing_target".to_string()));
     }
 
     #[test]
     fn str2func_returns_external_handle_for_qualified_name() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("Point.origin".to_string()))
-            .expect("str2func should succeed");
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::String("Point.origin".to_string()),
+        )
+        .expect("str2func should succeed");
         assert_eq!(
             value,
             Value::ExternalFunctionHandle("Point.origin".to_string())
@@ -1731,22 +1745,28 @@ mod tests {
     #[test]
     fn str2func_malformed_qualified_name_returns_dynamic_handle() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("Point..origin".to_string()))
-            .expect("str2func should succeed");
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::String("Point..origin".to_string()),
+        )
+        .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
     }
 
     #[test]
     fn func2str_rejects_non_handle_with_identifier() {
-        let err =
-            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::Num(1.0)).expect_err("func2str non-handle input should fail");
+        let err = crate::builtins::introspection::function_handle_text::dispatch_func2str(
+            Value::Num(1.0),
+        )
+        .expect_err("func2str non-handle input should fail");
         assert_eq!(err.identifier(), Some("RunMat:Func2StrHandleTypeInvalid"));
     }
 
     #[test]
     fn str2func_rejects_empty_name_with_identifier() {
-        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("   ".to_string()))
-            .expect_err("empty function name should fail");
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::String("   ".to_string()),
+        )
+        .expect_err("empty function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
     }
 
@@ -1754,25 +1774,31 @@ mod tests {
     fn str2func_rejects_non_row_char_name_with_identifier() {
         let chars = runmat_builtins::CharArray::new(vec!['a', 'b'], 2, 1)
             .expect("char array construction should succeed");
-        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::CharArray(chars))
-            .expect_err("non-row char-array function name should fail");
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::CharArray(chars),
+        )
+        .expect_err("non-row char-array function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
     }
 
     #[test]
     fn str2func_rejects_non_text_name_with_identifier() {
-        let err =
-            crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::Num(1.0)).expect_err("non-text function name should fail");
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::Num(1.0),
+        )
+        .expect_err("non-text function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
     }
 
     #[test]
     fn str2func_accepts_scalar_string_array_name() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
-                .expect("string array construction should succeed"),
-        ))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::StringArray(
+                runmat_builtins::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
+                    .expect("string array construction should succeed"),
+            ),
+        )
         .expect("scalar string-array function name should succeed");
         assert_eq!(value, Value::FunctionHandle("missing_target".to_string()));
     }
@@ -1784,8 +1810,8 @@ mod tests {
             runmat_builtins::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
                 .expect("string array construction should succeed"),
         );
-        let err =
-            crate::builtins::introspection::function_handle_text::dispatch_str2func(value).expect_err("nonscalar string-array function name must fail");
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(value)
+            .expect_err("nonscalar string-array function name must fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
     }
 
@@ -1795,10 +1821,12 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(445)
             })));
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
-                .expect("string array construction should succeed"),
-        ))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::StringArray(
+                runmat_builtins::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
+                    .expect("string array construction should succeed"),
+            ),
+        )
         .expect("scalar string-array function name should resolve semantically");
         assert_eq!(
             value,
@@ -1812,10 +1840,12 @@ mod tests {
     #[test]
     fn str2func_scalar_string_array_returns_external_handle_for_qualified_name() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
-                .expect("string array construction should succeed"),
-        ))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::StringArray(
+                runmat_builtins::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
+                    .expect("string array construction should succeed"),
+            ),
+        )
         .expect("scalar string-array qualified name should succeed");
         assert_eq!(
             value,
@@ -1826,10 +1856,12 @@ mod tests {
     #[test]
     fn str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
-                .expect("string array construction should succeed"),
-        ))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::StringArray(
+                runmat_builtins::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
+                    .expect("string array construction should succeed"),
+            ),
+        )
         .expect("scalar string-array malformed qualified name should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
     }
@@ -1837,10 +1869,12 @@ mod tests {
     #[test]
     fn str2func_scalar_string_array_rejects_empty_name_with_identifier() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["   ".to_string()], vec![1, 1])
-                .expect("string array construction should succeed"),
-        ))
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::StringArray(
+                runmat_builtins::StringArray::new(vec!["   ".to_string()], vec![1, 1])
+                    .expect("string array construction should succeed"),
+            ),
+        )
         .expect_err("scalar string-array empty function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
     }
@@ -1851,10 +1885,15 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.resolved_target").then_some(446)
             })));
-        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
-            runmat_builtins::StringArray::new(vec!["@pkg.resolved_target".to_string()], vec![1, 1])
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
+            Value::StringArray(
+                runmat_builtins::StringArray::new(
+                    vec!["@pkg.resolved_target".to_string()],
+                    vec![1, 1],
+                )
                 .expect("string array construction should succeed"),
-        ))
+            ),
+        )
         .expect("scalar string-array qualified function name should resolve semantically");
         assert_eq!(
             value,
@@ -2070,28 +2109,37 @@ mod tests {
     #[test]
     fn func2str_extracts_name_from_function_handles() {
         assert_eq!(
-            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::FunctionHandle("sin".to_string())).expect("func2str"),
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(
+                Value::FunctionHandle("sin".to_string())
+            )
+            .expect("func2str"),
             Value::String("sin".to_string())
         );
         assert_eq!(
-            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::ExternalFunctionHandle("Point.origin".to_string()))
-                .expect("func2str"),
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(
+                Value::ExternalFunctionHandle("Point.origin".to_string())
+            )
+            .expect("func2str"),
             Value::String("Point.origin".to_string())
         );
         assert_eq!(
-            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::BoundFunctionHandle {
-                name: "local_fn".to_string(),
-                function: 44,
-            })
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(
+                Value::BoundFunctionHandle {
+                    name: "local_fn".to_string(),
+                    function: 44,
+                }
+            )
             .expect("func2str"),
             Value::String("local_fn".to_string())
         );
         assert_eq!(
-            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::Closure(runmat_builtins::Closure {
-                function_name: "captured_fn".to_string(),
-                bound_function: None,
-                captures: Vec::new(),
-            }))
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(
+                Value::Closure(runmat_builtins::Closure {
+                    function_name: "captured_fn".to_string(),
+                    bound_function: None,
+                    captures: Vec::new(),
+                })
+            )
             .expect("func2str"),
             Value::String("captured_fn".to_string())
         );
@@ -2420,11 +2468,13 @@ mod tests {
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let result = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
-            base.clone(),
-            "deal".to_string(),
-            vec![Value::Num(9.0), Value::Num(10.0)],
-        ))
+        let result = block_on(
+            crate::builtins::introspection::call_method::dispatch_call_method(
+                base.clone(),
+                "deal".to_string(),
+                vec![Value::Num(9.0), Value::Num(10.0)],
+            ),
+        )
         .expect("call_method fallback should succeed");
         match result {
             Value::OutputList(values) => {
@@ -2444,11 +2494,13 @@ mod tests {
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let result = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
-            base.clone(),
-            "  deal  ".to_string(),
-            vec![Value::Num(9.0), Value::Num(10.0)],
-        ))
+        let result = block_on(
+            crate::builtins::introspection::call_method::dispatch_call_method(
+                base.clone(),
+                "  deal  ".to_string(),
+                vec![Value::Num(9.0), Value::Num(10.0)],
+            ),
+        )
         .expect("call_method fallback should succeed after method-name trimming");
         match result {
             Value::OutputList(values) => {
@@ -2541,72 +2593,84 @@ mod tests {
 
     #[test]
     fn call_method_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
-            Value::Num(1.0),
-            "origin".to_string(),
-            Vec::new(),
-        ))
+        let err = block_on(
+            crate::builtins::introspection::call_method::dispatch_call_method(
+                Value::Num(1.0),
+                "origin".to_string(),
+                Vec::new(),
+            ),
+        )
         .expect_err("non-object receiver should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
     }
 
     #[test]
     fn call_method_rejects_empty_method_name_with_identifier() {
-        let err = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
-            Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
-            "  ".to_string(),
-            Vec::new(),
-        ))
+        let err = block_on(
+            crate::builtins::introspection::call_method::dispatch_call_method(
+                Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+                "  ".to_string(),
+                Vec::new(),
+            ),
+        )
         .expect_err("empty method name should fail");
         assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
     }
 
     #[test]
     fn subsref_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsref(
-            Value::Num(1.0),
-            OBJECT_INDEX_PAREN.to_string(),
-            Value::Num(2.0),
-        ))
+        let err = block_on(
+            crate::builtins::introspection::object_indexing::dispatch_subsref(
+                Value::Num(1.0),
+                OBJECT_INDEX_PAREN.to_string(),
+                Value::Num(2.0),
+            ),
+        )
         .expect_err("non-object subsref receiver should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
     }
 
     #[test]
     fn subsasgn_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsasgn(
-            Value::Num(1.0),
-            OBJECT_INDEX_PAREN.to_string(),
-            Value::Num(2.0),
-            Value::Num(3.0),
-        ))
+        let err = block_on(
+            crate::builtins::introspection::object_indexing::dispatch_subsasgn(
+                Value::Num(1.0),
+                OBJECT_INDEX_PAREN.to_string(),
+                Value::Num(2.0),
+                Value::Num(3.0),
+            ),
+        )
         .expect_err("non-object subsasgn receiver should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
     }
 
     #[test]
     fn subsref_missing_protocol_errors_with_identifier() {
-        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsref(
-            Value::Object(runmat_builtins::ObjectInstance::new(
-                "NoSubsrefProtocolClass".to_string(),
-            )),
-            OBJECT_INDEX_PAREN.to_string(),
-            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
-        ))
+        let err = block_on(
+            crate::builtins::introspection::object_indexing::dispatch_subsref(
+                Value::Object(runmat_builtins::ObjectInstance::new(
+                    "NoSubsrefProtocolClass".to_string(),
+                )),
+                OBJECT_INDEX_PAREN.to_string(),
+                Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+            ),
+        )
         .expect_err("missing subsref protocol should fail");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
     }
 
     #[test]
     fn subsasgn_missing_protocol_errors_with_identifier() {
-        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsasgn(
-            Value::Object(runmat_builtins::ObjectInstance::new(
-                "NoSubsasgnProtocolClass".to_string(),
-            )),
-            OBJECT_INDEX_PAREN.to_string(),
-            Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
-            Value::Num(3.0),
-        ))
+        let err = block_on(
+            crate::builtins::introspection::object_indexing::dispatch_subsasgn(
+                Value::Object(runmat_builtins::ObjectInstance::new(
+                    "NoSubsasgnProtocolClass".to_string(),
+                )),
+                OBJECT_INDEX_PAREN.to_string(),
+                Value::Cell(runmat_builtins::CellArray::new(vec![Value::Num(1.0)], 1, 1).unwrap()),
+                Value::Num(3.0),
+            ),
+        )
         .expect_err("missing subsasgn protocol should fail");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
     }

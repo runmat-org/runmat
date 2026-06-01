@@ -19,29 +19,37 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
             return Some(class_name.to_string());
         }
     }
-    runmat_builtins::class_names().into_iter().find(|class_name| {
-        runmat_builtins::get_class(class_name).is_some_and(|class_def| {
-            class_def
-                .methods
-                .values()
-                .any(|method| method.function_name == caller_function_name)
+    runmat_builtins::class_names()
+        .into_iter()
+        .find(|class_name| {
+            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+                class_def
+                    .methods
+                    .values()
+                    .any(|method| method.function_name == caller_function_name)
+            })
         })
-    })
 }
 
-fn method_access_permitted(owner: &str, access: &Access, caller_function_name: Option<&str>) -> bool {
+fn method_access_permitted(
+    owner: &str,
+    access: &Access,
+    caller_function_name: Option<&str>,
+) -> bool {
     match access {
         Access::Public => true,
-        Access::Private => caller_class_for_function(caller_function_name).as_deref() == Some(owner),
-        Access::Protected => caller_class_for_function(caller_function_name)
-            .is_some_and(|caller_class| runmat_builtins::is_class_or_subclass(&caller_class, owner)),
+        Access::Private => {
+            caller_class_for_function(caller_function_name).as_deref() == Some(owner)
+        }
+        Access::Protected => {
+            caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
+                runmat_builtins::is_class_or_subclass(&caller_class, owner)
+            })
+        }
     }
 }
 
-fn caller_has_internal_class_access(
-    caller_function_name: Option<&str>,
-    class_name: &str,
-) -> bool {
+fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {
     caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
         runmat_builtins::is_class_or_subclass(&caller_class, class_name)
             || runmat_builtins::is_class_or_subclass(class_name, &caller_class)
@@ -129,8 +137,7 @@ async fn call_member_index_on_object_like(
     caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     if args.is_empty()
-        && get_class(class_name)
-            .is_some_and(|class_def| class_defines_member_subsref(&class_def))
+        && get_class(class_name).is_some_and(|class_def| class_defines_member_subsref(&class_def))
         && !caller_has_internal_class_access(caller_function_name, class_name)
     {
         return Box::pin(call_object_member_subsref(receiver, name)).await;
@@ -145,8 +152,7 @@ async fn call_member_index_on_object_like(
                 ),
             ));
         }
-        if !method_access_permitted(&owner, &m.access, caller_function_name)
-        {
+        if !method_access_permitted(&owner, &m.access, caller_function_name) {
             return Err(mex(
                 "MethodPrivate",
                 &format!("Method '{}' is private", name),
@@ -278,8 +284,7 @@ pub fn load_method_closure(
                         &format!("Method '{}' is not static", name),
                     ));
                 }
-                if !method_access_permitted(&owner, &m.access, caller_function_name)
-                {
+                if !method_access_permitted(&owner, &m.access, caller_function_name) {
                     return Err(mex(
                         "MethodPrivate",
                         &format!("Method '{}' is private", name),
@@ -381,8 +386,7 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                         &format!("Method '{}' is not static", name),
                     ));
                 }
-                if !method_access_permitted(&owner, &m.access, caller_function_name)
-                {
+                if !method_access_permitted(&owner, &m.access, caller_function_name) {
                     return Err(mex(
                         "MethodPrivate",
                         &format!("Method '{}' is private", name),

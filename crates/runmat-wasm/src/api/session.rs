@@ -122,10 +122,13 @@ impl RunMatWasm {
             ExecuteRequestSourcePayload::Text { text, .. } => text.clone(),
             ExecuteRequestSourcePayload::Path { path } => path.clone(),
         };
-        let (source_name, source_text): (Option<String>, Option<String>) = match &request_payload.source {
-            ExecuteRequestSourcePayload::Text { name, text } => (Some(name.clone()), Some(text.clone())),
-            ExecuteRequestSourcePayload::Path { path } => (Some(path.clone()), None),
-        };
+        let (source_name, source_text): (Option<String>, Option<String>) =
+            match &request_payload.source {
+                ExecuteRequestSourcePayload::Text { name, text } => {
+                    (Some(name.clone()), Some(text.clone()))
+                }
+                ExecuteRequestSourcePayload::Path { path } => (Some(path.clone()), None),
+            };
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",

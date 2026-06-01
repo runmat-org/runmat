@@ -785,10 +785,9 @@ pub(crate) mod tests {
                     Value::Bool(flag) => assert!(!flag, "isvalid should report false after delete"),
                     other => panic!("expected bool from isvalid, got {other:?}"),
                 }
-                let original_valid_value = futures::executor::block_on(crate::isvalid_builtin(
-                    original_handle,
-                ))
-                .expect("isvalid");
+                let original_valid_value =
+                    futures::executor::block_on(crate::isvalid_builtin(original_handle))
+                        .expect("isvalid");
                 match original_valid_value {
                     Value::Bool(flag) => assert!(!flag, "original alias should also be invalid"),
                     other => panic!("expected bool from isvalid, got {other:?}"),

@@ -35,7 +35,7 @@ const GETMETHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &GETMETHOD_OUTPUT,
 }];
 
-const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
+const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 3] = [
     BuiltinErrorDescriptor {
         code: "RM.GETMETHOD.NAME_INVALID",
         identifier: Some("RunMat:GetMethodNameInvalid"),
@@ -47,6 +47,12 @@ const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
         identifier: Some("RunMat:GetMethodReceiverUnsupported"),
         when: "Receiver is neither object nor class reference.",
         message: "getmethod: unsupported receiver",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.GETMETHOD.METHOD_PRIVATE",
+        identifier: Some("RunMat:MethodPrivate"),
+        when: "Method exists but is not accessible from the caller scope.",
+        message: "getmethod: method is not accessible from current scope",
     },
 ];
 
@@ -65,9 +71,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
             runmat_builtins::Access::Public => true,
-            runmat_builtins::Access::Private => {
-                caller_class.as_deref() == Some(owner.as_str())
-            }
+            runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
             runmat_builtins::Access::Protected => caller_class
                 .as_deref()
                 .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
@@ -75,23 +79,19 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         if access_allowed {
             return Ok(());
         }
-        Err(crate::build_runtime_error(format!(
-            "Method '{}.{}' is not accessible from current scope.",
-            class_name, method_name
+        Err(crate::runtime_descriptor_error_with_detail(
+            "getmethod",
+            &GETMETHOD_ERRORS[2],
+            format!("Method '{class_name}.{method_name}' is not accessible from current scope."),
         ))
-        .with_builtin("getmethod")
-        .with_identifier("RunMat:MethodPrivate")
-        .build())
     }
 
     let method_name = name.trim();
     if method_name.is_empty() {
-        return Err(
-            crate::build_runtime_error("getmethod: method name must not be empty")
-                .with_builtin("getmethod")
-                .with_identifier("RunMat:GetMethodNameInvalid")
-                .build(),
-        );
+        return Err(crate::runtime_descriptor_error(
+            "getmethod",
+            &GETMETHOD_ERRORS[0],
+        ));
     }
     let caller_scope = crate::class_access_context()
         .map(Value::String)
@@ -99,7 +99,8 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
     match obj {
         Value::Object(o) => {
             ensure_method_accessible(&o.class_name, method_name)?;
-            if let Some((resolved, _owner)) = runmat_builtins::lookup_method(&o.class_name, method_name)
+            if let Some((resolved, _owner)) =
+                runmat_builtins::lookup_method(&o.class_name, method_name)
             {
                 return Ok(Value::Closure(runmat_builtins::Closure {
                     function_name: resolved.function_name.clone(),
@@ -121,7 +122,8 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         }
         Value::HandleObject(h) => {
             ensure_method_accessible(&h.class_name, method_name)?;
-            if let Some((resolved, _owner)) = runmat_builtins::lookup_method(&h.class_name, method_name)
+            if let Some((resolved, _owner)) =
+                runmat_builtins::lookup_method(&h.class_name, method_name)
             {
                 return Ok(Value::Closure(runmat_builtins::Closure {
                     function_name: resolved.function_name.clone(),
@@ -147,12 +149,11 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 format!("@{cls}.{method_name}"),
             ))
         }
-        other => Err(
-            crate::build_runtime_error(format!("getmethod: unsupported receiver ({other:?})"))
-                .with_builtin("getmethod")
-                .with_identifier("RunMat:GetMethodReceiverUnsupported")
-                .build(),
-        ),
+        other => Err(crate::runtime_descriptor_error_with_detail(
+            "getmethod",
+            &GETMETHOD_ERRORS[1],
+            format!("unsupported receiver ({other:?})"),
+        )),
     }
 }
 

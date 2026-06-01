@@ -43,11 +43,12 @@ const CALL_BOUND_METHOD_INPUTS: [BuiltinParamDescriptor; 4] = [
     },
 ];
 
-const CALL_BOUND_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[out] = __runmat_call_bound_method__(base, method, scope, varargin)",
-    inputs: &CALL_BOUND_METHOD_INPUTS,
-    outputs: &CALL_BOUND_METHOD_OUTPUT,
-}];
+const CALL_BOUND_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
+    [BuiltinSignatureDescriptor {
+        label: "[out] = __runmat_call_bound_method__(base, method, scope, varargin)",
+        inputs: &CALL_BOUND_METHOD_INPUTS,
+        outputs: &CALL_BOUND_METHOD_OUTPUT,
+    }];
 
 const CALL_BOUND_METHOD_ERRORS: [BuiltinErrorDescriptor; 1] = [BuiltinErrorDescriptor {
     code: "RM.CALL_BOUND_METHOD.SCOPE_INVALID",
@@ -94,7 +95,8 @@ pub async fn call_bound_method_builtin(
             ))
         }
     };
-    let _scope_guard = scope_class.map(|class_name| crate::push_class_access_context(Some(class_name)));
+    let _scope_guard =
+        scope_class.map(|class_name| crate::push_class_access_context(Some(class_name)));
     let class_name = crate::object_receiver_class_name(&base).ok_or_else(|| {
         crate::runtime_descriptor_error(
             "__runmat_call_bound_method__",
@@ -113,7 +115,8 @@ pub async fn call_bound_method_builtin(
     args.extend(rest);
     let requested_outputs = crate::current_requested_outputs();
     if let Some((_resolved, owner)) = runmat_builtins::lookup_method(&class_name, &method) {
-        return crate::dispatch_object_external_member(owner, &method, args, requested_outputs).await;
+        return crate::dispatch_object_external_member(owner, &method, args, requested_outputs)
+            .await;
     }
     crate::dispatch_object_external_member(class_name, &method, args, requested_outputs).await
 }

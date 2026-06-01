@@ -1,6 +1,6 @@
+use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
-use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
@@ -21,7 +21,14 @@ type ClassRegistration = (
     Option<String>,
     bool,
     bool,
-    Vec<(String, bool, bool, Option<PropertyDefaultLiteral>, String, String)>,
+    Vec<(
+        String,
+        bool,
+        bool,
+        Option<PropertyDefaultLiteral>,
+        String,
+        String,
+    )>,
     Vec<(String, String, bool, bool, bool, String)>,
     Vec<String>,
 );
@@ -443,11 +450,12 @@ fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyD
     }
 
     match &expr.kind {
-        runmat_hir::HirExprKind::Number(text) => text
-            .parse::<f64>()
-            .ok()
-            .map(PropertyDefaultLiteral::Num),
-        runmat_hir::HirExprKind::String(text) => Some(PropertyDefaultLiteral::String(text.0.clone())),
+        runmat_hir::HirExprKind::Number(text) => {
+            text.parse::<f64>().ok().map(PropertyDefaultLiteral::Num)
+        }
+        runmat_hir::HirExprKind::String(text) => {
+            Some(PropertyDefaultLiteral::String(text.0.clone()))
+        }
         runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("true") => {
             Some(PropertyDefaultLiteral::Bool(true))
         }

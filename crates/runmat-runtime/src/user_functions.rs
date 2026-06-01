@@ -141,7 +141,9 @@ pub async fn try_call_semantic_descriptor(
         return None;
     }
     let name = fallback_policy.resolution_name_for(&identity)?;
-    if matches!(identity, CallableIdentity::DynamicName(_)) && runmat_builtins::get_class(&name).is_some() {
+    if matches!(identity, CallableIdentity::DynamicName(_))
+        && runmat_builtins::get_class(&name).is_some()
+    {
         // Constructor calls for class names must flow through runtime constructor dispatch,
         // not generic semantic name resolution.
         return None;

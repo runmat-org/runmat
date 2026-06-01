@@ -714,7 +714,6 @@ mod tests {
         assert_eq!(value, Value::Num(3.0));
     }
 
-
     #[test]
     fn imported_identity_never_falls_back_to_builtin_name_resolution() {
         let descriptor = CallableDescriptor::resolved(

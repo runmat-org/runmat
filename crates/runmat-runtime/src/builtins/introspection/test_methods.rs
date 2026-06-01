@@ -1,12 +1,12 @@
 //! Test-only class/method builtins used by semantic and VM pipeline tests.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
-};
 use crate::{
     runtime_descriptor_error, runtime_descriptor_error_with_detail, OBJECT_INDEX_BRACE,
     OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
+};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 
 const POINT_MOVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -66,7 +66,7 @@ pub const POINT_MOVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "Point.move",
     descriptor(self::POINT_MOVE_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn point_move_method(obj: Value, dx: f64, dy: f64) -> crate::BuiltinResult<Value> {
     match obj {
@@ -117,7 +117,7 @@ pub const POINT_ORIGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "Point.origin",
     descriptor(self::POINT_ORIGIN_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn point_origin_method() -> crate::BuiltinResult<Value> {
     let mut o = runmat_builtins::ObjectInstance::new("Point".to_string());
@@ -158,7 +158,7 @@ pub const SHAPE_AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "Shape.area",
     descriptor(self::SHAPE_AREA_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn shape_area_method(_obj: Value) -> crate::BuiltinResult<Value> {
     Ok(Value::Num(0.0))
@@ -205,7 +205,7 @@ pub const CIRCLE_AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "Circle.area",
     descriptor(self::CIRCLE_AREA_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn circle_area_method(obj: Value) -> crate::BuiltinResult<Value> {
     match obj {
@@ -258,7 +258,7 @@ pub const CTOR_CTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "Ctor.Ctor",
     descriptor(self::CTOR_CTOR_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn ctor_ctor_method(x: f64) -> crate::BuiltinResult<Value> {
     // Construct object with property 'x' initialized
@@ -294,7 +294,7 @@ pub const PKGF_FOO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "PkgF.foo",
     descriptor(self::PKGF_FOO_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn pkgf_foo() -> crate::BuiltinResult<Value> {
     Ok(Value::Num(10.0))
@@ -326,7 +326,7 @@ pub const PKGG_FOO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "PkgG.foo",
     descriptor(self::PKGG_FOO_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn pkgg_foo() -> crate::BuiltinResult<Value> {
     Ok(Value::Num(20.0))
@@ -406,9 +406,13 @@ pub const OVERIDX_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.subsref",
     descriptor(self::OVERIDX_SUBSREF_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
-pub(crate) async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn overidx_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> crate::BuiltinResult<Value> {
     // Simple sentinel implementation: return different values for '.' vs '()'
     match (obj, kind.as_str(), payload) {
         (Value::Object(_), OBJECT_INDEX_PAREN, Value::Cell(_)) => Ok(Value::Num(99.0)),
@@ -502,7 +506,7 @@ pub const OVERIDX_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.subsasgn",
     descriptor(self::OVERIDX_SUBSASGN_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_subsasgn(
     mut obj: Value,
@@ -779,7 +783,7 @@ pub const OVERIDX_XOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.plus",
     descriptor(self::OVERIDX_PLUS_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.plus")?;
@@ -795,7 +799,7 @@ pub(crate) async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.times",
     descriptor(self::OVERIDX_TIMES_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.times")?;
@@ -811,7 +815,7 @@ pub(crate) async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResul
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.mtimes",
     descriptor(self::OVERIDX_MTIMES_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.mtimes")?;
@@ -827,7 +831,7 @@ pub(crate) async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResu
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.lt",
     descriptor(self::OVERIDX_LT_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.lt")?;
@@ -843,7 +847,7 @@ pub(crate) async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<V
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.gt",
     descriptor(self::OVERIDX_GT_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.gt")?;
@@ -859,7 +863,7 @@ pub(crate) async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<V
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.eq",
     descriptor(self::OVERIDX_EQ_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.eq")?;
@@ -875,7 +879,7 @@ pub(crate) async fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<V
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.uplus",
     descriptor(self::OVERIDX_UPLUS_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
     // Identity
@@ -885,7 +889,7 @@ pub(crate) async fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.rdivide",
     descriptor(self::OVERIDX_RDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.rdivide")?;
@@ -901,7 +905,7 @@ pub(crate) async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinRes
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.mrdivide",
     descriptor(self::OVERIDX_MRDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     overidx_rdivide(obj, rhs).await
@@ -910,7 +914,7 @@ pub(crate) async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinRe
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.ldivide",
     descriptor(self::OVERIDX_LDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.ldivide")?;
@@ -926,7 +930,7 @@ pub(crate) async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinRes
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.mldivide",
     descriptor(self::OVERIDX_MLDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     overidx_ldivide(obj, rhs).await
@@ -935,7 +939,7 @@ pub(crate) async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinRe
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.and",
     descriptor(self::OVERIDX_AND_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.and")?;
@@ -951,7 +955,7 @@ pub(crate) async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.or",
     descriptor(self::OVERIDX_OR_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.or")?;
@@ -967,7 +971,7 @@ pub(crate) async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<V
 #[runmat_macros::runtime_builtin(
     name = "OverIdx.xor",
     descriptor(self::OVERIDX_XOR_DESCRIPTOR),
-    builtin_path = "crate"
+    builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = overidx_expect_object(obj, "OverIdx.xor")?;

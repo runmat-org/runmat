@@ -115,7 +115,11 @@ impl Parser {
 
     fn looks_like_super_constructor_stmt(&self) -> bool {
         if !matches!(
-            (self.peek_token(), self.peek_token_at(1), self.peek_token_at(2)),
+            (
+                self.peek_token(),
+                self.peek_token_at(1),
+                self.peek_token_at(2)
+            ),
             (Some(Token::Ident), Some(Token::At), Some(Token::Ident))
         ) {
             return false;
@@ -137,10 +141,9 @@ impl Parser {
         let target_name = target.lexeme.clone();
         let start = target.position;
         if !self.consume(&Token::At) {
-            return Err(self.error_with_expected(
-                "expected '@' for superclass constructor syntax",
-                "'@'",
-            ));
+            return Err(
+                self.error_with_expected("expected '@' for superclass constructor syntax", "'@'")
+            );
         }
         let mut super_parts = Vec::new();
         super_parts.push(self.expect_ident_syntax()?);
@@ -149,10 +152,9 @@ impl Parser {
         }
         let super_name = super_parts.join(".");
         if !self.consume(&Token::LParen) {
-            return Err(self.error_with_expected(
-                "expected '(' after superclass constructor name",
-                "'('",
-            ));
+            return Err(
+                self.error_with_expected("expected '(' after superclass constructor name", "'('")
+            );
         }
         let mut args = Vec::new();
         if !self.consume(&Token::RParen) {

@@ -9,10 +9,11 @@ use crate::{
     HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
     HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
     IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, MemberAccess,
-    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
-    ReferenceResolution, RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId,
-    StringLiteral, SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
+    QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount, SourceId,
+    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
+    WorkspaceVisibility, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME,
+    NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -53,6 +54,7 @@ struct LoweringCtx {
     top_level_await: Vec<bool>,
     runmat_extensions_enabled: bool,
     top_level_await_enabled: bool,
+    try_body_depth: usize,
     function_names: HashMap<String, FunctionId>,
     class_names: HashMap<String, ClassId>,
     external_function_names: HashMap<String, FunctionId>,
@@ -100,7 +102,9 @@ impl LoweringCtx {
                 }
             }
         }
-        if let Some((property, _owner)) = runmat_builtins::lookup_property(class_name, property_name) {
+        if let Some((property, _owner)) =
+            runmat_builtins::lookup_property(class_name, property_name)
+        {
             return property.is_static
                 && property.get_access == runmat_builtins::Access::Public
                 && property.set_access == runmat_builtins::Access::Public;
@@ -209,6 +213,7 @@ impl LoweringCtx {
             top_level_await: Vec::new(),
             runmat_extensions_enabled: context.runmat_extensions_enabled,
             top_level_await_enabled: context.top_level_await_enabled,
+            try_body_depth: 0,
             function_names: HashMap::new(),
             class_names: HashMap::new(),
             external_function_names: context.bound_functions.clone(),
@@ -290,13 +295,8 @@ impl LoweringCtx {
                     members,
                     span,
                 } => {
-                    let class = ctx.lower_class(
-                        attributes,
-                        name,
-                        super_class.as_deref(),
-                        members,
-                        *span,
-                    )?;
+                    let class =
+                        ctx.lower_class(attributes, name, super_class.as_deref(), members, *span)?;
                     ctx.assembly.classes.push(class);
                 }
                 _ => {}
@@ -794,7 +794,12 @@ impl LoweringCtx {
                     let parse_abstract_signature =
                         |stmt: &AstStmt| -> Option<(String, Vec<String>, Vec<String>, Span)> {
                             match stmt {
-                                AstStmt::Assign(output, AstExpr::FuncCall(method_name, args, _), _, span) => {
+                                AstStmt::Assign(
+                                    output,
+                                    AstExpr::FuncCall(method_name, args, _),
+                                    _,
+                                    span,
+                                ) => {
                                     let params = args
                                         .iter()
                                         .map(|arg| match arg {
@@ -804,7 +809,11 @@ impl LoweringCtx {
                                         .collect::<Option<Vec<_>>>()?;
                                     Some((method_name.clone(), params, vec![output.clone()], *span))
                                 }
-                                AstStmt::ExprStmt(AstExpr::FuncCall(method_name, args, _), _, span) => {
+                                AstStmt::ExprStmt(
+                                    AstExpr::FuncCall(method_name, args, _),
+                                    _,
+                                    span,
+                                ) => {
                                     let params = args
                                         .iter()
                                         .map(|arg| match arg {
@@ -1180,8 +1189,11 @@ impl LoweringCtx {
                 let catch_binding = catch_var.as_ref().map(|name| {
                     self.define_binding(name, BindingRole::Local, BindingStorage::Lexical, span)
                 });
+                self.try_body_depth += 1;
+                let lowered_try_body = self.lower_stmts_semantic(try_body);
+                self.try_body_depth -= 1;
                 HirStmtKind::TryCatch {
-                    try_body: self.lower_stmts_semantic(try_body)?,
+                    try_body: lowered_try_body?,
                     catch_binding,
                     catch_body: self.lower_stmts_semantic(catch_body)?,
                 }
@@ -1779,9 +1791,7 @@ impl LoweringCtx {
                         let mut call_args = vec![classref];
                         call_args.extend(
                             args.iter()
-                                .map(|arg| {
-                                    self.lower_call_argument(arg, RequestedOutputCount::One)
-                                })
+                                .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
                                 .collect::<Result<Vec<_>, _>>()?,
                         );
                         return Ok(HirExpr {
@@ -1978,8 +1988,9 @@ impl LoweringCtx {
         } else {
             None
         };
-        let constructor_name_override =
-            imported_constructor.as_ref().map(|(qualified, _)| qualified.as_str());
+        let constructor_name_override = imported_constructor
+            .as_ref()
+            .map(|(qualified, _)| qualified.as_str());
         let (callee, kind) = if let Some(class) = constructor_class {
             let constructor_name = constructor_name_override.unwrap_or(name);
             let constructor_qualified_name = qualified_name(
@@ -2013,16 +2024,28 @@ impl LoweringCtx {
                 HirCallableRef::Builtin(builtin.clone()),
                 CallKind::Builtin(builtin),
             )
-        } else if let Some(def_path) = self.resolve_imported_call_target(name, span)? {
-            (
-                HirCallableRef::Imported(def_path.clone()),
-                CallKind::PackageFunction(def_path),
-            )
         } else {
-            (
-                HirCallableRef::Unresolved(qualified_call_name.clone()),
-                CallKind::Dynamic,
-            )
+            let imported_call_target = match self.resolve_imported_call_target(name, span) {
+                Ok(target) => target,
+                Err(err)
+                    if self.try_body_depth > 0
+                        && err.identifier.as_deref() == Some(IDENT_IMPORT_AMBIGUOUS) =>
+                {
+                    None
+                }
+                Err(err) => return Err(err),
+            };
+            if let Some(def_path) = imported_call_target {
+                (
+                    HirCallableRef::Imported(def_path.clone()),
+                    CallKind::PackageFunction(def_path),
+                )
+            } else {
+                (
+                    HirCallableRef::Unresolved(qualified_call_name.clone()),
+                    CallKind::Dynamic,
+                )
+            }
         };
         self.hir_index.calls.push(CallResolution {
             name: qualified_call_name,
@@ -2243,14 +2266,14 @@ impl LoweringCtx {
         if let Some((qualified_constructor, _)) =
             self.resolve_imported_constructor_target(name, span)?
         {
-            return Ok(crate::FunctionHandleTarget::DefPath(def_path_for_import_path(
-                &qualified_name(
+            return Ok(crate::FunctionHandleTarget::DefPath(
+                def_path_for_import_path(&qualified_name(
                     &qualified_constructor
                         .split('.')
                         .map(ToString::to_string)
                         .collect::<Vec<_>>(),
-                ),
-            )));
+                )),
+            ));
         }
         if name.contains('.') {
             let mut parts = name.split('.');

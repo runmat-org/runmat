@@ -763,9 +763,9 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        _ if object::dispatch_object(instr, stack, current_function_name).await? => Ok(Some(DispatchHandled::Generic(
-            DispatchDecision::FallThrough,
-        ))),
+        _ if object::dispatch_object(instr, stack, current_function_name).await? => Ok(Some(
+            DispatchHandled::Generic(DispatchDecision::FallThrough),
+        )),
         _ if arithmetic::dispatch_arithmetic(instr, stack).await? => Ok(Some(
             DispatchHandled::Generic(DispatchDecision::FallThrough),
         )),
@@ -1270,9 +1270,12 @@ pub async fn dispatch_instruction(
         } => {
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let result =
-                runmat_runtime::call_super_constructor(current_class.clone(), super_class.clone(), args)
-                    .await?;
+            let result = runmat_runtime::call_super_constructor(
+                current_class.clone(),
+                super_class.clone(),
+                args,
+            )
+            .await?;
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -1458,9 +1461,12 @@ pub async fn dispatch_instruction(
         } => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let result =
-                runmat_runtime::call_super_constructor(current_class.clone(), super_class.clone(), args)
-                    .await?;
+            let result = runmat_runtime::call_super_constructor(
+                current_class.clone(),
+                super_class.clone(),
+                args,
+            )
+            .await?;
             stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

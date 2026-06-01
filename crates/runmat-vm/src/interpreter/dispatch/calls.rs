@@ -1,5 +1,5 @@
-use crate::bytecode::ArgSpec;
 use crate::bytecode::instr::PropertyDefaultLiteral;
+use crate::bytecode::ArgSpec;
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
@@ -41,25 +41,27 @@ fn current_class_context_from_function_name(current_function_name: &str) -> Opti
             return Some(class_name.to_string());
         }
     }
-    runmat_builtins::class_names().into_iter().find(|class_name| {
-        runmat_builtins::get_class(class_name).is_some_and(|class_def| {
-            class_def.methods.values().any(|method| {
-                method.function_name == current_function_name
-                    || method
-                        .function_name
-                        .strip_prefix(class_name)
-                        .is_some_and(|suffix| {
-                            suffix
-                                .strip_prefix('.')
-                                .is_some_and(|name| name == current_function_name)
-                        })
-                    || method
-                        .function_name
-                        .rsplit_once('.')
-                        .is_some_and(|(_, name)| name == current_function_name)
+    runmat_builtins::class_names()
+        .into_iter()
+        .find(|class_name| {
+            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+                class_def.methods.values().any(|method| {
+                    method.function_name == current_function_name
+                        || method
+                            .function_name
+                            .strip_prefix(class_name)
+                            .is_some_and(|suffix| {
+                                suffix
+                                    .strip_prefix('.')
+                                    .is_some_and(|name| name == current_function_name)
+                            })
+                        || method
+                            .function_name
+                            .rsplit_once('.')
+                            .is_some_and(|(_, name)| name == current_function_name)
+                })
             })
         })
-    })
 }
 
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
@@ -273,8 +275,8 @@ async fn handle_builtin_call_inner(
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let current_class_context = current_class_context_from_function_name(current_function_name);
-    let _access_guard =
-        current_class_context.map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+    let _access_guard = current_class_context
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
     let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
     let result =
@@ -349,53 +351,56 @@ pub async fn handle_prepared_user_function_call(
     };
     if current_class_context.is_some() {
         if let Some((class_name, method_name)) = static_candidate {
-        if runmat_builtins::get_class(&class_name).is_some() {
-            if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, &method_name)
-            {
-                if method.is_static {
-                    let allowed = match method.access {
-                        Access::Public => true,
-                        Access::Private => {
-                            current_class_context.as_deref() == Some(owner.as_str())
+            if runmat_builtins::get_class(&class_name).is_some() {
+                if let Some((method, owner)) =
+                    runmat_builtins::lookup_method(&class_name, &method_name)
+                {
+                    if method.is_static {
+                        let allowed = match method.access {
+                            Access::Public => true,
+                            Access::Private => {
+                                current_class_context.as_deref() == Some(owner.as_str())
+                            }
+                            Access::Protected => {
+                                current_class_context.as_ref().is_some_and(|caller_class| {
+                                    runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                                })
+                            }
+                        };
+                        if !allowed {
+                            return Err(crate::interpreter::errors::mex(
+                                "MethodPrivate",
+                                &format!("Method '{}' is private", method_name),
+                            ));
                         }
-                        Access::Protected => current_class_context.as_ref().is_some_and(
-                            |caller_class| {
-                                runmat_builtins::is_class_or_subclass(caller_class, &owner)
-                            },
-                        ),
-                    };
-                    if !allowed {
-                        return Err(crate::interpreter::errors::mex(
-                            "MethodPrivate",
-                            &format!("Method '{}' is private", method_name),
-                        ));
+                        let method_identity = if method.function_name.contains('.') {
+                            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
+                                method
+                                    .function_name
+                                    .split('.')
+                                    .map(|segment| {
+                                        runmat_hir::SymbolName(segment.trim().to_string())
+                                    })
+                                    .collect(),
+                            ))
+                        } else {
+                            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+                                method.function_name.clone(),
+                            ))
+                        };
+                        let static_descriptor = CallableDescriptor::resolved(
+                            method_identity,
+                            args,
+                            out_count,
+                            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                            CallableCallKind::Direct,
+                        );
+                        let result = execute_callable_descriptor(static_descriptor).await?;
+                        stack.push(normalize_requested_outputs(result, out_count));
+                        return Ok(UserCallHandling::Completed);
                     }
-                    let method_identity = if method.function_name.contains('.') {
-                        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
-                            method
-                                .function_name
-                                .split('.')
-                                .map(|segment| runmat_hir::SymbolName(segment.trim().to_string()))
-                                .collect(),
-                        ))
-                    } else {
-                        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
-                            method.function_name.clone(),
-                        ))
-                    };
-                    let static_descriptor = CallableDescriptor::resolved(
-                        method_identity,
-                        args,
-                        out_count,
-                        runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                        CallableCallKind::Direct,
-                    );
-                    let result = execute_callable_descriptor(static_descriptor).await?;
-                    stack.push(normalize_requested_outputs(result, out_count));
-                    return Ok(UserCallHandling::Completed);
                 }
             }
-        }
         }
     }
 
@@ -412,19 +417,20 @@ pub async fn handle_prepared_user_function_call(
         }
         _ => None,
     };
-    if let (Some(class_name), Some(method_name)) =
-        (current_class_context.as_ref(), local_method_candidate.as_ref())
-    {
+    if let (Some(class_name), Some(method_name)) = (
+        current_class_context.as_ref(),
+        local_method_candidate.as_ref(),
+    ) {
         if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
             if method.is_static {
                 let allowed = match method.access {
                     Access::Public => true,
                     Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
-                    Access::Protected => current_class_context
-                        .as_ref()
-                        .is_some_and(|caller_class| {
+                    Access::Protected => {
+                        current_class_context.as_ref().is_some_and(|caller_class| {
                             runmat_builtins::is_class_or_subclass(caller_class, &owner)
-                        }),
+                        })
+                    }
                 };
                 if !allowed {
                     return Err(crate::interpreter::errors::mex(
@@ -466,11 +472,11 @@ pub async fn handle_prepared_user_function_call(
                     let allowed = match method.access {
                         Access::Public => true,
                         Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
-                        Access::Protected => current_class_context
-                            .as_ref()
-                            .is_some_and(|caller_class| {
+                        Access::Protected => {
+                            current_class_context.as_ref().is_some_and(|caller_class| {
                                 runmat_builtins::is_class_or_subclass(caller_class, &owner)
-                            }),
+                            })
+                        }
                     };
                     if !allowed {
                         return Err(crate::interpreter::errors::mex(
@@ -576,8 +582,8 @@ async fn handle_method_or_member_index_call_inner(
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let current_class_context = current_class_context_from_function_name(current_function_name);
-    let _access_guard =
-        current_class_context.map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+    let _access_guard = current_class_context
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
         identity,
@@ -609,8 +615,8 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let base = args.remove(0);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let current_class_context = current_class_context_from_function_name(current_function_name);
-    let _access_guard =
-        current_class_context.map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+    let _access_guard = current_class_context
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
         identity,
@@ -673,7 +679,14 @@ pub fn handle_register_class(
     super_class: Option<String>,
     is_sealed: bool,
     is_abstract: bool,
-    properties: Vec<(String, bool, bool, Option<PropertyDefaultLiteral>, String, String)>,
+    properties: Vec<(
+        String,
+        bool,
+        bool,
+        Option<PropertyDefaultLiteral>,
+        String,
+        String,
+    )>,
     methods: Vec<(String, String, bool, bool, bool, String)>,
     enumerations: Vec<String>,
 ) -> Result<MethodHandling, RuntimeError> {
