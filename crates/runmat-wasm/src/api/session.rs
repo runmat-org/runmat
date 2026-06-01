@@ -122,9 +122,9 @@ impl RunMatWasm {
             ExecuteRequestSourcePayload::Text { text, .. } => text.clone(),
             ExecuteRequestSourcePayload::Path { path } => path.clone(),
         };
-        let (source_name, source_text) = match &request_payload.source {
-            ExecuteRequestSourcePayload::Text { name, text } => (Some(name.as_str()), Some(text.as_str())),
-            ExecuteRequestSourcePayload::Path { path } => (Some(path.as_str()), None),
+        let (source_name, source_text): (Option<String>, Option<String>) = match &request_payload.source {
+            ExecuteRequestSourcePayload::Text { name, text } => (Some(name.clone()), Some(text.clone())),
+            ExecuteRequestSourcePayload::Path { path } => (Some(path.clone()), None),
         };
         init_logging_once();
         let exec_span = info_span!(
@@ -236,7 +236,11 @@ impl RunMatWasm {
                 type_info: None,
                 execution_time_ms: 0,
                 used_jit: false,
-                error: Some(run_error_payload(&err, source_name, source_text)),
+                error: Some(run_error_payload(
+                    &err,
+                    source_name.as_deref(),
+                    source_text.as_deref(),
+                )),
                 stdout: Vec::new(),
                 display_events: Vec::new(),
                 workspace: WorkspacePayload {

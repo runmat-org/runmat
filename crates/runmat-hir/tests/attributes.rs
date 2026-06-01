@@ -59,7 +59,7 @@ fn classdef_property_attributes_enforced() {
 
 #[test]
 fn classdef_access_values_validated() {
-    let src = "classdef D\n  properties(Access=protected)\n    p\n  end\n  methods(Access=internal)\n    function y = f(x); y = x; end\n  end\nend";
+    let src = "classdef D\n  properties(Access=public)\n    p\n  end\n  methods(Access=internal)\n    function y = f(x); y = x; end\n  end\nend";
     let ast = parse(src).unwrap();
     let err = lower(&ast, &LoweringContext::empty())
         .expect_err("invalid class access attribute values should fail");
@@ -67,4 +67,29 @@ fn classdef_access_values_validated() {
         err.identifier.as_deref(),
         Some("RunMat:ClassAccessValueInvalid")
     );
+}
+
+#[test]
+fn classdef_protected_access_values_round_trip() {
+    let src = "classdef D\n  properties(GetAccess=protected, SetAccess=protected)\n    p\n  end\n  methods(Access=protected)\n    function y = f(x); y = x; end\n  end\nend";
+    let ast = parse(src).unwrap();
+    let assembly = lower(&ast, &LoweringContext::empty()).unwrap().assembly;
+    let class = assembly
+        .classes
+        .iter()
+        .find(|class| class.name.0[0].0 == "D")
+        .unwrap();
+    let prop = class
+        .properties
+        .iter()
+        .find(|property| property.name.0 == "p")
+        .expect("property p");
+    assert_eq!(prop.attributes.get_access, MemberAccess::Protected);
+    assert_eq!(prop.attributes.set_access, MemberAccess::Protected);
+    let method = class
+        .methods
+        .iter()
+        .find(|method| method.name.0 == "f")
+        .expect("method f");
+    assert_eq!(method.attributes.access, MemberAccess::Protected);
 }

@@ -12,8 +12,7 @@
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+    BuiltinErrorDescriptor, Value,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_gc_api::GcPtr;
@@ -45,6 +44,7 @@ pub const OBJECT_INDEX_PAREN: &str = "()";
 pub const OBJECT_INDEX_BRACE: &str = "{}";
 pub const OBJECT_INDEX_MEMBER: &str = ".";
 pub const CALL_METHOD_BUILTIN_NAME: &str = "call_method";
+pub const CALL_BOUND_METHOD_BUILTIN_NAME: &str = "__runmat_call_bound_method__";
 pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
 pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 pub(crate) const IDENT_UNDEFINED_FUNCTION: &str = "RunMat:UndefinedFunction";
@@ -57,7 +57,7 @@ pub fn object_property_setter_name(field: &str) -> String {
     format!("set.{field}")
 }
 
-fn current_requested_outputs() -> usize {
+pub(crate) fn current_requested_outputs() -> usize {
     crate::output_count::current_output_count().unwrap_or(1)
 }
 
@@ -68,7 +68,7 @@ fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeE
         .build()
 }
 
-fn is_undefined_function_error(err: &RuntimeError) -> bool {
+pub(crate) fn is_undefined_function_error(err: &RuntimeError) -> bool {
     err.identifier() == Some(IDENT_UNDEFINED_FUNCTION)
 }
 
@@ -85,14 +85,14 @@ fn build_shape_checked_cell(
     })
 }
 
-fn runtime_descriptor_error(
+pub(crate) fn runtime_descriptor_error(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
     runtime_descriptor_error_with_message(builtin, error.message, error)
 }
 
-fn runtime_descriptor_error_with_detail(
+pub(crate) fn runtime_descriptor_error_with_detail(
     builtin: &'static str,
     error: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -116,7 +116,7 @@ fn runtime_descriptor_error_with_message(
     builder.build()
 }
 
-fn object_receiver_class_name(receiver: &Value) -> Option<String> {
+pub(crate) fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     match receiver {
         Value::Object(obj) => Some(obj.class_name.clone()),
         Value::HandleObject(handle) => {
@@ -179,7 +179,7 @@ pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_hir::Cal
     }
 }
 
-async fn dispatch_object_external_member(
+pub(crate) async fn dispatch_object_external_member(
     class_name: String,
     member: &str,
     args: Vec<Value>,
@@ -202,7 +202,7 @@ async fn dispatch_named_with_requested_outputs(
     call_builtin_async_with_outputs(name, args, requested_outputs).await
 }
 
-async fn dispatch_callable_with_policy(
+pub(crate) async fn dispatch_callable_with_policy(
     identity: runmat_hir::CallableIdentity,
     fallback_policy: runmat_hir::CallableFallbackPolicy,
     args: Vec<Value>,
@@ -254,8 +254,9 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{
-    call_builtin, call_builtin_async, call_builtin_async_with_outputs, gather_if_needed,
-    gather_if_needed_async, is_gpu_value, value_contains_gpu,
+    call_builtin, call_builtin_async, call_builtin_async_with_outputs, class_access_context,
+    gather_if_needed, gather_if_needed_async, is_gpu_value, push_class_access_context,
+    value_contains_gpu,
 };
 
 #[cfg(feature = "plot-core")]
@@ -338,51 +339,7 @@ fn to_string_array(v: &Value) -> Result<runmat_builtins::StringArray, String> {
     }
 }
 
-// Adjust strjoin semantics: join rows (row-wise)
-const STRJOIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Joined string array.",
-}];
-
-const STRJOIN_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "text",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text array.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter inserted between row elements.",
-    },
-];
-
-const STRJOIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = strjoin(text, delimiter)",
-    inputs: &STRJOIN_INPUTS,
-    outputs: &STRJOIN_OUTPUT,
-}];
-
-pub const STRJOIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRJOIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "strjoin",
-    descriptor(crate::STRJOIN_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> {
     let d = to_string_scalar(&delim)?;
     let sa = to_string_array(&a)?;
     let rows = *sa.shape.first().unwrap_or(&sa.data.len());
@@ -409,42 +366,7 @@ async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> 
     ))
 }
 
-// deal: distribute inputs to multiple outputs (via cell for expansion)
-const DEAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargout",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Distributed output values.",
-}];
-
-const DEAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargin",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Input values to distribute.",
-}];
-
-const DEAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[varargout] = deal(varargin)",
-    inputs: &DEAL_INPUTS,
-    outputs: &DEAL_OUTPUT,
-}];
-
-pub const DEAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DEAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "deal",
-    descriptor(crate::DEAL_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -462,35 +384,7 @@ async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 // Object/handle utilities used by interpreter lowering for OOP/func handles
 
-const RETHROW_OUTPUT: [BuiltinParamDescriptor; 0] = [];
-
-const RETHROW_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "err",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Error value to rethrow.",
-}];
-
-const RETHROW_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "rethrow(err)",
-    inputs: &RETHROW_INPUTS,
-    outputs: &RETHROW_OUTPUT,
-}];
-
-pub const RETHROW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RETHROW_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "rethrow",
-    descriptor(crate::RETHROW_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     match e {
         Value::MException(me) => Err(build_runtime_error(me.message)
             .with_identifier(me.identifier)
@@ -500,366 +394,11 @@ async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     }
 }
 
-const CALL_METHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Method return value(s).",
-}];
-
-const CALL_METHOD_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "base",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "method",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Method name.",
-    },
-    BuiltinParamDescriptor {
-        name: "varargin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Method arguments.",
-    },
-];
-
-const CALL_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[out] = call_method(base, method, varargin)",
-    inputs: &CALL_METHOD_INPUTS,
-    outputs: &CALL_METHOD_OUTPUT,
-}];
-
-const CALL_METHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CALL_METHOD.NAME_INVALID",
-    identifier: Some("RunMat:CallMethodNameInvalid"),
-    when: "The method name is empty or missing.",
-    message: "call_method: method name must not be empty",
-};
-
-const CALL_METHOD_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CALL_METHOD.RECEIVER_INVALID",
-    identifier: Some("RunMat:InvalidObjectDispatch"),
-    when: "Receiver is not an object or handle object.",
-    message: "call_method: requires object receiver",
-};
-
-const CALL_METHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    CALL_METHOD_ERROR_NAME_INVALID,
-    CALL_METHOD_ERROR_RECEIVER_INVALID,
-];
-
-pub const CALL_METHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CALL_METHOD_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &CALL_METHOD_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "call_method",
-    descriptor(crate::CALL_METHOD_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn call_method_builtin(
-    base: Value,
-    method: String,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
-    let method = method.trim().to_string();
-    if method.is_empty() {
-        return Err(runtime_descriptor_error(
-            "call_method",
-            &CALL_METHOD_ERROR_NAME_INVALID,
-        ));
-    }
-    match base {
-        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
-                runtime_descriptor_error("call_method", &CALL_METHOD_ERROR_RECEIVER_INVALID)
-            })?;
-            let mut args = Vec::with_capacity(1 + rest.len());
-            args.push(receiver.clone());
-            args.extend(rest);
-            let requested_outputs = current_requested_outputs();
-            match dispatch_object_external_member(
-                class_name,
-                &method,
-                args.clone(),
-                requested_outputs,
-            )
-            .await
-            {
-                Ok(v) => return Ok(v),
-                Err(err) if is_undefined_function_error(&err) => {}
-                Err(err) => return Err(err),
-            }
-            let (identity, fallback_policy) = callable_identity_for_handle_name(&method);
-            dispatch_callable_with_policy(identity, fallback_policy, args, requested_outputs).await
-        }
-        other => Err(runtime_descriptor_error_with_detail(
-            "call_method",
-            &CALL_METHOD_ERROR_RECEIVER_INVALID,
-            format!("unsupported receiver {other:?} for method '{method}'"),
-        )),
-    }
-}
-
-// Global dispatch helpers for overloaded indexing (subsref/subsasgn) to support fallback resolution paths
-const SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated object value.",
-}];
-
-const SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token ('()', '{}', '.').",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing payload.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned value.",
-    },
-];
-
-const SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = subsasgn(obj, kind, payload, rhs)",
-    inputs: &SUBSASGN_INPUTS,
-    outputs: &SUBSASGN_OUTPUT,
-}];
-
-const SUBSASGN_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSASGN.RECEIVER_INVALID",
-    identifier: Some("RunMat:InvalidObjectDispatch"),
-    when: "Receiver is not an object or handle object.",
-    message: "subsasgn: requires object receiver",
-};
-
-const SUBSASGN_ERROR_METHOD_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSASGN.METHOD_MISSING",
-    identifier: Some("RunMat:MissingSubsasgn"),
-    when: "Target class does not implement subsasgn.",
-    message: "subsasgn: class does not define subsasgn for indexed assignment",
-};
-
-const SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    SUBSASGN_ERROR_RECEIVER_INVALID,
-    SUBSASGN_ERROR_METHOD_MISSING,
-];
-
-pub const SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &SUBSASGN_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "subsasgn",
-    descriptor(crate::SUBSASGN_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn subsasgn_dispatch(
-    obj: Value,
-    kind: String,
-    payload: Value,
-    rhs: Value,
-) -> crate::BuiltinResult<Value> {
-    match obj {
-        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
-                runtime_descriptor_error("subsasgn", &SUBSASGN_ERROR_RECEIVER_INVALID)
-            })?;
-            dispatch_object_external_member(
-                class_name,
-                OBJECT_SUBSASGN_METHOD,
-                vec![receiver, Value::String(kind), payload, rhs],
-                current_requested_outputs(),
-            )
-            .await
-            .map_err(|err| {
-                if is_undefined_function_error(&err) {
-                    runtime_descriptor_error("subsasgn", &SUBSASGN_ERROR_METHOD_MISSING)
-                } else {
-                    err
-                }
-            })
-        }
-        other => Err(runtime_descriptor_error_with_detail(
-            "subsasgn",
-            &SUBSASGN_ERROR_RECEIVER_INVALID,
-            format!("receiver must be object, got {other:?}"),
-        )),
-    }
-}
-
-const SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Indexed value.",
-}];
-
-const SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token ('()', '{}', '.').",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing payload.",
-    },
-];
-
-const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = subsref(obj, kind, payload)",
-    inputs: &SUBSREF_INPUTS,
-    outputs: &SUBSREF_OUTPUT,
-}];
-
-const SUBSREF_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSREF.RECEIVER_INVALID",
-    identifier: Some("RunMat:InvalidObjectDispatch"),
-    when: "Receiver is not an object or handle object.",
-    message: "subsref: requires object receiver",
-};
-
-const SUBSREF_ERROR_METHOD_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSREF.METHOD_MISSING",
-    identifier: Some("RunMat:MissingSubsref"),
-    when: "Target class does not implement subsref.",
-    message: "subsref: class does not define subsref for indexing operation",
-};
-
-const SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [SUBSREF_ERROR_RECEIVER_INVALID, SUBSREF_ERROR_METHOD_MISSING];
-
-pub const SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &SUBSREF_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "subsref",
-    descriptor(crate::SUBSREF_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
-    match obj {
-        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
-                runtime_descriptor_error("subsref", &SUBSREF_ERROR_RECEIVER_INVALID)
-            })?;
-            dispatch_object_external_member(
-                class_name,
-                OBJECT_SUBSREF_METHOD,
-                vec![receiver, Value::String(kind), payload],
-                current_requested_outputs(),
-            )
-            .await
-            .map_err(|err| {
-                if is_undefined_function_error(&err) {
-                    runtime_descriptor_error("subsref", &SUBSREF_ERROR_METHOD_MISSING)
-                } else {
-                    err
-                }
-            })
-        }
-        other => Err(runtime_descriptor_error_with_detail(
-            "subsref",
-            &SUBSREF_ERROR_RECEIVER_INVALID,
-            format!("receiver must be object, got {other:?}"),
-        )),
-    }
-}
-
 // -------- Handle classes & events --------
 
-const NEW_HANDLE_OBJECT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "handle",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "New handle-object instance.",
-}];
-
-const NEW_HANDLE_OBJECT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "class_name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Class name for created object.",
-}];
-
-const NEW_HANDLE_OBJECT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "handle = new_handle_object(class_name)",
-        inputs: &NEW_HANDLE_OBJECT_INPUTS,
-        outputs: &NEW_HANDLE_OBJECT_OUTPUT,
-    }];
-
-pub const NEW_HANDLE_OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NEW_HANDLE_OBJECT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "new_handle_object",
-    descriptor(crate::NEW_HANDLE_OBJECT_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn new_handle_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
+pub(crate) async fn new_handle_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     // Create an underlying object instance and wrap it in a handle
-    let obj = new_object_builtin(class_name.clone()).await?;
+    let obj = create_class_object(class_name.clone()).await?;
     let gc = runmat_gc::gc_allocate(obj).map_err(|e| format!("gc: {e}"))?;
     Ok(Value::HandleObject(runmat_builtins::HandleRef {
         class_name,
@@ -868,43 +407,9 @@ async fn new_handle_object_builtin(class_name: String) -> crate::BuiltinResult<V
     }))
 }
 
-const ISVALID_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when handle/listener is valid.",
-}];
-
-const ISVALID_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Value to inspect.",
-}];
-
-const ISVALID_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isvalid(value)",
-    inputs: &ISVALID_INPUTS,
-    outputs: &ISVALID_OUTPUT,
-}];
-
-pub const ISVALID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISVALID_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "isvalid",
-    descriptor(crate::ISVALID_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn isvalid_builtin(v: Value) -> crate::BuiltinResult<Value> {
     match v {
-        Value::HandleObject(h) => Ok(Value::Bool(h.valid)),
+        Value::HandleObject(h) => Ok(Value::Bool(runmat_builtins::is_handle_valid(&h))),
         Value::Listener(l) => Ok(Value::Bool(l.valid && l.enabled)),
         _ => Ok(Value::Bool(false)),
     }
@@ -924,30 +429,48 @@ fn events() -> &'static Mutex<EventRegistry> {
     EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default()))
 }
 
-pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Value) -> Value {
-    fn resolve_text_handle(text: &str) -> Option<Value> {
-        let trimmed = text.trim();
-        let rest = trimmed.strip_prefix('@')?;
-        let name = rest.trim();
-        if name.is_empty() {
-            return None;
+pub(crate) fn invalidate_listener_registration(listener_id: u64) {
+    let mut reg = events().lock().unwrap();
+    for listeners in reg.listeners.values_mut() {
+        for listener in listeners.iter_mut() {
+            if listener.id == listener_id {
+                listener.valid = false;
+                listener.enabled = false;
+            }
         }
-        let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
+    }
+}
+
+pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Value) -> Value {
+    fn normalize_handle_name(text: &str) -> Option<String> {
+        let trimmed = text.trim();
+        let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
+        (!name.is_empty()).then(|| name.to_string())
+    }
+
+    fn resolve_text_handle(text: &str) -> Option<Value> {
+        let name = normalize_handle_name(text)?;
+        let function = crate::user_functions::resolve_semantic_function_by_name(&name)?;
         Some(Value::BoundFunctionHandle {
-            name: name.to_string(),
+            name,
             function,
         })
     }
 
     match callback {
-        Value::String(text) => resolve_text_handle(&text).unwrap_or(Value::String(text)),
+        Value::String(text) => resolve_text_handle(&text)
+            .unwrap_or_else(|| crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String(text.clone())).unwrap_or(Value::String(text))),
         Value::StringArray(array) if array.data.len() == 1 => {
             let text = &array.data[0];
-            resolve_text_handle(text).unwrap_or(Value::StringArray(array))
+            resolve_text_handle(text).unwrap_or_else(|| {
+                crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(array.clone())).unwrap_or(Value::StringArray(array))
+            })
         }
         Value::CharArray(chars) if chars.rows == 1 => {
             let text: String = chars.data.iter().collect();
-            resolve_text_handle(&text).unwrap_or(Value::CharArray(chars))
+            resolve_text_handle(&text).unwrap_or_else(|| {
+                crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::CharArray(chars.clone())).unwrap_or(Value::CharArray(chars))
+            })
         }
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
@@ -993,66 +516,7 @@ fn canonicalize_listener_callback(callback: Value) -> Value {
     canonicalize_callback_handle_for_semantic_resolution(callback)
 }
 
-const ADDLISTENER_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "listener",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Created listener handle.",
-}];
-
-const ADDLISTENER_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "target",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target object or handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "event_name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Event name.",
-    },
-    BuiltinParamDescriptor {
-        name: "callback",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Callback handle or text handle.",
-    },
-];
-
-const ADDLISTENER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "listener = addlistener(target, event_name, callback)",
-    inputs: &ADDLISTENER_INPUTS,
-    outputs: &ADDLISTENER_OUTPUT,
-}];
-
-const ADDLISTENER_ERROR_TARGET_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ADDLISTENER.TARGET_INVALID",
-    identifier: Some("RunMat:AddListenerTargetInvalid"),
-    when: "Target is not an object or handle object.",
-    message: "addlistener: target must be handle or object",
-};
-
-const ADDLISTENER_ERRORS: [BuiltinErrorDescriptor; 1] = [ADDLISTENER_ERROR_TARGET_INVALID];
-
-pub const ADDLISTENER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ADDLISTENER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ADDLISTENER_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "addlistener",
-    descriptor(crate::ADDLISTENER_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn addlistener_builtin(
+pub(crate) async fn addlistener_builtin(
     target: Value,
     event_name: String,
     callback: Value,
@@ -1061,10 +525,12 @@ async fn addlistener_builtin(
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
         _ => {
-            return Err(runtime_descriptor_error(
-                "addlistener",
-                &ADDLISTENER_ERROR_TARGET_INVALID,
-            ))
+            return Err(
+                build_runtime_error("addlistener: target must be handle or object")
+                    .with_builtin("addlistener")
+                    .with_identifier("RunMat:AddListenerTargetInvalid")
+                    .build(),
+            )
         }
     };
     let mut reg = events().lock().unwrap();
@@ -1096,66 +562,7 @@ async fn addlistener_builtin(
     Ok(Value::Listener(listener))
 }
 
-const NOTIFY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Always zero on success.",
-}];
-
-const NOTIFY_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "target",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target object or handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "event_name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Event name.",
-    },
-    BuiltinParamDescriptor {
-        name: "varargin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Event callback arguments.",
-    },
-];
-
-const NOTIFY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "status = notify(target, event_name, varargin)",
-    inputs: &NOTIFY_INPUTS,
-    outputs: &NOTIFY_OUTPUT,
-}];
-
-const NOTIFY_ERROR_TARGET_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NOTIFY.TARGET_INVALID",
-    identifier: Some("RunMat:NotifyTargetInvalid"),
-    when: "Target is not an object or handle object.",
-    message: "notify: target must be handle or object",
-};
-
-const NOTIFY_ERRORS: [BuiltinErrorDescriptor; 1] = [NOTIFY_ERROR_TARGET_INVALID];
-
-pub const NOTIFY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NOTIFY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NOTIFY_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "notify",
-    descriptor(crate::NOTIFY_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn notify_builtin(
+pub(crate) async fn notify_builtin(
     target: Value,
     event_name: String,
     rest: Vec<Value>,
@@ -1164,10 +571,12 @@ async fn notify_builtin(
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
         _ => {
-            return Err(runtime_descriptor_error(
-                "notify",
-                &NOTIFY_ERROR_TARGET_INVALID,
-            ))
+            return Err(
+                build_runtime_error("notify: target must be handle or object")
+                    .with_builtin("notify")
+                    .with_identifier("RunMat:NotifyTargetInvalid")
+                    .build(),
+            )
         }
     };
     let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
@@ -1188,11 +597,11 @@ async fn notify_builtin(
         args.extend(rest.iter().cloned());
         let cbv: Value = (*l.callback).clone();
         let should_dispatch = match &cbv {
-            Value::String(s) => s.starts_with('@'),
-            Value::StringArray(sa) => sa.data.len() == 1 && sa.data[0].starts_with('@'),
+            Value::String(s) => !s.trim().is_empty(),
+            Value::StringArray(sa) => sa.data.len() == 1 && !sa.data[0].trim().is_empty(),
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text: String = ca.data.iter().collect();
-                text.starts_with('@')
+                !text.trim().is_empty()
             }
             Value::FunctionHandle(_)
             | Value::ExternalFunctionHandle(_)
@@ -1211,50 +620,7 @@ async fn notify_builtin(
 // Test-oriented dependent property handlers (global). If a class defines a Dependent
 // property named 'p', the VM will try to call get.p / set.p. We provide generic
 // implementations that read/write a conventional backing field 'p_backing'.
-const GET_P_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Dependent property backing value.",
-}];
-
-const GET_P_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Object receiver.",
-}];
-
-const GET_P_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = get.p(obj)",
-    inputs: &GET_P_INPUTS,
-    outputs: &GET_P_OUTPUT,
-}];
-
-const GET_P_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GET_P.RECEIVER_INVALID",
-    identifier: Some("RunMat:GetPReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "get.p: requires object receiver",
-};
-
-const GET_P_ERRORS: [BuiltinErrorDescriptor; 1] = [GET_P_ERROR_RECEIVER_INVALID];
-
-pub const GET_P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GET_P_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &GET_P_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "get.p",
-    descriptor(crate::GET_P_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(o) => {
             if let Some(v) = o.properties.get("p_backing") {
@@ -1263,173 +629,65 @@ async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
                 Ok(Value::Num(0.0))
             }
         }
-        other => Err(runtime_descriptor_error_with_detail(
-            "get.p",
-            &GET_P_ERROR_RECEIVER_INVALID,
-            format!("got {other:?}"),
-        )),
+        other => Err(
+            build_runtime_error(format!("get.p: requires object receiver (got {other:?})"))
+                .with_builtin("get.p")
+                .with_identifier("RunMat:GetPReceiverInvalid")
+                .build(),
+        ),
     }
 }
 
-const SET_P_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated object receiver.",
-}];
-
-const SET_P_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Value to assign.",
-    },
-];
-
-const SET_P_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = set.p(obj, value)",
-    inputs: &SET_P_INPUTS,
-    outputs: &SET_P_OUTPUT,
-}];
-
-const SET_P_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SET_P.RECEIVER_INVALID",
-    identifier: Some("RunMat:SetPReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "set.p: requires object receiver",
-};
-
-const SET_P_ERRORS: [BuiltinErrorDescriptor; 1] = [SET_P_ERROR_RECEIVER_INVALID];
-
-pub const SET_P_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SET_P_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &SET_P_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "set.p",
-    descriptor(crate::SET_P_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(mut o) => {
             o.properties.insert("p_backing".to_string(), val);
             Ok(Value::Object(o))
         }
-        other => Err(runtime_descriptor_error_with_detail(
-            "set.p",
-            &SET_P_ERROR_RECEIVER_INVALID,
-            format!("got {other:?}"),
-        )),
+        other => Err(
+            build_runtime_error(format!("set.p: requires object receiver (got {other:?})"))
+                .with_builtin("set.p")
+                .with_identifier("RunMat:SetPReceiverInvalid")
+                .build(),
+        ),
     }
 }
 
-const MAKE_ANON_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "handle_text",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Anonymous function text handle.",
-}];
-
-const MAKE_ANON_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "params",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Comma-separated parameter list.",
-    },
-    BuiltinParamDescriptor {
-        name: "body",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Anonymous body expression text.",
-    },
-];
-
-const MAKE_ANON_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "handle_text = make_anon(params, body)",
-    inputs: &MAKE_ANON_INPUTS,
-    outputs: &MAKE_ANON_OUTPUT,
-}];
-
-pub const MAKE_ANON_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MAKE_ANON_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "make_anon",
-    descriptor(crate::MAKE_ANON_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn make_anon_builtin(params: String, body: String) -> crate::BuiltinResult<Value> {
+pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::BuiltinResult<Value> {
     Ok(Value::String(format!("@anon({params}) {body}")))
 }
 
-const NEW_OBJECT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "New object instance.",
-}];
-
-const NEW_OBJECT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "class_name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Class name.",
-}];
-
-const NEW_OBJECT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = new_object(class_name)",
-    inputs: &NEW_OBJECT_INPUTS,
-    outputs: &NEW_OBJECT_OUTPUT,
-}];
-
-pub const NEW_OBJECT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NEW_OBJECT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "new_object",
-    descriptor(crate::NEW_OBJECT_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-pub(crate) async fn new_object_builtin(class_name: String) -> crate::BuiltinResult<Value> {
+pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Value> {
+    if runmat_builtins::is_class_abstract(&class_name) {
+        return Err(
+            build_runtime_error(format!("Cannot instantiate abstract class '{}'.", class_name))
+                .with_identifier("RunMat:AbstractMethodMissing")
+                .build(),
+        );
+    }
     if let Some(def) = runmat_builtins::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
         let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        let mut is_handle_class = false;
         let mut visited = std::collections::HashSet::new();
         // Walk up to root
         let mut cursor: Option<String> = Some(def.name.clone());
         while let Some(name) = cursor {
+            if name.eq_ignore_ascii_case("handle") {
+                is_handle_class = true;
+                break;
+            }
             if !visited.insert(name.clone()) {
                 break;
             }
             if let Some(cd) = runmat_builtins::get_class(&name) {
+                if cd
+                    .parent
+                    .as_ref()
+                    .is_some_and(|parent| parent.eq_ignore_ascii_case("handle"))
+                {
+                    is_handle_class = true;
+                }
                 chain.push(cd.clone());
                 cursor = cd.parent.clone();
             } else {
@@ -1440,16 +698,28 @@ pub(crate) async fn new_object_builtin(class_name: String) -> crate::BuiltinResu
         chain.reverse();
         let mut obj = runmat_builtins::ObjectInstance::new(def.name.clone());
         // Apply defaults from root to leaf (leaf overrides effectively by later assignment)
+        let empty_default = || {
+            Value::Tensor(runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"))
+        };
         for cd in chain {
             for (k, p) in cd.properties.iter() {
                 if !p.is_static {
-                    if let Some(v) = &p.default_value {
-                        obj.properties.insert(k.clone(), v.clone());
-                    }
+                    obj.properties
+                        .insert(k.clone(), p.default_value.clone().unwrap_or_else(empty_default));
                 }
             }
         }
-        Ok(Value::Object(obj))
+        if is_handle_class {
+            let gc = runmat_gc::gc_allocate(Value::Object(obj))
+                .map_err(|e| format!("gc: {e}"))?;
+            Ok(Value::HandleObject(runmat_builtins::HandleRef {
+                class_name: def.name.clone(),
+                target: gc,
+                valid: true,
+            }))
+        } else {
+            Ok(Value::Object(obj))
+        }
     } else {
         Ok(Value::Object(runmat_builtins::ObjectInstance::new(
             class_name,
@@ -1457,76 +727,137 @@ pub(crate) async fn new_object_builtin(class_name: String) -> crate::BuiltinResu
     }
 }
 
+pub async fn call_super_constructor(
+    class_name: String,
+    super_class_name: String,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let receiver = create_class_object(class_name).await?;
+    let ctor_name = super_class_name
+        .rsplit('.')
+        .next()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(super_class_name.as_str());
+    let ctor_lookup = runmat_builtins::lookup_method(&super_class_name, ctor_name)
+        .or_else(|| runmat_builtins::lookup_method(&super_class_name, &super_class_name));
+    let Some((ctor, _owner)) = ctor_lookup else {
+        return Ok(receiver);
+    };
+    let Some(result) =
+        crate::user_functions::try_call_semantic_function_by_name(&ctor.function_name, &args, 1)
+            .await
+    else {
+        return Ok(receiver);
+    };
+    let ctor_result = result?;
+    fn merge_parent_props_into_object(
+        receiver_obj: &mut runmat_builtins::ObjectInstance,
+        ctor_result: Value,
+    ) {
+        match ctor_result {
+            Value::Object(parent_obj) => {
+                for (name, value) in parent_obj.properties {
+                    receiver_obj.properties.insert(name, value);
+                }
+            }
+            Value::HandleObject(parent_handle) => {
+                let raw_parent = unsafe { parent_handle.target.as_raw() };
+                if !raw_parent.is_null() {
+                    if let Value::Object(parent_obj) = unsafe { (&*raw_parent).clone() } {
+                        for (name, value) in parent_obj.properties {
+                            receiver_obj.properties.insert(name, value);
+                        }
+                    }
+                }
+            }
+            Value::Struct(parent_fields) => {
+                for (name, value) in parent_fields.fields {
+                    receiver_obj.properties.insert(name, value);
+                }
+            }
+            _ => {}
+        }
+    }
+    match receiver {
+        Value::Object(mut receiver_obj) => {
+            merge_parent_props_into_object(&mut receiver_obj, ctor_result);
+            Ok(Value::Object(receiver_obj))
+        }
+        Value::HandleObject(handle) => {
+            let raw = unsafe { handle.target.as_raw_mut() };
+            if !raw.is_null() {
+                if let Value::Object(mut receiver_obj) = unsafe { (&*raw).clone() } {
+                    merge_parent_props_into_object(&mut receiver_obj, ctor_result);
+                    unsafe {
+                        *raw = Value::Object(receiver_obj);
+                    }
+                }
+            }
+            Ok(Value::HandleObject(handle))
+        }
+        _ => Ok(receiver),
+    }
+}
+
+pub async fn call_super_method(
+    class_name: String,
+    super_class_name: String,
+    method_name: String,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let Some((method, owner)) = runmat_builtins::lookup_method(&super_class_name, &method_name)
+    else {
+        return Err(build_runtime_error(format!(
+            "Undefined superclass method '{}@{}'",
+            method_name, super_class_name
+        ))
+        .with_identifier("RunMat:UndefinedFunction")
+        .build());
+    };
+    if method.is_static {
+        return Err(build_runtime_error(format!(
+            "Superclass method '{}@{}' is static and cannot be called with super method syntax.",
+            method_name, super_class_name
+        ))
+        .with_identifier("RunMat:MethodStaticAccess")
+        .build());
+    }
+    let access_allowed = match method.access {
+        runmat_builtins::Access::Public => true,
+        runmat_builtins::Access::Protected => {
+            runmat_builtins::is_class_or_subclass(&class_name, &owner)
+        }
+        runmat_builtins::Access::Private => class_name == owner,
+    };
+    if !access_allowed {
+        return Err(build_runtime_error(format!(
+            "Method '{}@{}' is not accessible from class '{}'.",
+            method_name, super_class_name, class_name
+        ))
+        .with_identifier("RunMat:MethodPrivate")
+        .build());
+    }
+    let Some(result) =
+        crate::user_functions::try_call_semantic_function_by_name(&method.function_name, &args, 1)
+            .await
+    else {
+        return Err(build_runtime_error(format!(
+            "Undefined function: {}",
+            method.function_name
+        ))
+        .with_identifier("RunMat:UndefinedFunction")
+        .build());
+    };
+    result
+}
+
 // handle-object builtins removed for now
 
-const CLASSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ref",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Class reference value.",
-}];
-
-const CLASSREF_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "class_name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Class name.",
-}];
-
-const CLASSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ref = classref(class_name)",
-    inputs: &CLASSREF_INPUTS,
-    outputs: &CLASSREF_OUTPUT,
-}];
-
-pub const CLASSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CLASSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "classref",
-    descriptor(crate::CLASSREF_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn classref_builtin(class_name: String) -> crate::BuiltinResult<Value> {
+pub(crate) async fn classref_builtin(class_name: String) -> crate::BuiltinResult<Value> {
     Ok(Value::ClassRef(class_name))
 }
 
-const REGISTER_TEST_CLASSES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Registration status value.",
-}];
-
-const REGISTER_TEST_CLASSES_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const REGISTER_TEST_CLASSES_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "status = __register_test_classes()",
-        inputs: &REGISTER_TEST_CLASSES_INPUTS,
-        outputs: &REGISTER_TEST_CLASSES_OUTPUT,
-    }];
-
-pub const REGISTER_TEST_CLASSES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGISTER_TEST_CLASSES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "__register_test_classes",
-    descriptor(crate::REGISTER_TEST_CLASSES_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
+pub(crate) async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
     use runmat_builtins::*;
     let mut props = std::collections::HashMap::new();
     props.insert(
@@ -1534,6 +865,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "x".to_string(),
             is_static: false,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Public,
             set_access: Access::Public,
@@ -1545,6 +877,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "y".to_string(),
             is_static: false,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Public,
             set_access: Access::Public,
@@ -1556,6 +889,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "staticValue".to_string(),
             is_static: true,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Public,
             set_access: Access::Public,
@@ -1567,6 +901,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "secret".to_string(),
             is_static: false,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Private,
             set_access: Access::Private,
@@ -1579,6 +914,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: "move".to_string(),
             is_static: false,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: "Point.move".to_string(),
             implicit_class_argument: None,
@@ -1589,6 +926,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: "origin".to_string(),
             is_static: true,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: "Point.origin".to_string(),
             implicit_class_argument: None,
@@ -1608,6 +947,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "x".to_string(),
             is_static: false,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Public,
             set_access: Access::Public,
@@ -1619,6 +959,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "y".to_string(),
             is_static: false,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Public,
             set_access: Access::Public,
@@ -1641,6 +982,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: "area".to_string(),
             is_static: false,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: "Shape.area".to_string(),
             implicit_class_argument: None,
@@ -1659,6 +1002,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         PropertyDef {
             name: "r".to_string(),
             is_static: false,
+            is_constant: false,
             is_dependent: false,
             get_access: Access::Public,
             set_access: Access::Public,
@@ -1671,6 +1015,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: "area".to_string(),
             is_static: false,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: "Circle.area".to_string(),
             implicit_class_argument: None,
@@ -1691,6 +1037,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: "Ctor".to_string(),
             is_static: true,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: "Ctor.Ctor".to_string(),
             implicit_class_argument: None,
@@ -1711,6 +1059,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: OBJECT_SUBSREF_METHOD.to_string(),
             is_static: false,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSREF_METHOD}"),
             implicit_class_argument: None,
@@ -1721,6 +1071,8 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         MethodDef {
             name: OBJECT_SUBSASGN_METHOD.to_string(),
             is_static: false,
+            is_abstract: false,
+            is_sealed: false,
             access: Access::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSASGN_METHOD}"),
             implicit_class_argument: None,
@@ -1749,1010 +1101,6 @@ pub async fn test_register_classes() {
 }
 
 // Example method implementation: Point.move(obj, dx, dy) -> updated obj
-const POINT_MOVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated point object.",
-}];
-
-const POINT_MOVE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Point object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "dx",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X displacement.",
-    },
-    BuiltinParamDescriptor {
-        name: "dy",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y displacement.",
-    },
-];
-
-const POINT_MOVE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = Point.move(obj, dx, dy)",
-    inputs: &POINT_MOVE_INPUTS,
-    outputs: &POINT_MOVE_OUTPUT,
-}];
-
-const POINT_MOVE_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.POINT_MOVE.RECEIVER_INVALID",
-    identifier: Some("RunMat:PointMoveReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "Point.move: requires object receiver",
-};
-
-const POINT_MOVE_ERRORS: [BuiltinErrorDescriptor; 1] = [POINT_MOVE_ERROR_RECEIVER_INVALID];
-
-pub const POINT_MOVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POINT_MOVE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &POINT_MOVE_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "Point.move",
-    descriptor(crate::POINT_MOVE_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn point_move_method(obj: Value, dx: f64, dy: f64) -> crate::BuiltinResult<Value> {
-    match obj {
-        Value::Object(mut o) => {
-            let mut x = 0.0;
-            let mut y = 0.0;
-            if let Some(Value::Num(v)) = o.properties.get("x") {
-                x = *v;
-            }
-            if let Some(Value::Num(v)) = o.properties.get("y") {
-                y = *v;
-            }
-            o.properties.insert("x".to_string(), Value::Num(x + dx));
-            o.properties.insert("y".to_string(), Value::Num(y + dy));
-            Ok(Value::Object(o))
-        }
-        other => Err(runtime_descriptor_error_with_detail(
-            "Point.move",
-            &POINT_MOVE_ERROR_RECEIVER_INVALID,
-            format!("got {other:?}"),
-        )),
-    }
-}
-
-const POINT_ORIGIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Origin point object.",
-}];
-
-const POINT_ORIGIN_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const POINT_ORIGIN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = Point.origin()",
-    inputs: &POINT_ORIGIN_INPUTS,
-    outputs: &POINT_ORIGIN_OUTPUT,
-}];
-
-pub const POINT_ORIGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POINT_ORIGIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "Point.origin",
-    descriptor(crate::POINT_ORIGIN_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn point_origin_method() -> crate::BuiltinResult<Value> {
-    let mut o = runmat_builtins::ObjectInstance::new("Point".to_string());
-    o.properties.insert("x".to_string(), Value::Num(0.0));
-    o.properties.insert("y".to_string(), Value::Num(0.0));
-    Ok(Value::Object(o))
-}
-
-const SHAPE_AREA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "area",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Area value.",
-}];
-
-const SHAPE_AREA_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Shape receiver.",
-}];
-
-const SHAPE_AREA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "area = Shape.area(obj)",
-    inputs: &SHAPE_AREA_INPUTS,
-    outputs: &SHAPE_AREA_OUTPUT,
-}];
-
-pub const SHAPE_AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SHAPE_AREA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "Shape.area",
-    descriptor(crate::SHAPE_AREA_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn shape_area_method(_obj: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::Num(0.0))
-}
-
-const CIRCLE_AREA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "area",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Area value.",
-}];
-
-const CIRCLE_AREA_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Circle receiver.",
-}];
-
-const CIRCLE_AREA_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "area = Circle.area(obj)",
-    inputs: &CIRCLE_AREA_INPUTS,
-    outputs: &CIRCLE_AREA_OUTPUT,
-}];
-
-const CIRCLE_AREA_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CIRCLE_AREA.RECEIVER_INVALID",
-    identifier: Some("RunMat:CircleAreaReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "Circle.area: requires object receiver",
-};
-
-const CIRCLE_AREA_ERRORS: [BuiltinErrorDescriptor; 1] = [CIRCLE_AREA_ERROR_RECEIVER_INVALID];
-
-pub const CIRCLE_AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CIRCLE_AREA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &CIRCLE_AREA_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "Circle.area",
-    descriptor(crate::CIRCLE_AREA_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn circle_area_method(obj: Value) -> crate::BuiltinResult<Value> {
-    match obj {
-        Value::Object(o) => {
-            let r = if let Some(Value::Num(v)) = o.properties.get("r") {
-                *v
-            } else {
-                0.0
-            };
-            Ok(Value::Num(std::f64::consts::PI * r * r))
-        }
-        other => Err(runtime_descriptor_error_with_detail(
-            "Circle.area",
-            &CIRCLE_AREA_ERROR_RECEIVER_INVALID,
-            format!("got {other:?}"),
-        )),
-    }
-}
-
-// --- Test-only helpers to validate constructors and subsref/subsasgn ---
-const CTOR_CTOR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Constructed Ctor object.",
-}];
-
-const CTOR_CTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "x",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Initial x value.",
-}];
-
-const CTOR_CTOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = Ctor.Ctor(x)",
-    inputs: &CTOR_CTOR_INPUTS,
-    outputs: &CTOR_CTOR_OUTPUT,
-}];
-
-pub const CTOR_CTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CTOR_CTOR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "Ctor.Ctor",
-    descriptor(crate::CTOR_CTOR_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn ctor_ctor_method(x: f64) -> crate::BuiltinResult<Value> {
-    // Construct object with property 'x' initialized
-    let mut o = runmat_builtins::ObjectInstance::new("Ctor".to_string());
-    o.properties.insert("x".to_string(), Value::Num(x));
-    Ok(Value::Object(o))
-}
-
-// --- Test-only package functions to exercise import precedence ---
-const PKGF_FOO_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Constant test value.",
-}];
-
-const PKGF_FOO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const PKGF_FOO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = PkgF.foo()",
-    inputs: &PKGF_FOO_INPUTS,
-    outputs: &PKGF_FOO_OUTPUT,
-}];
-
-pub const PKGF_FOO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PKGF_FOO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "PkgF.foo",
-    descriptor(crate::PKGF_FOO_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn pkgf_foo() -> crate::BuiltinResult<Value> {
-    Ok(Value::Num(10.0))
-}
-
-const PKGG_FOO_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Constant test value.",
-}];
-
-const PKGG_FOO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const PKGG_FOO_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = PkgG.foo()",
-    inputs: &PKGG_FOO_INPUTS,
-    outputs: &PKGG_FOO_OUTPUT,
-}];
-
-pub const PKGG_FOO_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PKGG_FOO_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &[],
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "PkgG.foo",
-    descriptor(crate::PKGG_FOO_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn pkgg_foo() -> crate::BuiltinResult<Value> {
-    Ok(Value::Num(20.0))
-}
-
-const OVERIDX_SUBSREF_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Indexed value.",
-}];
-
-const OVERIDX_SUBSREF_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing payload.",
-    },
-];
-
-const OVERIDX_SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.subsref(obj, kind, payload)",
-    inputs: &OVERIDX_SUBSREF_INPUTS,
-    outputs: &OVERIDX_SUBSREF_OUTPUT,
-}];
-
-const OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.SUBSREF_PAYLOAD_UNSUPPORTED",
-    identifier: Some("RunMat:OverIdxSubsrefPayloadUnsupported"),
-    when: "Indexing kind/payload combination is unsupported.",
-    message: "OverIdx.subsref: unsupported payload",
-};
-
-const OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.SUBSASGN_PAYLOAD_UNSUPPORTED",
-    identifier: Some("RunMat:OverIdxSubsasgnPayloadUnsupported"),
-    when: "Indexing assignment kind/payload combination is unsupported.",
-    message: "OverIdx.subsasgn: unsupported payload",
-};
-
-const OVERIDX_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.OVERIDX.RECEIVER_INVALID",
-    identifier: Some("RunMat:OverIdxReceiverInvalid"),
-    when: "Receiver is not an object value.",
-    message: "OverIdx: receiver must be object",
-};
-
-const OVERIDX_SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
-    OVERIDX_ERROR_RECEIVER_INVALID,
-];
-
-pub const OVERIDX_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_SUBSREF_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_SUBSREF_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.subsref",
-    descriptor(crate::OVERIDX_SUBSREF_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
-    // Simple sentinel implementation: return different values for '.' vs '()'
-    match (obj, kind.as_str(), payload) {
-        (Value::Object(_), OBJECT_INDEX_PAREN, Value::Cell(_)) => Ok(Value::Num(99.0)),
-        (Value::Object(o), OBJECT_INDEX_BRACE, Value::Cell(_)) => {
-            if let Some(v) = o.properties.get("lastCell") {
-                Ok(v.clone())
-            } else {
-                Ok(Value::Num(0.0))
-            }
-        }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::String(field)) => {
-            // If field exists, return it; otherwise sentinel 77
-            if let Some(v) = o.properties.get(&field) {
-                Ok(v.clone())
-            } else {
-                Ok(Value::Num(77.0))
-            }
-        }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::CharArray(ca)) => {
-            let field: String = ca.data.iter().collect();
-            if let Some(v) = o.properties.get(&field) {
-                Ok(v.clone())
-            } else {
-                Ok(Value::Num(77.0))
-            }
-        }
-        _ => Err(runtime_descriptor_error(
-            "OverIdx.subsref",
-            &OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
-        )),
-    }
-}
-
-const OVERIDX_SUBSASGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated object.",
-}];
-
-const OVERIDX_SUBSASGN_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing kind token.",
-    },
-    BuiltinParamDescriptor {
-        name: "payload",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indexing payload.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned value.",
-    },
-];
-
-const OVERIDX_SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "obj = OverIdx.subsasgn(obj, kind, payload, rhs)",
-    inputs: &OVERIDX_SUBSASGN_INPUTS,
-    outputs: &OVERIDX_SUBSASGN_OUTPUT,
-}];
-
-const OVERIDX_SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
-    OVERIDX_ERROR_RECEIVER_INVALID,
-];
-
-pub const OVERIDX_SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_SUBSASGN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_SUBSASGN_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.subsasgn",
-    descriptor(crate::OVERIDX_SUBSASGN_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_subsasgn(
-    mut obj: Value,
-    kind: String,
-    payload: Value,
-    rhs: Value,
-) -> crate::BuiltinResult<Value> {
-    match (&mut obj, kind.as_str(), payload) {
-        (Value::Object(o), OBJECT_INDEX_PAREN, Value::Cell(_)) => {
-            // Store into 'last' property
-            o.properties.insert("last".to_string(), rhs);
-            Ok(Value::Object(o.clone()))
-        }
-        (Value::Object(o), OBJECT_INDEX_BRACE, Value::Cell(_)) => {
-            o.properties.insert("lastCell".to_string(), rhs);
-            Ok(Value::Object(o.clone()))
-        }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::String(field)) => {
-            o.properties.insert(field, rhs);
-            Ok(Value::Object(o.clone()))
-        }
-        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::CharArray(ca)) => {
-            let field: String = ca.data.iter().collect();
-            o.properties.insert(field, rhs);
-            Ok(Value::Object(o.clone()))
-        }
-        _ => Err(runtime_descriptor_error(
-            "OverIdx.subsasgn",
-            &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
-        )),
-    }
-}
-
-fn overidx_expect_object(
-    obj: Value,
-    method: &str,
-) -> crate::BuiltinResult<runmat_builtins::ObjectInstance> {
-    match obj {
-        Value::Object(o) => Ok(o),
-        other => Err(runtime_descriptor_error_with_detail(
-            "OverIdx",
-            &OVERIDX_ERROR_RECEIVER_INVALID,
-            format!("{method}: got {other:?}"),
-        )),
-    }
-}
-
-// --- Operator overloading methods for OverIdx (test scaffolding) ---
-const OVERIDX_BINARY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Operator result value.",
-}];
-
-const OVERIDX_BINARY_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "OverIdx object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "rhs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right-hand operand.",
-    },
-];
-
-const OVERIDX_UNARY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Operator result value.",
-}];
-
-const OVERIDX_UNARY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "obj",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "OverIdx object receiver.",
-}];
-
-const OVERIDX_PLUS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.plus(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_TIMES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.times(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_MTIMES_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.mtimes(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_LT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.lt(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_GT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.gt(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_EQ_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.eq(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_UPLUS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.uplus(obj)",
-    inputs: &OVERIDX_UNARY_INPUTS,
-    outputs: &OVERIDX_UNARY_OUTPUT,
-}];
-
-const OVERIDX_RDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.rdivide(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_MRDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.mrdivide(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_LDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.ldivide(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_MLDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.mldivide(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_AND_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.and(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_OR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.or(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_XOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = OverIdx.xor(obj, rhs)",
-    inputs: &OVERIDX_BINARY_INPUTS,
-    outputs: &OVERIDX_BINARY_OUTPUT,
-}];
-
-const OVERIDX_OPERATOR_ERRORS: [BuiltinErrorDescriptor; 1] = [OVERIDX_ERROR_RECEIVER_INVALID];
-
-pub const OVERIDX_PLUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_PLUS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_TIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_TIMES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_MTIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_MTIMES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_LT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_LT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_GT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_GT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_EQ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_EQ_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_UPLUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_UPLUS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_RDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_RDIVIDE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_MRDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_MRDIVIDE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_LDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_LDIVIDE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_MLDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_MLDIVIDE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_AND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_AND_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_OR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_OR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-pub const OVERIDX_XOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &OVERIDX_XOR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &OVERIDX_OPERATOR_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.plus",
-    descriptor(crate::OVERIDX_PLUS_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_plus(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.plus")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k + r))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.times",
-    descriptor(crate::OVERIDX_TIMES_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_times(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.times")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k * r))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.mtimes",
-    descriptor(crate::OVERIDX_MTIMES_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_mtimes(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.mtimes")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k * r))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.lt",
-    descriptor(crate::OVERIDX_LT_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_lt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.lt")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if k < r { 1.0 } else { 0.0 }))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.gt",
-    descriptor(crate::OVERIDX_GT_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_gt(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.gt")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if k > r { 1.0 } else { 0.0 }))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.eq",
-    descriptor(crate::OVERIDX_EQ_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_eq(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.eq")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k - r).abs() < 1e-12 { 1.0 } else { 0.0 }))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.uplus",
-    descriptor(crate::OVERIDX_UPLUS_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_uplus(obj: Value) -> crate::BuiltinResult<Value> {
-    // Identity
-    Ok(obj)
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.rdivide",
-    descriptor(crate::OVERIDX_RDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.rdivide")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(k / r))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.mrdivide",
-    descriptor(crate::OVERIDX_MRDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    overidx_rdivide(obj, rhs).await
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.ldivide",
-    descriptor(crate::OVERIDX_LDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.ldivide")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(r / k))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.mldivide",
-    descriptor(crate::OVERIDX_MLDIVIDE_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    overidx_ldivide(obj, rhs).await
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.and",
-    descriptor(crate::OVERIDX_AND_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_and(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.and")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k != 0.0) && (r != 0.0) { 1.0 } else { 0.0 }))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.or",
-    descriptor(crate::OVERIDX_OR_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_or(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.or")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    Ok(Value::Num(if (k != 0.0) || (r != 0.0) { 1.0 } else { 0.0 }))
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "OverIdx.xor",
-    descriptor(crate::OVERIDX_XOR_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let o = overidx_expect_object(obj, "OverIdx.xor")?;
-    let k = if let Some(Value::Num(v)) = o.properties.get("k") {
-        *v
-    } else {
-        0.0
-    };
-    let r: f64 = (&rhs).try_into()?;
-    let a = k != 0.0;
-    let b = r != 0.0;
-    Ok(Value::Num(if a ^ b { 1.0 } else { 0.0 }))
-}
-
-const FEVAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "varargout",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Function return value(s).",
-}];
-
-const FEVAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function handle, handle text, closure, or object receiver.",
-    },
-    BuiltinParamDescriptor {
-        name: "varargin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Function call arguments.",
-    },
-];
-
-const FEVAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "[varargout] = feval(f, varargin)",
-    inputs: &FEVAL_INPUTS,
-    outputs: &FEVAL_OUTPUT,
-}];
-
 const FEVAL_ERROR_HANDLE_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.FEVAL.HANDLE_NAME_INVALID",
     identifier: Some("RunMat:FevalHandleNameInvalid"),
@@ -2788,7 +1136,7 @@ const FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinEr
     message: "feval: unsupported function value",
 };
 
-const FEVAL_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub(crate) const FEVAL_ERRORS: [BuiltinErrorDescriptor; 5] = [
     FEVAL_ERROR_HANDLE_NAME_INVALID,
     FEVAL_ERROR_HANDLE_STRING_INVALID,
     FEVAL_ERROR_HANDLE_SHAPE_INVALID,
@@ -2796,19 +1144,7 @@ const FEVAL_ERRORS: [BuiltinErrorDescriptor; 5] = [
     FEVAL_ERROR_FUNCTION_VALUE_UNSUPPORTED,
 ];
 
-pub const FEVAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FEVAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FEVAL_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "feval",
-    descriptor(crate::FEVAL_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     fn normalize_feval_handle_name(name: &str) -> Option<String> {
         let trimmed = name.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -2955,16 +1291,20 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                     Value::String(name) => name.clone(),
                     Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
                     _ => {
-                        return Err(runtime_descriptor_error_with_detail(
-                            "call_method",
-                            &CALL_METHOD_ERROR_NAME_INVALID,
-                            "closure captures must include method name text",
-                        ))
+                        return Err(build_runtime_error(
+                            "call_method: closure captures must include method name text",
+                        )
+                        .with_builtin("call_method")
+                        .with_identifier("RunMat:CallMethodNameInvalid")
+                        .build())
                     }
                 };
                 let mut method_args = c.captures.iter().skip(2).cloned().collect::<Vec<_>>();
                 method_args.extend(rest);
-                return call_method_builtin(base, method, method_args).await;
+                return crate::builtins::introspection::call_method::dispatch_call_method(
+                    base, method, method_args,
+                )
+                .await;
             }
 
             let mut args = c.captures.clone();
@@ -2992,7 +1332,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 rest.len(),
                 "feval object index payload",
             )?);
-            subsref_dispatch(receiver, OBJECT_INDEX_PAREN.to_string(), payload).await
+            crate::builtins::introspection::object_indexing::dispatch_subsref(
+                receiver,
+                OBJECT_INDEX_PAREN.to_string(),
+                payload,
+            )
+            .await
         }
         other => Err(runtime_descriptor_error_with_detail(
             "feval",
@@ -3002,263 +1347,10 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     }
 }
 
-const STR2FUNC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle value.",
-}];
-
-const STR2FUNC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle text.",
-}];
-
-const STR2FUNC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "fh = str2func(name)",
-    inputs: &STR2FUNC_INPUTS,
-    outputs: &STR2FUNC_OUTPUT,
-}];
-
-const STR2FUNC_ERROR_NAME_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2FUNC.NAME_SHAPE_INVALID",
-    identifier: Some("RunMat:Str2FuncNameShapeInvalid"),
-    when: "Input text value is not scalar row text.",
-    message: "str2func: function name text input must be scalar row text",
-};
-
-const STR2FUNC_ERROR_NAME_TYPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2FUNC.NAME_TYPE_INVALID",
-    identifier: Some("RunMat:Str2FuncNameTypeInvalid"),
-    when: "Input is not string or char text.",
-    message: "str2func: expected string/char function name",
-};
-
-const STR2FUNC_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STR2FUNC.NAME_INVALID",
-    identifier: Some("RunMat:Str2FuncNameInvalid"),
-    when: "Parsed function name is empty.",
-    message: "str2func: function name must not be empty",
-};
-
-const STR2FUNC_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    STR2FUNC_ERROR_NAME_SHAPE_INVALID,
-    STR2FUNC_ERROR_NAME_TYPE_INVALID,
-    STR2FUNC_ERROR_NAME_INVALID,
-];
-
-pub const STR2FUNC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STR2FUNC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STR2FUNC_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "str2func",
-    descriptor(crate::STR2FUNC_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    fn normalize_handle_name(text: &str) -> Option<String> {
-        let trimmed = text.trim();
-        let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
-        (!name.is_empty()).then(|| name.to_string())
-    }
-
-    let name = match value {
-        Value::String(text) => normalize_handle_name(&text),
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_handle_name(&sa.data[0]),
-        Value::StringArray(_) => {
-            return Err(runtime_descriptor_error_with_detail(
-                "str2func",
-                &STR2FUNC_ERROR_NAME_SHAPE_INVALID,
-                "string array must be scalar",
-            ))
-        }
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
-            normalize_handle_name(&text)
-        }
-        Value::CharArray(_) => {
-            return Err(runtime_descriptor_error_with_detail(
-                "str2func",
-                &STR2FUNC_ERROR_NAME_SHAPE_INVALID,
-                "char array must be a row vector",
-            ))
-        }
-        other => {
-            return Err(runtime_descriptor_error_with_detail(
-                "str2func",
-                &STR2FUNC_ERROR_NAME_TYPE_INVALID,
-                format!("got {other:?}"),
-            ))
-        }
-    }
-    .ok_or_else(|| runtime_descriptor_error("str2func", &STR2FUNC_ERROR_NAME_INVALID))?;
-
-    if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
-        Ok(Value::BoundFunctionHandle { name, function })
-    } else if is_well_formed_qualified_name(&name) {
-        Ok(Value::ExternalFunctionHandle(name))
-    } else {
-        Ok(Value::FunctionHandle(name))
-    }
-}
-
-const FUNC2STR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function name string.",
-}];
-
-const FUNC2STR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle value.",
-}];
-
-const FUNC2STR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "name = func2str(fh)",
-    inputs: &FUNC2STR_INPUTS,
-    outputs: &FUNC2STR_OUTPUT,
-}];
-
-const FUNC2STR_ERROR_HANDLE_TYPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FUNC2STR.HANDLE_TYPE_INVALID",
-    identifier: Some("RunMat:Func2StrHandleTypeInvalid"),
-    when: "Input is not a supported function handle value.",
-    message: "func2str: expected function handle",
-};
-
-const FUNC2STR_ERRORS: [BuiltinErrorDescriptor; 1] = [FUNC2STR_ERROR_HANDLE_TYPE_INVALID];
-
-pub const FUNC2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FUNC2STR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FUNC2STR_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "func2str",
-    descriptor(crate::FUNC2STR_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-fn func2str_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    match value {
-        Value::FunctionHandle(name)
-        | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name)
-        | Value::BoundFunctionHandle { name, .. } => Ok(Value::String(name)),
-        Value::Closure(closure) => Ok(Value::String(closure.function_name)),
-        other => Err(runtime_descriptor_error_with_detail(
-            "func2str",
-            &FUNC2STR_ERROR_HANDLE_TYPE_INVALID,
-            format!("got {other:?}"),
-        )),
-    }
-}
-
-const GETMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bound method closure/handle.",
-}];
-
-const GETMETHOD_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj_or_class",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver or class reference.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Method name.",
-    },
-];
-
-const GETMETHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "fh = getmethod(obj_or_class, name)",
-    inputs: &GETMETHOD_INPUTS,
-    outputs: &GETMETHOD_OUTPUT,
-}];
-
-const GETMETHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GETMETHOD.NAME_INVALID",
-    identifier: Some("RunMat:GetMethodNameInvalid"),
-    when: "Method name is empty.",
-    message: "getmethod: method name must not be empty",
-};
-
-const GETMETHOD_ERROR_RECEIVER_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GETMETHOD.RECEIVER_UNSUPPORTED",
-    identifier: Some("RunMat:GetMethodReceiverUnsupported"),
-    when: "Receiver is neither object nor class reference.",
-    message: "getmethod: unsupported receiver",
-};
-
-const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    GETMETHOD_ERROR_NAME_INVALID,
-    GETMETHOD_ERROR_RECEIVER_UNSUPPORTED,
-];
-
-pub const GETMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GETMETHOD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GETMETHOD_ERRORS,
-};
-
-#[runmat_macros::runtime_builtin(
-    name = "getmethod",
-    descriptor(crate::GETMETHOD_DESCRIPTOR),
-    builtin_path = "crate"
-)]
-async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Value> {
-    let method_name = name.trim();
-    if method_name.is_empty() {
-        return Err(runtime_descriptor_error(
-            "getmethod",
-            &GETMETHOD_ERROR_NAME_INVALID,
-        ));
-    }
-    match obj {
-        Value::Object(o) => {
-            // Return a closure capturing the receiver; feval will call runtime builtin call_method
-            Ok(Value::Closure(runmat_builtins::Closure {
-                function_name: CALL_METHOD_BUILTIN_NAME.to_string(),
-                bound_function: None,
-                captures: vec![Value::Object(o), Value::String(method_name.to_string())],
-            }))
-        }
-        Value::ClassRef(cls) => str2func_builtin(Value::String(format!("@{cls}.{method_name}"))),
-        other => Err(runtime_descriptor_error_with_detail(
-            "getmethod",
-            &GETMETHOD_ERROR_RECEIVER_UNSUPPORTED,
-            format!("{other:?}"),
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::introspection::test_methods::*;
     use futures::executor::block_on;
     use runmat_builtins::{register_class, Access, ClassDef, PropertyDef};
     use std::collections::HashMap;
@@ -3280,8 +1372,6 @@ mod tests {
             ("deal", "[varargout] = deal(varargin)"),
             ("rethrow", "rethrow(err)"),
             ("call_method", "[out] = call_method(base, method, varargin)"),
-            ("subsasgn", "obj = subsasgn(obj, kind, payload, rhs)"),
-            ("subsref", "out = subsref(obj, kind, payload)"),
             (
                 "new_handle_object",
                 "handle = new_handle_object(class_name)",
@@ -3294,7 +1384,6 @@ mod tests {
             ("get.p", "value = get.p(obj)"),
             ("set.p", "obj = set.p(obj, value)"),
             ("make_anon", "handle_text = make_anon(params, body)"),
-            ("new_object", "obj = new_object(class_name)"),
             ("classref", "ref = classref(class_name)"),
             (
                 "__register_test_classes",
@@ -3609,7 +1698,7 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(145)
             })));
-        let value = str2func_builtin(Value::String("resolved_target".to_string()))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("resolved_target".to_string()))
             .expect("str2func should succeed");
         assert_eq!(
             value,
@@ -3623,7 +1712,7 @@ mod tests {
     #[test]
     fn str2func_returns_dynamic_handle_when_resolver_cannot_resolve() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = str2func_builtin(Value::String("@missing_target".to_string()))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("@missing_target".to_string()))
             .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("missing_target".to_string()));
     }
@@ -3631,7 +1720,7 @@ mod tests {
     #[test]
     fn str2func_returns_external_handle_for_qualified_name() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = str2func_builtin(Value::String("Point.origin".to_string()))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("Point.origin".to_string()))
             .expect("str2func should succeed");
         assert_eq!(
             value,
@@ -3642,7 +1731,7 @@ mod tests {
     #[test]
     fn str2func_malformed_qualified_name_returns_dynamic_handle() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = str2func_builtin(Value::String("Point..origin".to_string()))
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("Point..origin".to_string()))
             .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
     }
@@ -3650,13 +1739,13 @@ mod tests {
     #[test]
     fn func2str_rejects_non_handle_with_identifier() {
         let err =
-            func2str_builtin(Value::Num(1.0)).expect_err("func2str non-handle input should fail");
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::Num(1.0)).expect_err("func2str non-handle input should fail");
         assert_eq!(err.identifier(), Some("RunMat:Func2StrHandleTypeInvalid"));
     }
 
     #[test]
     fn str2func_rejects_empty_name_with_identifier() {
-        let err = str2func_builtin(Value::String("   ".to_string()))
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String("   ".to_string()))
             .expect_err("empty function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
     }
@@ -3665,7 +1754,7 @@ mod tests {
     fn str2func_rejects_non_row_char_name_with_identifier() {
         let chars = runmat_builtins::CharArray::new(vec!['a', 'b'], 2, 1)
             .expect("char array construction should succeed");
-        let err = str2func_builtin(Value::CharArray(chars))
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::CharArray(chars))
             .expect_err("non-row char-array function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
     }
@@ -3673,14 +1762,14 @@ mod tests {
     #[test]
     fn str2func_rejects_non_text_name_with_identifier() {
         let err =
-            str2func_builtin(Value::Num(1.0)).expect_err("non-text function name should fail");
+            crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::Num(1.0)).expect_err("non-text function name should fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
     }
 
     #[test]
     fn str2func_accepts_scalar_string_array_name() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = str2func_builtin(Value::StringArray(
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
             runmat_builtins::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
                 .expect("string array construction should succeed"),
         ))
@@ -3696,7 +1785,7 @@ mod tests {
                 .expect("string array construction should succeed"),
         );
         let err =
-            str2func_builtin(value).expect_err("nonscalar string-array function name must fail");
+            crate::builtins::introspection::function_handle_text::dispatch_str2func(value).expect_err("nonscalar string-array function name must fail");
         assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
     }
 
@@ -3706,7 +1795,7 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(445)
             })));
-        let value = str2func_builtin(Value::StringArray(
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
             runmat_builtins::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
                 .expect("string array construction should succeed"),
         ))
@@ -3723,7 +1812,7 @@ mod tests {
     #[test]
     fn str2func_scalar_string_array_returns_external_handle_for_qualified_name() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = str2func_builtin(Value::StringArray(
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
             runmat_builtins::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
                 .expect("string array construction should succeed"),
         ))
@@ -3737,7 +1826,7 @@ mod tests {
     #[test]
     fn str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = str2func_builtin(Value::StringArray(
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
             runmat_builtins::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
                 .expect("string array construction should succeed"),
         ))
@@ -3748,7 +1837,7 @@ mod tests {
     #[test]
     fn str2func_scalar_string_array_rejects_empty_name_with_identifier() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let err = str2func_builtin(Value::StringArray(
+        let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
             runmat_builtins::StringArray::new(vec!["   ".to_string()], vec![1, 1])
                 .expect("string array construction should succeed"),
         ))
@@ -3762,7 +1851,7 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.resolved_target").then_some(446)
             })));
-        let value = str2func_builtin(Value::StringArray(
+        let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::StringArray(
             runmat_builtins::StringArray::new(vec!["@pkg.resolved_target".to_string()], vec![1, 1])
                 .expect("string array construction should succeed"),
         ))
@@ -3779,10 +1868,10 @@ mod tests {
     #[test]
     fn getmethod_classref_returns_typed_external_function_handle() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
-        let value = block_on(getmethod_builtin(
+        let value = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".to_string()),
             "origin".to_string(),
-        ))
+        )
         .expect("getmethod should resolve classref method handle");
         assert_eq!(
             value,
@@ -3792,18 +1881,21 @@ mod tests {
 
     #[test]
     fn getmethod_rejects_empty_method_name() {
-        let err = block_on(getmethod_builtin(
+        let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".to_string()),
             "   ".to_string(),
-        ))
+        )
         .expect_err("empty method name should be rejected");
         assert_eq!(err.identifier(), Some("RunMat:GetMethodNameInvalid"));
     }
 
     #[test]
     fn getmethod_rejects_unsupported_receiver_with_identifier() {
-        let err = block_on(getmethod_builtin(Value::Num(1.0), "origin".to_string()))
-            .expect_err("unsupported receiver should be rejected");
+        let err = crate::builtins::introspection::getmethod::dispatch_getmethod(
+            Value::Num(1.0),
+            "origin".to_string(),
+        )
+        .expect_err("unsupported receiver should be rejected");
         assert_eq!(
             err.identifier(),
             Some("RunMat:GetMethodReceiverUnsupported")
@@ -3811,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn new_object_builtin_handles_class_parent_cycles() {
+    fn create_class_object_handles_class_parent_cycles() {
         let class_a = unique_class_name("runtime_ctor_cycle_a");
         let class_b = unique_class_name("runtime_ctor_cycle_b");
 
@@ -3821,6 +1913,7 @@ mod tests {
             PropertyDef {
                 name: "fromA".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -3833,6 +1926,7 @@ mod tests {
             PropertyDef {
                 name: "fromB".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -3853,7 +1947,7 @@ mod tests {
             methods: HashMap::new(),
         });
 
-        let value = block_on(new_object_builtin(class_a.clone()))
+        let value = block_on(create_class_object(class_a.clone()))
             .expect("constructor should terminate under parent-cycle metadata");
         let Value::Object(obj) = value else {
             panic!("expected object result");
@@ -3861,6 +1955,26 @@ mod tests {
         assert_eq!(obj.class_name, class_a);
         assert_eq!(obj.properties.get("fromA"), Some(&Value::Num(1.0)));
         assert_eq!(obj.properties.get("fromB"), Some(&Value::Num(2.0)));
+    }
+
+    #[test]
+    fn create_class_object_abstract_class_reports_stable_identifier() {
+        let class_name = unique_class_name("runtime_ctor_abstract");
+        runmat_builtins::register_class_with_modifiers(
+            ClassDef {
+                name: class_name.clone(),
+                parent: None,
+                properties: HashMap::new(),
+                methods: HashMap::new(),
+            },
+            false,
+            true,
+        );
+
+        let err = block_on(create_class_object(class_name))
+            .expect_err("abstract class instantiation should fail");
+        assert_eq!(err.identifier(), Some("RunMat:AbstractMethodMissing"));
+        assert!(err.message().contains("Cannot instantiate abstract class"));
     }
 
     #[test]
@@ -3956,16 +2070,16 @@ mod tests {
     #[test]
     fn func2str_extracts_name_from_function_handles() {
         assert_eq!(
-            func2str_builtin(Value::FunctionHandle("sin".to_string())).expect("func2str"),
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::FunctionHandle("sin".to_string())).expect("func2str"),
             Value::String("sin".to_string())
         );
         assert_eq!(
-            func2str_builtin(Value::ExternalFunctionHandle("Point.origin".to_string()))
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::ExternalFunctionHandle("Point.origin".to_string()))
                 .expect("func2str"),
             Value::String("Point.origin".to_string())
         );
         assert_eq!(
-            func2str_builtin(Value::BoundFunctionHandle {
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::BoundFunctionHandle {
                 name: "local_fn".to_string(),
                 function: 44,
             })
@@ -3973,7 +2087,7 @@ mod tests {
             Value::String("local_fn".to_string())
         );
         assert_eq!(
-            func2str_builtin(Value::Closure(runmat_builtins::Closure {
+            crate::builtins::introspection::function_handle_text::dispatch_func2str(Value::Closure(runmat_builtins::Closure {
                 function_name: "captured_fn".to_string(),
                 bound_function: None,
                 captures: Vec::new(),
@@ -4306,7 +2420,7 @@ mod tests {
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let result = block_on(call_method_builtin(
+        let result = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
             base.clone(),
             "deal".to_string(),
             vec![Value::Num(9.0), Value::Num(10.0)],
@@ -4330,7 +2444,7 @@ mod tests {
         let base = Value::Object(runmat_builtins::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let result = block_on(call_method_builtin(
+        let result = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
             base.clone(),
             "  deal  ".to_string(),
             vec![Value::Num(9.0), Value::Num(10.0)],
@@ -4427,7 +2541,7 @@ mod tests {
 
     #[test]
     fn call_method_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(call_method_builtin(
+        let err = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
             Value::Num(1.0),
             "origin".to_string(),
             Vec::new(),
@@ -4438,7 +2552,7 @@ mod tests {
 
     #[test]
     fn call_method_rejects_empty_method_name_with_identifier() {
-        let err = block_on(call_method_builtin(
+        let err = block_on(crate::builtins::introspection::call_method::dispatch_call_method(
             Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
             "  ".to_string(),
             Vec::new(),
@@ -4449,7 +2563,7 @@ mod tests {
 
     #[test]
     fn subsref_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(subsref_dispatch(
+        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsref(
             Value::Num(1.0),
             OBJECT_INDEX_PAREN.to_string(),
             Value::Num(2.0),
@@ -4460,7 +2574,7 @@ mod tests {
 
     #[test]
     fn subsasgn_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(subsasgn_dispatch(
+        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsasgn(
             Value::Num(1.0),
             OBJECT_INDEX_PAREN.to_string(),
             Value::Num(2.0),
@@ -4472,7 +2586,7 @@ mod tests {
 
     #[test]
     fn subsref_missing_protocol_errors_with_identifier() {
-        let err = block_on(subsref_dispatch(
+        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsref(
             Value::Object(runmat_builtins::ObjectInstance::new(
                 "NoSubsrefProtocolClass".to_string(),
             )),
@@ -4485,7 +2599,7 @@ mod tests {
 
     #[test]
     fn subsasgn_missing_protocol_errors_with_identifier() {
-        let err = block_on(subsasgn_dispatch(
+        let err = block_on(crate::builtins::introspection::object_indexing::dispatch_subsasgn(
             Value::Object(runmat_builtins::ObjectInstance::new(
                 "NoSubsasgnProtocolClass".to_string(),
             )),

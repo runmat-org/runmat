@@ -2,29 +2,149 @@ use crate::call::shared::{
     call_object_member_subsasgn, call_object_member_subsref,
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
     class_defines_member_subsasgn, class_defines_member_subsref, external_qualified_display_name,
+    ObjectIndexOp,
 };
 use crate::interpreter::errors::mex;
-use runmat_builtins::{self, Access, Closure, StructValue, Value};
+use runmat_builtins::{self, Closure, StructValue, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
+const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
+
+fn caller_has_internal_class_access(
+    caller_function_name: Option<&str>,
+    class_name: &str,
+) -> bool {
+    if let Some(caller_name) = caller_function_name {
+        if let Some((caller_class, _)) = caller_name.rsplit_once('.') {
+            if !caller_class.is_empty()
+                && runmat_builtins::get_class(caller_class).is_some()
+                && (runmat_builtins::is_class_or_subclass(caller_class, class_name)
+                    || runmat_builtins::is_class_or_subclass(class_name, caller_class))
+            {
+                return true;
+            }
+        }
+    }
+    caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
+        runmat_builtins::is_class_or_subclass(&caller_class, class_name)
+            || runmat_builtins::is_class_or_subclass(class_name, &caller_class)
+    })
+}
+
+fn caller_is_index_overload(
+    caller_function_name: Option<&str>,
+    class_name: &str,
+    op: ObjectIndexOp,
+) -> bool {
+    let Some(caller) = caller_function_name else {
+        return false;
+    };
+    let method_name = op.protocol_name();
+    if caller == method_name {
+        return true;
+    }
+    if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
+        if caller == method.function_name {
+            return true;
+        }
+        if caller == format!("{owner}.{method_name}") {
+            return true;
+        }
+    }
+    if let Some((caller_class, caller_method)) = caller.rsplit_once('.') {
+        if caller_method == method_name
+            && runmat_builtins::is_class_or_subclass(class_name, caller_class)
+        {
+            return true;
+        }
+    }
+    if let Some(caller_class) = caller_class_for_function(Some(caller)) {
+        if let Some((method, _owner)) = runmat_builtins::lookup_method(&caller_class, method_name) {
+            if method.function_name == caller
+                && (runmat_builtins::is_class_or_subclass(class_name, &caller_class)
+                    || runmat_builtins::is_class_or_subclass(&caller_class, class_name))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
+    let caller_function_name = caller_function_name?;
+    if runmat_builtins::get_class(caller_function_name).is_some() {
+        return Some(caller_function_name.to_string());
+    }
+    if let Some(owner) = runmat_builtins::class_names().into_iter().find(|class_name| {
+        runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+            class_def
+                .methods
+                .values()
+                .any(|method| method.function_name == caller_function_name)
+        })
+    }) {
+        return Some(owner);
+    }
+    if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
+        if !class_name.is_empty()
+            && !method_name.is_empty()
+            && runmat_builtins::get_class(class_name).is_some()
+        {
+            return Some(class_name.to_string());
+        }
+    }
+    None
+}
+
+fn access_permitted(
+    owner: &str,
+    access: &runmat_builtins::Access,
+    caller_function_name: Option<&str>,
+) -> bool {
+    match access {
+        runmat_builtins::Access::Public => true,
+        runmat_builtins::Access::Private => {
+            caller_class_for_function(caller_function_name).as_deref() == Some(owner)
+        }
+        runmat_builtins::Access::Protected => caller_class_for_function(caller_function_name)
+            .is_some_and(|caller_class| runmat_builtins::is_class_or_subclass(&caller_class, owner)),
+    }
+}
 
 pub async fn load_member(
     base: Value,
     field: String,
     allow_init: bool,
+    caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
-                if p.is_static {
-                    return Err(format!(
-                        "Property '{}' is static; use classref('{}').{}",
-                        field, obj.class_name, field
+            if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
+                if class_defines_member_subsref(&cls)
+                    && !caller_is_index_overload(
+                        caller_function_name,
+                        &obj.class_name,
+                        ObjectIndexOp::Subsref,
                     )
-                    .into());
+                    && !caller_has_internal_class_access(caller_function_name, &obj.class_name)
+                {
+                    return call_object_member_subsref(Value::Object(obj), field).await;
                 }
-                if p.get_access == Access::Private {
+            }
+            if let Some((p, owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+                if p.is_static {
+                    return Err(mex(
+                        "RunMat:PropertyStaticAccess",
+                        &format!(
+                            "Property '{}' is static; use classref('{}').{}",
+                            field, obj.class_name, field
+                        ),
+                    ));
+                }
+                if !access_permitted(&owner, &p.get_access, caller_function_name)
+                {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -44,8 +164,16 @@ pub async fn load_member(
             }
             if let Some(v) = obj.properties.get(&field) {
                 Ok(v.clone())
-            } else if let Some((p2, _)) = runmat_builtins::lookup_property(&obj.class_name, &field)
+            } else if let Some((p2, owner)) =
+                runmat_builtins::lookup_property(&obj.class_name, &field)
             {
+                if !access_permitted(&owner, &p2.get_access, caller_function_name)
+                {
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
+                }
                 if p2.is_dependent {
                     let backing = format!("{field}_backing");
                     if let Some(vb) = obj.properties.get(&backing) {
@@ -72,9 +200,34 @@ pub async fn load_member(
             }
         }
         Value::HandleObject(handle) => {
-            call_object_member_subsref(Value::HandleObject(handle), field).await
+            if let Some(cls) = runmat_builtins::get_class(&handle.class_name) {
+                if class_defines_member_subsref(&cls)
+                    && !caller_is_index_overload(
+                        caller_function_name,
+                        &handle.class_name,
+                        ObjectIndexOp::Subsref,
+                    )
+                    && !caller_has_internal_class_access(caller_function_name, &handle.class_name)
+                {
+                    return call_object_member_subsref(Value::HandleObject(handle), field).await;
+                }
+            }
+            runmat_runtime::call_builtin_async_with_outputs(
+                "getfield",
+                &[Value::HandleObject(handle), Value::String(field)],
+                1,
+            )
+            .await
         }
-        Value::ClassRef(cls) => load_static_member(&cls, &field),
+        Value::Listener(listener) => {
+            runmat_runtime::call_builtin_async_with_outputs(
+                "getfield",
+                &[Value::Listener(listener), Value::String(field)],
+                1,
+            )
+            .await
+        }
+        Value::ClassRef(cls) => load_static_member(&cls, &field, caller_function_name),
         base @ (Value::Num(_) | Value::Int(_)) => {
             if !is_possible_graphics_handle_value(&base) {
                 return Err(mex("LoadMember", "LoadMember on non-object"));
@@ -124,34 +277,55 @@ pub async fn load_member_dynamic(
     base: Value,
     name: String,
     allow_init: bool,
+    caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
-    load_member(base, name, allow_init).await
+    load_member(base, name, allow_init, caller_function_name).await
 }
 
-pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError> {
+pub fn load_static_member(
+    cls: &str,
+    field: &str,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
     if let Some((p, owner)) = runmat_builtins::lookup_property(cls, field) {
         if !p.is_static {
-            return Err(format!("Property '{}' is not static", field).into());
+            return Err(mex(
+                "RunMat:PropertyStaticAccess",
+                &format!("Property '{}' is not static", field),
+            ));
         }
-        if p.get_access == Access::Private {
-            return Err(format!("Property '{}' is private", field).into());
+        if !access_permitted(&owner, &p.get_access, caller_function_name)
+        {
+            return Err(mex(
+                IDENT_PROPERTY_PRIVATE_ACCESS,
+                &format!("Property '{}' is private", field),
+            ));
         }
         if let Some(v) = runmat_builtins::get_static_property_value(&owner, field) {
             Ok(v)
         } else if let Some(v) = &p.default_value {
             Ok(v.clone())
         } else {
-            Ok(Value::Num(0.0))
+            Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty tensor")))
         }
     } else if let Some((m, _owner)) = runmat_builtins::lookup_method(cls, field) {
         if !m.is_static {
-            return Err(format!("Method '{}' is not static", field).into());
+            return Err(mex(
+                "RunMat:MethodStaticAccess",
+                &format!("Method '{}' is not static", field),
+            ));
         }
         Ok(Value::Closure(Closure {
             function_name: m.function_name,
             bound_function: None,
             captures: vec![],
         }))
+    } else if runmat_builtins::class_has_enumeration_member(cls, field) {
+        let mut value = runmat_builtins::ObjectInstance::new(cls.to_string());
+        value
+            .properties
+            .insert("__enum_member__".to_string(), Value::String(field.to_string()));
+        Ok(Value::Object(value))
     } else {
         let qualified = external_qualified_display_name(cls, field);
         if runmat_builtins::builtin_functions()
@@ -174,6 +348,7 @@ pub async fn store_member<OnWrite>(
     field: String,
     rhs: Value,
     allow_init: bool,
+    caller_function_name: Option<&str>,
     mut on_write: OnWrite,
 ) -> Result<Value, RuntimeError>
 where
@@ -181,15 +356,36 @@ where
 {
     match base {
         Value::Object(mut obj) => {
-            if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
-                if p.is_static {
-                    return Err(format!(
-                        "Property '{}' is static; use classref('{}').{}",
-                        field, obj.class_name, field
+            if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
+                if class_defines_member_subsasgn(&cls)
+                    && !caller_is_index_overload(
+                        caller_function_name,
+                        &obj.class_name,
+                        ObjectIndexOp::Subsasgn,
                     )
-                    .into());
+                    && !caller_has_internal_class_access(caller_function_name, &obj.class_name)
+                {
+                    return call_object_member_subsasgn(Value::Object(obj), field, rhs).await;
                 }
-                if p.set_access == Access::Private {
+            }
+            if let Some((p, owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+                if p.is_static {
+                    return Err(mex(
+                        "RunMat:PropertyStaticAccess",
+                        &format!(
+                            "Property '{}' is static; use classref('{}').{}",
+                            field, obj.class_name, field
+                        ),
+                    ));
+                }
+                if p.is_constant {
+                    return Err(mex(
+                        IDENT_PROPERTY_READ_ONLY,
+                        &format!("Property '{}' is constant", field),
+                    ));
+                }
+                if !access_permitted(&owner, &p.set_access, caller_function_name)
+                {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -225,9 +421,19 @@ where
         Value::ClassRef(cls) => {
             if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &field) {
                 if !p.is_static {
-                    return Err(format!("Property '{}' is not static", field).into());
+                    return Err(mex(
+                        "RunMat:PropertyStaticAccess",
+                        &format!("Property '{}' is not static", field),
+                    ));
                 }
-                if p.set_access == Access::Private {
+                if p.is_constant {
+                    return Err(mex(
+                        IDENT_PROPERTY_READ_ONLY,
+                        &format!("Property '{}' is constant", field),
+                    ));
+                }
+                if !access_permitted(&owner, &p.set_access, caller_function_name)
+                {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -240,7 +446,33 @@ where
             }
         }
         Value::HandleObject(handle) => {
-            call_object_member_subsasgn(Value::HandleObject(handle), field, rhs).await
+            if let Some(cls) = runmat_builtins::get_class(&handle.class_name) {
+                if class_defines_member_subsasgn(&cls)
+                    && !caller_is_index_overload(
+                        caller_function_name,
+                        &handle.class_name,
+                        ObjectIndexOp::Subsasgn,
+                    )
+                    && !caller_has_internal_class_access(caller_function_name, &handle.class_name)
+                {
+                    return call_object_member_subsasgn(Value::HandleObject(handle), field, rhs)
+                        .await;
+                }
+            }
+            runmat_runtime::call_builtin_async_with_outputs(
+                "setfield",
+                &[Value::HandleObject(handle), Value::String(field), rhs],
+                1,
+            )
+            .await
+        }
+        Value::Listener(listener) => {
+            runmat_runtime::call_builtin_async_with_outputs(
+                "setfield",
+                &[Value::Listener(listener), Value::String(field), rhs],
+                1,
+            )
+            .await
         }
         Value::Num(0.0) if allow_init => {
             let mut st = StructValue::new();
@@ -278,12 +510,13 @@ pub async fn store_member_dynamic<OnWrite>(
     name: String,
     rhs: Value,
     allow_init: bool,
+    caller_function_name: Option<&str>,
     on_write: OnWrite,
 ) -> Result<Value, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    store_member(base, name, rhs, allow_init, on_write).await
+    store_member(base, name, rhs, allow_init, caller_function_name, on_write).await
 }
 
 async fn load_graphics_member(base: Value, field: &str) -> Result<Value, RuntimeError> {
@@ -347,6 +580,7 @@ mod tests {
             PropertyDef {
                 name: "version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -367,7 +601,7 @@ mod tests {
         });
 
         runmat_builtins::set_static_property_value(&parent_name, "version", Value::Num(3.0));
-        let value = load_static_member(&child_name, "version")
+        let value = load_static_member(&child_name, "version", None)
             .expect("inherited static property should resolve through parent metadata owner");
         assert_eq!(value, Value::Num(3.0));
     }
@@ -383,6 +617,7 @@ mod tests {
             PropertyDef {
                 name: "version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -407,6 +642,7 @@ mod tests {
             "version".to_string(),
             Value::Num(9.0),
             false,
+            None,
             |_old, _new| {},
         ))
         .expect("storing inherited static property via child class ref should succeed");
@@ -428,6 +664,8 @@ mod tests {
             MethodDef {
                 name: "build".to_string(),
                 is_static: true,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "build_impl".to_string(),
                 implicit_class_argument: None,
@@ -446,7 +684,7 @@ mod tests {
             methods: HashMap::new(),
         });
 
-        let value = load_static_member(&child_name, "build")
+        let value = load_static_member(&child_name, "build", None)
             .expect("inherited static method should resolve through parent metadata");
         let Value::Closure(closure) = value else {
             panic!("expected static method lookup to return closure");
@@ -465,6 +703,8 @@ mod tests {
             MethodDef {
                 name: "subsref".to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "OverIdx.subsref".to_string(),
                 implicit_class_argument: None,
@@ -484,7 +724,8 @@ mod tests {
         });
 
         let obj = Value::Object(ObjectInstance::new(child_name));
-        let value = futures::executor::block_on(load_member(obj, "missing".to_string(), false))
+        let value =
+            futures::executor::block_on(load_member(obj, "missing".to_string(), false, None))
             .expect("missing member should dispatch to inherited subsref");
         assert_eq!(value, Value::Num(77.0));
     }
@@ -500,6 +741,8 @@ mod tests {
             MethodDef {
                 name: "subsasgn".to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "OverIdx.subsasgn".to_string(),
                 implicit_class_argument: None,
@@ -523,6 +766,7 @@ mod tests {
             "missing".to_string(),
             Value::Num(13.0),
             false,
+            None,
             |_old, _new| {},
         ))
         .expect("missing member store should dispatch to inherited subsasgn");

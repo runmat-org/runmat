@@ -52,6 +52,7 @@ pub async fn call_method_or_member_index_named_with_outputs(
         name,
         args,
         requested_outputs,
+        None,
     )
     .await
 }

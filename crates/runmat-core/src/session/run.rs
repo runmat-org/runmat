@@ -51,6 +51,12 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        self.pending_companion_class_statements =
+            Some(super::compile::discover_companion_class_source_statements_async(
+                self.current_source_name(),
+                self.compat_mode,
+            )
+            .await);
         let previous_workspace_names = self
             .workspace_values
             .keys()
@@ -105,6 +111,7 @@ impl RunMatSession {
         self.active_source_name = previous_source_name;
         self.abi_workspace_handle = previous_workspace_handle;
         self.active_source_identity = previous_source_identity;
+        self.pending_companion_class_statements = None;
 
         result.map(|outcome| apply_requested_output_policy(outcome, &requested_outputs))
     }

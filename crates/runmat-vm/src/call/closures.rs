@@ -3,13 +3,50 @@ use crate::call::descriptor::{
     CallableDescriptor,
 };
 use crate::call::shared::{
-    call_getfield_with_indices, external_qualified_display_name, external_qualified_identity,
+    call_getfield_with_indices, call_object_member_subsref, class_defines_member_subsref,
+    external_qualified_display_name, external_qualified_identity,
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, get_class, lookup_method, Access, Closure, Value};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
+
+fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<String> {
+    let caller_function_name = caller_function_name?;
+    if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
+        if !class_name.is_empty() && !method_name.is_empty() {
+            return Some(class_name.to_string());
+        }
+    }
+    runmat_builtins::class_names().into_iter().find(|class_name| {
+        runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+            class_def
+                .methods
+                .values()
+                .any(|method| method.function_name == caller_function_name)
+        })
+    })
+}
+
+fn method_access_permitted(owner: &str, access: &Access, caller_function_name: Option<&str>) -> bool {
+    match access {
+        Access::Public => true,
+        Access::Private => caller_class_for_function(caller_function_name).as_deref() == Some(owner),
+        Access::Protected => caller_class_for_function(caller_function_name)
+            .is_some_and(|caller_class| runmat_builtins::is_class_or_subclass(&caller_class, owner)),
+    }
+}
+
+fn caller_has_internal_class_access(
+    caller_function_name: Option<&str>,
+    class_name: &str,
+) -> bool {
+    caller_class_for_function(caller_function_name).is_some_and(|caller_class| {
+        runmat_builtins::is_class_or_subclass(&caller_class, class_name)
+            || runmat_builtins::is_class_or_subclass(class_name, &caller_class)
+    })
+}
 
 fn method_member_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
@@ -89,8 +126,16 @@ async fn call_member_index_on_object_like(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
+    caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
-    if let Some((m, _owner)) = lookup_method(class_name, &name) {
+    if args.is_empty()
+        && get_class(class_name)
+            .is_some_and(|class_def| class_defines_member_subsref(&class_def))
+        && !caller_has_internal_class_access(caller_function_name, class_name)
+    {
+        return Box::pin(call_object_member_subsref(receiver, name)).await;
+    }
+    if let Some((m, owner)) = lookup_method(class_name, &name) {
         if m.is_static {
             return Err(mex(
                 "MethodStaticOnInstance",
@@ -100,7 +145,8 @@ async fn call_member_index_on_object_like(
                 ),
             ));
         }
-        if m.access == Access::Private {
+        if !method_access_permitted(&owner, &m.access, caller_function_name)
+        {
             return Err(mex(
                 "MethodPrivate",
                 &format!("Method '{}' is private", name),
@@ -208,7 +254,11 @@ pub fn create_semantic_closure(
     Ok(())
 }
 
-pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeError> {
+pub fn load_method_closure(
+    base: Value,
+    name: String,
+    caller_function_name: Option<&str>,
+) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
             let function_name = external_qualified_display_name(&obj.class_name, &name);
@@ -221,11 +271,18 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
             }))
         }
         Value::ClassRef(cls) => {
-            if let Some((m, _owner)) = lookup_method(&cls, &name) {
+            if let Some((m, owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(mex(
                         "MethodNotStatic",
                         &format!("Method '{}' is not static", name),
+                    ));
+                }
+                if !method_access_permitted(&owner, &m.access, caller_function_name)
+                {
+                    return Err(mex(
+                        "MethodPrivate",
+                        &format!("Method '{}' is private", name),
                     ));
                 }
                 return Ok(Value::Closure(Closure {
@@ -263,6 +320,7 @@ pub async fn call_method_or_member_index_with_outputs(
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
+    caller_function_name: Option<&str>,
     _fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     let name = method_member_name(&identity).ok_or_else(|| {
@@ -273,7 +331,14 @@ pub async fn call_method_or_member_index_with_outputs(
             ),
         )
     })?;
-    call_method_or_member_index_named_with_outputs(base, name, args, requested_outputs).await
+    call_method_or_member_index_named_with_outputs(
+        base,
+        name,
+        args,
+        requested_outputs,
+        caller_function_name,
+    )
+    .await
 }
 
 pub(crate) async fn call_method_or_member_index_named_with_outputs(
@@ -281,6 +346,7 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
+    caller_function_name: Option<&str>,
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
@@ -291,6 +357,7 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                 name,
                 args,
                 requested_outputs,
+                caller_function_name,
             )
             .await
         }
@@ -302,15 +369,23 @@ pub(crate) async fn call_method_or_member_index_named_with_outputs(
                 name,
                 args,
                 requested_outputs,
+                caller_function_name,
             )
             .await
         }
         Value::ClassRef(cls) => {
-            if let Some((m, _owner)) = lookup_method(&cls, &name) {
+            if let Some((m, owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(mex(
                         "MethodNotStatic",
                         &format!("Method '{}' is not static", name),
+                    ));
+                }
+                if !method_access_permitted(&owner, &m.access, caller_function_name)
+                {
+                    return Err(mex(
+                        "MethodPrivate",
+                        &format!("Method '{}' is private", name),
                     ));
                 }
                 let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
@@ -387,6 +462,7 @@ mod tests {
             CallableIdentity::Method(MethodId("remote_inc".to_string())),
             vec![Value::Num(2.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect("classref external call should resolve through semantic resolver");
@@ -400,6 +476,7 @@ mod tests {
             CallableIdentity::Method(MethodId("sqrt".to_string())),
             vec![Value::Num(9.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("classref external call should not fallback to builtin name resolution");
@@ -413,6 +490,7 @@ mod tests {
             CallableIdentity::AnonymousFunction(runmat_hir::FunctionId(12)),
             vec![Value::Num(9.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("anonymous identity should not be used for method/member call");
@@ -435,6 +513,7 @@ mod tests {
             }),
             vec![Value::Num(9.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("imported identity should not be used for method/member call");
@@ -451,6 +530,7 @@ mod tests {
             ])),
             vec![Value::Num(9.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("multi-segment external identity should not be used for method/member call");
@@ -464,6 +544,7 @@ mod tests {
             CallableIdentity::Method(MethodId("   ".to_string())),
             vec![Value::Num(9.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("whitespace method identity should not be used for method/member call");
@@ -479,6 +560,7 @@ mod tests {
             ])),
             vec![Value::Num(9.0)],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err(
@@ -496,6 +578,8 @@ mod tests {
             MethodDef {
                 name: "inst".to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "inst".to_string(),
                 implicit_class_argument: None,
@@ -513,6 +597,7 @@ mod tests {
             CallableIdentity::Method(MethodId("inst".to_string())),
             vec![],
             1,
+            None,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("classref call to non-static method should fail");
@@ -524,6 +609,7 @@ mod tests {
         let err = load_method_closure(
             Value::ClassRef("Point".to_string()),
             "definitely_missing_static_method".to_string(),
+            None,
         )
         .expect_err("unknown static method should fail during method-handle load");
         assert_eq!(err.identifier(), Some("RunMat:UnknownStaticMethod"));

@@ -263,6 +263,7 @@ fn ensure_duration_class_registered() {
             PropertyDef {
                 name: FORMAT_FIELD.to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -288,6 +289,8 @@ fn ensure_duration_class_registered() {
                 MethodDef {
                     name: name.to_string(),
                     is_static: false,
+                    is_abstract: false,
+                    is_sealed: false,
                     access: Access::Public,
                     function_name: format!("{DURATION_CLASS}.{name}"),
                     implicit_class_argument: None,

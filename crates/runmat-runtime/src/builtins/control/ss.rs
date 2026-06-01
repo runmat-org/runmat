@@ -234,6 +234,7 @@ fn ensure_ss_class_registered() {
                 PropertyDef {
                     name: name.to_string(),
                     is_static: false,
+                    is_constant: false,
                     is_dependent: false,
                     get_access: Access::Public,
                     set_access: Access::Public,

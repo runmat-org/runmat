@@ -34,14 +34,212 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
         source_path
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("/"))
+            .unwrap_or_else(|| PathBuf::from("."))
     } else {
-        match runmat_filesystem::current_dir() {
-            Ok(cwd) => cwd,
-            Err(_) => return HashSet::new(),
-        }
+        runmat_filesystem::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     };
     discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
+}
+
+fn source_lookup_cwd(source_name: &str) -> Option<PathBuf> {
+    let source_path = PathBuf::from(source_name);
+    if source_path.is_absolute() {
+        return source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .or_else(|| Some(PathBuf::from(".")));
+    }
+    Some(runmat_filesystem::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn resolved_source_path(source_name: &str, cwd: &Path) -> PathBuf {
+    let source_path = PathBuf::from(source_name);
+    if source_path.is_absolute() {
+        source_path
+    } else {
+        cwd.join(source_path)
+    }
+}
+
+fn is_class_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
+    let has_classdef = stmts
+        .iter()
+        .any(|stmt| matches!(stmt, runmat_parser::Stmt::ClassDef { .. }));
+    if !has_classdef {
+        return false;
+    }
+    stmts.iter().all(|stmt| {
+        matches!(
+            stmt,
+            runmat_parser::Stmt::ClassDef { .. } | runmat_parser::Stmt::Function { .. }
+        )
+    })
+}
+
+fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<String> {
+    let relative = source_path.strip_prefix(root_dir).ok()?;
+    let class_name = source_path.file_stem()?.to_str()?;
+    let mut package_segments = Vec::new();
+    if let Some(parent) = relative.parent() {
+        for component in parent.components() {
+            let segment = component.as_os_str().to_str()?;
+            if let Some(pkg) = segment.strip_prefix('+') {
+                if pkg.is_empty() {
+                    return None;
+                }
+                package_segments.push(pkg.to_string());
+            } else {
+                return None;
+            }
+        }
+    }
+    if package_segments.is_empty() {
+        return None;
+    }
+    package_segments.push(class_name.to_string());
+    Some(package_segments.join("."))
+}
+
+fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
+    for stmt in stmts {
+        if let runmat_parser::Stmt::ClassDef { name, .. } = stmt {
+            if !name.contains('.') {
+                *name = qualified_name.to_string();
+            }
+        }
+    }
+}
+
+fn source_index_qualified_class_name(source: &runmat_config::project::ProjectSourceFile) -> Option<&str> {
+    source
+        .package_path
+        .as_ref()
+        .and_then(|_| source.qualified_name.contains('.').then_some(source.qualified_name.as_str()))
+}
+
+async fn discover_companion_from_composition_graph_async(
+    source_name: &str,
+    cwd: &Path,
+    primary_source_path: &Path,
+    compat_mode: runmat_parser::CompatMode,
+) -> Vec<runmat_parser::Stmt> {
+    use runmat_config::project::{
+        build_project_composition_graph_async, discover_project_symbols_from_source_name_async,
+    };
+    let options = ParserOptions::new(compat_mode);
+    let mut out = Vec::new();
+
+    if let Ok(Some(discovered_symbols)) =
+        discover_project_symbols_from_source_name_async(source_name, cwd).await
+    {
+        if let Ok(composition) =
+            build_project_composition_graph_async(&discovered_symbols.manifest_path).await
+        {
+            for package in composition.packages.values() {
+                for source in &package.source_index.files {
+                    let file_path = package
+                        .project_root
+                        .join(&source.source_root)
+                        .join(&source.relative_path);
+                    if file_path == primary_source_path {
+                        continue;
+                    }
+                    let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await else {
+                        continue;
+                    };
+                    if !contents.contains("classdef") {
+                        continue;
+                    }
+                    let Ok(program) = parse_with_options(&contents, options) else {
+                        continue;
+                    };
+                    if !is_class_source_body(&program.body) {
+                        continue;
+                    }
+                    let mut body = program.body;
+                    if let Some(qualified) = source_index_qualified_class_name(source) {
+                        qualify_companion_classdefs(&mut body, qualified);
+                    } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
+                        qualify_companion_classdefs(&mut body, &qualified);
+                    }
+                    out.extend(body);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+pub(super) async fn discover_companion_class_source_statements_async(
+    source_name: &str,
+    compat_mode: runmat_parser::CompatMode,
+) -> Vec<runmat_parser::Stmt> {
+    let Some(cwd) = source_lookup_cwd(source_name) else {
+        return Vec::new();
+    };
+    let primary_source_path = resolved_source_path(source_name, &cwd);
+    let Some(parent) = primary_source_path.parent() else {
+        return Vec::new();
+    };
+    let mut out = discover_companion_from_composition_graph_async(
+        source_name,
+        &cwd,
+        &primary_source_path,
+        compat_mode,
+    )
+    .await;
+    if !out.is_empty() {
+        return out;
+    }
+    let options = ParserOptions::new(compat_mode);
+    let mut stack = vec![parent.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = runmat_filesystem::read_dir_async(&dir).await else {
+            continue;
+        };
+        for entry in entries {
+            let path = entry.path().to_path_buf();
+            if path == primary_source_path {
+                continue;
+            }
+            if entry.is_dir() {
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with('+'))
+                {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if !path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
+            {
+                continue;
+            }
+            let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
+                continue;
+            };
+            if !contents.contains("classdef") {
+                continue;
+            }
+            let Ok(program) = parse_with_options(&contents, options) else {
+                continue;
+            };
+            if !is_class_source_body(&program.body) {
+                continue;
+            }
+            let mut body = program.body;
+            if let Some(qualified) = package_class_name_from_path(&path, parent) {
+                qualify_companion_classdefs(&mut body, &qualified);
+            }
+            out.extend(body);
+        }
+    }
+    out
 }
 
 impl RunMatSession {
@@ -66,7 +264,16 @@ impl RunMatSession {
         let source_id = self.source_pool.intern(&source_name, input);
         let ast = {
             let _span = info_span!("runtime.parse").entered();
-            parse_with_options(input, ParserOptions::new(self.compat_mode))?
+            let mut ast = parse_with_options(input, ParserOptions::new(self.compat_mode))?;
+            let mut companion = self
+                .pending_companion_class_statements
+                .take()
+                .unwrap_or_default();
+            if !companion.is_empty() {
+                companion.append(&mut ast.body);
+                ast.body = companion;
+            }
+            ast
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();

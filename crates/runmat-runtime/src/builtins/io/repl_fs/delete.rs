@@ -194,7 +194,7 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
 
     if gathered.iter().all(is_handle_input) {
-        return delete_handles(&gathered);
+        return delete_handles(&gathered).await;
     }
 
     if gathered.iter().any(contains_handle_input) {
@@ -436,11 +436,11 @@ fn collect_cell_targets(cell: &CellArray, targets: &mut Vec<String>) -> BuiltinR
     Ok(())
 }
 
-fn delete_handles(values: &[Value]) -> BuiltinResult<Value> {
+async fn delete_handles(values: &[Value]) -> BuiltinResult<Value> {
     let mut mutated_last: Option<Value> = None;
     let mut total = 0usize;
     for value in values {
-        total += process_handle_value(value, &mut mutated_last)?;
+        total += process_handle_value(value, &mut mutated_last).await?;
     }
     if total == 1 {
         Ok(mutated_last.unwrap_or(Value::Num(0.0)))
@@ -449,15 +449,41 @@ fn delete_handles(values: &[Value]) -> BuiltinResult<Value> {
     }
 }
 
-fn process_handle_value(value: &Value, mutated_last: &mut Option<Value>) -> BuiltinResult<usize> {
+async fn process_handle_value(
+    value: &Value,
+    mutated_last: &mut Option<Value>,
+) -> BuiltinResult<usize> {
     match value {
         Value::HandleObject(handle) => {
+            if let Some((delete_method, _owner)) =
+                runmat_builtins::lookup_method(&handle.class_name, "delete")
+            {
+                if let Some(result) = crate::user_functions::try_call_semantic_function_by_name(
+                    &delete_method.function_name,
+                    &[Value::HandleObject(handle.clone())],
+                    0,
+                )
+                .await
+                {
+                    result?;
+                } else {
+                    return Err(delete_error_with(
+                        &DELETE_ERROR_INVALID_HANDLE,
+                        format!(
+                            "delete: unresolved handle delete method '{}'",
+                            delete_method.function_name
+                        ),
+                    ));
+                }
+            }
+            let _ = runmat_builtins::set_handle_valid(handle, false);
             let mut invalid = handle.clone();
             invalid.valid = false;
             *mutated_last = Some(Value::HandleObject(invalid));
             Ok(1)
         }
         Value::Listener(listener) => {
+            crate::invalidate_listener_registration(listener.id);
             let mut invalid = listener.clone();
             invalid.valid = false;
             invalid.enabled = false;
@@ -468,7 +494,7 @@ fn process_handle_value(value: &Value, mutated_last: &mut Option<Value>) -> Buil
             let mut total = 0usize;
             for handle in &cell.data {
                 let inner = unsafe { &*handle.as_raw() };
-                total += process_handle_value(inner, mutated_last)?;
+                total += Box::pin(process_handle_value(inner, mutated_last)).await?;
             }
             Ok(total)
         }
@@ -746,6 +772,7 @@ pub(crate) mod tests {
             "ReplFsDeleteTestHandle".to_string(),
         ))
         .expect("handle");
+        let original_handle = handle.clone();
         let result = delete_builtin(vec![handle]).expect("delete handle");
         match result {
             Value::HandleObject(h) => {
@@ -756,6 +783,14 @@ pub(crate) mod tests {
                 .expect("isvalid");
                 match valid_value {
                     Value::Bool(flag) => assert!(!flag, "isvalid should report false after delete"),
+                    other => panic!("expected bool from isvalid, got {other:?}"),
+                }
+                let original_valid_value = futures::executor::block_on(crate::isvalid_builtin(
+                    original_handle,
+                ))
+                .expect("isvalid");
+                match original_valid_value {
+                    Value::Bool(flag) => assert!(!flag, "original alias should also be invalid"),
                     other => panic!("expected bool from isvalid, got {other:?}"),
                 }
             }

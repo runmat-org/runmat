@@ -8,8 +8,8 @@ use crate::{
     HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
     HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
     HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
-    IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind,
-    PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
+    IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, MemberAccess,
+    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
     ReferenceResolution, RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId,
     StringLiteral, SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
     DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
@@ -47,12 +47,14 @@ struct LoweringCtx {
     next_expr: usize,
     next_stmt: usize,
     next_function: usize,
+    next_class: usize,
     scopes: Vec<ScopeFrame>,
     function_modifiers: Vec<FunctionModifiers>,
     top_level_await: Vec<bool>,
     runmat_extensions_enabled: bool,
     top_level_await_enabled: bool,
     function_names: HashMap<String, FunctionId>,
+    class_names: HashMap<String, ClassId>,
     external_function_names: HashMap<String, FunctionId>,
     known_project_symbols: HashSet<String>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
@@ -81,6 +83,49 @@ pub fn lower(prog: &AstProgram, context: &LoweringContext<'_>) -> Result<Lowerin
 }
 
 impl LoweringCtx {
+    fn class_for_id(&self, id: ClassId) -> Option<&HirClass> {
+        self.assembly.classes.iter().find(|class| class.id == id)
+    }
+
+    fn class_has_public_static_property(&self, class_name: &str, property_name: &str) -> bool {
+        if let Some(class_id) = self.class_id_for_name(class_name) {
+            if let Some(class_def) = self.class_for_id(class_id) {
+                if class_def.properties.iter().any(|property| {
+                    property.name.0 == property_name
+                        && property.attributes.is_static
+                        && matches!(property.attributes.get_access, MemberAccess::Public)
+                        && matches!(property.attributes.access, MemberAccess::Public)
+                }) {
+                    return true;
+                }
+            }
+        }
+        if let Some((property, _owner)) = runmat_builtins::lookup_property(class_name, property_name) {
+            return property.is_static
+                && property.get_access == runmat_builtins::Access::Public
+                && property.set_access == runmat_builtins::Access::Public;
+        }
+        false
+    }
+
+    fn class_id_for_name(&self, name: &str) -> Option<ClassId> {
+        if let Some(id) = self.class_names.get(name) {
+            return Some(*id);
+        }
+        self.class_id_for_unqualified_name(name)
+    }
+
+    fn class_id_for_unqualified_name(&self, name: &str) -> Option<ClassId> {
+        if let Some(id) = self.class_names.get(name) {
+            return Some(*id);
+        }
+        self.assembly
+            .classes
+            .iter()
+            .find(|class| class.name.0.len() == 1 && class.name.0[0].0 == name)
+            .map(|class| class.id)
+    }
+
     fn qualified_name_string(name: &QualifiedName) -> String {
         name.0
             .iter()
@@ -94,6 +139,28 @@ impl LoweringCtx {
             || self
                 .known_project_symbols
                 .contains(&Self::qualified_name_string(qualified))
+            || self.source_class_static_method_exists(qualified)
+    }
+
+    fn source_class_static_method_exists(&self, qualified: &QualifiedName) -> bool {
+        if qualified.0.len() < 2 {
+            return false;
+        }
+        let method_name = qualified.0[qualified.0.len() - 1].0.as_str();
+        let class_segments = &qualified.0[..qualified.0.len() - 1];
+        self.assembly.classes.iter().any(|class| {
+            class.name.0.len() == class_segments.len()
+                && class
+                    .name
+                    .0
+                    .iter()
+                    .zip(class_segments.iter())
+                    .all(|(a, b)| a.0 == b.0)
+                && class
+                    .methods
+                    .iter()
+                    .any(|method| method.is_static && method.name.0 == method_name)
+        })
     }
 
     fn wildcard_import_candidate(import_path: &QualifiedName, name: &str) -> QualifiedName {
@@ -136,12 +203,14 @@ impl LoweringCtx {
             next_expr: 0,
             next_stmt: 0,
             next_function: 0,
+            next_class: 0,
             scopes: Vec::new(),
             function_modifiers: Vec::new(),
             top_level_await: Vec::new(),
             runmat_extensions_enabled: context.runmat_extensions_enabled,
             top_level_await_enabled: context.top_level_await_enabled,
             function_names: HashMap::new(),
+            class_names: HashMap::new(),
             external_function_names: context.bound_functions.clone(),
             known_project_symbols: context.known_project_symbols.clone(),
             captures: HashMap::new(),
@@ -165,6 +234,9 @@ impl LoweringCtx {
                     .top_level_functions
                     .push(id);
             }
+            if let AstStmt::ClassDef { name, .. } = stmt {
+                let _ = ctx.reserve_class_name(name);
+            }
         }
 
         for stmt in &prog.body {
@@ -181,6 +253,55 @@ impl LoweringCtx {
             }
         }
         validate_semantic_imports(&ctx.assembly.modules[ctx.module.0].imports)?;
+
+        for stmt in &prog.body {
+            match stmt {
+                AstStmt::Function {
+                    name,
+                    params,
+                    outputs,
+                    body,
+                    isolated,
+                    is_async,
+                    span,
+                } => {
+                    let id = ctx.function_names[name];
+                    let function = ctx.lower_function(LowerFunctionSpec {
+                        id,
+                        name,
+                        params,
+                        outputs,
+                        body,
+                        span: *span,
+                        kind: FunctionKind::Named,
+                        modifiers: FunctionModifiers {
+                            isolated: *isolated,
+                            is_async: *is_async,
+                        },
+                        parent: None,
+                        enclosing_class: None,
+                    })?;
+                    ctx.assembly.functions.push(function);
+                }
+                AstStmt::ClassDef {
+                    attributes,
+                    name,
+                    super_class,
+                    members,
+                    span,
+                } => {
+                    let class = ctx.lower_class(
+                        attributes,
+                        name,
+                        super_class.as_deref(),
+                        members,
+                        *span,
+                    )?;
+                    ctx.assembly.classes.push(class);
+                }
+                _ => {}
+            }
+        }
 
         let executable: Vec<_> = prog
             .body
@@ -233,48 +354,6 @@ impl LoweringCtx {
             });
         }
 
-        for stmt in &prog.body {
-            match stmt {
-                AstStmt::Function {
-                    name,
-                    params,
-                    outputs,
-                    body,
-                    isolated,
-                    is_async,
-                    span,
-                } => {
-                    let id = ctx.function_names[name];
-                    let function = ctx.lower_function(LowerFunctionSpec {
-                        id,
-                        name,
-                        params,
-                        outputs,
-                        body,
-                        span: *span,
-                        kind: FunctionKind::Named,
-                        modifiers: FunctionModifiers {
-                            isolated: *isolated,
-                            is_async: *is_async,
-                        },
-                        parent: None,
-                        enclosing_class: None,
-                    })?;
-                    ctx.assembly.functions.push(function);
-                }
-                AstStmt::ClassDef {
-                    name,
-                    super_class,
-                    members,
-                    span,
-                } => {
-                    let class = ctx.lower_class(name, super_class.as_deref(), members, *span)?;
-                    ctx.assembly.classes.push(class);
-                }
-                _ => {}
-            }
-        }
-
         Ok((ctx.assembly, ctx.hir_index))
     }
 
@@ -290,6 +369,16 @@ impl LoweringCtx {
     fn take_function_id(&mut self) -> FunctionId {
         let id = FunctionId(self.next_function);
         self.next_function += 1;
+        id
+    }
+
+    fn reserve_class_name(&mut self, name: &str) -> ClassId {
+        if let Some(id) = self.class_names.get(name) {
+            return *id;
+        }
+        let id = ClassId(self.next_class);
+        self.next_class += 1;
+        self.class_names.insert(name.to_string(), id);
         id
     }
 
@@ -638,6 +727,7 @@ impl LoweringCtx {
 
     fn lower_class(
         &mut self,
+        class_attributes: &[runmat_parser::Attr],
         name: &str,
         super_class: Option<&str>,
         members: &[runmat_parser::ClassMember],
@@ -649,7 +739,7 @@ impl LoweringCtx {
                     .with_identifier(IDENT_CLASS_SELF_INHERITANCE_INVALID),
             );
         }
-        let class_id = ClassId(self.assembly.classes.len());
+        let class_id = self.reserve_class_name(name);
         self.assembly.modules[self.module.0].classes.push(class_id);
         let mut properties = Vec::new();
         let mut methods = Vec::new();
@@ -658,12 +748,19 @@ impl LoweringCtx {
         let mut arguments = Vec::new();
         let mut property_names = HashSet::new();
         let mut method_names = HashSet::new();
+        let is_sealed = class_attributes
+            .iter()
+            .any(|attr| attr.name.eq_ignore_ascii_case("Sealed"));
+        let is_abstract = class_attributes
+            .iter()
+            .any(|attr| attr.name.eq_ignore_ascii_case("Abstract"));
 
         for member in members {
             match member {
                 runmat_parser::ClassMember::Properties { attributes, names } => {
                     let attributes = property_attributes(name, attributes)?;
-                    for prop_name in names {
+                    for property_decl in names {
+                        let prop_name = &property_decl.name;
                         if !property_names.insert(prop_name.clone()) {
                             return Err(HirError::new(format!(
                                 "Duplicate property '{prop_name}' in class {name}"
@@ -676,10 +773,15 @@ impl LoweringCtx {
                             ))
                             .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
+                        let default = property_decl
+                            .default
+                            .as_ref()
+                            .map(|expr| self.lower_expr_semantic(expr))
+                            .transpose()?;
                         properties.push(ClassProperty {
                             name: crate::MemberName(prop_name.clone()),
                             attributes: attributes.clone(),
-                            default: None,
+                            default,
                             span,
                         });
                     }
@@ -689,6 +791,32 @@ impl LoweringCtx {
                         .iter()
                         .any(|attr| attr.name.eq_ignore_ascii_case("Static"));
                     let method_attributes = method_attributes(name, attributes)?;
+                    let parse_abstract_signature =
+                        |stmt: &AstStmt| -> Option<(String, Vec<String>, Vec<String>, Span)> {
+                            match stmt {
+                                AstStmt::Assign(output, AstExpr::FuncCall(method_name, args, _), _, span) => {
+                                    let params = args
+                                        .iter()
+                                        .map(|arg| match arg {
+                                            AstExpr::Ident(param, _) => Some(param.clone()),
+                                            _ => None,
+                                        })
+                                        .collect::<Option<Vec<_>>>()?;
+                                    Some((method_name.clone(), params, vec![output.clone()], *span))
+                                }
+                                AstStmt::ExprStmt(AstExpr::FuncCall(method_name, args, _), _, span) => {
+                                    let params = args
+                                        .iter()
+                                        .map(|arg| match arg {
+                                            AstExpr::Ident(param, _) => Some(param.clone()),
+                                            _ => None,
+                                        })
+                                        .collect::<Option<Vec<_>>>()?;
+                                    Some((method_name.clone(), params, Vec::new(), *span))
+                                }
+                                _ => None,
+                            }
+                        };
                     for stmt in body {
                         if let AstStmt::Function {
                             name: method_name,
@@ -701,9 +829,10 @@ impl LoweringCtx {
                         } = stmt
                         {
                             let function_id = self.take_function_id();
+                            let qualified_method_name = format!("{name}.{method_name}");
                             let function = self.lower_function(LowerFunctionSpec {
                                 id: function_id,
-                                name: method_name,
+                                name: &qualified_method_name,
                                 params,
                                 outputs,
                                 body,
@@ -735,6 +864,48 @@ impl LoweringCtx {
                                 is_static,
                                 attributes: method_attributes.clone(),
                                 span: *span,
+                            });
+                        } else if method_attributes.is_abstract {
+                            let Some((method_name, params, outputs, method_span)) =
+                                parse_abstract_signature(stmt)
+                            else {
+                                return Err(HirError::new(format!(
+                                    "Invalid abstract method declaration in class {name}"
+                                )));
+                            };
+                            let function_id = self.take_function_id();
+                            let qualified_method_name = format!("{name}.{method_name}");
+                            let function = self.lower_function(LowerFunctionSpec {
+                                id: function_id,
+                                name: &qualified_method_name,
+                                params: &params,
+                                outputs: &outputs,
+                                body: &[],
+                                span: method_span,
+                                kind: FunctionKind::ClassMethod { is_static },
+                                modifiers: FunctionModifiers::default(),
+                                parent: None,
+                                enclosing_class: Some(class_id),
+                            })?;
+                            self.assembly.functions.push(function);
+                            if !method_names.insert(method_name.clone()) {
+                                return Err(HirError::new(format!(
+                                    "Duplicate method '{method_name}' in class {name}",
+                                ))
+                                .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
+                            }
+                            if property_names.contains(&method_name) {
+                                return Err(HirError::new(format!(
+                                    "Name '{method_name}' used for both property and method in class {name}",
+                                ))
+                                .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
+                            }
+                            methods.push(ClassMethod {
+                                function: function_id,
+                                name: crate::MethodName(method_name),
+                                is_static,
+                                attributes: method_attributes.clone(),
+                                span: method_span,
                             });
                         }
                     }
@@ -795,19 +966,42 @@ impl LoweringCtx {
             span,
         });
 
+        let resolved_super = super_class.and_then(|super_name| {
+            if super_name.eq_ignore_ascii_case("handle") {
+                None
+            } else {
+                self.class_names.get(super_name).copied().or_else(|| {
+                    self.assembly
+                        .classes
+                        .iter()
+                        .find(|candidate| {
+                            candidate.name.0.len() == 1 && candidate.name.0[0].0 == super_name
+                        })
+                        .map(|candidate| candidate.id)
+                })
+            }
+        });
+
+        let kind = if super_class
+            .map(|name| name.eq_ignore_ascii_case("handle"))
+            .unwrap_or(false)
+            || resolved_super
+                .and_then(|id| self.assembly.classes.iter().find(|class| class.id == id))
+                .is_some_and(|class| matches!(class.kind, ClassKind::Handle))
+        {
+            ClassKind::Handle
+        } else {
+            ClassKind::Value
+        };
+
         Ok(HirClass {
             id: class_id,
             module: self.module,
             name: qualified,
-            super_class: None,
-            kind: if super_class
-                .map(|name| name.eq_ignore_ascii_case("handle"))
-                .unwrap_or(false)
-            {
-                ClassKind::Handle
-            } else {
-                ClassKind::Value
-            },
+            super_class: resolved_super,
+            kind,
+            is_sealed,
+            is_abstract,
             properties,
             methods,
             events,
@@ -1029,14 +1223,26 @@ impl LoweringCtx {
         use runmat_parser::LValue;
         Ok(match lvalue {
             LValue::Var(name) => HirPlace::Binding(self.binding_for_write(name, span)),
-            LValue::Member(base, name) => HirPlace::Member(
-                Box::new(self.lower_assignment_base_expr(
-                    base,
-                    span,
-                    assignment_index_context(deletion),
-                )?),
-                crate::MemberName(name.clone()),
-            ),
+            LValue::Member(base, name) => {
+                let lowered_base = if let AstExpr::Ident(class_name, _) = &**base {
+                    if self.lookup_binding(class_name).is_none()
+                        && self.class_id_for_unqualified_name(class_name).is_some()
+                    {
+                        self.classref_expr(class_name, base.span())?
+                    } else {
+                        self.lower_assignment_base_expr(
+                            base,
+                            span,
+                            assignment_index_context(deletion),
+                        )?
+                    }
+                } else if let AstExpr::MetaClass(class_name, _) = &**base {
+                    self.classref_expr(class_name, base.span())?
+                } else {
+                    self.lower_assignment_base_expr(base, span, assignment_index_context(deletion))?
+                };
+                HirPlace::Member(Box::new(lowered_base), crate::MemberName(name.clone()))
+            }
             LValue::MemberDynamic(base, name) => HirPlace::MemberDynamic(
                 Box::new(self.lower_assignment_base_expr(
                     base,
@@ -1159,6 +1365,11 @@ impl LoweringCtx {
                     .any(|c| c.name == name.as_str())
                 {
                     HirExprKind::Constant(SymbolName(name.clone()))
+                } else if let Some(class_name) =
+                    self.resolve_imported_static_property_target(name, span)?
+                {
+                    let class_ref = self.classref_expr(&class_name, span)?;
+                    HirExprKind::Member(Box::new(class_ref), MemberName(name.clone()))
                 } else {
                     return Err(HirError::new(format!("undefined variable '{name}'"))
                         .with_span(span)
@@ -1252,6 +1463,58 @@ impl LoweringCtx {
                         span,
                     )?)
                 }
+            }
+            AstExpr::SuperConstructorCall {
+                current_class,
+                super_class,
+                args,
+                ..
+            } => {
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
+                    .collect::<Result<Vec<_>, _>>()?;
+                HirExprKind::Call(HirCall {
+                    callee: HirCallableRef::SuperConstructor {
+                        current_class: SymbolName(current_class.clone()),
+                        super_class: qualified_name(
+                            &super_class
+                                .split('.')
+                                .map(|segment| segment.to_string())
+                                .collect::<Vec<_>>(),
+                        ),
+                    },
+                    args: lowered_args,
+                    syntax: CallSyntax::Plain,
+                    requested_outputs,
+                })
+            }
+            AstExpr::SuperMethodCall {
+                current_class,
+                super_class,
+                method,
+                args,
+                ..
+            } => {
+                let lowered_args = args
+                    .iter()
+                    .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
+                    .collect::<Result<Vec<_>, _>>()?;
+                HirExprKind::Call(HirCall {
+                    callee: HirCallableRef::SuperMethod {
+                        current_class: SymbolName(current_class.clone()),
+                        super_class: qualified_name(
+                            &super_class
+                                .split('.')
+                                .map(|segment| segment.to_string())
+                                .collect::<Vec<_>>(),
+                        ),
+                        method: SymbolName(method.clone()),
+                    },
+                    args: lowered_args,
+                    syntax: CallSyntax::Method,
+                    requested_outputs,
+                })
             }
             AstExpr::CommandCall(name, args, _) => HirExprKind::CommandCall(HirCommandCall {
                 command: self
@@ -1416,7 +1679,27 @@ impl LoweringCtx {
             AstExpr::Colon(_) => HirExprKind::Colon,
             AstExpr::EndKeyword(_) => HirExprKind::End,
             AstExpr::Member(base, name, _) => {
-                let lowered_base = if let AstExpr::MetaClass(class_name, _) = &**base {
+                let lowered_base = if let AstExpr::Ident(class_name, _) = &**base {
+                    if self.lookup_binding(class_name).is_none() {
+                        if let Some(qualified) =
+                            self.resolve_imported_class_name_target(class_name, base.span())?
+                        {
+                            self.classref_expr(&qualified, base.span())?
+                        } else if self.class_id_for_unqualified_name(class_name).is_some() {
+                            self.classref_expr(class_name, base.span())?
+                        } else {
+                            self.lower_expr_semantic(base)?
+                        }
+                    } else {
+                        self.lower_expr_semantic(base)?
+                    }
+                } else if let Some(qualified_base) = self.unbound_qualified_member_base(base) {
+                    if self.class_id_for_name(&qualified_base).is_some() {
+                        self.classref_expr(&qualified_base, base.span())?
+                    } else {
+                        self.lower_expr_semantic(base)?
+                    }
+                } else if let AstExpr::MetaClass(class_name, _) = &**base {
                     self.classref_expr(class_name, base.span())?
                 } else {
                     self.lower_expr_semantic(base)?
@@ -1474,6 +1757,39 @@ impl LoweringCtx {
                                 &function_name,
                                 call_args,
                                 CallSyntax::Plain,
+                                requested_outputs,
+                                span,
+                            )?),
+                            span,
+                        });
+                    }
+                    if self.lookup_binding(class_name).is_none()
+                        && (self.class_id_for_unqualified_name(class_name).is_some()
+                            || self
+                                .resolve_imported_class_name_target(class_name, base.span())?
+                                .is_some())
+                    {
+                        let classref = if let Some(qualified) =
+                            self.resolve_imported_class_name_target(class_name, base.span())?
+                        {
+                            self.classref_expr(&qualified, base.span())?
+                        } else {
+                            self.classref_expr(class_name, base.span())?
+                        };
+                        let mut call_args = vec![classref];
+                        call_args.extend(
+                            args.iter()
+                                .map(|arg| {
+                                    self.lower_call_argument(arg, RequestedOutputCount::One)
+                                })
+                                .collect::<Result<Vec<_>, _>>()?,
+                        );
+                        return Ok(HirExpr {
+                            id: self.alloc_expr_id(),
+                            kind: HirExprKind::Call(self.call_for_name(
+                                name,
+                                call_args,
+                                CallSyntax::Method,
                                 requested_outputs,
                                 span,
                             )?),
@@ -1649,7 +1965,34 @@ impl LoweringCtx {
         let qualified_call_name =
             qualified_name(&name.split('.').map(ToString::to_string).collect::<Vec<_>>());
         let method_like_syntax = matches!(syntax, CallSyntax::Method | CallSyntax::DottedInvoke);
-        let (callee, kind) = if let Some(function) = self.function_names.get(name) {
+        let imported_constructor = if !method_like_syntax {
+            self.resolve_imported_constructor_target(name, span)?
+        } else {
+            None
+        };
+        let constructor_class = if !method_like_syntax {
+            imported_constructor
+                .as_ref()
+                .map(|(_, class_id)| *class_id)
+                .or_else(|| self.class_id_for_name(name))
+        } else {
+            None
+        };
+        let constructor_name_override =
+            imported_constructor.as_ref().map(|(qualified, _)| qualified.as_str());
+        let (callee, kind) = if let Some(class) = constructor_class {
+            let constructor_name = constructor_name_override.unwrap_or(name);
+            let constructor_qualified_name = qualified_name(
+                &constructor_name
+                    .split('.')
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            );
+            (
+                HirCallableRef::Unresolved(constructor_qualified_name),
+                CallKind::Constructor(class),
+            )
+        } else if let Some(function) = self.function_names.get(name) {
             (
                 HirCallableRef::Function(*function),
                 CallKind::DirectFunction(*function),
@@ -1696,6 +2039,125 @@ impl LoweringCtx {
         })
     }
 
+    fn resolve_imported_constructor_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<(String, ClassId)>, HirError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| {
+                !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
+            })
+            .map(|import| Self::qualified_name_string(&import.path))
+            .collect();
+        let specific_matches: Vec<(String, ClassId)> = specific_candidates
+            .iter()
+            .filter_map(|qualified| {
+                self.class_id_for_name(qualified)
+                    .map(|class_id| (qualified.clone(), class_id))
+            })
+            .collect();
+        if specific_matches.len() == 1 {
+            return Ok(specific_matches.first().cloned());
+        }
+        if specific_candidates.len() > 1 || specific_matches.len() > 1 {
+            return Err(
+                HirError::new(format!("ambiguous call target '{name}' via imports"))
+                    .with_span(span)
+                    .with_identifier(IDENT_IMPORT_AMBIGUOUS),
+            );
+        }
+        let wildcard_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .map(|import| Self::wildcard_import_candidate(&import.path, name))
+            .map(|qualified| Self::qualified_name_string(&qualified))
+            .collect();
+        let wildcard_matches: Vec<(String, ClassId)> = wildcard_candidates
+            .iter()
+            .filter_map(|qualified| {
+                self.class_id_for_name(qualified)
+                    .map(|class_id| (qualified.clone(), class_id))
+            })
+            .collect();
+        if wildcard_matches.len() == 1 {
+            return Ok(wildcard_matches.first().cloned());
+        }
+        let resolvable_wildcard_candidates = wildcard_candidates
+            .iter()
+            .filter(|candidate| self.known_project_symbols.contains(*candidate))
+            .count();
+        if wildcard_matches.len() > 1 || resolvable_wildcard_candidates > 1 {
+            return Err(HirError::new(format!(
+                "ambiguous call target '{name}' via wildcard imports"
+            ))
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
+        }
+        Ok(None)
+    }
+
+    fn resolve_imported_class_name_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<String>, HirError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| {
+                !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
+            })
+            .map(|import| Self::qualified_name_string(&import.path))
+            .collect();
+        let specific_resolvable: Vec<String> = specific_candidates
+            .iter()
+            .filter(|qualified| {
+                self.class_id_for_name(qualified).is_some()
+                    || self.known_project_symbols.contains(*qualified)
+            })
+            .cloned()
+            .collect();
+        if specific_resolvable.len() == 1 {
+            return Ok(specific_resolvable.first().cloned());
+        }
+        if specific_resolvable.len() > 1 {
+            return Err(
+                HirError::new(format!("ambiguous call target '{name}' via imports"))
+                    .with_span(span)
+                    .with_identifier(IDENT_IMPORT_AMBIGUOUS),
+            );
+        }
+
+        let wildcard_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .map(|import| Self::wildcard_import_candidate(&import.path, name))
+            .map(|qualified| Self::qualified_name_string(&qualified))
+            .collect();
+        let wildcard_resolvable: Vec<String> = wildcard_candidates
+            .iter()
+            .filter(|qualified| {
+                self.class_id_for_name(qualified).is_some()
+                    || self.known_project_symbols.contains(*qualified)
+            })
+            .cloned()
+            .collect();
+        if wildcard_resolvable.len() == 1 {
+            return Ok(wildcard_resolvable.first().cloned());
+        }
+        if wildcard_resolvable.len() > 1 {
+            return Err(HirError::new(format!(
+                "ambiguous call target '{name}' via wildcard imports"
+            ))
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
+        }
+        Ok(None)
+    }
+
     fn resolve_imported_call_target(
         &self,
         name: &str,
@@ -1737,6 +2199,31 @@ impl LoweringCtx {
         Ok(None)
     }
 
+    fn resolve_imported_static_property_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<String>, HirError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_candidates: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .map(|import| Self::qualified_name_string(&import.path))
+            .filter(|qualified_class| self.class_has_public_static_property(qualified_class, name))
+            .collect();
+        if specific_candidates.len() == 1 {
+            return Ok(specific_candidates.first().cloned());
+        }
+        if specific_candidates.len() > 1 {
+            return Err(HirError::new(format!(
+                "ambiguous static property target '{name}' via wildcard imports"
+            ))
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
+        }
+        Ok(None)
+    }
+
     fn resolve_function_handle_target(
         &self,
         name: &str,
@@ -1753,7 +2240,39 @@ impl LoweringCtx {
                 name.to_string(),
             )));
         }
+        if let Some((qualified_constructor, _)) =
+            self.resolve_imported_constructor_target(name, span)?
+        {
+            return Ok(crate::FunctionHandleTarget::DefPath(def_path_for_import_path(
+                &qualified_name(
+                    &qualified_constructor
+                        .split('.')
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                ),
+            )));
+        }
         if name.contains('.') {
+            let mut parts = name.split('.');
+            if let Some(first) = parts.next() {
+                let suffix = parts.collect::<Vec<_>>();
+                if !suffix.is_empty() {
+                    if let Some(qualified_class) =
+                        self.resolve_imported_class_name_target(first, span)?
+                    {
+                        let resolved_qualified_name =
+                            format!("{qualified_class}.{}", suffix.join("."));
+                        return Ok(crate::FunctionHandleTarget::DefPath(
+                            def_path_for_import_path(&qualified_name(
+                                &resolved_qualified_name
+                                    .split('.')
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>(),
+                            )),
+                        ));
+                    }
+                }
+            }
             if Self::is_well_formed_qualified_name(name) {
                 return Ok(crate::FunctionHandleTarget::DefPath(
                     def_path_for_import_path(&qualified_name(
@@ -2073,8 +2592,9 @@ fn parse_member_access_value(
     match normalized.as_str() {
         "public" => Ok(crate::MemberAccess::Public),
         "private" => Ok(crate::MemberAccess::Private),
+        "protected" => Ok(crate::MemberAccess::Protected),
         other => Err(HirError::new(format!(
-            "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private)"
+            "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private, protected)"
         ))
         .with_identifier(IDENT_CLASS_ACCESS_VALUE_INVALID)),
     }
@@ -2141,6 +2661,9 @@ fn property_attributes(
             "class '{class_name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"
         ))
         .with_identifier(IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT));
+    }
+    if has_constant {
+        result.is_static = true;
     }
     Ok(result)
 }

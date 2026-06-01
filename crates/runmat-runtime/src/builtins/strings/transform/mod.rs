@@ -11,5 +11,6 @@ pub mod split;
 pub mod strcat;
 pub mod strip;
 pub mod strrep;
+pub mod strjoin;
 pub mod strtrim;
 pub mod upper;

@@ -1027,6 +1027,10 @@ impl BytecodeCompiler {
                     | Instr::CallFevalMulti(_, _)
                     | Instr::CreateSemanticFuture(_, _, _)
                     | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
+                    | Instr::CallSuperConstructorMulti { .. }
+                    | Instr::CallSuperMethodMulti { .. }
+                    | Instr::CallSuperConstructorExpandMultiOutput { .. }
+                    | Instr::CallSuperMethodExpandMultiOutput { .. }
                     | Instr::Spawn
                     | Instr::Await => {
                         return Err(execution_error(

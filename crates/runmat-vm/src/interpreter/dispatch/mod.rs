@@ -71,6 +71,7 @@ pub struct DispatchHooks<'a> {
     pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
     pub store_local_before_var_overwrite: &'a mut dyn FnMut(&Value, &Value),
+    pub store_local_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_after_fallback_store: &'a mut dyn FnMut(&str, usize, &Value),
 }
 
@@ -275,6 +276,7 @@ fn create_async_future_value(
 }
 
 fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
+    let empty_default = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty tensor"));
     if let Some(def) = runmat_builtins::get_class(class_name) {
         let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
         let mut visited = HashSet::new();
@@ -295,9 +297,10 @@ fn initialize_object_with_defaults(class_name: &str) -> ObjectInstance {
         for class_def in chain {
             for (property_name, property_def) in class_def.properties {
                 if !property_def.is_static {
-                    if let Some(default_value) = property_def.default_value {
-                        object.properties.insert(property_name, default_value);
-                    }
+                    object.properties.insert(
+                        property_name,
+                        property_def.default_value.unwrap_or_else(empty_default),
+                    );
                 }
             }
         }
@@ -742,6 +745,7 @@ pub async fn dispatch_instruction(
         store_var_after_store,
         store_local_before_local_overwrite,
         store_local_before_var_overwrite,
+        store_local_after_store,
         store_local_after_fallback_store,
     } = hooks;
     match instr {
@@ -759,7 +763,7 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        _ if object::dispatch_object(instr, stack).await? => Ok(Some(DispatchHandled::Generic(
+        _ if object::dispatch_object(instr, stack, current_function_name).await? => Ok(Some(DispatchHandled::Generic(
             DispatchDecision::FallThrough,
         ))),
         _ if arithmetic::dispatch_arithmetic(instr, stack).await? => Ok(Some(
@@ -814,6 +818,15 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVar(index) => {
+            if let Some(alias) = global_aliases.get(index) {
+                if let Some(global_value) = crate::runtime::globals::get_global_value(alias) {
+                    if *index >= vars.len() {
+                        vars.resize(*index + 1, Value::Num(0.0));
+                        refresh_workspace_state(vars);
+                    }
+                    vars[*index] = global_value;
+                }
+            }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
                     "NotEnoughInputs",
@@ -840,6 +853,15 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVarForIndexAssignment(index) => {
+            if let Some(alias) = global_aliases.get(index) {
+                if let Some(global_value) = crate::runtime::globals::get_global_value(alias) {
+                    if *index >= vars.len() {
+                        vars.resize(*index + 1, Value::Num(0.0));
+                        refresh_workspace_state(vars);
+                    }
+                    vars[*index] = global_value;
+                }
+            }
             if missing_input_slots.contains(index) {
                 return Err(crate::interpreter::errors::mex(
                     "NotEnoughInputs",
@@ -979,6 +1001,7 @@ pub async fn dispatch_instruction(
                     *offset,
                     store_local_before_local_overwrite,
                     store_local_before_var_overwrite,
+                    store_local_after_store,
                     store_local_after_fallback_store,
                 )?;
             }
@@ -1214,6 +1237,7 @@ pub async fn dispatch_instruction(
                     call_arg_spans: call_arg_spans.clone(),
                     imports: imports.as_slice(),
                     call_counts,
+                    current_function_name,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -1234,6 +1258,43 @@ pub async fn dispatch_instruction(
                 }
                 BuiltinHandling::Uncaught(err) => return Err(*err),
             }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSuperConstructorMulti {
+            current_class,
+            super_class,
+            arg_count,
+            out_count,
+        } => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let result =
+                runmat_runtime::call_super_constructor(current_class.clone(), super_class.clone(), args)
+                    .await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSuperMethodMulti {
+            current_class,
+            super_class,
+            method,
+            arg_count,
+            out_count,
+        } => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let result = runmat_runtime::call_super_method(
+                current_class.clone(),
+                super_class.clone(),
+                method.clone(),
+                args,
+            )
+            .await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1315,6 +1376,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
+                    current_function_name,
+                    imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -1351,6 +1414,8 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
+                    current_function_name,
+                    imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -1385,6 +1450,43 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallSuperConstructorExpandMultiOutput {
+            current_class,
+            super_class,
+            specs,
+            out_count,
+        } => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let result =
+                runmat_runtime::call_super_constructor(current_class.clone(), super_class.clone(), args)
+                    .await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSuperMethodExpandMultiOutput {
+            current_class,
+            super_class,
+            method,
+            specs,
+            out_count,
+        } => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let result = runmat_runtime::call_super_method(
+                current_class.clone(),
+                super_class.clone(),
+                method.clone(),
+                args,
+            )
+            .await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallFunctionExpandMultiOutput {
             identity,
             fallback_policy,
@@ -1398,6 +1500,8 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
+                    current_function_name,
+                    imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -1430,6 +1534,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
+                    current_function_name,
+                    imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -1466,6 +1572,7 @@ pub async fn dispatch_instruction(
                 *fallback_policy,
                 *arg_count,
                 *out_count,
+                current_function_name,
             )
             .await?;
             Ok(Some(DispatchHandled::Generic(
@@ -1484,6 +1591,7 @@ pub async fn dispatch_instruction(
                 *fallback_policy,
                 specs,
                 *out_count,
+                current_function_name,
             )
             .await?;
             Ok(Some(DispatchHandled::Generic(
@@ -1491,7 +1599,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadMethod(name) => {
-            handle_load_method(stack, name.clone())?;
+            handle_load_method(stack, name.clone(), current_function_name)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1544,14 +1652,20 @@ pub async fn dispatch_instruction(
         Instr::RegisterClass {
             name,
             super_class,
+            is_sealed,
+            is_abstract,
             properties,
             methods,
+            enumerations,
         } => {
             handle_register_class(
                 name.clone(),
                 super_class.clone(),
+                *is_sealed,
+                *is_abstract,
                 properties.clone(),
                 methods.clone(),
+                enumerations.clone(),
             )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

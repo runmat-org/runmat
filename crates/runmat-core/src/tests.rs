@@ -149,6 +149,499 @@ fn execute_outcome_exposes_workspace_upserts() {
 }
 
 #[test]
+fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-syntax-semantic.m".to_string(),
+            text: "hold on; h = hold(); axis off;".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(17)),
+    }))
+    .expect("command syntax should execute");
+    let h_is_logical_scalar = outcome.workspace_delta.upserts.iter().any(|upsert| {
+        let is_h = match &upsert.key {
+            abi::WorkspaceBindingKey::Interactive { name, .. } => name.0 == "h",
+            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == "h",
+            abi::WorkspaceBindingKey::Global { .. } | abi::WorkspaceBindingKey::Persistent { .. } => {
+                false
+            }
+        };
+        if !is_h {
+            return false;
+        }
+        match &upsert.value {
+            runmat_builtins::Value::Bool(_) => true,
+            runmat_builtins::Value::LogicalArray(array) => {
+                array.shape == vec![1, 1]
+            }
+            _ => false,
+        }
+    });
+    assert!(
+        h_is_logical_scalar,
+        "hold() result should be captured as a logical scalar binding"
+    );
+}
+
+#[test]
+fn execute_request_rejects_command_syntax_in_strict_mode() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-syntax-strict.m".to_string(),
+            text: "hold on".to_string(),
+        },
+        compatibility: CompatMode::Strict,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(18)),
+    }))
+    .expect_err("strict compatibility should reject command syntax");
+    let RunError::Syntax(syntax) = err else {
+        panic!("expected syntax error for strict command syntax rejection");
+    };
+    assert!(
+        syntax
+            .message
+            .contains("Command syntax is disabled in strict compatibility mode"),
+        "unexpected strict-mode command syntax error: {}",
+        syntax.message
+    );
+}
+
+#[test]
+fn execute_request_supports_warning_off_all_command_rewrite() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-warning-off-all.m".to_string(),
+            text: "warning off all; warning('hello from test'); ok = 1;".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(19)),
+    }))
+    .expect("warning command syntax should execute");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn execute_request_supports_clearvars_name_command_rewrite() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-clearvars-name.m".to_string(),
+            text: "x = 1; y = 2; clearvars x; ex = exist('x', 'var'); ey = exist('y', 'var');"
+                .to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(20)),
+    }))
+    .expect("clearvars command syntax should execute");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ex",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ey",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn execute_request_supports_close_all_command_rewrite() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-close-all.m".to_string(),
+            text: "close all; ok = 1;".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(21)),
+    }))
+    .expect("close all command syntax should execute");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn execute_request_supports_clearvars_except_command_rewrite() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-clearvars-except.m".to_string(),
+            text:
+                "x = 1; y = 2; z = 3; clearvars -except y; ex = exist('x', 'var'); ey = exist('y', 'var'); ez = exist('z', 'var');"
+                    .to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(22)),
+    }))
+    .expect("clearvars -except command syntax should execute");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ex",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ey",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ez",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+}
+
+#[test]
+fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-clearvars-except-missing.m".to_string(),
+            text: "clearvars -except".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(23)),
+    }))
+    .expect("request should complete with runtime diagnostic");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diag| diag
+                .message
+            .contains("clearvars: -except requires at least one variable name"),
+        ),
+        "missing clearvars -except diagnostic: {:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn compile_input_lowers_print_command_dash_and_dotted_args_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("print -dpng out.v1;")
+        .expect("print command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "print command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "-dpng")),
+        "print command should carry '-dpng' as a semantic string argument"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "out.v1")),
+        "print command should carry dotted filename token as a semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 2, _) if name == "print")
+        ),
+        "print command should lower to builtin dispatch with two normalized arguments"
+    );
+}
+
+#[test]
+fn compile_input_lowers_format_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("format long;")
+        .expect("format command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "format command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "long")),
+        "format command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "format")
+        ),
+        "format command should lower to builtin dispatch with one normalized argument"
+    );
+}
+
+#[test]
+fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "command-format-long.m".to_string(),
+            text: "format long; x = 1;".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(24)),
+    }))
+    .expect("format command syntax should execute");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "x",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn compile_input_lowers_grid_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("grid on;")
+        .expect("grid command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "grid command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "on")),
+        "grid command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "grid")
+        ),
+        "grid command should lower to builtin dispatch with one normalized argument"
+    );
+}
+
+#[test]
+fn compile_input_lowers_box_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("box off;")
+        .expect("box command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "box command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "off")),
+        "box command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "box")
+        ),
+        "box command should lower to builtin dispatch with one normalized argument"
+    );
+}
+
+#[test]
+fn compile_input_lowers_axis_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("axis tight;")
+        .expect("axis command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "axis command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "tight")),
+        "axis command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "axis")
+        ),
+        "axis command should lower to builtin dispatch with one normalized argument"
+    );
+}
+
+#[test]
+fn compile_input_lowers_colormap_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("colormap jet;")
+        .expect("colormap command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "colormap command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "jet")),
+        "colormap command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "colormap")
+        ),
+        "colormap command should lower to builtin dispatch with one normalized argument"
+    );
+}
+
+#[test]
+fn compile_input_lowers_shading_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("shading interp;")
+        .expect("shading command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "shading command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "interp")),
+        "shading command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "shading")
+        ),
+        "shading command should lower to builtin dispatch with one normalized argument"
+    );
+}
+
+#[test]
+fn compile_input_lowers_colorbar_command_without_args_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("colorbar;")
+        .expect("colorbar command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "colorbar command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 0, _) if name == "colorbar")
+        ),
+        "colorbar command without args should lower to builtin dispatch with zero arguments"
+    );
+}
+
+#[test]
+fn compile_input_lowers_colorbar_command_keyword_to_semantic_builtin_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("colorbar off;")
+        .expect("colorbar command syntax should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "colorbar command syntax should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LoadString(s) if s == "off")),
+        "colorbar command should carry normalized keyword as semantic string argument"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(
+            |instr| matches!(instr, runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "colorbar")
+        ),
+        "colorbar command with keyword should lower to builtin dispatch with one argument"
+    );
+}
+
+#[test]
+fn compile_input_rewrites_ident_paren_call_to_index_when_binding_shadows_callable() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "foo = [10, 20, 30]; y = foo(2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("binding-shadowed paren call should compile");
+
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "binding-shadowed paren call should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::Index(1))),
+        "binding-shadowed paren call should lower to index bytecode"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallBuiltinMulti(name, _, _) if name == "foo"
+        )),
+        "binding-shadowed paren call must not lower as callable dispatch"
+    );
+
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "20"
+    }));
+}
+
+#[test]
 fn execute_outcome_exposes_workspace_removals_and_effects() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     execute_text_request(&mut session, "x = 1; y = 2;").expect("seed workspace");
@@ -303,6 +796,4378 @@ roots = ["."]
         }),
         "wildcard import call should resolve to package function when source index symbols are available; calls={calls:#?}"
     );
+}
+
+#[test]
+fn execute_path_request_loads_sibling_classdef_sources_without_manifest() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("Vec2.m"),
+        r#"
+classdef Vec2
+  properties
+    x
+    y
+  end
+  methods
+    function obj = Vec2(x, y)
+      obj.x = x;
+      obj.y = y;
+    end
+    function m = magnitude(obj)
+      m = sqrt(obj.x*obj.x + obj.y*obj.y);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "p = Vec2(3,4); cls = class(p); m = p.magnitude();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "cls", &runmat_builtins::Value::String("Vec2".into())),
+        "expected class() result to be Vec2"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+        "expected method call result to be 5"
+    );
+}
+
+#[test]
+fn execute_path_request_loads_package_classdef_sources_without_manifest() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+geom")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+geom").join("Point.m"),
+        r#"
+classdef Point
+  properties
+    x
+  end
+  methods
+    function obj = Point(v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "p = geom.Point(42); c = class(p); x = p.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::String("geom.Point".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "x",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_loads_dependency_package_classdef_sources_via_project_composition() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let dep_root = tmp.path().join("deps/geombase");
+    std::fs::create_dir_all(dep_root.join("+geom")).expect("create dependency package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+
+[dependencies]
+geombase = { path = "deps/geombase" }
+"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        dep_root.join("runmat.toml"),
+        r#"
+[package]
+name = "geombase"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write dependency manifest");
+    std::fs::write(
+        dep_root.join("+geom").join("Point.m"),
+        r#"
+classdef Point
+  properties
+    x
+  end
+  methods
+    function obj = Point(v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write dependency class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "p = geom.Point(42); c = class(p); x = p.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::String("geom.Point".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "x",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_source_authoring_oop_smoke() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("Vec2.m"),
+        r#"
+classdef Vec2
+  properties
+    x
+    y
+  end
+  methods
+    function obj = Vec2(x, y)
+      obj.x = x;
+      obj.y = y;
+    end
+    function m = magnitude(obj)
+      m = sqrt(obj.x*obj.x + obj.y*obj.y);
+    end
+  end
+  methods(Static)
+    function u = unitX()
+      u = Vec2(1, 0);
+    end
+  end
+end
+"#,
+    )
+    .expect("write Vec2 source");
+    std::fs::write(
+        tmp.path().join("Money.m"),
+        r#"
+classdef Money
+  properties
+    amount
+  end
+  methods
+    function obj = Money(v)
+      obj.amount = v;
+    end
+    function out = plus(a, b)
+      out = Money(a.amount + b.amount);
+    end
+  end
+end
+"#,
+    )
+    .expect("write Money source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        r#"
+v = Vec2(3, 4);
+cls = class(v);
+isVec = isa(v, 'Vec2');
+mag = v.magnitude();
+ux = Vec2.unitX();
+uxx = ux.x;
+a = Money(10);
+b = Money(5);
+c = a + b;
+isMoney = isa(c, 'Money');
+amt = c.amount;
+"#,
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("Vec2".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isVec",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "mag",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "uxx",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isMoney",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "amt",
+        &runmat_builtins::Value::Num(15.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_source_authoring_one_file_oop_smoke() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source = tmp.path().join("main.m");
+    std::fs::write(
+        &source,
+        r#"
+classdef Vec2
+  properties
+    x
+    y
+  end
+  methods
+    function obj = Vec2(x, y)
+      obj.x = x;
+      obj.y = y;
+    end
+    function m = magnitude(obj)
+      m = sqrt(obj.x*obj.x + obj.y*obj.y);
+    end
+  end
+  methods(Static)
+    function u = unitX()
+      u = Vec2(1, 0);
+    end
+  end
+end
+
+p = Vec2(3,4);
+cls = class(p);
+isv = isa(p,'Vec2');
+m = p.magnitude();
+u = Vec2.unitX();
+ux = u.x;
+"#,
+    )
+    .expect("write single-file source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_path_request(&mut session, source.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("Vec2".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isv",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "m",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ux",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_source_authoring_one_file_operator_overload_plus() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source = tmp.path().join("main.m");
+    std::fs::write(
+        &source,
+        r#"
+classdef Money
+  properties
+    amount
+  end
+  methods
+    function obj = Money(v)
+      obj.amount = v;
+    end
+    function out = plus(a, b)
+      out = Money(a.amount + b.amount);
+    end
+  end
+end
+
+a = Money(10);
+b = Money(5);
+c = a + b;
+cls = class(c);
+ism = isa(c, 'Money');
+v = c.amount;
+"#,
+    )
+    .expect("write single-file source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_path_request(&mut session, source.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("Money".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ism",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "v",
+        &runmat_builtins::Value::Num(15.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_preserves_handle_alias_semantics_for_sibling_classdef() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  properties
+    x
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = H(); a.x = 1; b = a; a.x = 9; y = b.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(9.0)),
+        "expected handle alias update to be visible through b.x"
+    );
+}
+
+#[test]
+fn execute_path_request_delete_invalidates_all_handle_aliases() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  properties
+    x
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = H(); b = a; a.x = 5; delete(a); va = isvalid(a); vb = isvalid(b); try, y = b.x; id = 'BAD'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "va",
+        &runmat_builtins::Value::Bool(false)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "vb",
+        &runmat_builtins::Value::Bool(false)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:getfield:InvalidHandle".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_calls_handle_delete_method_before_invalidation() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  properties(Static)
+    DeletedCount = 0;
+  end
+  methods
+    function delete(obj)
+      H.DeletedCount = H.DeletedCount + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = H(); delete(h); g = H.DeletedCount; v = isvalid(h);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "g",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "v",
+        &runmat_builtins::Value::Bool(false)
+    ));
+}
+
+#[test]
+fn execute_path_request_delete_listener_disables_future_notifications() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  events
+    Tick
+  end
+  methods
+    function fire(obj)
+      notify(obj, 'Tick');
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("CB.m"),
+        r#"
+classdef CB
+  properties(Static)
+    Count = 0;
+  end
+  methods(Static)
+    function on_tick(src)
+      CB.Count = CB.Count + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = H(); l = addlistener(h, 'Tick', @CB.on_tick); delete(l); h.fire(); c = CB.Count;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_listener_member_access_via_dot_syntax() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  events
+    Tick
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("CB.m"),
+        r#"
+classdef CB
+  methods(Static)
+    function on_tick(src)
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = H(); l = addlistener(h, 'Tick', @CB.on_tick); enabled = l.Enabled; valid = l.Valid;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "enabled",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "valid",
+        &runmat_builtins::Value::Bool(true)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_addlistener_char_callback_name_without_at_prefix() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  events
+    Tick
+  end
+  methods
+    function fire(obj)
+      notify(obj, 'Tick');
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("CB.m"),
+        r#"
+classdef CB
+  properties(Static)
+    Count = 0;
+  end
+  methods(Static)
+    function on_tick(src)
+      CB.Count = CB.Count + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = H(); addlistener(h, 'Tick', 'CB.on_tick'); h.fire(); g = CB.Count;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "g",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+}
+
+#[test]
+fn compile_local_function_global_decl_emits_named_global_workspace_effect() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "global G; G = 0; y = on_tick(1,2);\nfunction out = on_tick(a,b)\n  global G; G = G + 1; out = 77;\nend";
+    let prepared = session.compile_input(source).expect("compile");
+    let fid = prepared
+        .bytecode
+        .function_registry
+        .resolve_name("on_tick")
+        .expect("local function should resolve");
+    let function = prepared
+        .bytecode
+        .function_registry
+        .get(fid)
+        .expect("local function bytecode should exist");
+    assert!(
+        function
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::DeclareGlobalNamed(_, _))),
+        "local function global declaration should lower to DeclareGlobalNamed"
+    );
+    let declared_slots: std::collections::HashSet<usize> = function
+        .instructions
+        .iter()
+        .filter_map(|instr| match instr {
+            runmat_vm::Instr::DeclareGlobalNamed(indices, names)
+                if names.iter().any(|name| name == "G") =>
+            {
+                Some(indices.to_vec())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let stores_global_slot = function.instructions.iter().any(|instr| match instr {
+        runmat_vm::Instr::StoreVar(index) | runmat_vm::Instr::StoreLocal(index) => {
+            declared_slots.contains(index)
+        }
+        _ => false,
+    });
+    assert!(
+        stores_global_slot,
+        "global binding slot should be the same slot being stored for assignment"
+    );
+}
+
+#[test]
+fn execute_path_request_reports_undefined_function_for_missing_event_callback() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  events
+    Tick
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = H(); addlistener(h, 'Tick', @definitely_missing_callback); try, notify(h, 'Tick'); id = 'BAD'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:UndefinedFunction".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_reports_undefined_function_for_uncaught_missing_event_callback() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  events
+    Tick
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = H(); addlistener(h, 'Tick', @definitely_missing_callback); notify(h, 'Tick');",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execution should complete with diagnostic");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:UndefinedFunction"),
+        "uncaught missing event callback should surface RunMat:UndefinedFunction diagnostic"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_enumeration_member_static_access() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("Color.m"),
+        r#"
+classdef Color
+  enumeration
+    Red
+    Blue
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "c = Color.Red; cls = class(c);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("Color".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_call_method_subsasgn_dot_without_custom_subsasgn() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  properties
+    x
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = H(); a.x = 1; b = a; a = call_method(a, 'subsasgn', '.', 'x', 9); y = b.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_call_method_subsref_dot_without_custom_subsref() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("H.m"),
+        r#"
+classdef H < handle
+  properties
+    x
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = H(); a.x = 11; y = call_method(a, 'subsref', '.', 'x');",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_rejects_subclassing_sealed_class() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef (Sealed) A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, b = B(); id = 'BAD'; catch e, id = e.identifier; msg = e.message; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        "sealed class inheritance should fail"
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("RunMat:ClassSealed".into())
+        ) || outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:ClassSealed"),
+        "sealed class failure should surface RunMat:ClassSealed"
+    );
+}
+
+#[test]
+fn execute_path_request_reports_class_sealed_for_uncaught_subclassing() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef (Sealed) A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "b = B();").expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execution should complete with diagnostic");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:ClassSealed"),
+        "uncaught sealed-class subclassing should surface RunMat:ClassSealed diagnostic"
+    );
+}
+
+#[test]
+fn execute_path_request_rejects_instantiating_abstract_class() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef (Abstract) A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, a = A(); id = 'BAD'; catch e, id = e.identifier; msg = e.message; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        "abstract class instantiation should fail"
+    );
+}
+
+#[test]
+fn execute_path_request_reports_abstract_method_missing_for_uncaught_abstract_instantiation() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef (Abstract) A
+  methods (Abstract)
+    y = f(obj);
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "a = A();").expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code == "RunMat:AbstractMethodMissing"
+                    && diagnostic
+                        .message
+                        .contains("Cannot instantiate abstract class")
+            }),
+        "uncaught abstract instantiation should surface RunMat:AbstractMethodMissing diagnostics; got {:?}",
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_rejects_concrete_subclass_missing_abstract_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef (Abstract) A
+  methods (Abstract)
+    y = f(obj)
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, b = B(); id = 'BAD'; catch e, id = e.identifier; msg = e.message; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        "concrete subclass missing abstract method should fail"
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("RunMat:AbstractMethodMissing".into())
+        ) || outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:AbstractMethodMissing"),
+        "abstract contract failure should surface RunMat:AbstractMethodMissing"
+    );
+}
+
+#[test]
+fn execute_path_request_reports_abstract_method_missing_for_uncaught_partial_implementation() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef (Abstract) A
+  methods (Abstract)
+    y = f(obj);
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "b = B();").expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:AbstractMethodMissing"),
+        "uncaught concrete subclass missing abstract method should surface RunMat:AbstractMethodMissing diagnostics"
+    );
+}
+
+#[test]
+fn execute_path_request_rejects_overriding_sealed_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Sealed)
+    function y = f(obj)
+      y = 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function y = f(obj)
+      y = 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, b = B(); y = b.f(); id = 'BAD'; catch e, id = e.identifier; msg = e.message; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        !outcome_has_named_upsert(&outcome, "id", &runmat_builtins::Value::String("BAD".into())),
+        "overriding sealed method should fail"
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "id",
+            &runmat_builtins::Value::String("RunMat:MethodSealed".into())
+        ) || outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:MethodSealed"),
+        "sealed override failure should surface RunMat:MethodSealed"
+    );
+}
+
+#[test]
+fn execute_path_request_reports_method_sealed_for_uncaught_override() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Sealed)
+    function y = f(obj)
+      y = 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function y = f(obj)
+      y = 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "b = B(); y = b.f();").expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:MethodSealed"),
+        "uncaught sealed override should surface RunMat:MethodSealed diagnostics"
+    );
+}
+
+#[test]
+fn execute_path_request_enforces_private_constructor_access() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Access=private)
+    function obj = A()
+    end
+  end
+  methods(Static)
+    function obj = make()
+      obj = A();
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, a = A(); id = 'BAD'; catch e, id = e.identifier; end; b = A.make(); cb = class(b);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cb",
+        &runmat_builtins::Value::String("A".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_enforces_protected_constructor_access() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Access=protected)
+    function obj = A(v)
+      if nargin < 1, v = 1; end
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function obj = B()
+      obj@A(2);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, a = A(); id = 'BAD'; catch e, id = e.identifier; end; b = B(); cb = class(b);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cb",
+        &runmat_builtins::Value::String("B".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_treats_constant_property_as_static_readonly() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  properties(Constant)
+    K
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = C.K; try, C.K = 9; id = 'BAD'; catch e, id = e.identifier; end; b = C.K;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    let empty = runmat_builtins::Value::Tensor(
+        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    );
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &empty
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:PropertyReadOnly".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &empty
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_dependent_getter_setter_methods() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("D.m"),
+        r#"
+classdef D
+  properties(Dependent)
+    p
+  end
+  properties(Access=private)
+    p_backing
+  end
+  methods
+    function obj = D()
+      obj.p_backing = 2;
+    end
+    function val = get.p(obj)
+      val = obj.p_backing;
+    end
+    function obj = set.p(obj, val)
+      obj.p_backing = val;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "d = D(); a = d.p; d.p = 9; b = d.p;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_applies_property_default_initializers() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  properties
+    x = 4
+  end
+  properties(Static)
+    y = 6
+  end
+  properties(Constant)
+    k = 8
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "s = S(); a = s.x; b = S.y; c = S.k;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(8.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_applies_constant_expression_property_defaults_and_empty_fallback() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("E.m"),
+        r#"
+classdef E
+  properties
+    x = 2 + 3
+    z
+  end
+  properties(Static)
+    s
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "e = E(); a = e.x; b = e.z; c = E.s;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    let empty = runmat_builtins::Value::Tensor(
+        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    );
+    assert!(outcome_has_named_upsert(&outcome, "b", &empty));
+    assert!(outcome_has_named_upsert(&outcome, "c", &empty));
+}
+
+#[test]
+fn execute_path_request_allows_private_property_access_within_class_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  properties(Access=private)
+    p
+  end
+  methods
+    function obj = C()
+      obj.p = 7;
+    end
+    function y = getP(obj)
+      y = obj.p;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "c = C(); try, x = c.p; id = 'BAD'; catch e, id = e.identifier; end; y = c.getP();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:PropertyPrivateAccess".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_superclass_constructor_syntax() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A < handle
+  properties
+    x
+  end
+  methods
+    function obj = A(v)
+      obj.x = v;
+    end
+    function obj = setX(obj, v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function obj = B(v)
+      obj@A(v);
+    end
+  end
+end
+"#,
+    )
+    .expect("write subclass source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "b = B(1); cls = class(b); isaA = isa(b,'A'); b2 = b; b = b.setX(9); y = b2.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("B".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isaA",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_qualified_superclass_constructor_syntax() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("+pkg1")).expect("create package");
+
+    std::fs::write(
+        root.join("+pkg1").join("A.m"),
+        r#"
+classdef A < handle
+  properties
+    x
+  end
+  methods
+    function obj = A(v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write A.m");
+
+    std::fs::write(
+        root.join("B.m"),
+        r#"
+classdef B < pkg1.A
+  methods
+    function obj = B(v)
+      obj@pkg1.A(v + 1);
+    end
+  end
+end
+"#,
+    )
+    .expect("write B.m");
+
+    std::fs::write(
+        root.join("main.m"),
+        r#"
+b = B(8);
+y = b.x;
+"#,
+    )
+    .expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(
+        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(9.0)),
+        "qualified super constructor should initialize inherited state"
+    );
+}
+
+#[test]
+fn compile_input_lowers_super_constructor_to_semantic_super_instruction() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+classdef A < handle
+  methods
+    function obj = A(v)
+      obj.v = v;
+    end
+  end
+end
+classdef B < A
+  methods
+    function obj = B(v)
+      obj@A(v);
+    end
+  end
+end
+b = B(3);
+"#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile super constructor syntax");
+    let function_registry = prepared.bytecode.function_registry();
+    assert!(
+        function_registry
+            .functions
+            .values()
+            .flat_map(|f| f.instructions.iter())
+            .any(|instr| matches!(
+                instr,
+                runmat_vm::Instr::CallSuperConstructorMulti { .. }
+                    | runmat_vm::Instr::CallSuperConstructorExpandMultiOutput { .. }
+            )),
+        "super constructor syntax should lower to dedicated semantic super-constructor bytecode"
+    );
+    assert!(
+        !function_registry
+            .functions
+            .values()
+            .flat_map(|f| f.instructions.iter())
+            .any(|instr| matches!(
+                instr,
+                runmat_vm::Instr::CallBuiltinMulti(name, _, _)
+                    if name == "__runmat_super_ctor__"
+            )),
+        "super constructor syntax must not lower through builtin-name dispatch"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_superclass_method_syntax() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods
+    function v = f(obj)
+      v = 3;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function v = f(obj)
+      v = f@A(obj) + 4;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "b = B(); v = b.f();")
+        .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "v",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn compile_input_lowers_super_method_to_semantic_super_instruction() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+classdef A
+  methods
+    function y = f(obj, x)
+      y = x + 1;
+    end
+  end
+end
+classdef B < A
+  methods
+    function y = f(obj, x)
+      y = f@A(obj, x) + 2;
+    end
+  end
+end
+y = B().f(4);
+"#;
+    let prepared = session
+        .compile_input(source)
+        .expect("compile super method syntax");
+    let function_registry = prepared.bytecode.function_registry();
+    assert!(
+        function_registry
+            .functions
+            .values()
+            .flat_map(|f| f.instructions.iter())
+            .any(|instr| matches!(
+                instr,
+                runmat_vm::Instr::CallSuperMethodMulti { .. }
+                    | runmat_vm::Instr::CallSuperMethodExpandMultiOutput { .. }
+            )),
+        "super method syntax should lower to dedicated semantic super-method bytecode"
+    );
+    assert!(
+        !function_registry
+            .functions
+            .values()
+            .flat_map(|f| f.instructions.iter())
+            .any(|instr| matches!(
+                instr,
+                runmat_vm::Instr::CallBuiltinMulti(name, _, _)
+                    if name == "__runmat_super_method__"
+            )),
+        "super method syntax must not lower through builtin-name dispatch"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_qualified_superclass_method_syntax() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg1")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg1").join("A.m"),
+        r#"
+classdef A
+  methods
+    function v = f(obj)
+      v = 8;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < pkg1.A
+  methods
+    function v = f(obj)
+      v = f@pkg1.A(obj) + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "b = B(); v = f(b);")
+        .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "v",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_nested_package_qualified_superclass_syntax() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg").join("+sub")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("+sub").join("A.m"),
+        r#"
+classdef A
+  properties
+    x
+  end
+  methods
+    function obj = A(v)
+      obj.x = v;
+    end
+    function y = f(obj, n)
+      y = obj.x + n;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < pkg.sub.A
+  methods
+    function obj = B(v)
+      obj@pkg.sub.A(v + 1);
+    end
+    function y = f(obj, n)
+      y = f@pkg.sub.A(obj, n + 2);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "b = B(4); x = b.x; y = b.f(3); cls = class(b); isaA = isa(b,'pkg.sub.A');",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "x",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(10.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("B".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isaA",
+        &runmat_builtins::Value::Bool(true)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_function_style_instance_method_dispatch() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("P.m"),
+        r#"
+classdef P
+  properties
+    x
+  end
+  methods
+    function obj = P(v)
+      obj.x = v;
+    end
+    function y = twice(obj)
+      y = obj.x * 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "p = P(6); a = p.twice(); b = twice(p);")
+        .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(12.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(12.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_function_style_protected_method_inside_subclass() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Access=protected)
+    function v = secret(obj)
+      v = 9;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function v = callsecret(obj)
+      v = secret(obj);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "b = B(); a = callsecret(b); try, c = secret(b); id = 'BAD'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_function_style_private_method_inside_class_only() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods
+    function v = callpvt(obj)
+      v = pvt(obj);
+    end
+  end
+  methods(Access=private)
+    function v = pvt(obj)
+      v = 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "c = C(); a = callpvt(c); try, b = pvt(c); id = 'BAD'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_reports_method_private_for_uncaught_function_style_private_call() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods(Access=private)
+    function v = pvt(obj)
+      v = 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "c = C(); b = pvt(c);").expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execution should complete with diagnostic");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:MethodPrivate"),
+        "uncaught function-style private method call should surface RunMat:MethodPrivate diagnostic"
+    );
+}
+
+#[test]
+fn execute_path_request_allows_private_method_calls_within_class() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods(Access=private)
+    function y = hidden(obj)
+      y = 42;
+    end
+  end
+  methods
+    function y = callHidden(obj)
+      y = obj.hidden();
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "c = C(); try, x = c.hidden(); id = 'BAD'; catch e, id = e.identifier; end; y = c.callHidden();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_static_method_calls() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods(Static)
+    function y = secret()
+      y = 7;
+    end
+    function y = reveal()
+      y = C.secret();
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "y = C.reveal();").expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_source_class_operator_overload_plus() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("Money.m"),
+        r#"
+classdef Money
+  properties
+    amount
+  end
+  methods
+    function obj = Money(v)
+      obj.amount = v;
+    end
+    function out = plus(a, b)
+      out = Money(a.amount + b.amount);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = Money(10); b = Money(5); c = a + b; cls = class(c); isaMoney = isa(c, 'Money'); v = c.amount;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("Money".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isaMoney",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "v",
+        &runmat_builtins::Value::Num(15.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_rejects_unqualified_static_method_name_in_script_scope() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static)
+    function v = f(x)
+      v = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = S.f(3); try, b = f(3); id='BAD'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:UndefinedFunction".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_reports_undefined_function_for_uncaught_unqualified_static_method_name() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static)
+    function v = f(x)
+      v = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = S.f(3); b = f(3);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execution should complete with diagnostic");
+
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RunMat:UndefinedFunction"),
+        "uncaught unqualified static method should surface RunMat:UndefinedFunction diagnostic"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_unqualified_static_method_name_via_wildcard_import() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static)
+    function v = f(x)
+      v = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import S.*; a = f(3);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_unqualified_static_property_via_wildcard_import() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  properties(Static)
+    K = 9;
+  end
+  methods(Static)
+    function setk(v)
+      S.K = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import S.*; a = K; setk(13); b = K;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(13.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_local_variable_shadows_imported_static_property() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  properties(Static)
+    K = 9;
+  end
+  methods(Static)
+    function y = readk()
+      y = S.K;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import S.*; K = 42; a = K; b = readk();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_unqualified_static_method_handle_via_wildcard_import() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static)
+    function v = f(x)
+      v = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import S.*; h = @f; a = h(3);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_unqualified_static_method_handle_via_specific_import() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static)
+    function v = f(x)
+      v = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import S.f; h = @f; a = h(3);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_rejects_ambiguous_unqualified_static_method_handle_via_wildcard_imports() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Static)
+    function y = f(x)
+      y = x + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B
+  methods(Static)
+    function y = f(x)
+      y = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import A.*; import B.*; h = @f;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect_err("ambiguous static handle import should fail");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for ambiguous static handle import");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportAmbiguous"));
+}
+
+#[test]
+fn execute_path_request_rejects_ambiguous_unqualified_static_method_via_wildcard_imports() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Static)
+    function y = f(x)
+      y = x + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B
+  methods(Static)
+    function y = f(x)
+      y = x + 2;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import A.*; import B.*; try, z = f(3); id='BAD'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:AmbiguousImport".to_string())
+    ));
+}
+
+#[test]
+fn execute_path_request_enforces_private_static_property_access_identifier() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("P.m"),
+        r#"
+classdef P
+  properties(Static, Access=private)
+    v
+  end
+  methods(Static)
+    function y = readv()
+      y = P.v;
+    end
+    function setv(x)
+      P.v = x;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, a = P.v; id='BAD'; catch e, id=e.identifier; end; P.setv(8); b = P.readv();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:PropertyPrivateAccess".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(8.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_allows_private_static_calls_within_class_only() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods(Static, Access=private)
+    function y = secret()
+      y = 7;
+    end
+  end
+  methods(Static)
+    function y = reveal()
+      y = C.secret();
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "try, x = C.secret(); id = 'BAD'; catch e, id = e.identifier; end; y = C.reveal();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_enforces_protected_property_and_method_access() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  properties(Access=protected)
+    x
+  end
+  methods
+    function obj = A(v)
+      obj.x = v;
+    end
+  end
+  methods(Access=protected)
+    function y = hidden(obj)
+      y = obj.x + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function obj = B(v)
+      obj@A(v);
+    end
+    function y = getX(obj)
+      y = obj.x;
+    end
+    function y = callHidden(obj)
+      y = obj.hidden();
+    end
+  end
+end
+"#,
+    )
+    .expect("write subclass source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "b = B(5); try, a = b.x; p = 'BAD'; catch e, p = e.identifier; end; try, c = b.hidden(); m = 'BAD'; catch e2, m = e2.identifier; end; y = b.getX(); z = b.callHidden();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "p",
+        &runmat_builtins::Value::String("RunMat:PropertyPrivateAccess".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "m",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "z",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_multilevel_super_constructor_chain_for_handle_classes() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A < handle
+  properties
+    x
+  end
+  methods
+    function obj = A(v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+  methods
+    function obj = B(v)
+      obj@A(v + 1);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C < B
+  methods
+    function obj = C(v)
+      obj@B(v + 2);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "c = C(1); cls = class(c); isaA = isa(c,'A'); y = c.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("C".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "isaA",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_static_property_read_write_via_class_name() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  properties(Static)
+    v
+  end
+  methods(Static)
+    function y = setv(x)
+      S.v = x;
+      y = S.v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "a = S.v; b = S.setv(9); c = S.v; S.v = 12; d = S.v;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    let empty = runmat_builtins::Value::Tensor(
+        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    );
+    assert!(outcome_has_named_upsert(&outcome, "a", &empty));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "d",
+        &runmat_builtins::Value::Num(12.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_source_class_subsref_signature() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("Ov.m"),
+        r#"
+classdef Ov
+  properties
+    data
+  end
+  methods
+    function obj = Ov(v)
+      obj.data = v;
+    end
+    function out = subsref(obj, S)
+      if strcmp(S(1).type, '()')
+        idx = S(1).subs{1};
+        out = obj.data(idx) * 10;
+      else
+        out = builtin('subsref', obj, S);
+      end
+    end
+  end
+end
+"#,
+    )
+    .expect("write Ov.m");
+
+    std::fs::write(
+        root.join("main.m"),
+        r#"
+o = Ov([2 3 4]);
+y = o(2);
+"#,
+    )
+    .expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(
+        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(30.0)),
+        "source-authored subsref(obj, S) should drive () overload dispatch"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_source_class_subsasgn_signature() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("Ov.m"),
+        r#"
+classdef Ov
+  properties
+    data
+  end
+  methods
+    function obj = Ov(v)
+      obj.data = v;
+    end
+    function out = subsref(obj, S)
+      if strcmp(S(1).type, '()')
+        idx = S(1).subs{1};
+        out = obj.data(idx);
+      else
+        out = builtin('subsref', obj, S);
+      end
+    end
+    function obj = subsasgn(obj, S, rhs)
+      if strcmp(S(1).type, '()')
+        idx = S(1).subs{1};
+        obj.data(idx) = rhs;
+      else
+        obj = builtin('subsasgn', obj, S, rhs);
+      end
+    end
+  end
+end
+"#,
+    )
+    .expect("write Ov.m");
+
+    std::fs::write(
+        root.join("main.m"),
+        r#"
+o = Ov([1 2 3]);
+o(2) = 9;
+y = o(2);
+"#,
+    )
+    .expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(
+        outcome_has_named_upsert(&outcome, "y", &runmat_builtins::Value::Num(9.0)),
+        "source-authored subsasgn(obj, S, rhs) should drive () assignment overload dispatch"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_source_class_subsref_and_member_index_chains() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("C.m"),
+        r#"
+classdef C
+  properties
+    data
+  end
+  methods
+    function obj = C(v)
+      obj.data = v;
+    end
+    function out = getdata(obj)
+      out = obj.data;
+    end
+    function out = subsref(obj, S)
+      if strcmp(S(1).type, '()')
+        idx = S(1).subs{1};
+        out = obj.data(idx);
+      else
+        out = builtin('subsref', obj, S);
+      end
+    end
+  end
+end
+"#,
+    )
+    .expect("write C.m");
+
+    std::fs::write(
+        root.join("main.m"),
+        r#"
+c = C([10 20 30]);
+a = c(2);
+b = c.getdata();
+d = c.data(3);
+"#,
+    )
+    .expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(20.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "d",
+        &runmat_builtins::Value::Num(30.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_idiomatic_classdef_source_layout_end_to_end() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("Vec2.m"),
+        r#"
+classdef Vec2
+  properties
+    x
+    y
+  end
+  methods
+    function obj = Vec2(x, y)
+      obj.x = x;
+      obj.y = y;
+    end
+    function out = magnitude(obj)
+      out = sqrt(obj.x^2 + obj.y^2);
+    end
+  end
+  methods (Static)
+    function u = unit()
+      u = Vec2(1, 0);
+    end
+  end
+end
+"#,
+    )
+    .expect("write Vec2 class source");
+    std::fs::write(
+        tmp.path().join("Money.m"),
+        r#"
+classdef Money
+  properties
+    amount
+  end
+  methods
+    function obj = Money(a)
+      obj.amount = a;
+    end
+    function out = plus(a, b)
+      out = Money(a.amount + b.amount);
+    end
+  end
+end
+"#,
+    )
+    .expect("write Money class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        r#"
+p = Vec2(3,4);
+m = p.magnitude();
+u = Vec2.unit();
+a = Money(10); b = Money(5); c = a + b;
+t = class(p);
+ok = isa(p,'Vec2');
+ux = u.x;
+total = c.amount;
+"#,
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "t", &runmat_builtins::Value::String("Vec2".to_string())),
+        "class() should preserve source class identity"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Bool(true)),
+        "isa() should report source class membership"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+        "dot-method dispatch should resolve source-authored instance methods"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "ux", &runmat_builtins::Value::Num(1.0)),
+        "static method dispatch should resolve Class.method() calls"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "total", &runmat_builtins::Value::Num(15.0)),
+        "operator overload dispatch should resolve source-authored plus"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_package_qualified_classdef_source_layout_end_to_end() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("Vec2.m"),
+        r#"
+classdef Vec2
+  properties
+    x
+    y
+  end
+  methods
+    function obj = Vec2(x, y)
+      obj.x = x;
+      obj.y = y;
+    end
+    function out = magnitude(obj)
+      out = sqrt(obj.x^2 + obj.y^2);
+    end
+  end
+  methods (Static)
+    function u = unit()
+      u = pkg.Vec2(1, 0);
+    end
+  end
+end
+"#,
+    )
+    .expect("write pkg.Vec2 class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        r#"
+p = pkg.Vec2(3,4);
+m = p.magnitude();
+u = pkg.Vec2.unit();
+t = class(p);
+ok = isa(p,'pkg.Vec2');
+ux = u.x;
+"#,
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "t",
+            &runmat_builtins::Value::String("pkg.Vec2".to_string())
+        ),
+        "class() should preserve qualified source class identity"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Bool(true)),
+        "isa() should report qualified source class membership"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+        "dot-method dispatch should resolve source-authored package instance methods"
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "ux", &runmat_builtins::Value::Num(1.0)),
+        "static method dispatch should resolve package-qualified Class.method() calls"
+    );
+}
+
+#[test]
+fn execute_path_request_supports_nested_package_classdef_source_layout_end_to_end() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg").join("+sub")).expect("create nested package");
+    std::fs::write(
+        tmp.path().join("+pkg").join("+sub").join("C.m"),
+        r#"
+classdef C
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+    function y = twice(obj)
+      y = obj.x * 2;
+    end
+  end
+  methods(Static)
+    function z = three()
+      z = 3;
+    end
+  end
+end
+"#,
+    )
+    .expect("write pkg.sub.C class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        r#"
+o = pkg.sub.C(7);
+a = o.twice();
+b = pkg.sub.C.three();
+cls = class(o);
+ok = isa(o,'pkg.sub.C');
+"#,
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(14.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(3.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("pkg.sub.C".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Bool(true)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_package_source_class_subsref_subsasgn_dispatch() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("OverIdx.m"),
+        r#"
+classdef OverIdx
+  properties
+    x
+  end
+  methods
+    function obj = OverIdx(v)
+      obj.x = v;
+    end
+    function out = subsref(obj, S)
+      if strcmp(S(1).type, '.')
+        if strcmp(S(1).subs, 'x')
+          out = obj.x + 1;
+          return;
+        end
+      end
+      out = builtin('subsref', obj, S);
+    end
+    function obj = subsasgn(obj, S, rhs)
+      if strcmp(S(1).type, '.')
+        if strcmp(S(1).subs, 'x')
+          obj.x = rhs + 2;
+          return;
+        end
+      end
+      obj = builtin('subsasgn', obj, S, rhs);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "o = pkg.OverIdx(5); a = o.x; o.x = 10; b = o.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(13.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_package_static_property_reference_inside_methods() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  properties(Constant)
+    K = 9;
+  end
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+    function y = f(obj)
+      y = obj.x + pkg.C.K;
+    end
+  end
+  methods(Static)
+    function y = g(v)
+      y = v + pkg.C.K;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "o = pkg.C(1); a = o.f(); b = pkg.C.g(2); c = pkg.C.K;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(10.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_import_wildcard_unqualified_package_class_constructor_calls() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  properties(Constant)
+    K = 9;
+  end
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+    function y = f(obj)
+      y = obj.x + pkg.C.K;
+    end
+  end
+  methods(Static)
+    function y = g(v)
+      y = v + pkg.C.K;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.*; o = C(1); a = o.f(); b = C.g(2); c = C.K;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(10.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_import_specific_unqualified_package_class_constructor_calls() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  properties(Constant)
+    K = 9;
+  end
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+    function y = f(obj)
+      y = obj.x + pkg.C.K;
+    end
+  end
+  methods(Static)
+    function y = g(v)
+      y = v + pkg.C.K;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.C; o = C(1); a = o.f(); b = C.g(2); c = C.K;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(10.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_reports_import_ambiguous_for_unqualified_class_constructor_wildcards() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.*; import pkg2.*; o = C();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect_err("ambiguous wildcard-import class constructor should fail compilation");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic import ambiguity error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportAmbiguous"));
+}
+
+#[test]
+fn execute_path_request_specific_import_precedes_wildcard_for_unqualified_class_name() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  properties(Constant)
+    K = 9;
+  end
+  methods
+    function obj = C(), end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        r#"
+classdef C
+  properties(Constant)
+    K = 17;
+  end
+  methods
+    function obj = C(), end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.C; import pkg2.*; a = C.K;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_imported_class_static_function_handle_resolution() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  methods(Static)
+    function y = g(v)
+      y = v + 9;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.C; fh = @C.g; y = fh(2);")
+        .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_import_wildcard_class_constructor_function_handle() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.*; fh = @C; o = fh(7); y = o.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_reports_import_ambiguous_for_constructor_function_handle_wildcards() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.*; import pkg2.*; fh = @C; o = fh();",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect_err("ambiguous wildcard-import constructor handle should fail compilation");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic import ambiguity error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportAmbiguous"));
+}
+
+#[test]
+fn execute_path_request_specific_import_precedes_wildcard_for_constructor_function_handle() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        "classdef C; methods; function obj = C(), end; end; end",
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.C; import pkg2.*; fh = @C; o = fh(7); y = o.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_specific_import_precedes_wildcard_for_static_method_handle() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg2")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("C.m"),
+        r#"
+classdef C
+  methods(Static)
+    function y = g(v)
+      y = v + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("+pkg2").join("C.m"),
+        r#"
+classdef C
+  methods(Static)
+    function y = g(v)
+      y = v + 99;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.C; import pkg2.*; fh = @C.g; y = fh(3);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_imported_static_listener_callback_dispatch() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("+pkg").join("CB.m"),
+        r#"
+classdef CB
+  methods(Static)
+    function k(src, v)
+      src.x = v + 1;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.CB; __register_test_classes(); h = new_handle_object('Point'); addlistener(h, 'changed', @CB.k); notify(h, 'changed', 42); y = h.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(43.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_rejects_getmethod_for_private_method_from_outside_class() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods(Access=private)
+    function y = pvt(obj, x)
+      y = x + 5;
+    end
+  end
+  methods
+    function y = pub(obj, x)
+      y = pvt(obj, x);
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "c = C(); a = c.pub(2); try, fh = getmethod(c, 'pvt'); b = fh(3); id = 'NOERR'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".to_string())
+    ));
+}
+
+#[test]
+fn execute_path_request_allows_getmethod_for_protected_method_inside_subclass_only() {
+    let result = std::thread::Builder::new()
+        .name("protected-getmethod-subclass".to_string())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(|| {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            std::fs::write(
+                tmp.path().join("A.m"),
+                r#"
+classdef A
+  methods(Access=protected)
+    function y = prot(obj, x)
+      y = x + 10;
+    end
+  end
+end
+"#,
+            )
+            .expect("write class source");
+            std::fs::write(
+                tmp.path().join("B.m"),
+                r#"
+classdef B < A
+  methods
+    function y = via_handle(obj, x)
+      fh = getmethod(obj, 'prot');
+      y = fh(x);
+    end
+  end
+end
+"#,
+            )
+            .expect("write class source");
+            std::fs::write(
+                tmp.path().join("main.m"),
+                "a = A(); b = B(); y1 = b.via_handle(3); try, fh = getmethod(a, 'prot'); y2 = fh(4); id = 'NOERR'; catch e, id = e.identifier; end;",
+            )
+            .expect("write script source");
+
+            let mut session =
+                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let source_path = tmp.path().join("main.m");
+            let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+                .expect("execute script");
+
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "y1",
+                &runmat_builtins::Value::Num(13.0)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "id",
+                &runmat_builtins::Value::String("RunMat:MethodPrivate".to_string())
+            ));
+        })
+        .expect("spawn protected-getmethod-subclass test thread")
+        .join();
+    assert!(result.is_ok(), "protected getmethod subclass thread panicked");
+}
+
+#[test]
+fn execute_path_request_supports_getmethod_on_classref_for_public_static_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static)
+    function y = pub(x)
+      y = x + 11;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "cls = classref('S'); fh = getmethod(cls, 'pub'); y = fh(4);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(15.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_getmethod_on_classref_for_inherited_static_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("A.m"),
+        r#"
+classdef A
+  methods(Static)
+    function y = util(x)
+      y = x + 100;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("B.m"),
+        r#"
+classdef B < A
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "cls = classref('B'); fh = getmethod(cls, 'util'); y = fh(2);",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(102.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_rejects_getmethod_on_classref_for_private_static_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  methods(Static, Access=private)
+    function y = pvt(x)
+      y = x + 11;
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "cls = classref('S'); try, fh = getmethod(cls, 'pvt'); y = fh(4); id = 'NOERR'; catch e, id = e.identifier; end;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:MethodPrivate".to_string())
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_single_file_classdef_with_trailing_script() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        r#"
+classdef Vec2
+  properties
+    x
+    y
+  end
+  methods
+    function obj = Vec2(x, y)
+      obj.x = x;
+      obj.y = y;
+    end
+    function m = magnitude(obj)
+      m = sqrt(obj.x * obj.x + obj.y * obj.y);
+    end
+  end
+end
+p = Vec2(3, 4); c = class(p); m = p.magnitude(); ok = isa(p, 'Vec2');
+"#,
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::String("Vec2".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "m",
+        &runmat_builtins::Value::Num(5.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Bool(true)
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "__register_test_classes(); o = new_object('Point'); c = class(o); x = o.x;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::String("Point".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "x",
+        &runmat_builtins::Value::Num(0.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_custom_subsref_intercepts_dot_member_access() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("DotSpy.m"),
+        r#"
+classdef DotSpy
+  properties
+    x
+  end
+  methods
+    function obj = DotSpy(v)
+      obj.x = v;
+    end
+    function out = getx(obj)
+      out = obj.x;
+    end
+    function out = subsref(obj, S)
+      if strcmp(S(1).type, '.')
+        out = 999;
+      else
+        out = builtin('subsref', obj, S);
+      end
+    end
+  end
+end
+"#,
+    )
+    .expect("write DotSpy.m");
+
+    std::fs::write(
+        root.join("main.m"),
+        r#"
+d = DotSpy(3);
+a = d.x;
+b = d.getx();
+"#,
+    )
+    .expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(999.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(999.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_custom_subsasgn_intercepts_dot_member_assignment() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("DotSetSpy.m"),
+        r#"
+classdef DotSetSpy
+  properties
+    x
+  end
+  methods
+    function obj = DotSetSpy(v)
+      obj.x = v;
+    end
+    function obj = subsasgn(obj, S, rhs)
+      if strcmp(S(1).type, '.')
+        return;
+      else
+        obj = builtin('subsasgn', obj, S, rhs);
+      end
+    end
+  end
+end
+"#,
+    )
+    .expect("write DotSetSpy.m");
+
+    std::fs::write(
+        root.join("main.m"),
+        r#"
+d = DotSetSpy(3);
+d.x = 5;
+y = d.x;
+"#,
+    )
+    .expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(3.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_builtin_subsref_dot_falls_back_to_method_dispatch() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("C.m"),
+        r#"
+classdef C
+  methods
+    function y = getv(obj)
+      y = 42;
+    end
+    function out = subsref(obj, S)
+      out = builtin('subsref', obj, S);
+    end
+  end
+end
+"#,
+    )
+    .expect("write C.m");
+
+    std::fs::write(root.join("main.m"), "c = C(); y = c.getv();").expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(42.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_builtin_subsasgn_dot_falls_back_to_setfield() {
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
+    let project = tempfile::tempdir().expect("tempdir");
+    let root = project.path();
+
+    std::fs::write(
+        root.join("C.m"),
+        r#"
+classdef C
+  properties
+    x
+  end
+  methods
+    function obj = C(v)
+      obj.x = v;
+    end
+    function obj = subsasgn(obj, S, rhs)
+      obj = builtin('subsasgn', obj, S, rhs);
+    end
+  end
+end
+"#,
+    )
+    .expect("write C.m");
+
+    std::fs::write(root.join("main.m"), "c = C(1); c.x = 9; y = c.x;").expect("write main.m");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd_guard = push_cwd(root);
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "y",
+        &runmat_builtins::Value::Num(9.0)
+    ));
+}
+
+#[test]
+fn execute_path_request_rejects_static_property_access_via_instance_with_identifier() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("S.m"),
+        r#"
+classdef S
+  properties(Static)
+    v
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "s = S(); try, a = s.v; id='OK'; catch e, id=e.identifier; a=-1; end; try, s.v = 3; id2='OK'; catch e2, id2=e2.identifier; end; b = S.v;",
+    )
+    .expect("write script source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source_path = tmp.path().join("main.m");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute script");
+
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id",
+        &runmat_builtins::Value::String("RunMat:PropertyStaticAccess".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id2",
+        &runmat_builtins::Value::String("RunMat:PropertyStaticAccess".into())
+    ));
+    let empty = runmat_builtins::Value::Tensor(
+        runmat_builtins::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+    );
+    assert!(outcome_has_named_upsert(&outcome, "b", &empty));
 }
 
 #[test]

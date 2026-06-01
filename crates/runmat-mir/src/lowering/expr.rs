@@ -499,12 +499,42 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
 }
 
 fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> Result<MirRvalue, HirError> {
-    let Some(identity) = call.callee.identity() else {
-        return Err(HirError::new(
-            "call requires either a static callable identity or a dynamic callee expression",
-        ));
+    let callee = match &call.callee {
+        HirCallableRef::SuperConstructor {
+            current_class,
+            super_class,
+        } => MirCallee::SuperConstructor {
+            current_class: current_class.0.clone(),
+            super_class: super_class
+                .0
+                .iter()
+                .map(|segment| segment.0.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+        },
+        HirCallableRef::SuperMethod {
+            current_class,
+            super_class,
+            method,
+        } => MirCallee::SuperMethod {
+            current_class: current_class.0.clone(),
+            super_class: super_class
+                .0
+                .iter()
+                .map(|segment| segment.0.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+            method: method.0.clone(),
+        },
+        _ => {
+            let Some(identity) = call.callee.identity() else {
+                return Err(HirError::new(
+                    "call requires either a static callable identity or a dynamic callee expression",
+                ));
+            };
+            MirCallee::Static(identity)
+        }
     };
-    let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
     let fallback_policy = call_fallback_policy(&callee, &call.syntax);
     Ok(MirRvalue::Call(MirCall {
@@ -564,6 +594,8 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
             | CallableIdentity::Method(_)
             | CallableIdentity::AnonymousFunction(_),
         )
+        | MirCallee::SuperConstructor { .. }
+        | MirCallee::SuperMethod { .. }
         | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
         MirCallee::Static(CallableIdentity::BoundFunction(_)) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
@@ -587,12 +619,15 @@ fn call_fallback_policy(
     ) && !matches!(
         callee,
         MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
+            | MirCallee::SuperMethod { .. }
     ) {
         return runmat_hir::CallableFallbackPolicy::ObjectDispatch;
     }
     match callee {
         MirCallee::Static(runmat_hir::CallableIdentity::BoundFunction(_))
-        | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_)) => {
+        | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_))
+        | MirCallee::SuperConstructor { .. }
+        | MirCallee::SuperMethod { .. } => {
             runmat_hir::CallableFallbackPolicy::None
         }
         MirCallee::Static(runmat_hir::CallableIdentity::ExternalName(_)) => {

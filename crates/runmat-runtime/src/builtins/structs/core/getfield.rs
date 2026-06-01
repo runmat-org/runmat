@@ -1037,7 +1037,7 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_handle_field(handle: &HandleRef, name: &str) -> BuiltinResult<Value> {
-    if !handle.valid {
+    if !runmat_builtins::is_handle_valid(handle) {
         return Err(getfield_error_with_message(
             format!("Invalid or deleted handle object '{}'.", handle.class_name),
             &GETFIELD_ERROR_INVALID_HANDLE,
@@ -1324,6 +1324,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "p".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: true,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -1357,6 +1358,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "p".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: true,
                 get_access: Access::Public,
                 set_access: Access::Public,

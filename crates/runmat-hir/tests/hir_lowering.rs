@@ -267,6 +267,63 @@ fn class_method_lowers_to_function_referenced_by_class() {
 }
 
 #[test]
+fn class_constructor_call_is_tagged_as_constructor_call_kind() {
+    let result = lower_result(
+        "classdef C\n methods\n  function obj = C(x)\n   obj.x = x;\n  end\n end\nend\nv = C(3);",
+    );
+    let kinds = result
+        .hir_index
+        .calls
+        .iter()
+        .map(|call| format!("{:?}:{}", call.kind, call.name.display_name().unwrap_or_default()))
+        .collect::<Vec<_>>();
+    assert!(
+        result
+            .hir_index
+            .calls
+            .iter()
+            .any(|call| matches!(call.kind, CallKind::Constructor(_))),
+        "expected constructor call kind, got {:?}",
+        kinds
+    );
+}
+
+#[test]
+fn class_inheritance_links_super_class_id() {
+    let assembly = lower_semantic("classdef A\nend\nclassdef B < A\nend\nx = 1;");
+    let class_a = assembly
+        .classes
+        .iter()
+        .find(|class| class.name.0[0].0 == "A")
+        .expect("class A");
+    let class_b = assembly
+        .classes
+        .iter()
+        .find(|class| class.name.0[0].0 == "B")
+        .expect("class B");
+    assert_eq!(class_b.super_class, Some(class_a.id));
+}
+
+#[test]
+fn transitive_handle_inheritance_marks_handle_kind() {
+    let assembly = lower_semantic(
+        "classdef A < handle\nend\nclassdef B < A\nend\nclassdef C < B\nend\nx = 1;",
+    );
+    let class_b = assembly
+        .classes
+        .iter()
+        .find(|class| class.name.0[0].0 == "B")
+        .expect("class B");
+    let class_c = assembly
+        .classes
+        .iter()
+        .find(|class| class.name.0[0].0 == "C")
+        .expect("class C");
+    assert!(matches!(class_b.kind, runmat_hir::ClassKind::Handle));
+    assert!(matches!(class_c.kind, runmat_hir::ClassKind::Handle));
+}
+
+#[test]
 fn struct_aggregate_literal_lowers_with_field_order_and_duplicates() {
     let assembly = lower_semantic("s = struct{a = 1, a = 2, b = 3};");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
