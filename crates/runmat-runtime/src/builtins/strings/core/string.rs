@@ -682,7 +682,18 @@ async fn convert_to_string_array(
         Value::StringArray(sa) => Ok(sa),
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
-        Value::SparseTensor(sparse) => tensor_to_string_array(sparse.to_dense().map_err(string_flow)?),
+        Value::SparseTensor(sparse) => {
+            let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+                string_flow("string: sparse matrix dimensions overflow")
+            })?;
+            if total_elements > 10_000_000 {
+                return Err(string_flow(format!(
+                    "string: cannot convert sparse tensor {}x{} with {} stored entries to dense string array ({} elements exceeds safe threshold)",
+                    sparse.rows, sparse.cols, sparse.nnz(), total_elements
+                )));
+            }
+            tensor_to_string_array(sparse.to_dense().map_err(string_flow)?)
+        }
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
         Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,

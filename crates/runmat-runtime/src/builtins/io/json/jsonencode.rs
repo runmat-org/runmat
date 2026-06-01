@@ -416,6 +416,15 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::LogicalArray(logical) => logical_array_to_json(logical, options),
         Value::Tensor(tensor) => tensor_to_json(tensor, options),
         Value::SparseTensor(sparse) => {
+            let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+                jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, "jsonencode: sparse matrix dimensions overflow")
+            })?;
+            if total_elements > 10_000_000 {
+                return Err(jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    format!("jsonencode: cannot densify sparse tensor {}x{} ({} elements exceeds safe threshold)", sparse.rows, sparse.cols, total_elements),
+                ));
+            }
             let dense = sparse.to_dense().map_err(|err| {
                 jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, format!("jsonencode: {err}"))
             })?;

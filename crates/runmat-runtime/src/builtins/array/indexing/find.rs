@@ -347,6 +347,10 @@ pub async fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<Find
             let result = compute_find(&storage, &options);
             Ok(FindEval::from_host(result, true))
         }
+        Value::SparseTensor(sparse) => {
+            let result = compute_find_sparse(&sparse, &options);
+            Ok(FindEval::from_host(result, false))
+        }
         other => {
             let (storage, input_was_gpu) = materialize_input(other).await?;
             let result = compute_find(&storage, &options);
@@ -675,6 +679,59 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
             FindResult::new(shape, indices, FindValues::Complex(values))
         }
     }
+}
+
+fn compute_find_sparse(sparse: &runmat_builtins::SparseTensor, options: &FindOptions) -> FindResult {
+    let shape = vec![sparse.rows, sparse.cols];
+    let limit = options.effective_limit();
+
+    let mut indices = Vec::new();
+    let mut values = Vec::new();
+
+    if matches!(limit, Some(0)) {
+        return FindResult::new(shape, indices, FindValues::Real(values));
+    }
+
+    match options.direction {
+        FindDirection::First => {
+            for col in 0..sparse.cols {
+                let col_start = sparse.col_ptrs[col];
+                let col_end = sparse.col_ptrs[col + 1];
+                for idx in col_start..col_end {
+                    let row = sparse.row_indices[idx];
+                    let value = sparse.values[idx];
+                    if value != 0.0 {
+                        let linear_idx = row + col * sparse.rows;
+                        indices.push(linear_idx + 1);
+                        values.push(value);
+                        if limit.is_some_and(|k| indices.len() >= k) {
+                            return FindResult::new(shape, indices, FindValues::Real(values));
+                        }
+                    }
+                }
+            }
+        }
+        FindDirection::Last => {
+            for col in (0..sparse.cols).rev() {
+                let col_start = sparse.col_ptrs[col];
+                let col_end = sparse.col_ptrs[col + 1];
+                for idx in (col_start..col_end).rev() {
+                    let row = sparse.row_indices[idx];
+                    let value = sparse.values[idx];
+                    if value != 0.0 {
+                        let linear_idx = row + col * sparse.rows;
+                        indices.push(linear_idx + 1);
+                        values.push(value);
+                        if limit.is_some_and(|k| indices.len() >= k) {
+                            return FindResult::new(shape, indices, FindValues::Real(values));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    FindResult::new(shape, indices, FindValues::Real(values))
 }
 
 impl FindResult {
