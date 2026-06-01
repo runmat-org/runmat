@@ -127,7 +127,7 @@ fn tand_complex(re: f64, im: f64) -> (f64, f64) {
 #[runtime_builtin(
     name = "tand",
     category = "math/trigonometry",
-    summary = "Tangent of input expressed in degrees.",
+    summary = "Compute element-wise tangent values for degree-based angles.",
     keywords = "tand,tangent,degrees,trigonometry",
     accel = "unary",
     type_resolver(numeric_unary_type),

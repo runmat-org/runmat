@@ -177,7 +177,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cond",
     category = "math/linalg/solve",
-    summary = "Compute the matrix condition number with MATLAB-compatible norms.",
+    summary = "Compute matrix condition numbers.",
     keywords = "cond,condition number,norm,gpu",
     accel = "cond",
     type_resolver(numeric_scalar_type),

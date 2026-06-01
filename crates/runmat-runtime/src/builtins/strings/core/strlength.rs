@@ -124,7 +124,7 @@ fn remap_strlength_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strlength",
     category = "strings/core",
-    summary = "Count characters in string arrays, character arrays, or cell arrays of character vectors.",
+    summary = "Count characters in each element of text inputs.",
     keywords = "strlength,string length,text,count,characters",
     accel = "sink",
     type_resolver(numeric_text_scalar_or_tensor_type),

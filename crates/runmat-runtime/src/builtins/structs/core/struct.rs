@@ -252,7 +252,7 @@ fn struct_error_with_message(
 #[runtime_builtin(
     name = "struct",
     category = "structs/core",
-    summary = "Create scalar structs or struct arrays from name/value pairs.",
+    summary = "Create scalar structs or struct arrays from field/value inputs.",
     keywords = "struct,structure,name-value,record",
     type_resolver(struct_type),
     descriptor(crate::builtins::structs::core::r#struct::STRUCT_DESCRIPTOR),

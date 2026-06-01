@@ -1,0 +1,104 @@
+{
+  "title": "optimoptions",
+  "category": "math/optim",
+  "keywords": [
+    "optimoptions",
+    "options",
+    "TolX",
+    "TolFun",
+    "MaxIter",
+    "MaxFunEvals",
+    "Display"
+  ],
+  "summary": "Create or update solver-specific optimization options for fminbnd, fzero, and fsolve.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Options are host metadata. gpuArray option values are gathered before validation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::optimoptions::tests"
+  },
+  "description": "`optimoptions(solver)` creates a solver-specific options struct with RunMat defaults. `optimoptions(solver, name, value, ...)` applies validated name-value overrides, and `optimoptions(oldOptions, name, value, ...)` copies an existing options struct before applying later values.",
+  "behaviors": [
+    "Supported solvers are `fminbnd`, `fzero`, and `fsolve`.",
+    "Option names are case-insensitive and stored with canonical field names: `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display`.",
+    "`TolX` and `TolFun` must be finite positive numeric scalars. `MaxIter` and `MaxFunEvals` must be finite positive integer scalars.",
+    "`Display` accepts `off`, `none`, `iter`, and `final` for `fzero` and `fsolve`; `fminbnd` also accepts `notify` and defaults to it.",
+    "Unknown options are rejected so solver configuration mistakes fail before the solver starts.",
+    "The returned struct can be passed directly to `fminbnd`, `fzero`, and `fsolve`."
+  ],
+  "examples": [
+    {
+      "description": "Construct fminbnd options",
+      "input": "opts = optimoptions(\"fminbnd\", \"TolX\", 1e-10, \"Display\", \"off\");\nx = fminbnd(@cos, 0, pi, opts)",
+      "output": "x =\n    3.1416"
+    },
+    {
+      "description": "Construct fzero options",
+      "input": "opts = optimoptions(\"fzero\", \"TolX\", 1e-10, \"Display\", \"off\");\nx = fzero(@sin, [3 4], opts)",
+      "output": "x =\n    3.1416"
+    },
+    {
+      "description": "Construct fsolve options",
+      "input": "opts = optimoptions(\"fsolve\", \"TolX\", 1e-8, \"TolFun\", 1e-8, \"Display\", \"off\");\nx = fsolve(@sin, 3, opts)",
+      "output": "x =\n    3.1416"
+    },
+    {
+      "description": "Update an existing options struct",
+      "input": "base = optimoptions(\"fsolve\", \"TolX\", 1e-6);\nopts = optimoptions(base, \"TolX\", 1e-9, \"MaxIter\", 100);\nx = fsolve(@sin, 3, opts)",
+      "output": "x =\n    3.1416"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is this different from optimset?",
+      "answer": "`optimoptions` starts from solver-specific defaults and validates option names and values immediately. `optimset` is a looser compatibility helper that preserves unknown fields."
+    },
+    {
+      "question": "Does optimoptions run on the GPU?",
+      "answer": "No. Options structs are CPU metadata. If an option value is a gpuArray scalar, RunMat gathers it before validation."
+    },
+    {
+      "question": "Can I pass optimoptions output to existing solvers?",
+      "answer": "Yes. `fminbnd`, `fzero`, and `fsolve` consume the same canonical option fields returned by `optimoptions`."
+    }
+  ],
+  "links": [
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    },
+    {
+      "label": "fminbnd",
+      "url": "./fminbnd"
+    },
+    {
+      "label": "fzero",
+      "url": "./fzero"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/optimoptions.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/optimoptions.rs"
+  },
+  "gpu_residency": "Options structs are host metadata. RunMat gathers gpuArray option values before validation and returns a host struct.",
+  "gpu_behavior": [
+    "`optimoptions` does not need a provider kernel because it constructs and validates metadata for host iterative solvers.",
+    "The builtin registers GPU and fusion specs as a host metadata sink so fusion planning does not try to move options construction onto the device."
+  ]
+}

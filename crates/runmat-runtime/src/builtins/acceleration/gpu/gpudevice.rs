@@ -154,7 +154,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gpuDevice",
     category = "acceleration/gpu",
-    summary = "Query metadata about the active GPU provider and return it as a MATLAB struct.",
+    summary = "Query active GPU device metadata.",
     keywords = "gpu,gpuDevice,device,info,accelerate",
     examples = "info = gpuDevice();",
     type_resolver(gpudevice_type),

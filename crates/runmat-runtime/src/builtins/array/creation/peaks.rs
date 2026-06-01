@@ -361,7 +361,7 @@ fn same_size_shape(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<Vec<O
 #[runtime_builtin(
     name = "peaks",
     category = "array/creation",
-    summary = "Sample data: 3-D test surface on an n-by-n grid.",
+    summary = "Generate the standard peaks test surface.",
     keywords = "peaks,sample,surface,test,demo",
     accel = "array_construct",
     type_resolver(peaks_type),

@@ -358,7 +358,7 @@ fn sortrows_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "sortrows",
     category = "array/sorting_sets",
-    summary = "Sort matrix rows lexicographically with optional column and direction control.",
+    summary = "Sort matrix rows lexicographically with column and direction controls.",
     keywords = "sortrows,row sort,lexicographic,gpu",
     accel = "sink",
     sink = true,

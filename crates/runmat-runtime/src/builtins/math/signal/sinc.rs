@@ -194,7 +194,7 @@ fn provider_error(err: anyhow::Error) -> RuntimeError {
 #[runtime_builtin(
     name = "sinc",
     category = "math/signal",
-    summary = "Normalized sinc, sin(pi*x)/(pi*x), evaluated element-wise.",
+    summary = "Compute the normalized sinc function element-wise.",
     keywords = "sinc,normalized sinc,signal processing,elementwise",
     accel = "unary",
     type_resolver(numeric_unary_type),

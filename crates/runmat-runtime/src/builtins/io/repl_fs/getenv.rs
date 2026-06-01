@@ -151,7 +151,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "getenv",
     category = "io/repl_fs",
-    summary = "Query environment variables as character vectors, strings, or structures.",
+    summary = "Read environment variables.",
     keywords = "getenv,environment variable,env,system variable,process environment",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::getenv_type),

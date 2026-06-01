@@ -238,7 +238,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "eig",
     category = "math/linalg/factor",
-    summary = "Eigenvalue decomposition with MATLAB-compatible multi-output forms.",
+    summary = "Compute eigenvalue decompositions.",
     keywords = "eig,eigenvalues,eigenvectors,linalg",
     accel = "sink",
     sink = true,

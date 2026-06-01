@@ -276,7 +276,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fill3",
     category = "plotting",
-    summary = "Create MATLAB-compatible 3-D filled polygon patches.",
+    summary = "Create 3-D filled polygon patches.",
     keywords = "fill3,patch,plotting,polygon,3d",
     sink = true,
     suppress_auto_output = true,

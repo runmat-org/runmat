@@ -429,7 +429,7 @@ impl CummaxEvaluation {
 #[runtime_builtin(
     name = "cummax",
     category = "math/reduction",
-    summary = "Cumulative maximum and index tracking for scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute cumulative maxima (with optional indices).",
     keywords = "cummax,cumulative maximum,running maximum,reverse,omitnan,indices,gpu",
     accel = "reduction",
     type_resolver(cummax_type),

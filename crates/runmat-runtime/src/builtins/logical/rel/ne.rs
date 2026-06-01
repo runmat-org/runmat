@@ -128,7 +128,7 @@ fn ne_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "ne",
     category = "logical/rel",
-    summary = "Element-wise inequality comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise inequality comparisons.",
     keywords = "ne,not equal,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

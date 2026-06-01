@@ -1,0 +1,90 @@
+{
+  "title": "set",
+  "category": "plotting",
+  "keywords": [
+    "set",
+    "graphics handle",
+    "plot properties",
+    "matlab set",
+    "update plotting state"
+  ],
+  "summary": "Set figure, axes, and graphics-object properties through MATLAB-compatible `set` handle workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::set::tests"
+  },
+  "description": "`set` applies property/value pairs to graphics handles. It supports MATLAB-compatible property assignment across figure, axes, legend, text, and plot-object handles using forms like `set(h, 'Property', value)`.",
+  "behaviors": [
+    "`set` requires a plotting handle followed by one or more property/value pairs.",
+    "Different handle families accept different properties, and unsupported properties raise plotting errors rather than silently succeeding.",
+    "Axes-local state such as limits, log modes, and legend visibility can be updated through axes handles.",
+    "Plot-child properties such as line width, display names, marker styling, and selected object semantics are updated in place through the returned plot handles.",
+    "Legend and text objects participate in the same property path, so figure annotation workflows stay consistent with the rest of the handle model."
+  ],
+  "examples": [
+    {
+      "description": "Style a line after plotting",
+      "input": "h = plot(0:0.1:1, (0:0.1:1).^2);\nset(h, 'Color', 'r', 'LineWidth', 2, 'DisplayName', 'quadratic');"
+    },
+    {
+      "description": "Update axes-local state through an axes handle",
+      "input": "ax = subplot(1, 2, 2);\nplot(1:5, [2 3 5 4 1]);\nset(ax, 'XScale', 'log', 'Grid', false);"
+    },
+    {
+      "description": "Change a legend after it has been created",
+      "input": "plot(1:5, 1:5);\nlg = legend('series');\nset(lg, 'Location', 'southwest', 'Orientation', 'horizontal');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I set multiple properties in a single call?",
+      "answer": "Yes. Pass alternating property/value pairs: `set(h, 'Color', 'r', 'LineWidth', 2, 'DisplayName', 'trend')`. All updates apply atomically to the same handle."
+    },
+    {
+      "question": "What are the most commonly used properties to set on a line handle?",
+      "answer": "`'Color'`, `'LineWidth'`, `'LineStyle'`, `'Marker'`, and `'DisplayName'` cover most styling needs. `'DisplayName'` is especially useful — it feeds directly into `legend` when you call it without explicit labels.\n\n```matlab\nh = plot(x, y);\nset(h, 'Color', [0.2 0.6 0.8], 'LineWidth', 1.5, 'DisplayName', 'measured');\n```"
+    },
+    {
+      "question": "What happens if I pass a property name that the handle doesn't support?",
+      "answer": "RunMat raises a plotting error immediately. It doesn't silently ignore unknown properties, so typos in property names surface right away rather than producing subtle bugs."
+    }
+  ],
+  "links": [
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/set.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/set.rs"
+  }
+}

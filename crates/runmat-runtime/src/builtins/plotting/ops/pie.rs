@@ -214,7 +214,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "pie",
     category = "plotting",
-    summary = "Render a MATLAB-compatible pie chart.",
+    summary = "Render pie charts.",
     keywords = "pie,plotting,chart",
     sink = true,
     suppress_auto_output = true,

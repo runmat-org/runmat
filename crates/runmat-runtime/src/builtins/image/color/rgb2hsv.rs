@@ -126,7 +126,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rgb2hsv",
     category = "image/color",
-    summary = "Convert RGB values to HSV color space.",
+    summary = "Convert RGB image or colormap values to HSV color space.",
     keywords = "rgb2hsv,rgb,hsv,color,image,colormap",
     accel = "sink",
     type_resolver(same_shape_type),

@@ -257,7 +257,7 @@ fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
 #[runtime_builtin(
     name = "view",
     category = "plotting",
-    summary = "Set or query the current 3-D view angles.",
+    summary = "Set or query azimuth/elevation camera view angles.",
     keywords = "view,plotting,3d,camera",
     suppress_auto_output = true,
     type_resolver(get_type),

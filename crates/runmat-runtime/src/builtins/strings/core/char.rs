@@ -155,7 +155,7 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "char",
     category = "strings/core",
-    summary = "Convert numeric codes, strings, and cell contents into a character array.",
+    summary = "Convert numeric codes and text values into character arrays.",
     keywords = "char,character,string,gpu",
     accel = "conversion",
     type_resolver(string_array_type),

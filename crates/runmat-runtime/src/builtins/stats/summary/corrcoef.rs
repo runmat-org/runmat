@@ -364,7 +364,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "corrcoef",
     category = "stats/summary",
-    summary = "Compute Pearson correlation coefficients for the columns of matrices or paired data sets.",
+    summary = "Compute Pearson correlation coefficients.",
     keywords = "corrcoef,correlation,statistics,rows,normalization,gpu",
     accel = "reduction",
     type_resolver(corrcoef_type),

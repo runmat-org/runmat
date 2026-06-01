@@ -121,7 +121,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "asin",
     category = "math/trigonometry",
-    summary = "Element-wise inverse sine with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse sine, with complex promotion outside [-1, 1].",
     keywords = "asin,inverse sine,arcsin,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

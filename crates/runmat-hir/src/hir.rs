@@ -301,6 +301,15 @@ pub enum HirCallableRef {
     Function(FunctionId),
     Builtin(BuiltinId),
     Imported(DefPath),
+    SuperConstructor {
+        current_class: SymbolName,
+        super_class: QualifiedName,
+    },
+    SuperMethod {
+        current_class: SymbolName,
+        super_class: QualifiedName,
+        method: SymbolName,
+    },
     DynamicExpr(Box<HirExpr>),
     Unresolved(QualifiedName),
 }
@@ -321,6 +330,7 @@ impl HirCallableRef {
             HirCallableRef::Function(function) => Some(CallableIdentity::BoundFunction(*function)),
             HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
             HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
+            HirCallableRef::SuperConstructor { .. } | HirCallableRef::SuperMethod { .. } => None,
             HirCallableRef::DynamicExpr(_) => None,
             HirCallableRef::Unresolved(name) => {
                 if name.0.len() == 1 {
@@ -548,6 +558,8 @@ pub struct HirClass {
     pub name: QualifiedName,
     pub super_class: Option<ClassId>,
     pub kind: ClassKind,
+    pub is_sealed: bool,
+    pub is_abstract: bool,
     pub properties: Vec<ClassProperty>,
     pub methods: Vec<ClassMethod>,
     pub events: Vec<ClassEvent>,
@@ -621,6 +633,7 @@ pub enum MemberAccess {
     #[default]
     Public,
     Private,
+    Protected,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

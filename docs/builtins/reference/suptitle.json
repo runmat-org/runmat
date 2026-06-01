@@ -1,0 +1,84 @@
+{
+  "title": "suptitle",
+  "category": "plotting",
+  "keywords": [
+    "suptitle",
+    "sgtitle",
+    "super title",
+    "subplot title",
+    "figure title",
+    "matlab suptitle"
+  ],
+  "summary": "Set a centered figure-level title using the legacy `suptitle` alias for `sgtitle`.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::suptitle::tests"
+  },
+  "description": "`suptitle` sets the same figure-level title as `sgtitle` and exists primarily for compatibility with older MATLAB subplot code. It supports current-figure and explicit-figure forms and returns a text handle.",
+  "behaviors": [
+    "`suptitle(txt)` updates the current figure and returns the super-title text handle.",
+    "`suptitle(fig, txt, ...)` targets an explicit figure handle when the handle exists.",
+    "String scalars, char arrays, string arrays, and cell arrays can all be used to create multiline super titles.",
+    "Text styling properties such as `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` use the shared plotting text-property system.",
+    "`suptitle` and `sgtitle` update the same figure-level title object."
+  ],
+  "examples": [
+    {
+      "description": "Add a super title above a subplot figure",
+      "input": "subplot(2, 1, 1);\nplot(1:10, rand(1, 10));\nsubplot(2, 1, 2);\nplot(1:10, rand(1, 10));\nsuptitle('Experiment Summary');"
+    },
+    {
+      "description": "Style the figure-level title and inspect the returned handle",
+      "input": "subplot(1, 2, 1);\nimagesc(peaks(20));\nsubplot(1, 2, 2);\nimagesc(peaks(20));\nh = suptitle('Field Comparison', 'FontSize', 18, 'FontWeight', 'bold');\nget(h, 'Type')",
+      "output": "ans =\n    'text'"
+    },
+    {
+      "description": "Target an explicit figure handle",
+      "input": "fig = figure(42);\nsubplot(1, 2, 1);\nplot(0:0.1:1, sin(0:0.1:1));\nsubplot(1, 2, 2);\nplot(0:0.1:1, cos(0:0.1:1));\nsuptitle(fig, 'Sine and Cosine');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is suptitle different from sgtitle?",
+      "answer": "In RunMat, `suptitle` and `sgtitle` update the same figure-level super title. `suptitle` is provided as a compatibility spelling for MATLAB code that uses the older helper name."
+    },
+    {
+      "question": "How is suptitle different from title?",
+      "answer": "`title` attaches text to the current axes, so each subplot can have its own panel title. `suptitle` attaches text to the figure as a whole and is drawn once above all panels."
+    },
+    {
+      "question": "Can I update the super title after creating it?",
+      "answer": "Yes. `suptitle` returns a text handle, so you can inspect or update it with `get` and `set`.\n\n```matlab\nh = suptitle('Initial Title');\nset(h, 'String', 'Updated Title', 'FontWeight', 'bold');\n```"
+    }
+  ],
+  "links": [
+    {
+      "label": "sgtitle",
+      "url": "./sgtitle"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "title",
+      "url": "./title"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/suptitle.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/suptitle.rs"
+  }
+}

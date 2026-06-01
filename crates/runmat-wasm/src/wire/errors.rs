@@ -71,8 +71,8 @@ pub(crate) fn runtime_error_to_js(err: &RuntimeError) -> JsValue {
     }
 }
 
-pub(crate) fn run_error_to_js(err: &RunError, source: &str) -> JsValue {
-    serde_wasm_bindgen::to_value(&run_error_payload(err, source))
+pub(crate) fn run_error_to_js(err: &RunError, source_name: Option<&str>, source: Option<&str>) -> JsValue {
+    serde_wasm_bindgen::to_value(&run_error_payload(err, source_name, source))
         .unwrap_or_else(|_| JsValue::from_str("RunMat error"))
 }
 
@@ -132,7 +132,8 @@ fn span_payload_from_source(source: &str, start: usize, end: usize) -> RunMatErr
     }
 }
 
-fn format_run_error(err: &RunError, source: &str) -> String {
+fn format_run_error(err: &RunError, source_name: Option<&str>, source: Option<&str>) -> String {
+    let span_source = source_name.zip(source);
     match err {
         RunError::Syntax(err) => {
             let mut message = err.message.clone();
@@ -147,7 +148,7 @@ fn format_run_error(err: &RunError, source: &str) -> String {
                 .with_identifier("RunMat:SyntaxError")
                 .with_span(span)
                 .build()
-                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+                .format_diagnostic_with_source(span_source.map(|(name, _)| name), span_source.map(|(_, src)| src))
         }
         RunError::Semantic(err) => {
             let span = err.span.map(|span| {
@@ -165,7 +166,7 @@ fn format_run_error(err: &RunError, source: &str) -> String {
             }
             builder
                 .build()
-                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+                .format_diagnostic_with_source(span_source.map(|(name, _)| name), span_source.map(|(_, src)| src))
         }
         RunError::Compile(err) => {
             let span = err.span.map(|span| {
@@ -183,14 +184,18 @@ fn format_run_error(err: &RunError, source: &str) -> String {
             }
             builder
                 .build()
-                .format_diagnostic_with_source(Some("<wasm>"), Some(source))
+                .format_diagnostic_with_source(span_source.map(|(name, _)| name), span_source.map(|(_, src)| src))
         }
-        RunError::Runtime(err) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
+        RunError::Runtime(err) => err.format_diagnostic_with_source(
+            span_source.map(|(name, _)| name),
+            span_source.map(|(_, src)| src),
+        ),
     }
 }
 
 pub(crate) fn runtime_error_payload(
     err: &RuntimeError,
+    source_name: Option<&str>,
     source: Option<&str>,
 ) -> RunMatErrorPayload {
     let identifier = err.identifier().map(|id| id.to_string());
@@ -203,7 +208,7 @@ pub(crate) fn runtime_error_payload(
         _ => None,
     };
     let diagnostic = match source {
-        Some(source) => err.format_diagnostic_with_source(Some("<wasm>"), Some(source)),
+        Some(source) => err.format_diagnostic_with_source(source_name, Some(source)),
         None => err.format_diagnostic(),
     };
     let callstack = if !err.context.call_stack.is_empty() {
@@ -226,8 +231,12 @@ pub(crate) fn runtime_error_payload(
     }
 }
 
-pub(crate) fn run_error_payload(err: &RunError, source: &str) -> RunMatErrorPayload {
-    let diagnostic = format_run_error(err, source);
+pub(crate) fn run_error_payload(
+    err: &RunError,
+    source_name: Option<&str>,
+    source: Option<&str>,
+) -> RunMatErrorPayload {
+    let diagnostic = format_run_error(err, source_name, source);
     match err {
         RunError::Syntax(err) => {
             let mut message = err.message.clone();
@@ -237,13 +246,13 @@ pub(crate) fn run_error_payload(err: &RunError, source: &str) -> RunMatErrorPayl
             if let Some(found) = &err.found_token {
                 message = format!("{message} (found '{found}')");
             }
-            let span = span_payload_from_source(source, err.position, err.position + 1);
+            let span = source.map(|src| span_payload_from_source(src, err.position, err.position + 1));
             RunMatErrorPayload {
                 kind: RunMatErrorKind::Syntax,
                 message,
                 identifier: Some("RunMat:SyntaxError".to_string()),
                 diagnostic,
-                span: Some(span),
+                span,
                 callstack: Vec::new(),
                 callstack_elided: 0,
             }
@@ -253,9 +262,11 @@ pub(crate) fn run_error_payload(err: &RunError, source: &str) -> RunMatErrorPayl
             message: err.message.clone(),
             identifier: err.identifier.clone(),
             diagnostic,
-            span: err.span.map(|span| {
-                let end = span.end.max(span.start + 1);
-                span_payload_from_source(source, span.start, end)
+            span: source.and_then(|src| {
+                err.span.map(|span| {
+                    let end = span.end.max(span.start + 1);
+                    span_payload_from_source(src, span.start, end)
+                })
             }),
             callstack: Vec::new(),
             callstack_elided: 0,
@@ -265,13 +276,15 @@ pub(crate) fn run_error_payload(err: &RunError, source: &str) -> RunMatErrorPayl
             message: err.message.clone(),
             identifier: err.identifier.clone(),
             diagnostic,
-            span: err.span.map(|span| {
-                let end = span.end.max(span.start + 1);
-                span_payload_from_source(source, span.start, end)
+            span: source.and_then(|src| {
+                err.span.map(|span| {
+                    let end = span.end.max(span.start + 1);
+                    span_payload_from_source(src, span.start, end)
+                })
             }),
             callstack: Vec::new(),
             callstack_elided: 0,
         },
-        RunError::Runtime(err) => runtime_error_payload(err, Some(source)),
+        RunError::Runtime(err) => runtime_error_payload(err, source_name, source),
     }
 }

@@ -140,7 +140,7 @@ fn lt_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "lt",
     category = "logical/rel",
-    summary = "Element-wise less-than comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise less-than comparisons.",
     keywords = "lt,less than,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

@@ -306,7 +306,7 @@ impl Default for FilewriteOptions {
 #[runtime_builtin(
     name = "filewrite",
     category = "io/filetext",
-    summary = "Write text or raw bytes to a file.",
+    summary = "Write text or raw bytes to files.",
     keywords = "filewrite,io,write file,text file,append,encoding",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::filewrite_type),

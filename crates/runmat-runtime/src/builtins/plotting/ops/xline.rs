@@ -143,7 +143,7 @@ pub const XLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "xline",
     category = "plotting",
-    summary = "Draw vertical reference lines on the current axes.",
+    summary = "Draw vertical reference lines on current or specified axes.",
     keywords = "xline,reference,line,plotting",
     sink = true,
     suppress_auto_output = true,

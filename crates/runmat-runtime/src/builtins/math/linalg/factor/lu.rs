@@ -229,7 +229,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "lu",
     category = "math/linalg/factor",
-    summary = "LU decomposition with partial pivoting.",
+    summary = "Compute LU decompositions with partial pivoting.",
     keywords = "lu,factorization,decomposition,permutation",
     accel = "sink",
     sink = true,

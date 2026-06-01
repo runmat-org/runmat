@@ -254,7 +254,7 @@ fn join_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "join",
     category = "strings/transform",
-    summary = "Combine text across a specified dimension inserting delimiters between elements.",
+    summary = "Join text elements with delimiters along a dimension.",
     keywords = "join,string join,concatenate strings,delimiters,cell array join",
     accel = "none",
     type_resolver(text_concat_type),

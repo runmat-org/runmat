@@ -277,7 +277,7 @@ fn map_contourf_internal(err: crate::RuntimeError) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "contourf",
     category = "plotting",
-    summary = "Render MATLAB-compatible filled contour plots.",
+    summary = "Create filled contour plots.",
     keywords = "contourf,plotting,filled,contour",
     sink = true,
     suppress_auto_output = true,

@@ -239,7 +239,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "scatterplot",
     category = "communications/plotting",
-    summary = "Plot complex-baseband constellation samples.",
+    summary = "Plot complex samples as 2-D constellation points.",
     keywords = "scatterplot,constellation,communications,scatter,plotting,gpu",
     sink = true,
     suppress_auto_output = true,

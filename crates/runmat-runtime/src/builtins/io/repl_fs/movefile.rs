@@ -268,7 +268,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "movefile",
     category = "io/repl_fs",
-    summary = "Move or rename files and folders with MATLAB-compatible status, message, and message ID outputs.",
+    summary = "Move or rename files and folders.",
     keywords = "movefile,rename,move file,filesystem,status,message,messageid,force,overwrite",
     accel = "cpu",
     suppress_auto_output = true,

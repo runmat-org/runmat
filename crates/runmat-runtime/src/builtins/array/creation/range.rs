@@ -261,7 +261,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "range",
     category = "array/creation",
-    summary = "Compute the difference between the maximum and minimum values.",
+    summary = "Compute data span as maximum minus minimum.",
     keywords = "range,max,min,spread,gpu",
     accel = "reduction",
     type_resolver(range_type),

@@ -1,0 +1,202 @@
+{
+  "title": "delete",
+  "category": "io/repl_fs",
+  "keywords": [
+    "delete",
+    "remove file",
+    "wildcard delete",
+    "cleanup",
+    "temporary files",
+    "MATLAB delete"
+  ],
+  "summary": "Remove files in MATLAB and RunMat.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Filesystem operations always execute on the host CPU. If path inputs reside on the GPU, RunMat gathers them before removing files."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::delete::tests",
+    "integration": "builtins::io::repl_fs::delete::tests::delete_removes_files_with_wildcard"
+  },
+  "description": "`delete(filename)` removes files, while `delete(obj)` invalidates handle objects or listeners. Supported filename forms, wildcard handling, and diagnostics follow MATLAB semantics.",
+  "behaviors": [
+    "Accepts individual paths, string arrays, cell arrays of character vectors, and char matrices. Each element targets one file.",
+    "Accepts handle objects (`handle`) and event listeners, marking them invalid (`isvalid` returns `false`) without touching the filesystem when invoked with non-string inputs.",
+    "Expands shell-style wildcards (`*` and `?`) using MATLAB-compatible rules. Patterns must resolve to existing files; otherwise, the builtin throws `RunMat:DELETE:FileNotFound`.",
+    "Rejects folders. When a target is a directory, RunMat raises `RunMat:DELETE:Directories`, matching MATLAB’s “Use rmdir to remove directories” diagnostic.",
+    "Propagates operating-system failures (for example, permission errors or read-only files) through `RunMat:DELETE:PermissionDenied`.",
+    "Expands `~` to the user’s home directory and resolves relative paths against the current working folder (`pwd`).",
+    "Treats empty character vectors or empty string scalars as invalid inputs and raises `RunMat:DELETE:EmptyFilename`.",
+    "When passed an empty string array or empty cell array, the builtin performs no action and returns without error, just like MATLAB."
+  ],
+  "examples": [
+    {
+      "description": "Deleting a single temporary file",
+      "input": "fname = \"scratch.txt\";\nfid = fopen(fname, \"w\");\nfclose(fid);\ndelete(fname)"
+    },
+    {
+      "description": "Removing multiple files with a wildcard pattern",
+      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor i = 1:numel(logs)\n    fid = fopen(logs(i), \"w\");\n    fclose(fid);\nend\nfor i = 1:numel(logs)\n    delete(logs(i));\nend"
+    },
+    {
+      "description": "Deleting files listed in a string array",
+      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor i = 1:numel(files)\n    fid = fopen(files(i), \"w\");\n    fclose(fid);\nend\ndelete(files)"
+    },
+    {
+      "description": "Handling missing files safely with try/catch",
+      "input": "try\n    delete(\"missing-file.txt\");\ncatch err\n    disp(err.identifier)\n    disp(err.message)\nend"
+    },
+    {
+      "description": "Cleaning up build artifacts stored under your home folder",
+      "input": "delete(\"~/runmat/build/*.o\")"
+    },
+    {
+      "description": "Deleting char-matrix filenames generated programmatically",
+      "input": "names = char(\"stage1.tmp\", \"stage2.tmp\");\nfor row = 1:size(names, 1)\n    fname = strtrim(names(row, :));\n    fid = fopen(fname, \"w\");\n    fclose(fid);\nend\ndelete(names)"
+    },
+    {
+      "description": "Deleting graphics handles after use",
+      "input": "fig = figure;\ndelete(fig);\ntf = isvalid(fig)",
+      "output": "tf =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What message IDs does `delete` produce?",
+      "answer": "Missing files raise `RunMat:DELETE:FileNotFound`, directories raise `RunMat:DELETE:Directories`, wildcard syntax issues raise `RunMat:DELETE:InvalidPattern`, operating-system failures raise `RunMat:DELETE:PermissionDenied`, and invalid handle inputs raise `RunMat:DELETE:InvalidHandle`."
+    },
+    {
+      "question": "Can I delete folders with `delete`?",
+      "answer": "No. MATLAB reserves folder deletion for `rmdir`. RunMat follows suit and throws `RunMat:DELETE:Directories` when a target is a directory."
+    },
+    {
+      "question": "Does `delete` support multiple filenames at once?",
+      "answer": "Yes. Pass a string array, a cell array of character vectors, or a char matrix. Each element is deleted in turn."
+    },
+    {
+      "question": "How are wildcard patterns resolved?",
+      "answer": "RunMat uses MATLAB-compatible globbing: `*` matches any sequence, `?` matches a single character, and the pattern is evaluated relative to the current folder (`pwd`) unless you pass an absolute path."
+    },
+    {
+      "question": "What happens when a wildcard matches nothing?",
+      "answer": "The builtin raises `RunMat:DELETE:FileNotFound` (just like MATLAB) and leaves the filesystem unchanged."
+    },
+    {
+      "question": "Do empty arrays raise errors?",
+      "answer": "Empty string arrays or empty cell arrays simply result in no deletions. Empty strings, however, are invalid and trigger `RunMat:DELETE:EmptyFilename`."
+    },
+    {
+      "question": "How do GPU inputs behave?",
+      "answer": "Inputs on the GPU are gathered to the host automatically. No GPU kernels are launched."
+    },
+    {
+      "question": "Does `delete` preserve symbolic links?",
+      "answer": "Yes. RunMat delegates to the operating system: deleting a symlink removes the link itself, not the target—matching MATLAB."
+    },
+    {
+      "question": "Can I detect failures programmatically?",
+      "answer": "Wrap the call in `try/catch` and inspect `err.identifier` and `err.message` just as you would in MATLAB."
+    },
+    {
+      "question": "Will `delete` follow relative paths updated by `cd`?",
+      "answer": "Yes. Paths are interpreted using the process working directory, so calling `cd` before `delete` mirrors MATLAB’s behaviour."
+    }
+  ],
+  "links": [
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/delete.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/delete.rs"
+  },
+  "gpu_residency": "No. `delete` executes on the CPU. If a script accidentally wraps path strings in `gpuArray`, RunMat gathers the scalars before issuing filesystem calls. Keeping paths on the GPU provides no benefit.",
+  "gpu_behavior": [
+    "`delete` performs host-side filesystem I/O. When a path argument lives on the GPU (for example, `gpuArray(\"scratch.log\")`), RunMat gathers the scalar to CPU memory before touching the filesystem. Acceleration providers do not implement dedicated hooks for `delete`, so there are no GPU kernels or device transfers beyond the automatic gathering of inputs."
+  ]
+}

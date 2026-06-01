@@ -194,7 +194,7 @@ fn rot90_error_with_message(
 #[runtime_builtin(
     name = "rot90",
     category = "array/shape",
-    summary = "Rotate matrices and N-D arrays by multiples of 90 degrees.",
+    summary = "Rotate matrices and N-D arrays in 90-degree increments.",
     keywords = "rot90,rotate,90 degrees,matrix,gpu,clockwise,counterclockwise",
     accel = "custom",
     type_resolver(preserve_matrix_type),

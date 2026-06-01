@@ -101,7 +101,7 @@ pub const NOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "not",
     category = "logical/bit",
-    summary = "Element-wise logical negation for scalars, arrays, and gpuArray values.",
+    summary = "Compute element-wise logical negation.",
     keywords = "logical,not,boolean,gpu",
     accel = "elementwise",
     type_resolver(logical_unary_type),

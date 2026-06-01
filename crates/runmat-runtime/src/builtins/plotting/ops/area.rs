@@ -361,7 +361,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "area",
     category = "plotting",
-    summary = "Render MATLAB-compatible area plots.",
+    summary = "Create filled area plots.",
     keywords = "area,plotting,stacked,fill",
     sink = true,
     suppress_auto_output = true,

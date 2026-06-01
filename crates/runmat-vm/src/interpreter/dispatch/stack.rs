@@ -70,18 +70,21 @@ where
     stack_ops::store_var(stack, vars, index, var_names, before_overwrite, after_store)
 }
 
-pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterFallbackStore>(
+#[allow(clippy::too_many_arguments)]
+pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, AfterFallbackStore>(
     stack: &mut Vec<Value>,
     context: &mut ExecutionContext,
     vars: &mut Vec<Value>,
     offset: usize,
     before_local_overwrite: BeforeLocalOverwrite,
     before_var_overwrite: BeforeVarOverwrite,
+    after_local_store: AfterLocalStore,
     after_fallback_store: AfterFallbackStore,
 ) -> Result<(), RuntimeError>
 where
     BeforeLocalOverwrite: FnMut(&Value, &Value),
     BeforeVarOverwrite: FnMut(&Value, &Value),
+    AfterLocalStore: FnMut(usize, &Value),
     AfterFallbackStore: FnMut(&str, usize, &Value),
 {
     stack_ops::store_local(
@@ -91,6 +94,7 @@ where
         offset,
         before_local_overwrite,
         before_var_overwrite,
+        after_local_store,
         after_fallback_store,
     )
 }

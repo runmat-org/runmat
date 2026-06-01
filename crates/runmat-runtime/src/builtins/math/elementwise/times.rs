@@ -206,7 +206,7 @@ fn times_error_with_detail(
 #[runtime_builtin(
     name = "times",
     category = "math/elementwise",
-    summary = "Element-wise multiplication with MATLAB-compatible implicit expansion.",
+    summary = "Multiply arrays element-wise with MATLAB-compatible implicit expansion.",
     keywords = "times,element-wise multiply,gpu,.*",
     accel = "elementwise",
     type_resolver(numeric_binary_type),

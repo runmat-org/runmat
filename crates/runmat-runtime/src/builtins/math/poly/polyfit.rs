@@ -249,7 +249,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "polyfit",
     category = "math/poly",
-    summary = "Fit an n-th degree polynomial to data points with MATLAB-compatible outputs.",
+    summary = "Fit polynomials to data using least squares.",
     keywords = "polyfit,polynomial,least-squares,gpu",
     accel = "sink",
     sink = true,

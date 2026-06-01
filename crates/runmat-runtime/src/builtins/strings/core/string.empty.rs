@@ -199,7 +199,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "string.empty",
     category = "strings/core",
-    summary = "Construct an empty string array with MATLAB-compatible dimensions.",
+    summary = "Construct empty string arrays with MATLAB-compatible dimension semantics.",
     keywords = "string.empty,empty,string array,preallocate",
     accel = "none",
     type_resolver(string_array_type),

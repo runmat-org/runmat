@@ -202,7 +202,7 @@ fn power_error_with_detail(
 #[runtime_builtin(
     name = "power",
     category = "math/elementwise",
-    summary = "Element-wise power with MATLAB-compatible broadcasting and complex support.",
+    summary = "Compute element-wise exponentiation.",
     keywords = "power,element-wise,.^,gpu,broadcast",
     accel = "elementwise",
     type_resolver(numeric_binary_type),

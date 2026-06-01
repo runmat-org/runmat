@@ -72,7 +72,7 @@ pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "class",
     category = "introspection",
-    summary = "Return the MATLAB class name for scalars, arrays, and objects.",
+    summary = "Return class names for values.",
     keywords = "class,type inspection,type name,gpuArray class",
     type_resolver(class_type),
     descriptor(crate::builtins::introspection::class::CLASS_DESCRIPTOR),

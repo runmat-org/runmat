@@ -637,7 +637,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "contour",
     category = "plotting",
-    summary = "Render MATLAB-compatible contour plots.",
+    summary = "Create contour line plots.",
     keywords = "contour,plotting,isolines",
     sink = true,
     suppress_auto_output = true,

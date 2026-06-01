@@ -181,7 +181,7 @@ fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeE
 #[runtime_builtin(
     name = "flip",
     category = "array/shape",
-    summary = "Reverse the order of elements along specific dimensions.",
+    summary = "Reverse element order along dimensions.",
     keywords = "flip,reverse,dimension,gpu,horizontal,vertical",
     accel = "custom",
     type_resolver(preserve_array_type),

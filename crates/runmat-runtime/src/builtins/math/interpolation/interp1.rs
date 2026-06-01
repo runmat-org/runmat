@@ -348,7 +348,7 @@ fn interp1_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "interp1",
     category = "math/interpolation",
-    summary = "One-dimensional interpolation for sampled data.",
+    summary = "Interpolate one-dimensional sampled data.",
     keywords = "interp1,interpolation,linear,nearest,spline,pchip",
     accel = "sink",
     sink = true,

@@ -296,7 +296,7 @@ fn cmd_error_with_message(
 #[runtime_builtin(
     name = "grid",
     category = "plotting",
-    summary = "Toggle grid lines on current axes.",
+    summary = "Toggle axes grid lines.",
     keywords = "grid,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),
@@ -325,7 +325,7 @@ pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 #[runtime_builtin(
     name = "box",
     category = "plotting",
-    summary = "Toggle axes box outline.",
+    summary = "Toggle axes box outlines.",
     keywords = "box,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),
@@ -354,7 +354,7 @@ pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 #[runtime_builtin(
     name = "axis",
     category = "plotting",
-    summary = "Set axis limits/aspect.",
+    summary = "Set axis limits and aspect behavior.",
     keywords = "axis,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),
@@ -458,7 +458,7 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 #[runtime_builtin(
     name = "cla",
     category = "plotting",
-    summary = "Clear current axes.",
+    summary = "Clear the current axes.",
     keywords = "cla,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),
@@ -532,7 +532,7 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 #[runtime_builtin(
     name = "shading",
     category = "plotting",
-    summary = "Set shading mode for surface plots.",
+    summary = "Set surface shading mode (flat, interp, or faceted).",
     keywords = "shading,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),
@@ -576,7 +576,7 @@ pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
 #[runtime_builtin(
     name = "colorbar",
     category = "plotting",
-    summary = "Toggle colorbar visibility.",
+    summary = "Show, hide, or toggle colorbars.",
     keywords = "colorbar,plotting",
     suppress_auto_output = true,
     type_resolver(bool_type),

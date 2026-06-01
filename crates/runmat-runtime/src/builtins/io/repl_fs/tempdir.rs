@@ -93,7 +93,7 @@ fn tempdir_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "tempdir",
     category = "io/repl_fs",
-    summary = "Return the absolute path to the system temporary folder.",
+    summary = "Return the system temporary directory path with trailing separator.",
     keywords = "tempdir,temporary folder,temp directory,system temp",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tempdir_type),

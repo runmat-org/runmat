@@ -139,7 +139,7 @@ fn ge_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "ge",
     category = "logical/rel",
-    summary = "Element-wise greater-than-or-equal comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise greater-than-or-equal comparisons.",
     keywords = "ge,greater equal,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

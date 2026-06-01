@@ -178,7 +178,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "genpath",
     category = "io/repl_fs",
-    summary = "Generate a MATLAB-style search path string for a folder tree.",
+    summary = "Generate recursive path strings from folder trees.",
     keywords = "genpath,recursive path,search path,addpath",
     accel = "cpu",
     suppress_auto_output = true,

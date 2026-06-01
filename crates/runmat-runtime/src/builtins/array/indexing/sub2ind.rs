@@ -185,7 +185,7 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "sub2ind",
     category = "array/indexing",
-    summary = "Convert N-D subscripts into MATLAB-style column-major linear indices.",
+    summary = "Convert N-D subscripts to MATLAB-style column-major linear indices.",
     keywords = "sub2ind,linear index,column major,gpu indexing",
     accel = "custom",
     type_resolver(sub2ind_type),

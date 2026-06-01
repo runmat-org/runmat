@@ -147,7 +147,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "im2double",
     category = "image/color",
-    summary = "Convert image data to double precision, scaling integer images into [0,1].",
+    summary = "Convert images to double precision.",
     keywords = "im2double,image,convert,double,uint8,uint16",
     accel = "sink",
     type_resolver(same_shape_type),

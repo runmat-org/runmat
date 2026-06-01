@@ -24,6 +24,15 @@ pub struct MirCall {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirCallee {
     Static(CallableIdentity),
+    SuperConstructor {
+        current_class: String,
+        super_class: String,
+    },
+    SuperMethod {
+        current_class: String,
+        super_class: String,
+        method: String,
+    },
     Dynamic(MirOperand),
 }
 

@@ -175,7 +175,7 @@ enum DbMode {
 #[runtime_builtin(
     name = "db",
     category = "control",
-    summary = "Convert numeric values to decibels using MATLAB-compatible voltage, power, or resistance forms.",
+    summary = "Convert numeric values to decibels.",
     keywords = "db,decibel,voltage,power,resistance,complex",
     accel = "metadata",
     type_resolver(db_type),

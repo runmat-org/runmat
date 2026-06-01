@@ -115,7 +115,7 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "fix",
     category = "math/rounding",
-    summary = "Round scalars, vectors, matrices, or N-D tensors toward zero.",
+    summary = "Round values toward zero.",
     keywords = "fix,truncate,rounding,toward zero,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

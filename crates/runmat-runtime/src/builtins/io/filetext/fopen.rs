@@ -424,7 +424,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "fopen",
     category = "io/filetext",
-    summary = "Open a file and obtain a MATLAB-compatible file identifier.",
+    summary = "Open files and return file identifiers.",
     keywords = "fopen,file,io,permission,encoding",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fopen_type),

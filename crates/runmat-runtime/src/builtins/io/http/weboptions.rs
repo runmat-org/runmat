@@ -188,7 +188,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "weboptions",
     category = "io/http",
-    summary = "Create an options struct that configures webread and webwrite HTTP behaviour.",
+    summary = "Create HTTP options structs for `webread` and `webwrite` requests.",
     keywords = "weboptions,http options,timeout,headers,rest client",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::weboptions_type),

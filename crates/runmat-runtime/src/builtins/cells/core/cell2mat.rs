@@ -129,7 +129,7 @@ fn cell2mat_error_with_message(
 #[runtime_builtin(
     name = "cell2mat",
     category = "cells/core",
-    summary = "Convert a cell array of numeric, logical, complex, or character blocks into a dense MATLAB array.",
+    summary = "Convert cell arrays of blocks into dense arrays.",
     keywords = "cell2mat,cell,matrix,concatenation",
     accel = "gather",
     type_resolver(cell2mat_type),

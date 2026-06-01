@@ -114,7 +114,7 @@ fn fieldnames_error_with_message(
 #[runtime_builtin(
     name = "fieldnames",
     category = "structs/core",
-    summary = "List the field names of scalar structs or struct arrays.",
+    summary = "List struct or object field names.",
     keywords = "fieldnames,struct,introspection,fields",
     type_resolver(fieldnames_type),
     descriptor(crate::builtins::structs::core::fieldnames::FIELDNAMES_DESCRIPTOR),
@@ -178,7 +178,7 @@ fn collect_object_fieldnames(obj: &ObjectInstance) -> Vec<String> {
 fn collect_handle_fieldnames(handle: &HandleRef) -> BuiltinResult<Vec<String>> {
     let mut names = class_instance_property_names(&handle.class_name);
 
-    if handle.valid {
+    if runmat_builtins::is_handle_valid(handle) {
         let target = unsafe { &*handle.target.as_raw() };
         match target {
             Value::Struct(st) => {
@@ -370,6 +370,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "Value".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -381,6 +382,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "Version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -417,6 +419,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "ParentValue".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -436,6 +439,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "ChildValue".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -471,6 +475,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "Enabled".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -519,6 +524,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "ParentEnabled".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -538,6 +544,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "ChildEnabled".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,

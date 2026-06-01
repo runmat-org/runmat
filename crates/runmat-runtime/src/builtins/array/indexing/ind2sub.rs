@@ -161,7 +161,7 @@ fn ind2sub_provider_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "ind2sub",
     category = "array/indexing",
-    summary = "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
+    summary = "Convert linear indices to subscripts.",
     keywords = "ind2sub,linear index,subscripts,column major,gpu indexing",
     accel = "custom",
     type_resolver(ind2sub_type),

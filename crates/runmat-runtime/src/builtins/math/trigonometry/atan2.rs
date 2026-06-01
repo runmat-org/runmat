@@ -152,7 +152,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atan2",
     category = "math/trigonometry",
-    summary = "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
+    summary = "Quadrant-aware inverse tangent atan2(y, x).",
     keywords = "atan2,inverse tangent,quadrant,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),

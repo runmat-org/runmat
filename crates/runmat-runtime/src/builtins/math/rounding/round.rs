@@ -194,7 +194,7 @@ impl RoundStrategy {
 #[runtime_builtin(
     name = "round",
     category = "math/rounding",
-    summary = "Round values to the nearest integers, decimal places, or significant digits.",
+    summary = "Round values to nearest integers, decimal places, or significant digits.",
     keywords = "round,rounding,significant,decimals,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

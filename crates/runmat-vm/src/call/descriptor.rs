@@ -415,7 +415,13 @@ async fn forward_named_fallback(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
-    forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+    match runmat_runtime::call_builtin_async_with_outputs(&name, &args, requested_outputs).await {
+        Ok(value) => Ok(value),
+        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {
+            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+        }
+        Err(err) => Err(err),
+    }
 }
 
 async fn execute_resolved_callable(
@@ -707,6 +713,7 @@ mod tests {
             .expect("dynamic runtime name resolution should reach builtin");
         assert_eq!(value, Value::Num(3.0));
     }
+
 
     #[test]
     fn imported_identity_never_falls_back_to_builtin_name_resolution() {

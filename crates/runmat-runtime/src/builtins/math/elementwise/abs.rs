@@ -106,7 +106,7 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "abs",
     category = "math/elementwise",
-    summary = "Absolute value or magnitude of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Absolute value and complex magnitude for scalars and arrays.",
     keywords = "abs,absolute value,magnitude,complex,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

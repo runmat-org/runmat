@@ -125,11 +125,13 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             span: Span::default(),
         },
         Stmt::ClassDef {
+            attributes,
             name,
             super_class,
             members,
             ..
         } => Stmt::ClassDef {
+            attributes: attributes.clone(),
             name: name.clone(),
             super_class: super_class.clone(),
             members: members.iter().map(strip_class_member).collect(),
@@ -190,6 +192,30 @@ fn strip_expr(expr: &Expr) -> Expr {
             args.iter().map(strip_expr).collect(),
             Span::default(),
         ),
+        Expr::SuperConstructorCall {
+            current_class,
+            super_class,
+            args,
+            ..
+        } => Expr::SuperConstructorCall {
+            current_class: current_class.clone(),
+            super_class: super_class.clone(),
+            args: args.iter().map(strip_expr).collect(),
+            span: Span::default(),
+        },
+        Expr::SuperMethodCall {
+            current_class,
+            super_class,
+            method,
+            args,
+            ..
+        } => Expr::SuperMethodCall {
+            current_class: current_class.clone(),
+            super_class: super_class.clone(),
+            method: method.clone(),
+            args: args.iter().map(strip_expr).collect(),
+            span: Span::default(),
+        },
         Expr::CommandCall(name, args, _) => Expr::CommandCall(
             name.clone(),
             args.iter().map(strip_expr).collect(),

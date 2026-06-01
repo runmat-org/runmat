@@ -114,7 +114,7 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "angle",
     category = "math/elementwise",
-    summary = "Phase angle of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Phase angle (argument) of real and complex values.",
     keywords = "angle,phase,argument,complex,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

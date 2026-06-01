@@ -86,7 +86,7 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "set",
     category = "plotting",
-    summary = "Set properties on plotting handles.",
+    summary = "Set properties on plotting and graphics handles.",
     keywords = "set,plotting,handle,property",
     suppress_auto_output = true,
     type_resolver(set_type),

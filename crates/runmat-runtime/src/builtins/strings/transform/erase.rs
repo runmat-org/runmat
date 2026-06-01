@@ -145,7 +145,7 @@ fn erase_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "erase",
     category = "strings/transform",
-    summary = "Remove substring occurrences from strings, character arrays, and cell arrays.",
+    summary = "Remove substring occurrences from text inputs.",
     keywords = "erase,remove substring,strings,character array,text",
     accel = "sink",
     type_resolver(text_preserve_type),

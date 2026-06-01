@@ -310,7 +310,7 @@ fn ifft_error_with_message(
 #[runtime_builtin(
     name = "ifft",
     category = "math/fft",
-    summary = "Inverse discrete Fourier transform with optional length, dimension, and symmetric flag.",
+    summary = "Compute inverse discrete Fourier transforms.",
     keywords = "ifft,inverse fft,inverse fourier transform,symmetric,gpu",
     type_resolver(ifft_type),
     descriptor(crate::builtins::math::fft::ifft::IFFT_DESCRIPTOR),

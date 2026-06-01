@@ -189,7 +189,7 @@ fn pchip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "pchip",
     category = "math/interpolation",
-    summary = "Shape-preserving piecewise cubic Hermite interpolation.",
+    summary = "Construct or evaluate shape-preserving piecewise cubic Hermite interpolants.",
     keywords = "pchip,shape preserving,cubic hermite,interpolation,ppval",
     accel = "sink",
     sink = true,

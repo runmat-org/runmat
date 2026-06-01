@@ -138,7 +138,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "det",
     category = "math/linalg/solve",
-    summary = "Compute the determinant of a square matrix.",
+    summary = "Compute determinants of square matrices.",
     keywords = "det,determinant,linear algebra,matrix,gpu",
     accel = "det",
     type_resolver(numeric_scalar_type),

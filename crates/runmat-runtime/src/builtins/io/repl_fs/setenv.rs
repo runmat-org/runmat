@@ -164,7 +164,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "setenv",
     category = "io/repl_fs",
-    summary = "Set or clear environment variables with MATLAB-compatible status outputs.",
+    summary = "Set or clear environment variables with status outputs.",
     keywords = "setenv,environment variable,status,message,unset",
     accel = "cpu",
     suppress_auto_output = true,

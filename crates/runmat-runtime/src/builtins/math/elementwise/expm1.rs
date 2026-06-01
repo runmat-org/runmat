@@ -125,7 +125,7 @@ fn expm1_error_with_detail(
 #[runtime_builtin(
     name = "expm1",
     category = "math/elementwise",
-    summary = "Accurate element-wise computation of exp(x) - 1.",
+    summary = "Compute exp(x)-1 element-wise with near-zero accuracy.",
     keywords = "expm1,exp(x)-1,exponential,elementwise,gpu,precision",
     accel = "unary",
     type_resolver(numeric_unary_type),

@@ -214,7 +214,7 @@ fn cumtrapz_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 #[runtime_builtin(
     name = "cumtrapz",
     category = "math/reduction",
-    summary = "Cumulative trapezoidal numerical integration of sampled data.",
+    summary = "Compute cumulative trapezoidal integration.",
     keywords = "cumtrapz,cumulative trapezoidal integration,numerical integration,gpu",
     accel = "none",
     type_resolver(cumtrapz_type),

@@ -348,7 +348,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "prod",
     category = "math/reduction",
-    summary = "Multiply elements of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Multiply elements across array dimensions.",
     keywords = "prod,product,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(prod_type),

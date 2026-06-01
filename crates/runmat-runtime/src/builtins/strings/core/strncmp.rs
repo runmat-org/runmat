@@ -148,7 +148,7 @@ fn remap_strncmp_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strncmp",
     category = "strings/core",
-    summary = "Compare text inputs for equality up to N leading characters (case-sensitive).",
+    summary = "Compare text inputs case-sensitively up to N leading characters.",
     keywords = "strncmp,string compare,prefix,text equality",
     accel = "sink",
     type_resolver(logical_text_match_type),

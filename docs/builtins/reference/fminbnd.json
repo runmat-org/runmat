@@ -1,0 +1,91 @@
+{
+  "title": "fminbnd",
+  "category": "math/optim",
+  "keywords": [
+    "fminbnd",
+    "bounded minimization",
+    "brent",
+    "golden section",
+    "parabolic interpolation",
+    "optimization"
+  ],
+  "summary": "Find bounded scalar minima with Brent's method in MATLAB and RunMat.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The solver runs on the host. Callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::fminbnd::tests",
+    "integration": "runmat-vm/tests/closures.rs::fminbnd_accepts_anonymous_function"
+  },
+  "description": "`x = fminbnd(fun, x1, x2)` searches the closed interval `[x1, x2]` for a local minimum of scalar function `fun` using Brent's method. Optional outputs return the minimum value, exit flag, and diagnostics, with tolerance and iteration behavior matching MATLAB semantics.",
+  "behaviors": [
+    "The function handle must return a finite real scalar for every sampled point in the interval.",
+    "If `x1 > x2`, the bounds are inconsistent and `exitflag = -2`.",
+    "If `x1 == x2`, that point is returned with `exitflag = 1`.",
+    "Options are supplied as a struct, usually built with `optimset`. `TolX`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
+    "`Display` may be `'off'`, `'iter'`, `'notify'` (default; only prints when the solver fails to converge), or `'final'`.",
+    "`exitflag` is `1` on convergence within `TolX`, `0` when the iteration or evaluation budget is exhausted.",
+    "The fourth output is a struct with `iterations`, `funcCount`, `algorithm`, and `message` fields."
+  ],
+  "examples": [
+    {
+      "description": "Minimize a quadratic",
+      "input": "x = fminbnd(@(x) (x-2).^2, 0, 5)",
+      "output": "x =\n    2.0000"
+    },
+    {
+      "description": "Capture the function value too",
+      "input": "[x, fval] = fminbnd(@(x) (x-3).^2 + 1, 0, 5)",
+      "output": "x =\n    3.0000\nfval =\n    1.0000"
+    },
+    {
+      "description": "Tighten tolerances",
+      "input": "opts = optimset('TolX', 1e-10, 'Display', 'off');\n[x, fval, exitflag] = fminbnd(@cos, 0, pi, opts)",
+      "output": "x =\n    3.1416\nfval =\n   -1.0000\nexitflag =\n     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does fminbnd support unbounded minimization?",
+      "answer": "No. `fminbnd` requires finite scalar bounds. Use `fminunc` or `fminsearch` for unconstrained problems."
+    },
+    {
+      "question": "Can I retrieve the iteration history?",
+      "answer": "Yes — request the four-output form `[x, fval, exitflag, output] = fminbnd(...)` to receive a struct with `iterations`, `funcCount`, `algorithm`, and `message`."
+    },
+    {
+      "question": "Does fminbnd guarantee a global minimum?",
+      "answer": "No. Brent's method converges to a local minimum on `[x1, x2]`. For multi-modal functions, narrow the interval to bracket the desired minimum."
+    }
+  ],
+  "links": [
+    {
+      "label": "fzero",
+      "url": "./fzero"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/fminbnd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/fminbnd.rs"
+  }
+}

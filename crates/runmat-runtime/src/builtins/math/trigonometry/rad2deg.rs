@@ -112,7 +112,7 @@ fn rad2deg_error_with_detail(
 #[runtime_builtin(
     name = "rad2deg",
     category = "math/trigonometry",
-    summary = "Convert angles from radians to degrees.",
+    summary = "Convert angle values from radians to degrees.",
     keywords = "rad2deg,radians,degrees,angle,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

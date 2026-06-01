@@ -187,7 +187,7 @@ fn square_scalar(t: f64, duty: f64) -> f64 {
 #[runtime_builtin(
     name = "square",
     category = "math/signal",
-    summary = "Generate a periodic square wave with optional duty cycle.",
+    summary = "Generate periodic square waves with an optional duty-cycle argument.",
     keywords = "square,waveform,signal processing,duty cycle,periodic",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::square::SQUARE_DESCRIPTOR),

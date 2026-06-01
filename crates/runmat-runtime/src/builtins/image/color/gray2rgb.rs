@@ -128,7 +128,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gray2rgb",
     category = "image/color",
-    summary = "Replicate a grayscale image into an RGB truecolor image.",
+    summary = "Convert grayscale images to RGB.",
     keywords = "gray2rgb,gray,grayscale,rgb,image",
     accel = "sink",
     type_resolver(gray2rgb_type),

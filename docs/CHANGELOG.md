@@ -1,8 +1,6 @@
 # RunMat Changelog
 
-_What's new across the RunMat runtime, app, and sandbox. For technical runtime details and commit diffs, see [GitHub Releases](https://github.com/runmat-org/runmat/releases) (runtime only)._
-
----
+_What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
 ## [v0.4.9](https://github.com/runmat-org/runmat/compare/v0.4.8...v0.4.9)
 

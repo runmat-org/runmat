@@ -182,7 +182,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 #[runtime_builtin(
     name = "double",
     category = "math/elementwise",
-    summary = "Convert scalars, arrays, logical masks, and gpuArray values to double precision.",
+    summary = "Convert values to double precision.",
     keywords = "double,float64,cast,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

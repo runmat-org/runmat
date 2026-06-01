@@ -197,7 +197,7 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
 #[runtime_builtin(
     name = "sawtooth",
     category = "math/signal",
-    summary = "Generate a periodic sawtooth waveform with optional peak position.",
+    summary = "Generate periodic sawtooth waveforms with an optional peak-position control.",
     keywords = "sawtooth,waveform,signal processing,triangle,periodic",
     type_resolver(numeric_unary_type),
     descriptor(crate::builtins::math::signal::sawtooth::SAWTOOTH_DESCRIPTOR),

@@ -61,7 +61,7 @@ pub const FIGURE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "figure",
     category = "plotting",
-    summary = "Create or select a plotting figure.",
+    summary = "Create or select plotting figures.",
     keywords = "figure,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),

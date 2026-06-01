@@ -120,7 +120,7 @@ fn cellstr_error_with_message(
 #[runtime_builtin(
     name = "cellstr",
     category = "cells/core",
-    summary = "Convert text to a cell array of character vectors.",
+    summary = "Convert text values to a cell array of character vectors.",
     keywords = "cellstr,text,character,string,conversion",
     accel = "gather",
     type_resolver(cellstr_type),

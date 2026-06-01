@@ -223,7 +223,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "rmdir",
     category = "io/repl_fs",
-    summary = "Remove folders with MATLAB-compatible status, message, and message ID outputs.",
+    summary = "Remove folders and return MATLAB-style status, message, and message ID outputs.",
     keywords = "rmdir,remove directory,delete folder,filesystem,status,message,messageid,recursive",
     accel = "cpu",
     suppress_auto_output = true,

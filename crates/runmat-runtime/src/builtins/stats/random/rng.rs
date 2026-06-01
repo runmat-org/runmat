@@ -224,7 +224,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rng",
     category = "stats/random",
-    summary = "Seed, shuffle, and query the global random number generator.",
+    summary = "Configure, query, and restore the global pseudorandom number generator state.",
     keywords = "rng,seed,twister,shuffle,state",
     type_resolver(rng_type),
     descriptor(crate::builtins::stats::random::rng::RNG_DESCRIPTOR),

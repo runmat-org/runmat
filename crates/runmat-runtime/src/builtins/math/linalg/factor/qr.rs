@@ -295,7 +295,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "qr",
     category = "math/linalg/factor",
-    summary = "QR factorization with optional column pivoting and economy-size outputs.",
+    summary = "Compute QR factorizations with optional pivoting.",
     keywords = "qr,factorization,decomposition,householder",
     accel = "sink",
     sink = true,

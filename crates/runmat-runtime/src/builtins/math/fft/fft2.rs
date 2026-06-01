@@ -215,7 +215,7 @@ fn fft2_error_with_message(
 #[runtime_builtin(
     name = "fft2",
     category = "math/fft",
-    summary = "Compute the two-dimensional discrete Fourier transform (DFT) of numeric or complex data.",
+    summary = "Compute two-dimensional discrete Fourier transforms.",
     keywords = "fft2,2d fft,two-dimensional fourier transform,gpu",
     type_resolver(fft2_type),
     descriptor(crate::builtins::math::fft::fft2::FFT2_DESCRIPTOR),

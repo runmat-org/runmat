@@ -345,7 +345,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "stairs",
     category = "plotting",
-    summary = "Render MATLAB-compatible stairs plots.",
+    summary = "Create staircase line plots for sampled or piecewise-constant data.",
     keywords = "stairs,plotting,step",
     sink = true,
     suppress_auto_output = true,

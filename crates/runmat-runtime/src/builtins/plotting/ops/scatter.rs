@@ -462,7 +462,7 @@ fn map_scatter_internal(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "scatter",
     category = "plotting",
-    summary = "Create MATLAB-compatible 2-D scatter plots.",
+    summary = "Create 2-D scatter plots from x/y point data.",
     keywords = "scatter,plotting,2d,markers",
     sink = true,
     suppress_auto_output = true,

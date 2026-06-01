@@ -38,6 +38,13 @@ pub enum EndExpr {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PropertyDefaultLiteral {
+    Num(f64),
+    Bool(bool),
+    String(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(f64),
@@ -220,8 +227,11 @@ pub enum Instr {
     RegisterClass {
         name: String,
         super_class: Option<String>,
-        properties: Vec<(String, bool, String, String)>,
-        methods: Vec<(String, String, bool, String)>,
+        is_sealed: bool,
+        is_abstract: bool,
+        properties: Vec<(String, bool, bool, Option<PropertyDefaultLiteral>, String, String)>,
+        methods: Vec<(String, String, bool, bool, bool, String)>,
+        enumerations: Vec<String>,
     },
 
     // `feval` keeps the callable value on the stack instead of naming the target statically.
@@ -244,6 +254,19 @@ pub enum Instr {
 
     // User-function invocation variants.
     CallBuiltinMulti(String, usize, usize),
+    CallSuperConstructorMulti {
+        current_class: String,
+        super_class: String,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallSuperMethodMulti {
+        current_class: String,
+        super_class: String,
+        method: String,
+        arg_count: usize,
+        out_count: usize,
+    },
 
     // Calls a user function and shapes the result list to `out_count`.
     CallFunctionMulti {
@@ -262,6 +285,19 @@ pub enum Instr {
     },
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
     CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
+    CallSuperConstructorExpandMultiOutput {
+        current_class: String,
+        super_class: String,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
+    CallSuperMethodExpandMultiOutput {
+        current_class: String,
+        super_class: String,
+        method: String,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
 
     // Packs the top N values into row or column tensor form.
     PackToRow(usize),
@@ -355,6 +391,8 @@ impl Instr {
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
+            Instr::CallSuperConstructorMulti { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallSuperMethodMulti { arg_count, .. } => effect(*arg_count, 1),
             Instr::CallFunctionMulti {
                 arg_count,
                 out_count,
@@ -428,6 +466,8 @@ impl Instr {
             | Instr::CallFunctionExpandMultiOutput { specs, .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
+            | Instr::CallSuperConstructorExpandMultiOutput { specs, .. }
+            | Instr::CallSuperMethodExpandMultiOutput { specs, .. }
             | Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, .. } => {
                 let fixed = specs.iter().filter(|s| !s.is_expand).count();
                 let expanded: usize = specs

@@ -306,7 +306,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "histcounts2",
     category = "stats/hist",
-    summary = "Count paired observations into two-dimensional histogram bins.",
+    summary = "Count paired observations in 2-D histogram bins.",
     keywords = "histcounts2,2d histogram,joint distribution,binning,probability,gpu",
     accel = "reduction",
     sink = true,

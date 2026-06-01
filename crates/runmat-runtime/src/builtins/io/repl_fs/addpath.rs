@@ -293,7 +293,7 @@ struct AddPathSpec {
 #[runtime_builtin(
     name = "addpath",
     category = "io/repl_fs",
-    summary = "Add folders to the MATLAB search path used by RunMat.",
+    summary = "Add folders to the MATLAB/RunMat search path for function and script resolution.",
     keywords = "addpath,search path,matlab path,-begin,-end,-frozen",
     accel = "cpu",
     suppress_auto_output = true,

@@ -1,6 +1,6 @@
 use runmat_lexer::Token;
 
-use crate::{Stmt, SyntaxError};
+use crate::{Expr, Stmt, SyntaxError};
 
 use super::{Parser, TokenInfo};
 
@@ -75,6 +75,9 @@ impl Parser {
                     let span = self.span_from(start, expr.span().end);
                     Ok(Stmt::Assign(name, expr, false, span))
                 } else if self.peek_token() == Some(&Token::Ident) {
+                    if self.looks_like_super_constructor_stmt() {
+                        return self.parse_super_constructor_stmt();
+                    }
                     if let Some(lv) = self.try_parse_lvalue_assign()? {
                         return Ok(lv);
                     }
@@ -108,6 +111,76 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn looks_like_super_constructor_stmt(&self) -> bool {
+        if !matches!(
+            (self.peek_token(), self.peek_token_at(1), self.peek_token_at(2)),
+            (Some(Token::Ident), Some(Token::At), Some(Token::Ident))
+        ) {
+            return false;
+        }
+        let mut idx = 3usize;
+        while matches!(
+            (self.peek_token_at(idx), self.peek_token_at(idx + 1)),
+            (Some(Token::Dot), Some(Token::Ident))
+        ) {
+            idx += 2;
+        }
+        matches!(self.peek_token_at(idx), Some(Token::LParen))
+    }
+
+    fn parse_super_constructor_stmt(&mut self) -> Result<Stmt, SyntaxError> {
+        let target = self
+            .next()
+            .ok_or_else(|| self.error("expected constructor target"))?;
+        let target_name = target.lexeme.clone();
+        let start = target.position;
+        if !self.consume(&Token::At) {
+            return Err(self.error_with_expected(
+                "expected '@' for superclass constructor syntax",
+                "'@'",
+            ));
+        }
+        let mut super_parts = Vec::new();
+        super_parts.push(self.expect_ident_syntax()?);
+        while self.consume(&Token::Dot) {
+            super_parts.push(self.expect_ident_syntax()?);
+        }
+        let super_name = super_parts.join(".");
+        if !self.consume(&Token::LParen) {
+            return Err(self.error_with_expected(
+                "expected '(' after superclass constructor name",
+                "'('",
+            ));
+        }
+        let mut args = Vec::new();
+        if !self.consume(&Token::RParen) {
+            loop {
+                args.push(self.parse_expr()?);
+                if self.consume(&Token::Comma) {
+                    continue;
+                }
+                if self.consume(&Token::RParen) {
+                    break;
+                }
+                return Err(
+                    self.error_with_expected("expected ',' or ')' in argument list", "',' or ')'")
+                );
+            }
+        }
+        let end = self.last_token_end();
+        let span = self.span_from(start, end);
+        let class_name = self.current_classdef_name.clone().ok_or_else(|| {
+            self.error("superclass constructor syntax is only valid inside classdef methods")
+        })?;
+        let call = Expr::SuperConstructorCall {
+            current_class: class_name,
+            super_class: super_name,
+            args,
+            span,
+        };
+        Ok(Stmt::Assign(target_name, call, false, span))
     }
 
     fn looks_like_multi_assign_lhs(&self) -> bool {
@@ -251,7 +324,11 @@ impl Parser {
             outputs.push(self.next().unwrap().lexeme);
             self.consume(&Token::Assign);
         }
-        let name = self.expect_ident()?;
+        let mut name = self.expect_ident()?;
+        if self.current_classdef_name.is_some() && self.consume(&Token::Dot) {
+            let member = self.expect_ident()?;
+            name = format!("{name}.{member}");
+        }
         if !self.consume(&Token::LParen) {
             return Err("expected '('".into());
         }

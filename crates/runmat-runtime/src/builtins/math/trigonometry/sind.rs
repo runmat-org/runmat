@@ -127,7 +127,7 @@ fn sind_complex(re: f64, im: f64) -> (f64, f64) {
 #[runtime_builtin(
     name = "sind",
     category = "math/trigonometry",
-    summary = "Sine of input expressed in degrees.",
+    summary = "Compute element-wise sine values for degree-based angles.",
     keywords = "sind,sine,degrees,trigonometry",
     accel = "unary",
     type_resolver(numeric_unary_type),

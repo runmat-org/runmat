@@ -532,7 +532,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "scatter3",
     category = "plotting",
-    summary = "Render a MATLAB-compatible 3-D scatter plot.",
+    summary = "Create 3-D scatter plots from x/y/z point data.",
     keywords = "scatter3,plotting,3d,pointcloud",
     sink = true,
     suppress_auto_output = true,

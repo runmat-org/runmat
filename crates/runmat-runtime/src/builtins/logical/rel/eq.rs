@@ -128,7 +128,7 @@ fn eq_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 #[runtime_builtin(
     name = "eq",
     category = "logical/rel",
-    summary = "Element-wise equality comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise equality.",
     keywords = "eq,equality,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),

@@ -408,7 +408,54 @@ impl Parser {
                 }
                 Token::Ident => {
                     let span = self.span_from(info.position, info.end);
-                    Ok(Expr::Ident(info.lexeme, span))
+                    if self.peek_token() == Some(&Token::At) {
+                        let method_name = info.lexeme;
+                        self.pos += 1; // consume '@'
+                        let mut super_parts = Vec::new();
+                        super_parts.push(self.expect_ident_syntax()?);
+                        while self.consume(&Token::Dot) {
+                            super_parts.push(self.expect_ident_syntax()?);
+                        }
+                        let super_name = super_parts.join(".");
+                        if !self.consume(&Token::LParen) {
+                            return Err(self.error_with_expected(
+                                "expected '(' after superclass method name",
+                                "'('",
+                            ));
+                        }
+                        let mut args = Vec::new();
+                        if !self.consume(&Token::RParen) {
+                            loop {
+                                args.push(self.parse_expr()?);
+                                if self.consume(&Token::Comma) {
+                                    continue;
+                                }
+                                if self.consume(&Token::RParen) {
+                                    break;
+                                }
+                                return Err(self.error_with_expected(
+                                    "expected ',' or ')' in argument list",
+                                    "',' or ')'",
+                                ));
+                            }
+                        }
+                        let end = self.last_token_end();
+                        let span = self.span_from(info.position, end);
+                        let class_name = self.current_classdef_name.clone().ok_or_else(|| {
+                            self.error(
+                                "superclass method syntax is only valid inside classdef methods",
+                            )
+                        })?;
+                        Ok(Expr::SuperMethodCall {
+                            current_class: class_name,
+                            super_class: super_name,
+                            method: method_name,
+                            args,
+                            span,
+                        })
+                    } else {
+                        Ok(Expr::Ident(info.lexeme, span))
+                    }
                 }
                 // Treat 'end' as EndKeyword in expression contexts; in command-form we allow
                 // 'end' to be consumed as an identifier via command-args path.

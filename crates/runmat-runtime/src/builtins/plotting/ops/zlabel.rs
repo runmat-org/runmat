@@ -132,7 +132,7 @@ pub const ZLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "zlabel",
     category = "plotting",
-    summary = "Set the current axes z-axis label.",
+    summary = "Set z-axis label text for current or specified axes.",
     keywords = "zlabel,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),

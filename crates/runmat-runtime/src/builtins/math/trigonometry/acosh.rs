@@ -125,7 +125,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "acosh",
     category = "math/trigonometry",
-    summary = "Inverse hyperbolic cosine with MATLAB-compatible complex promotion.",
+    summary = "Element-wise inverse hyperbolic cosine, with complex promotion for x < 1.",
     keywords = "acosh,inverse hyperbolic cosine,arccosh,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

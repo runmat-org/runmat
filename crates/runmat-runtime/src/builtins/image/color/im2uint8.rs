@@ -146,7 +146,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "im2uint8",
     category = "image/color",
-    summary = "Convert image data to uint8 using MATLAB image scaling rules.",
+    summary = "Convert images to uint8.",
     keywords = "im2uint8,image,convert,uint8,double,uint16",
     accel = "sink",
     type_resolver(same_shape_type),

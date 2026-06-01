@@ -429,7 +429,7 @@ impl CumminEvaluation {
 #[runtime_builtin(
     name = "cummin",
     category = "math/reduction",
-    summary = "Cumulative minimum and index tracking for scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute cumulative minima (with optional indices).",
     keywords = "cummin,cumulative minimum,running minimum,reverse,omitnan,indices,gpu",
     accel = "reduction",
     type_resolver(cummin_type),

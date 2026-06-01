@@ -169,7 +169,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "hamming",
     category = "math/signal",
-    summary = "Generate a Hamming window as an N-by-1 real column vector.",
+    summary = "Generate Hamming windows.",
     keywords = "hamming,window,signal processing,dsp,fft",
     type_resolver(window_vector_type),
     descriptor(crate::builtins::math::signal::hamming::HAMMING_DESCRIPTOR),

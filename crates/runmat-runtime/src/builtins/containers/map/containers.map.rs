@@ -735,7 +735,7 @@ struct KeyCandidate {
 #[runtime_builtin(
     name = "containers.Map",
     category = "containers/map",
-    summary = "Create MATLAB-style dictionary objects that map keys to values.",
+    summary = "Create key-value dictionary objects.",
     keywords = "map,containers.Map,dictionary,hash map,lookup",
     accel = "metadata",
     sink = true,
@@ -1164,7 +1164,7 @@ fn extract_handle<'a>(value: &'a Value, builtin: &'static str) -> BuiltinResult<
 }
 
 fn ensure_handle(handle: &HandleRef, builtin: &'static str) -> BuiltinResult<()> {
-    if !handle.valid {
+    if !runmat_builtins::is_handle_valid(handle) {
         return Err(map_error("containers.Map: handle is invalid", builtin));
     }
     if handle.class_name != CLASS_NAME {
@@ -1799,7 +1799,7 @@ async fn collect_key_spec(
 
 pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
-        if handle.valid && handle.class_name == CLASS_NAME {
+        if runmat_builtins::is_handle_valid(handle) && handle.class_name == CLASS_NAME {
             if let Ok(id) = map_id(handle, BUILTIN_CONSTRUCTOR) {
                 if let Ok(registry) = MAP_REGISTRY.read() {
                     return registry.get(&id).map(|store| store.len());

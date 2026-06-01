@@ -294,7 +294,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "webwrite",
     category = "io/http",
-    summary = "Send data to web services using HTTP POST/PUT requests and return the response.",
+    summary = "Write data to web services via HTTP and return decoded responses.",
     keywords = "webwrite,http post,rest client,json upload,form post",
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::webwrite_type),

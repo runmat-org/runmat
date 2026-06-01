@@ -91,7 +91,7 @@ pub const CLEARVARS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "clearvars",
     category = "introspection",
-    summary = "Clear variables from the active workspace, with optional exclusions.",
+    summary = "Clear workspace variables with optional exclusions.",
     keywords = "clearvars,workspace,variables,except",
     sink = true,
     suppress_auto_output = true,

@@ -201,7 +201,7 @@ pub const LINSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "linspace",
     category = "array/creation",
-    summary = "Linearly spaced vector.",
+    summary = "Generate linearly spaced row vectors.",
     keywords = "linspace,range,vector,gpu",
     examples = "x = linspace(0, 1, 5)  % [0 0.25 0.5 0.75 1]",
     accel = "array_construct",

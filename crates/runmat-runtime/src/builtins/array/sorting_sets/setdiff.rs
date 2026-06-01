@@ -237,7 +237,7 @@ fn setdiff_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "setdiff",
     category = "array/sorting_sets",
-    summary = "Return the values that appear in the first input but not the second.",
+    summary = "Return values that appear in the first input but not the second.",
     keywords = "setdiff,difference,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,

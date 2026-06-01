@@ -240,7 +240,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "which",
     category = "introspection",
-    summary = "Identify which variable, builtin, script, class, or folder RunMat will execute for a given name.",
+    summary = "Resolve which variable, builtin, file, or class matches a given name.",
     keywords = "which,search path,builtin lookup,script path,variable shadowing",
     accel = "cpu",
     type_resolver(which_type),

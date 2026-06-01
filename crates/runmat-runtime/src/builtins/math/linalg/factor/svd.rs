@@ -277,7 +277,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "svd",
     category = "math/linalg/factor",
-    summary = "Singular value decomposition with MATLAB-compatible economy and vector options.",
+    summary = "Compute singular value decompositions with full, economy, or vector outputs.",
     keywords = "svd,singular value decomposition,economy,vector",
     accel = "sink",
     sink = true,

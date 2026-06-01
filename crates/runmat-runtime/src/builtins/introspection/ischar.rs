@@ -74,7 +74,7 @@ pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "ischar",
     category = "introspection",
-    summary = "Return true when a value is a MATLAB character array.",
+    summary = "Return true when a value is a character array.",
     keywords = "ischar,char array,type checking,introspection",
     accel = "metadata",
     type_resolver(ischar_type),

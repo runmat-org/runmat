@@ -135,7 +135,7 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "sprintf",
     category = "strings/core",
-    summary = "Format data into a character vector using printf-style placeholders.",
+    summary = "Format data into a character vector using printf-style specifiers.",
     keywords = "sprintf,format,printf,text",
     accel = "format",
     sink = true,

@@ -167,7 +167,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "tempname",
     category = "io/repl_fs",
-    summary = "Return a unique temporary file path.",
+    summary = "Generate unique temporary file or folder paths.",
     keywords = "tempname,temporary file,unique name,temp directory",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::tempname_type),

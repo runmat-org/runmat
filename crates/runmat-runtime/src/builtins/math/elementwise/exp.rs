@@ -120,7 +120,7 @@ fn exp_error_with_detail(
 #[runtime_builtin(
     name = "exp",
     category = "math/elementwise",
-    summary = "Element-wise exponential of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute element-wise exponential values.",
     keywords = "exp,exponential,elementwise,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

@@ -1,5 +1,6 @@
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
+use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
@@ -18,8 +19,11 @@ use std::collections::{HashMap, HashSet};
 type ClassRegistration = (
     String,
     Option<String>,
-    Vec<(String, bool, String, String)>,
-    Vec<(String, String, bool, String)>,
+    bool,
+    bool,
+    Vec<(String, bool, bool, Option<PropertyDefaultLiteral>, String, String)>,
+    Vec<(String, String, bool, bool, bool, String)>,
+    Vec<String>,
 );
 type MirCellEndOffsets = Vec<(usize, isize)>;
 type MirCellEndExprs = Vec<(usize, EndExpr)>;
@@ -321,7 +325,7 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .map(|part| part.0.clone())
                 .collect::<Vec<_>>()
                 .join(".");
-            let super_class = class.super_class.and_then(|class_id| {
+            let mut super_class = class.super_class.and_then(|class_id| {
                 hir.classes
                     .iter()
                     .find(|candidate| candidate.id == class_id)
@@ -335,6 +339,9 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                             .join(".")
                     })
             });
+            if super_class.is_none() && matches!(class.kind, runmat_hir::ClassKind::Handle) {
+                super_class = Some("handle".to_string());
+            }
             let properties = class
                 .properties
                 .iter()
@@ -344,9 +351,15 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                     } else {
                         property.name.0.clone()
                     };
+                    let default = property
+                        .default
+                        .as_ref()
+                        .and_then(hir_property_default_to_value);
                     (
                         name,
                         property.attributes.is_static,
+                        property.attributes.is_constant,
+                        default,
                         member_access_name(property.attributes.get_access.clone()).to_string(),
                         member_access_name(property.attributes.set_access.clone()).to_string(),
                     )
@@ -356,15 +369,36 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .methods
                 .iter()
                 .map(|method| {
+                    let function_name = hir
+                        .functions
+                        .iter()
+                        .find(|function| function.id == method.function)
+                        .map(|function| function.name.0.clone())
+                        .unwrap_or_else(|| method.name.0.clone());
                     (
                         method.name.0.clone(),
-                        method.name.0.clone(),
+                        function_name,
                         method.is_static,
+                        method.attributes.is_abstract,
+                        method.attributes.is_sealed,
                         member_access_name(method.attributes.access.clone()).to_string(),
                     )
                 })
                 .collect();
-            (name, super_class, properties, methods)
+            let enumerations = class
+                .enumerations
+                .iter()
+                .map(|enumeration| enumeration.name.0.clone())
+                .collect();
+            (
+                name,
+                super_class,
+                class.is_sealed,
+                class.is_abstract,
+                properties,
+                methods,
+                enumerations,
+            )
         })
         .collect()
 }
@@ -372,7 +406,55 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
 fn member_access_name(access: runmat_hir::MemberAccess) -> &'static str {
     match access {
         runmat_hir::MemberAccess::Private => "private",
+        runmat_hir::MemberAccess::Protected => "protected",
         _ => "public",
+    }
+}
+
+fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyDefaultLiteral> {
+    fn eval_numeric(expr: &runmat_hir::HirExpr) -> Option<f64> {
+        match &expr.kind {
+            runmat_hir::HirExprKind::Number(text) => text.parse::<f64>().ok(),
+            runmat_hir::HirExprKind::Unary(runmat_hir::OperatorKind::UnaryPlus, inner) => {
+                eval_numeric(inner)
+            }
+            runmat_hir::HirExprKind::Unary(runmat_hir::OperatorKind::UnaryMinus, inner) => {
+                eval_numeric(inner).map(|value| -value)
+            }
+            runmat_hir::HirExprKind::Binary(left, op, right) => {
+                let left = eval_numeric(left)?;
+                let right = eval_numeric(right)?;
+                match op {
+                    runmat_hir::OperatorKind::Add => Some(left + right),
+                    runmat_hir::OperatorKind::Subtract => Some(left - right),
+                    runmat_hir::OperatorKind::MatrixMultiply
+                    | runmat_hir::OperatorKind::ElementwiseMultiply => Some(left * right),
+                    runmat_hir::OperatorKind::Mrdivide
+                    | runmat_hir::OperatorKind::Mldivide
+                    | runmat_hir::OperatorKind::ElementwiseDivide
+                    | runmat_hir::OperatorKind::ElementwiseLeftDivide => Some(left / right),
+                    runmat_hir::OperatorKind::MatrixPower
+                    | runmat_hir::OperatorKind::ElementwisePower => Some(left.powf(right)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    match &expr.kind {
+        runmat_hir::HirExprKind::Number(text) => text
+            .parse::<f64>()
+            .ok()
+            .map(PropertyDefaultLiteral::Num),
+        runmat_hir::HirExprKind::String(text) => Some(PropertyDefaultLiteral::String(text.0.clone())),
+        runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("true") => {
+            Some(PropertyDefaultLiteral::Bool(true))
+        }
+        runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("false") => {
+            Some(PropertyDefaultLiteral::Bool(false))
+        }
+        _ => eval_numeric(expr).map(PropertyDefaultLiteral::Num),
     }
 }
 
@@ -521,12 +603,17 @@ impl Compiler {
             .clone()
             .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
 
-        for (name, super_class, properties, methods) in self.class_registrations.clone() {
+        for (name, super_class, is_sealed, is_abstract, properties, methods, enumerations) in
+            self.class_registrations.clone()
+        {
             self.emit(Instr::RegisterClass {
                 name,
                 super_class,
+                is_sealed,
+                is_abstract,
                 properties,
                 methods,
+                enumerations,
             });
         }
         for (path, wildcard) in self.imports.clone() {
@@ -1251,6 +1338,12 @@ impl Compiler {
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
                 MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::SuperMethod { .. } => {}
+                MirCallee::SuperConstructor { .. } => {
+                    return Err(self
+                        .compile_error("MIR method-call lowering found super-constructor callee")
+                        .with_identifier(IDENT_MIR_METHOD_CALL_CALLEE_INVALID));
+                }
                 MirCallee::Dynamic(_) => {
                     return Err(self
                         .compile_error(
@@ -1292,6 +1385,55 @@ impl Compiler {
                     self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
                 } else {
                     self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                }
+            }
+            MirCallee::SuperConstructor {
+                current_class,
+                super_class,
+            } => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    self.emit(Instr::CallSuperConstructorExpandMultiOutput {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        specs,
+                        out_count: output_count,
+                    });
+                } else {
+                    self.emit(Instr::CallSuperConstructorMulti {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        arg_count: call.args.len(),
+                        out_count: output_count,
+                    });
+                }
+            }
+            MirCallee::SuperMethod {
+                current_class,
+                super_class,
+                method,
+            } => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    self.emit(Instr::CallSuperMethodExpandMultiOutput {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        method: method.clone(),
+                        specs,
+                        out_count: output_count,
+                    });
+                } else {
+                    self.emit(Instr::CallSuperMethodMulti {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        method: method.clone(),
+                        arg_count: call.args.len(),
+                        out_count: output_count,
+                    });
                 }
             }
             MirCallee::Static(CallableIdentity::Builtin(id)) => {
@@ -2069,6 +2211,12 @@ impl Compiler {
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
             match &call.callee {
                 MirCallee::Static(CallableIdentity::BoundFunction(_)) => {}
+                MirCallee::SuperMethod { .. } => {}
+                MirCallee::SuperConstructor { .. } => {
+                    return Err(self
+                        .compile_error("MIR method-call lowering found super-constructor callee")
+                        .with_identifier(IDENT_MIR_METHOD_CALL_CALLEE_INVALID));
+                }
                 MirCallee::Dynamic(_) => {
                     return Err(self
                         .compile_error(
@@ -2096,6 +2244,55 @@ impl Compiler {
                         call.args.len(),
                         requested_outputs,
                     ));
+                }
+            }
+            MirCallee::SuperConstructor {
+                current_class,
+                super_class,
+            } => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    self.emit(Instr::CallSuperConstructorExpandMultiOutput {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        specs,
+                        out_count: requested_outputs,
+                    });
+                } else {
+                    self.emit(Instr::CallSuperConstructorMulti {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        arg_count: call.args.len(),
+                        out_count: requested_outputs,
+                    });
+                }
+            }
+            MirCallee::SuperMethod {
+                current_class,
+                super_class,
+                method,
+            } => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    self.emit(Instr::CallSuperMethodExpandMultiOutput {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        method: method.clone(),
+                        specs,
+                        out_count: requested_outputs,
+                    });
+                } else {
+                    self.emit(Instr::CallSuperMethodMulti {
+                        current_class: current_class.clone(),
+                        super_class: super_class.clone(),
+                        method: method.clone(),
+                        arg_count: call.args.len(),
+                        out_count: requested_outputs,
+                    });
                 }
             }
             MirCallee::Dynamic(callee) => {
@@ -2989,6 +3186,7 @@ impl Compiler {
     fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
         let identity = match &call.callee {
             MirCallee::Static(identity) => identity.clone(),
+            MirCallee::SuperConstructor { .. } | MirCallee::SuperMethod { .. } => return None,
             MirCallee::Dynamic(_) => return None,
         };
         let mut args = Vec::with_capacity(call.args.len());

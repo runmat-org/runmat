@@ -200,7 +200,7 @@ fn deconv_error_with_source(
 #[runtime_builtin(
     name = "deconv",
     category = "math/signal",
-    summary = "Polynomial (1-D sequence) deconvolution returning quotient and remainder.",
+    summary = "Compute one-dimensional deconvolution.",
     keywords = "deconv,deconvolution,polynomial division,signal,gpu",
     accel = "custom",
     type_resolver(deconv_type),

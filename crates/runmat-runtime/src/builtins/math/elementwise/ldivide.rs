@@ -207,7 +207,7 @@ fn ldivide_error_with_detail(
 #[runtime_builtin(
     name = "ldivide",
     category = "math/elementwise",
-    summary = "Element-wise left division (B ./ A) with MATLAB-compatible implicit expansion.",
+    summary = "Compute element-wise left division (B ./ A).",
     keywords = "ldivide,element-wise left division,gpu,.\\",
     accel = "elementwise",
     type_resolver(numeric_binary_type),

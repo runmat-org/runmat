@@ -158,7 +158,7 @@ fn mat2cell_error_with_message(
 #[runtime_builtin(
     name = "mat2cell",
     category = "cells/core",
-    summary = "Split arrays into cell-array blocks.",
+    summary = "Split arrays into cell-array blocks by dimension partitions.",
     keywords = "mat2cell,cell array,partition,block",
     type_resolver(mat2cell_type),
     descriptor(crate::builtins::cells::core::mat2cell::MAT2CELL_DESCRIPTOR),

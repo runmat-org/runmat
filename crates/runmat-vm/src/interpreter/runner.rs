@@ -446,6 +446,10 @@ async fn run_interpreter_inner(
             Instr::StoreVar(_) => Some(global_aliases.clone()),
             _ => None,
         };
+        let store_local_global_aliases = match &bytecode.instructions[pc] {
+            Instr::StoreLocal(_) => Some(global_aliases.clone()),
+            _ => None,
+        };
         let mut clear_value_residency = |value: &Value| {
             #[cfg(feature = "native-accel")]
             clear_residency(value);
@@ -458,8 +462,16 @@ async fn run_interpreter_inner(
         };
         let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
+        let mut store_local_after_store = |stored_offset: usize, stored_value: &Value| {
+            if let Some(ref aliases) = store_local_global_aliases {
+                runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+            }
+        };
         let mut store_local_after_fallback_store =
             |func_name: &str, stored_offset: usize, stored_value: &Value| {
+                if let Some(ref aliases) = store_local_global_aliases {
+                    runtime_globals::update_global_store(stored_offset, stored_value, aliases);
+                }
                 runtime_globals::update_persistent_local_store(
                     func_name,
                     stored_offset,
@@ -494,6 +506,7 @@ async fn run_interpreter_inner(
                 store_var_after_store: &mut store_var_after_store,
                 store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
                 store_local_before_var_overwrite: &mut store_local_before_var_overwrite,
+                store_local_after_store: &mut store_local_after_store,
                 store_local_after_fallback_store: &mut store_local_after_fallback_store,
             },
         )
@@ -610,11 +623,15 @@ async fn run_interpreter_inner(
             | Instr::Spawn
             | Instr::Await
             | Instr::CallBuiltinMulti(_, _, _)
+            | Instr::CallSuperConstructorMulti { .. }
+            | Instr::CallSuperMethodMulti { .. }
             | Instr::CallSemanticFunctionMulti(_, _, _)
             | Instr::CallFunctionMulti { .. }
             | Instr::CallFunctionExpandMultiOutput { .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
             | Instr::CallBuiltinExpandMultiOutput(_, _, _)
+            | Instr::CallSuperConstructorExpandMultiOutput { .. }
+            | Instr::CallSuperMethodExpandMultiOutput { .. }
             | Instr::ExitScope(_)
             | Instr::RegisterImport { .. }
             | Instr::DeclareGlobal(_)

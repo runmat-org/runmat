@@ -167,7 +167,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "feof",
     category = "io/filetext",
-    summary = "Query whether a file identifier is positioned at end-of-file.",
+    summary = "Query end-of-file state for file identifiers.",
     keywords = "feof,end of file,io,file identifier",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::feof_type),

@@ -110,7 +110,7 @@ fn builtin_error_with_detail(
 #[runtime_builtin(
     name = "imag",
     category = "math/elementwise",
-    summary = "Extract the imaginary component of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Extract imaginary components.",
     keywords = "imag,imaginary,complex,elementwise,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

@@ -200,7 +200,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gradient",
     category = "math/reduction",
-    summary = "Numerical gradients using central differences with MATLAB-compatible output ordering.",
+    summary = "Compute numerical gradients.",
     keywords = "gradient,numerical gradient,finite difference,vector field,gpu",
     accel = "gradient",
     type_resolver(gradient_type),

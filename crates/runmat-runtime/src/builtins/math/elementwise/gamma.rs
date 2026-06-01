@@ -184,7 +184,7 @@ fn gamma_error_with_detail(
 #[runtime_builtin(
     name = "gamma",
     category = "math/elementwise",
-    summary = "Element-wise gamma function for scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute gamma function values element-wise.",
     keywords = "gamma,factorial,special,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),

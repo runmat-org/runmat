@@ -234,7 +234,7 @@ enum FillKind {
 #[runtime_builtin(
     name = "strings",
     category = "strings/core",
-    summary = "Preallocate string arrays filled with empty string scalars.",
+    summary = "Preallocate string arrays filled with empty string scalars (`\"\"`).",
     keywords = "strings,string array,empty,preallocate",
     accel = "array_construct",
     type_resolver(string_array_type),

@@ -228,7 +228,7 @@ pub const SIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "size",
     category = "array/introspection",
-    summary = "Get the dimensions of scalars, vectors, matrices, and N-D arrays.",
+    summary = "Return array dimension sizes using MATLAB-compatible output forms.",
     keywords = "size,dimensions,shape,gpu,introspection",
     type_resolver(size_type),
     descriptor(crate::builtins::array::introspection::size::SIZE_DESCRIPTOR),

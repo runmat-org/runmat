@@ -164,7 +164,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fzero",
     category = "math/optim",
-    summary = "Find a zero of a scalar nonlinear function using bracket expansion and Brent's method.",
+    summary = "Find scalar function zeros with bracketed root-finding.",
     keywords = "fzero,root finding,zero,brent,optimization",
     accel = "sink",
     type_resolver(scalar_root_type),

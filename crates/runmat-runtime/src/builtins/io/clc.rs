@@ -47,7 +47,7 @@ fn clc_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
 #[runtime_builtin(
     name = "clc",
     category = "io",
-    summary = "Clear the Command Window display.",
+    summary = "Clear the visible command window or console display hosts.",
     keywords = "clc,console,clear screen",
     sink = true,
     suppress_auto_output = true,

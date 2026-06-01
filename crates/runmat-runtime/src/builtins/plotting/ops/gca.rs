@@ -70,7 +70,7 @@ pub const GCA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 #[runtime_builtin(
     name = "gca",
     category = "plotting",
-    summary = "Return the handle for the current axes.",
+    summary = "Return the current axes handle.",
     keywords = "gca,axes,plotting",
     suppress_auto_output = true,
     type_resolver(gca_type),

@@ -133,7 +133,7 @@ fn remap_strcmp_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "strcmp",
     category = "strings/core",
-    summary = "Compare text inputs for exact matches (case-sensitive).",
+    summary = "Compare text inputs for exact case-sensitive equality.",
     keywords = "strcmp,string compare,text equality",
     accel = "sink",
     type_resolver(logical_text_match_type),

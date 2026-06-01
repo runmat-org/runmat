@@ -235,7 +235,7 @@ fn remap_endswith_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "endsWith",
     category = "strings/search",
-    summary = "Return logical values indicating whether text inputs end with specific patterns.",
+    summary = "Test whether text inputs end with patterns.",
     keywords = "endswith,suffix,text,ignorecase,search",
     accel = "sink",
     type_resolver(logical_text_match_type),

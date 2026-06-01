@@ -161,7 +161,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "exist",
     category = "io/repl_fs",
-    summary = "Determine whether a variable, file, folder, built-in, or class exists.",
+    summary = "Determine whether variables, files, folders, or symbols exist.",
     keywords = "exist,file,dir,var,builtin,class",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::exist_type),
@@ -388,7 +388,7 @@ async fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
 fn exist_handle(value: &Value) -> ExistResultKind {
     match value {
         Value::HandleObject(handle) => {
-            if handle.valid {
+            if runmat_builtins::is_handle_valid(handle) {
                 ExistResultKind::Variable
             } else {
                 ExistResultKind::NotFound
@@ -755,6 +755,8 @@ pub(crate) mod tests {
             MethodDef {
                 name: "parentOnly".to_string(),
                 is_static: false,
+                is_abstract: false,
+                is_sealed: false,
                 access: Access::Public,
                 function_name: "parent_only_impl".to_string(),
                 implicit_class_argument: None,
