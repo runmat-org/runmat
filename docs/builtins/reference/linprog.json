@@ -49,6 +49,16 @@
       "output": "x =\n     3\n     0\nfval =\n     3"
     },
     {
+      "description": "Use a finite lower bound on one variable",
+      "input": "f = [1; 0];\n[x, fval, exitflag] = linprog(f, [], [], [], [], [2; -Inf], [])",
+      "output": "x =\n     2\n     0\nfval =\n     2\nexitflag =\n     1"
+    },
+    {
+      "description": "Optimize along an equality face",
+      "input": "f = [-1; 0; 0];\nA = [1 0 0];\nb = 1;\nAeq = [0 0 1];\nbeq = 0;\n[x, fval, exitflag] = linprog(f, A, b, Aeq, beq, [], [])",
+      "output": "x =\n     1\n     0\n     0\nfval =\n    -1\nexitflag =\n     1"
+    },
+    {
       "description": "Inspect infeasible status",
       "input": "[x, fval, exitflag, output] = linprog(1, [], [], [], [], 2, 1);\nexitflag",
       "output": "exitflag =\n    -2"

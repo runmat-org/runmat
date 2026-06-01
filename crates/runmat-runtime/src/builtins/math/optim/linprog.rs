@@ -669,18 +669,24 @@ impl LinprogOutcome {
 
 fn solve_linprog(problem: &LinearProgram) -> LinprogOutcome {
     let n = problem.f.len();
+    let Some(face) = equality_face(problem, n) else {
+        return LinprogOutcome::infeasible("No feasible point found.");
+    };
+    let reduced = reduce_to_equality_face(problem, &face);
+    let k = reduced.f.len();
     let mut candidates = Vec::new();
     let mut combinations = 0usize;
 
-    enumerate_vertices(problem, |x| {
+    enumerate_vertices(&reduced, |y| {
         combinations += 1;
-        if is_feasible(problem, &x) {
-            candidates.push(x);
+        if is_feasible(&reduced, &y) {
+            candidates.push(y);
         }
     });
 
     let feasible_fallback = if candidates.is_empty() {
-        equality_feasible_point(problem, n).filter(|x| is_feasible(problem, x))
+        let y0 = vec![0.0; k];
+        is_feasible(&reduced, &y0).then_some(y0)
     } else {
         None
     };
@@ -688,7 +694,7 @@ fn solve_linprog(problem: &LinearProgram) -> LinprogOutcome {
     if !has_feasible_point {
         return LinprogOutcome::infeasible("No feasible point found.");
     }
-    if has_unbounded_descent_direction(problem) {
+    if has_unbounded_descent_direction(&reduced) {
         return LinprogOutcome::unbounded(combinations);
     }
 
@@ -696,16 +702,18 @@ fn solve_linprog(problem: &LinearProgram) -> LinprogOutcome {
         candidates.push(x);
     }
 
-    let mut best = candidates[0].clone();
-    let mut best_fval = dot(&problem.f, &best);
+    let mut best_y = candidates[0].clone();
+    let mut best_fval = dot(&reduced.f, &best_y);
     for candidate in candidates.into_iter().skip(1) {
-        let fval = dot(&problem.f, &candidate);
+        let fval = dot(&reduced.f, &candidate);
         if fval < best_fval - TOL {
-            best = candidate;
+            best_y = candidate;
             best_fval = fval;
         }
     }
 
+    let best = lift_from_equality_face(&face, &best_y);
+    let best_fval = dot(&problem.f, &best);
     let constrviolation = constraint_violation(problem, &best);
     LinprogOutcome {
         x: Some(best),
@@ -715,6 +723,61 @@ fn solve_linprog(problem: &LinearProgram) -> LinprogOutcome {
         constrviolation,
         message: "Optimal solution found.".to_string(),
     }
+}
+
+struct EqualityFace {
+    x0: Vec<f64>,
+    basis: Vec<Vec<f64>>,
+}
+
+fn equality_face(problem: &LinearProgram, n: usize) -> Option<EqualityFace> {
+    let x0 = if problem.a_eq.is_empty() {
+        vec![0.0; n]
+    } else {
+        pseudo_solve(&problem.a_eq, &problem.b_eq, n)?
+    };
+    Some(EqualityFace {
+        x0,
+        basis: nullspace_basis(&problem.a_eq, n),
+    })
+}
+
+fn reduce_to_equality_face(problem: &LinearProgram, face: &EqualityFace) -> LinearProgram {
+    LinearProgram {
+        f: face
+            .basis
+            .iter()
+            .map(|basis_vector| dot(&problem.f, basis_vector))
+            .collect(),
+        a_ineq: problem
+            .a_ineq
+            .iter()
+            .map(|row| {
+                face.basis
+                    .iter()
+                    .map(|basis_vector| dot(row, basis_vector))
+                    .collect()
+            })
+            .collect(),
+        b_ineq: problem
+            .a_ineq
+            .iter()
+            .zip(&problem.b_ineq)
+            .map(|(row, rhs)| rhs - dot(row, &face.x0))
+            .collect(),
+        a_eq: Vec::new(),
+        b_eq: Vec::new(),
+    }
+}
+
+fn lift_from_equality_face(face: &EqualityFace, y: &[f64]) -> Vec<f64> {
+    let mut x = face.x0.clone();
+    for (coeff, basis_vector) in y.iter().zip(&face.basis) {
+        for (x_j, basis_j) in x.iter_mut().zip(basis_vector) {
+            *x_j += coeff * basis_j;
+        }
+    }
+    x
 }
 
 fn enumerate_vertices(problem: &LinearProgram, mut visit: impl FnMut(Vec<f64>)) {
@@ -732,14 +795,6 @@ fn enumerate_vertices(problem: &LinearProgram, mut visit: impl FnMut(Vec<f64>)) 
                 visit(x);
             }
         });
-    }
-}
-
-fn equality_feasible_point(problem: &LinearProgram, n: usize) -> Option<Vec<f64>> {
-    if problem.a_eq.is_empty() {
-        Some(vec![0.0; n])
-    } else {
-        pseudo_solve(&problem.a_eq, &problem.b_eq, n)
     }
 }
 
@@ -1147,6 +1202,32 @@ mod tests {
             other => panic!("unexpected x {other:?}"),
         }
         assert!(matches!(&outputs[1], V::Num(fval) if (*fval - 2.0).abs() < 1.0e-7));
+        assert!(matches!(&outputs[2], V::Num(flag) if *flag == 1.0));
+    }
+
+    #[test]
+    fn optimizes_along_equality_face_when_particular_solution_is_suboptimal() {
+        let outputs = run(
+            tensor(vec![-1.0, 0.0, 0.0], 3, 1),
+            tensor(vec![1.0, 0.0, 0.0], 1, 3),
+            V::Num(1.0),
+            vec![
+                tensor(vec![0.0, 0.0, 1.0], 1, 3),
+                V::Num(0.0),
+                empty(),
+                empty(),
+            ],
+            3,
+        );
+        match &outputs[0] {
+            V::Tensor(x) => {
+                assert!((x.data[0] - 1.0).abs() < 1.0e-7, "{x:?}");
+                assert!(x.data[1].abs() < 1.0e-7, "{x:?}");
+                assert!(x.data[2].abs() < 1.0e-7, "{x:?}");
+            }
+            other => panic!("unexpected x {other:?}"),
+        }
+        assert!(matches!(&outputs[1], V::Num(fval) if (*fval + 1.0).abs() < 1.0e-7));
         assert!(matches!(&outputs[2], V::Num(flag) if *flag == 1.0));
     }
 
