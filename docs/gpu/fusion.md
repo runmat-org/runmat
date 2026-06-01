@@ -7,7 +7,7 @@ last_updated: "May 28, 2026"
 
 # Fusion Engine & Residency Management
 
-The fusion engine identifies groups of VM operations that can run as a single accelerated unit. It combines compile-time bytecode metadata, graph-level pattern detection, runtime stack layout, and provider-side execution so the interpreter can skip a span of ordinary bytecode and push a GPU-resident result instead.
+The fusion engine identifies semantic regions that can run as a single accelerated unit. MIR analysis first marks fusion-capable statement runs, the bytecode compiler maps those semantic candidates onto VM instruction windows, and runtime planning reconciles those windows with a bytecode-derived `AccelGraph`. Once a plan is accepted, the interpreter can skip a span of ordinary bytecode and push a GPU-resident result instead.
 
 This allows a single GPU kernel to perform multiple operations in a single dispatch, reducing the overhead of launching and synchronizing kernels.
 
@@ -15,14 +15,16 @@ Residency management is the other half of the system. Once a value becomes `Valu
 
 ## Fusion Pipeline
 
-Fusion starts with bytecode and graph metadata and ends with a `FusionExecutionRequest` passed to the active acceleration provider.
+Fusion starts with MIR semantic candidates and ends with a `FusionExecutionRequest` passed to the active acceleration provider. The runtime executes by bytecode spans: MIR decides where fusion is allowed, while bytecode instruction windows and the `AccelGraph` provide the stack layout, values, and operations needed to run the fused group.
 
 ```mermaid
 flowchart TD
-  Bytecode["Bytecode instructions"]
-  Metadata["FusionMetadata"]
-  Graph["AccelGraph"]
-  Groups["detect_fusion_groups()"]
+  MIR["MIR rvalue semantics"]
+  Candidates["FusionCandidateGroup"]
+  Bytecode["Bytecode instructions + source spans"]
+  Windows["FusionInstructionWindow"]
+  Graph["runtime AccelGraph"]
+  Groups["runtime FusionGroup"]
   Layout["annotate stack layout"]
   Runtime["run_interpreter_inner"]
   Gate{"group starts at pc?"}
@@ -33,8 +35,11 @@ flowchart TD
   Result["Value::GpuTensor"]
   Fallback["interpret normal bytecode"]
 
-  Bytecode --> Metadata
-  Metadata --> Graph
+  MIR --> Candidates
+  Candidates --> Windows
+  Bytecode --> Windows
+  Bytecode --> Graph
+  Windows --> Groups
   Graph --> Groups
   Groups --> Layout
   Layout --> Runtime
@@ -46,7 +51,7 @@ flowchart TD
 
 ## Fusion Group Kinds
 
-`runmat-accelerate` classifies eligible graph regions into `FusionKind` variants.
+The VM maps semantic instruction windows into `FusionKind` variants, then runtime planning uses the `AccelGraph` to recover the graph nodes covered by those spans. Standalone graph-level detection still exists in `runmat-accelerate` for provider tests and pattern analysis, but normal VM execution is gated by MIR-derived fusion metadata.
 
 | Kind | Purpose |
 | --- | --- |

@@ -133,8 +133,7 @@ For a single plot surface, pass a canvas at initialization:
 const canvas = document.querySelector<HTMLCanvasElement>("#plot")!;
 
 const session = await initRunMat({
-  plotCanvas: canvas,
-  telemetryConsent: false
+  plotCanvas: canvas
 });
 
 await session.executeRequest({

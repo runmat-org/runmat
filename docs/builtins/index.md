@@ -7,7 +7,7 @@ last_updated: "May 28, 2026"
 
 # RunMat Runtime Builtin Library
 
-This matrix tracks the public builtin surface implemented by `runmat-runtime`. It groups related MATLAB-compatible functions by runtime module.
+This matrix tracks the public builtin surface implemented by `runmat-runtime`.
 
 ## Legend
 

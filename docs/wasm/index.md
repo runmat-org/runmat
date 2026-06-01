@@ -156,8 +156,7 @@ For simple single-canvas plotting, pass a canvas during initialization:
 const canvas = document.querySelector<HTMLCanvasElement>("#plot")!;
 
 const session = await initRunMat({
-  plotCanvas: canvas,
-  telemetryConsent: false
+  plotCanvas: canvas
 });
 
 await session.executeRequest({

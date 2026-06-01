@@ -17,7 +17,8 @@ The acceleration path is intentionally opportunistic. CPU execution remains the 
 flowchart TD
   Runtime["runmat-runtime built-ins"]
   VM["runmat-vm interpreter"]
-  Metadata["Bytecode fusion metadata"]
+  Metadata["MIR-derived fusion metadata"]
+  Windows["bytecode instruction windows"]
   Promote["auto promotion"]
   Graph["AccelGraph"]
   Plan["FusionGroupPlan"]
@@ -28,7 +29,8 @@ flowchart TD
   Value["Value::GpuTensor"]
 
   Runtime --> VM
-  Metadata --> VM
+  Metadata --> Windows
+  Windows --> VM
   VM --> Promote
   VM --> Graph
   Graph --> Plan
@@ -45,7 +47,7 @@ flowchart TD
 
 | Component | Role |
 | --- | --- |
-| `runmat-vm/src/accel` | Runtime fusion execution, stack layout, residency cleanup, and VM integration. |
+| `runmat-vm/src/accel` | Runtime fusion execution, stack layout, residency cleanup, and VM integration for MIR-gated bytecode windows. |
 | `runmat-accelerate-api` | Provider trait, GPU tensor handles, metadata registries, residency hooks, and exported GPU contexts. |
 | `runmat-accelerate/src/fusion.rs` | Graph-level fusion-group detection and fusion pattern classification. |
 | `runmat-accelerate/src/fusion_exec.rs` | Execution of fusion plans through the active provider. |
