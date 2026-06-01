@@ -476,7 +476,11 @@ fn apply_struct_fields(
         }
         let canonical = canonical_option_name(key);
         if let Some(defaults) = &source_defaults {
-            if lookup_case_insensitive(defaults, &canonical).is_some_and(|default| default == value)
+            if solver.accepts_option(&canonical)
+                && lookup_case_insensitive(defaults, &canonical).is_some_and(|default| {
+                    normalized_option_value(solver, &canonical, value)
+                        .is_ok_and(|normalized| default == &normalized)
+                })
             {
                 continue;
             }
@@ -504,14 +508,20 @@ fn set_option_field(
         ));
     }
 
-    let value = match canonical.as_str() {
-        "TolX" | "TolFun" => Value::Num(positive_finite_scalar(&canonical, value)?),
-        "MaxIter" | "MaxFunEvals" => Value::Num(positive_integer_scalar(&canonical, value)? as f64),
-        "Display" => Value::from(display_value(solver, value)?),
-        _ => unreachable!("unsupported option passed accepts_option"),
-    };
+    let value = normalized_option_value(solver, &canonical, value)?;
     options.insert(canonical, value);
     Ok(())
+}
+
+fn normalized_option_value(solver: Solver, canonical: &str, value: &Value) -> BuiltinResult<Value> {
+    match canonical {
+        "TolX" | "TolFun" => Ok(Value::Num(positive_finite_scalar(canonical, value)?)),
+        "MaxIter" | "MaxFunEvals" => {
+            Ok(Value::Num(positive_integer_scalar(canonical, value)? as f64))
+        }
+        "Display" => Ok(Value::from(display_value(solver, value)?)),
+        _ => unreachable!("unsupported option passed accepts_option"),
+    }
 }
 
 fn solver_label(solver: Solver) -> &'static str {
@@ -627,6 +637,7 @@ mod tests {
     use super::*;
     use crate::call_builtin_async;
     use futures::executor::block_on;
+    use runmat_builtins::IntValue;
 
     fn run_optimoptions(rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(optimoptions_builtin(rest))
@@ -838,6 +849,34 @@ mod tests {
         assert_eq!(string_field(&options, "Solver"), "fsolve");
         assert_eq!(num_field(&options, "TolX"), 1.0e-8);
         assert_eq!(num_field(&options, "MaxFunEvals"), 2000.0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_default_skipping_compares_normalized_values() {
+        let first = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("MaxFunEvals"),
+            Value::Num(2000.0),
+            Value::from("Display"),
+            Value::from("final"),
+        ])
+        .expect("first");
+
+        let mut later = StructValue::new();
+        later.insert("Solver", Value::from("fsolve"));
+        later.insert("TolX", Value::Num(1.0e-8));
+        later.insert("MaxFunEvals", Value::Int(IntValue::I32(40000)));
+        later.insert("Display", Value::CharArray(CharArray::new_row("off")));
+
+        let options = struct_result(
+            run_optimoptions(vec![first, Value::Struct(later)]).expect("merged options"),
+        );
+
+        assert_eq!(string_field(&options, "Solver"), "fsolve");
+        assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 2000.0);
+        assert_eq!(string_field(&options, "Display"), "final");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
