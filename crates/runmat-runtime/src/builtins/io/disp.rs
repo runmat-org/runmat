@@ -197,8 +197,11 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .map(|line| line.to_string())
                 .collect(),
             RenderMode::Nested => {
-                let nnz = sparse.data.len();
-                vec![format!("<sparse {}x{} nnz={}>", sparse.rows, sparse.cols, nnz)]
+                let nnz = sparse.values.len();
+                vec![format!(
+                    "<sparse {}x{} nnz={}>",
+                    sparse.rows, sparse.cols, nnz
+                )]
             }
         },
         Value::Complex(re, im) => vec![format!("{}", Value::Complex(*re, *im))],

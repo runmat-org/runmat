@@ -417,7 +417,10 @@ fn value_to_json(value: &Value, options: &JsonEncodeOptions) -> BuiltinResult<Js
         Value::Tensor(tensor) => tensor_to_json(tensor, options),
         Value::SparseTensor(sparse) => {
             let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
-                jsonencode_error_with(&JSONENCODE_ERROR_INTERNAL, "jsonencode: sparse matrix dimensions overflow")
+                jsonencode_error_with(
+                    &JSONENCODE_ERROR_INTERNAL,
+                    "jsonencode: sparse matrix dimensions overflow",
+                )
             })?;
             if total_elements > 10_000_000 {
                 return Err(jsonencode_error_with(

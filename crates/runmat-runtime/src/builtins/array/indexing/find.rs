@@ -681,7 +681,10 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
     }
 }
 
-fn compute_find_sparse(sparse: &runmat_builtins::SparseTensor, options: &FindOptions) -> FindResult {
+fn compute_find_sparse(
+    sparse: &runmat_builtins::SparseTensor,
+    options: &FindOptions,
+) -> FindResult {
     let shape = vec![sparse.rows, sparse.cols];
     let limit = options.effective_limit();
 

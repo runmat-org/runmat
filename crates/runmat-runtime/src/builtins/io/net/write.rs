@@ -496,7 +496,10 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         Value::Tensor(t) => Ok(t.data.clone()),
         Value::SparseTensor(s) => {
             let total_elements = s.rows.checked_mul(s.cols).ok_or_else(|| {
-                write_error_with_message("write: sparse matrix dimensions overflow", &WRITE_ERROR_INTERNAL)
+                write_error_with_message(
+                    "write: sparse matrix dimensions overflow",
+                    &WRITE_ERROR_INTERNAL,
+                )
             })?;
             if total_elements > 10_000_000 {
                 return Err(write_error_with_message(

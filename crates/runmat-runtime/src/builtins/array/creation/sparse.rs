@@ -315,7 +315,10 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
             if tensor.shape.len() != 2 {
                 return Err(sparse_error(
                     &SPARSE_ERROR_INVALID_INPUT,
-                    format!("sparse: input must be a 2-D matrix, got {}-D tensor", tensor.shape.len()),
+                    format!(
+                        "sparse: input must be a 2-D matrix, got {}-D tensor",
+                        tensor.shape.len()
+                    ),
                 ));
             }
             sparse_from_dense_tensor(&tensor)
@@ -476,14 +479,14 @@ fn sparse_from_triplet_form(args: Vec<Value>) -> BuiltinResult<SparseTensor> {
 fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     match value {
         Value::Tensor(tensor) => {
-            if tensor.shape.len() > 2 {
+            if !is_vector_shape(&tensor.shape) {
                 return Err(numeric_vector_error(value, name));
             }
             Ok(tensor.data.clone())
         }
         Value::SparseTensor(sparse) => {
-            let shape = vec![sparse.rows, sparse.cols];
-            if shape.len() > 2 {
+            let shape = [sparse.rows, sparse.cols];
+            if !is_vector_shape(&shape) {
                 return Err(numeric_vector_error(value, name));
             }
             sparse
@@ -492,7 +495,7 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))
         }
         Value::LogicalArray(logical) => {
-            if logical.shape.len() > 2 {
+            if !is_vector_shape(&logical.shape) {
                 return Err(numeric_vector_error(value, name));
             }
             Ok(logical
