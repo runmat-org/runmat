@@ -54,6 +54,8 @@ Unlike many alternative MATLAB syntax-based runtimes, RunMat provides full `clas
 - Handle Classes: Implements identity semantics, `isvalid`, and `delete` lifecycle management.
 - Events: Full `addlistener` and `notify` support integrated with the runtime event registry.
 
+For a complete guide to writing classes, including value vs. handle classes, inheritance, operator overloading, events, enumerations, and packages, see [Classes (classdef)](/docs/runtime/classes).
+
 ## Compiler Pipeline
 
 The compatibility layer is primarily enforced during the "Lowering" phase, where the `runmat-parser` AST is converted into `runmat-hir`, and then into a control-flow graph in the [Mid-Level IR (MIR)](/docs/runtime/compiler/mir) stage. These stages resolve identifiers based on MATLAB's complex precedence rules.

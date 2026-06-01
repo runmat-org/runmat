@@ -48,7 +48,7 @@ Runtime builtins can be plain synchronous Rust functions or `async fn` implement
 
 If a host-only builtin receives GPU values and the first implementation fails on GPU input, the dispatcher can gather arguments and retry a compatible implementation. `gather_if_needed_async` recursively materializes tensors, logical arrays, cells, structs, objects, closures, and output lists.
 
-## RunMat Async Extensions
+## RunMat Async Language Extensions (Beta)
 
 RunMat accepts `async function` and `await(...)` as RunMat extensions to the MATLAB language. MATLAB-strict compatibility mode rejects these forms before execution (see [Configuration Reference](/docs/runtime/getting-started/config) for more details on setting the compatibility mode).
 
@@ -68,7 +68,7 @@ y = await(f); % prompt happens here
 
 ## Spawn Handles
 
-`spawn(value)` is also a RunMat extension. It accepts a future and returns a single-use spawn handle, but it currently resolves the future before returning the handle.
+`spawn(value)` is also a RunMat language extension to the MATLAB language. It accepts a future and returns a single-use spawn handle. It currently resolves the future before returning the handle, but this will change in a future release to return the future itself.
 
 ```matlab
 async function y = ask()
