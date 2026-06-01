@@ -11,7 +11,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::math::optim::common::field_name;
+use crate::builtins::math::optim::common::{canonical_option_name, field_name};
 use crate::builtins::math::optim::type_resolvers::optim_options_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -200,17 +200,6 @@ async fn optimset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     Ok(Value::Struct(fields))
-}
-
-fn canonical_option_name(name: &str) -> String {
-    match name.to_ascii_lowercase().as_str() {
-        "tolx" => "TolX".to_string(),
-        "tolfun" => "TolFun".to_string(),
-        "maxiter" => "MaxIter".to_string(),
-        "maxfunevals" => "MaxFunEvals".to_string(),
-        "display" => "Display".to_string(),
-        _ => name.to_string(),
-    }
 }
 
 #[cfg(test)]

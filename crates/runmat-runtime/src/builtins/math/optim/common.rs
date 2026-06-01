@@ -154,6 +154,17 @@ pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
+pub(crate) fn canonical_option_name(name: &str) -> String {
+    match name.to_ascii_lowercase().as_str() {
+        "tolx" => "TolX".to_string(),
+        "tolfun" => "TolFun".to_string(),
+        "maxiter" => "MaxIter".to_string(),
+        "maxfunevals" => "MaxFunEvals".to_string(),
+        "display" => "Display".to_string(),
+        _ => name.to_string(),
+    }
+}
+
 pub(crate) fn lookup_option<'a>(options: &'a StructValue, name: &str) -> Option<&'a Value> {
     options
         .fields
