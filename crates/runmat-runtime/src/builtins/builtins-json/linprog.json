@@ -1,0 +1,85 @@
+{
+  "title": "linprog",
+  "category": "math/optim",
+  "keywords": [
+    "linprog",
+    "linear programming",
+    "optimization",
+    "linear constraints",
+    "bounds"
+  ],
+  "summary": "Solve linear programming minimization problems with inequality constraints, equality constraints, and bounds.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The solver runs on the host. GPU-resident numeric inputs are gathered before solving."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 7,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::linprog::tests",
+    "integration": null
+  },
+  "description": "`linprog` minimizes `f' * x` subject to `A*x <= b`, `Aeq*x == beq`, and `lb <= x <= ub`. Supported forms are `x = linprog(f,A,b)`, `x = linprog(f,A,b,Aeq,beq)`, `x = linprog(f,A,b,Aeq,beq,lb,ub)`, and the two-, three-, and four-output variants.",
+  "behaviors": [
+    "`f`, `b`, `beq`, `lb`, and `ub` must be numeric vectors with compatible lengths.",
+    "`A` and `Aeq` must be numeric matrices with one column per element of `f`.",
+    "`[]` may be passed for omitted optional `Aeq`, `beq`, `lb`, or `ub` arguments.",
+    "`exitflag` is `1` when an optimum is found, `-2` when no feasible point is found, and `-3` when the objective is unbounded below.",
+    "The fourth output is a struct with `iterations`, `algorithm`, `constrviolation`, and `message` fields.",
+    "Advanced MATLAB options, algorithms, problem structs, and lambda outputs are intentionally unsupported in this initial implementation."
+  ],
+  "examples": [
+    {
+      "description": "Solve a bounded linear program",
+      "input": "f = [-1; -2];\nA = [1 1];\nb = 4;\n[x, fval, exitflag] = linprog(f, A, b, [], [], [0; 0], [])",
+      "output": "x =\n     0\n     4\nfval =\n    -8\nexitflag =\n     1"
+    },
+    {
+      "description": "Use equality constraints and lower bounds",
+      "input": "f = [1; 2];\nA = [];\nb = [];\nAeq = [1 1];\nbeq = 3;\n[x, fval] = linprog(f, A, b, Aeq, beq, [1; 0], [])",
+      "output": "x =\n     3\n     0\nfval =\n     3"
+    },
+    {
+      "description": "Inspect infeasible status",
+      "input": "[x, fval, exitflag, output] = linprog(1, [], [], [], [], 2, 1);\nexitflag",
+      "output": "exitflag =\n    -2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does linprog support optimoptions or MATLAB problem structs?",
+      "answer": "No. This implementation supports the common positional numeric call forms only."
+    },
+    {
+      "question": "Does linprog run on the GPU?",
+      "answer": "No. It gathers GPU-resident inputs and runs the active-set solve on the host."
+    }
+  ],
+  "links": [
+    {
+      "label": "fminbnd",
+      "url": "./fminbnd"
+    },
+    {
+      "label": "fsolve",
+      "url": "./fsolve"
+    },
+    {
+      "label": "optimset",
+      "url": "./optimset"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/linprog.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/linprog.rs"
+  }
+}
