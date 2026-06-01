@@ -238,7 +238,6 @@ async fn optimoptions_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
                     let next_solver = solver_from_options(&existing)?;
                     let skip_defaults_from = match next_solver {
                         Solver::Generic => None,
-                        other if other == solver => None,
                         other => Some(other),
                     };
                     apply_struct_fields(
@@ -785,6 +784,31 @@ mod tests {
         .expect("second");
 
         let options = struct_result(run_optimoptions(vec![first, second]).expect("merged options"));
+
+        assert_eq!(string_field(&options, "Solver"), "fsolve");
+        assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 2000.0);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn optimoptions_solver_form_same_solver_struct_preserves_prior_overrides() {
+        let later = run_optimoptions(vec![
+            Value::from("fsolve"),
+            Value::from("TolX"),
+            Value::Num(1.0e-8),
+        ])
+        .expect("later options");
+
+        let options = struct_result(
+            run_optimoptions(vec![
+                Value::from("fsolve"),
+                Value::from("MaxFunEvals"),
+                Value::Num(2000.0),
+                later,
+            ])
+            .expect("merged options"),
+        );
 
         assert_eq!(string_field(&options, "Solver"), "fsolve");
         assert_eq!(num_field(&options, "TolX"), 1.0e-8);
