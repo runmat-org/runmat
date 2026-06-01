@@ -39,6 +39,23 @@ fn linprog_solves_equality_and_bounds_from_source() {
 }
 
 #[test]
+fn linprog_solves_sparse_one_sided_bound_from_source() {
+    let vars = execute_source(
+        "f = [1; 0]; [x, fval, exitflag] = linprog(f, [], [], [], [], [2; -Inf], []); y = x(1);",
+    )
+    .unwrap();
+    assert!(vars.iter().any(|value| {
+        matches!(value, Value::Tensor(t) if t.shape == vec![2, 1] && (t.data[0] - 2.0).abs() < 1.0e-7 && t.data[1].abs() < 1.0e-7)
+    }));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 2.0).abs() < 1.0e-7)));
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < 1.0e-7)));
+}
+
+#[test]
 fn linprog_reports_infeasible_status_from_source() {
     let vars =
         execute_source("[x, fval, exitflag, output] = linprog(1, [], [], [], [], 2, 1);").unwrap();

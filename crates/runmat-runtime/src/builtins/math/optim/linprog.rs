@@ -719,10 +719,8 @@ fn solve_linprog(problem: &LinearProgram) -> LinprogOutcome {
 
 fn enumerate_vertices(problem: &LinearProgram, mut visit: impl FnMut(Vec<f64>)) {
     let n = problem.f.len();
-    let eq_rank = matrix_rank(&problem.a_eq, n);
-    let min_active = n.saturating_sub(eq_rank);
     let max_active = problem.a_ineq.len().min(n);
-    for active_count in min_active..=max_active {
+    for active_count in 0..=max_active {
         enumerate_combinations(problem.a_ineq.len(), active_count, |active| {
             let mut rows = problem.a_eq.clone();
             let mut rhs = problem.b_eq.clone();
@@ -730,10 +728,8 @@ fn enumerate_vertices(problem: &LinearProgram, mut visit: impl FnMut(Vec<f64>)) 
                 rows.push(problem.a_ineq[idx].clone());
                 rhs.push(problem.b_ineq[idx]);
             }
-            if matrix_rank(&rows, n) == n {
-                if let Some(x) = pseudo_solve(&rows, &rhs, n) {
-                    visit(x);
-                }
+            if let Some(x) = pseudo_solve(&rows, &rhs, n) {
+                visit(x);
             }
         });
     }
@@ -823,14 +819,6 @@ fn constraint_violation(problem: &LinearProgram, x: &[f64]) -> f64 {
         .map(|(row, rhs)| (dot(row, x) - rhs).max(0.0))
         .fold(0.0, f64::max);
     eq.max(ineq)
-}
-
-fn matrix_rank(rows: &[Vec<f64>], n: usize) -> usize {
-    if rows.is_empty() || n == 0 {
-        return 0;
-    }
-    let (_, pivots) = rref(rows, n);
-    pivots.len()
 }
 
 fn nullspace_basis(rows: &[Vec<f64>], n: usize) -> Vec<Vec<f64>> {
@@ -1135,6 +1123,31 @@ mod tests {
             other => panic!("unexpected x {other:?}"),
         }
         assert!(matches!(&outputs[1], V::Num(fval) if (*fval - 5.0).abs() < 1.0e-7));
+    }
+
+    #[test]
+    fn solves_one_sided_bound_with_fewer_rows_than_variables() {
+        let outputs = run(
+            tensor(vec![1.0, 0.0], 2, 1),
+            empty(),
+            empty(),
+            vec![
+                empty(),
+                empty(),
+                tensor(vec![2.0, f64::NEG_INFINITY], 2, 1),
+                empty(),
+            ],
+            3,
+        );
+        match &outputs[0] {
+            V::Tensor(x) => {
+                assert!((x.data[0] - 2.0).abs() < 1.0e-7, "{x:?}");
+                assert!(x.data[1].abs() < 1.0e-7, "{x:?}");
+            }
+            other => panic!("unexpected x {other:?}"),
+        }
+        assert!(matches!(&outputs[1], V::Num(fval) if (*fval - 2.0).abs() < 1.0e-7));
+        assert!(matches!(&outputs[2], V::Num(flag) if *flag == 1.0));
     }
 
     #[test]

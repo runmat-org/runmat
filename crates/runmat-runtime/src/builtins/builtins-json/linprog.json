@@ -49,6 +49,11 @@
       "output": "x =\n     3\n     0\nfval =\n     3"
     },
     {
+      "description": "Use a finite lower bound on one variable",
+      "input": "f = [1; 0];\n[x, fval, exitflag] = linprog(f, [], [], [], [], [2; -Inf], [])",
+      "output": "x =\n     2\n     0\nfval =\n     2\nexitflag =\n     1"
+    },
+    {
       "description": "Inspect infeasible status",
       "input": "[x, fval, exitflag, output] = linprog(1, [], [], [], [], 2, 1);\nexitflag",
       "output": "exitflag =\n    -2"
