@@ -46,9 +46,19 @@ RunMat implements a robust indexing subsystem that handles N-D numeric and logic
 - Expansion: Supports function and cell expansion into slice targets with dynamic packing.
 - L-Value Handling: The HIR lowering stage distinguishes between standard assignments, indexed assignments (`A(1)=2`), and cell assignments (`C{1}=3`).
 
+### Functions
+
+RunMat implements a MATLAB compatible function model, from simple named functions to nested functions that share their parent's scope.
+
+- Inputs & outputs: Multiple return values, optional arguments via `nargin`/`nargout`, and variable arity with `varargin`/`varargout`.
+- Handles & closures: Anonymous functions with capture-by-value closures, function handles, and higher-order builtins like `arrayfun` and `cellfun`.
+- Validation: `arguments` blocks with size, class, default, and `mustBe*` validators.
+
+For a complete guide to writing functions, including nested functions, closures, function handles, persistent and global state, and argument validation, see [Functions](/docs/runtime/functions).
+
 ### Object-Oriented Programming (classdef)
 
-Unlike many alternative MATLAB syntax-based runtimes, RunMat provides full `classdef` support.
+Unlike many alternative MATLAB syntax-based runtimes such as Octave, RunMat provides full `classdef` support.
 
 - Properties & Methods: Supports attributes such as `Constant`, `Dependent`, `Static`, and access levels (`Private`, `Public`).
 - Handle Classes: Implements identity semantics, `isvalid`, and `delete` lifecycle management.
