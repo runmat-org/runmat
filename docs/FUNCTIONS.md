@@ -10,7 +10,7 @@ last_updated: "June 2, 2026"
 Functions are the main way to organize reusable logic in RunMat. You can write named
 functions in their own files, define helper functions alongside a script, nest functions
 inside one another to share state, and pass functions around as values with handles.
-RunMat follows MATLAB's function semantics, so most existing code runs unchanged.
+RunMat follows MATLAB's function semantics, so most existing code will run unchanged.
 
 ## Defining and calling functions
 
