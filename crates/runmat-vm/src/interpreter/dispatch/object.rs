@@ -73,11 +73,17 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value =
-                obj_resolve::store_member(base, field.clone(), rhs, false, caller_function_name, |oldv, newv| {
+            let value = obj_resolve::store_member(
+                base,
+                field.clone(),
+                rhs,
+                false,
+                caller_function_name,
+                |oldv, newv| {
                     gc_record_write(oldv, newv);
-                })
-                .await?;
+                },
+            )
+            .await?;
             stack.push(value);
             Ok(true)
         }
@@ -90,11 +96,17 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value =
-                obj_resolve::store_member(base, field.clone(), rhs, true, caller_function_name, |oldv, newv| {
+            let value = obj_resolve::store_member(
+                base,
+                field.clone(),
+                rhs,
+                true,
+                caller_function_name,
+                |oldv, newv| {
                     gc_record_write(oldv, newv);
-                })
-                .await?;
+                },
+            )
+            .await?;
             stack.push(value);
             Ok(true)
         }

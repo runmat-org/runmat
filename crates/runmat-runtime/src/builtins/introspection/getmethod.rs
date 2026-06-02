@@ -65,9 +65,7 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
             runmat_builtins::Access::Public => true,
-            runmat_builtins::Access::Private => {
-                caller_class.as_deref() == Some(owner.as_str())
-            }
+            runmat_builtins::Access::Private => caller_class.as_deref() == Some(owner.as_str()),
             runmat_builtins::Access::Protected => caller_class
                 .as_deref()
                 .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
@@ -99,7 +97,8 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
     match obj {
         Value::Object(o) => {
             ensure_method_accessible(&o.class_name, method_name)?;
-            if let Some((resolved, _owner)) = runmat_builtins::lookup_method(&o.class_name, method_name)
+            if let Some((resolved, _owner)) =
+                runmat_builtins::lookup_method(&o.class_name, method_name)
             {
                 return Ok(Value::Closure(runmat_builtins::Closure {
                     function_name: resolved.function_name.clone(),
@@ -121,7 +120,8 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         }
         Value::HandleObject(h) => {
             ensure_method_accessible(&h.class_name, method_name)?;
-            if let Some((resolved, _owner)) = runmat_builtins::lookup_method(&h.class_name, method_name)
+            if let Some((resolved, _owner)) =
+                runmat_builtins::lookup_method(&h.class_name, method_name)
             {
                 return Ok(Value::Closure(runmat_builtins::Closure {
                     function_name: resolved.function_name.clone(),
@@ -147,12 +147,12 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 format!("@{cls}.{method_name}"),
             ))
         }
-        other => Err(
-            crate::build_runtime_error(format!("getmethod: unsupported receiver ({other:?})"))
-                .with_builtin("getmethod")
-                .with_identifier("RunMat:GetMethodReceiverUnsupported")
-                .build(),
-        ),
+        other => Err(crate::build_runtime_error(format!(
+            "getmethod: unsupported receiver ({other:?})"
+        ))
+        .with_builtin("getmethod")
+        .with_identifier("RunMat:GetMethodReceiverUnsupported")
+        .build()),
     }
 }
 

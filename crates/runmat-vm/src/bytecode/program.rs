@@ -54,6 +54,59 @@ pub struct FunctionBytecode {
     #[serde(default)]
     pub implicit_nargout_slot: Option<usize>,
     pub capture_slots: Vec<usize>,
+    #[serde(default)]
+    pub argument_validations: Vec<FunctionArgumentValidation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDim {
+    Any,
+    Exact(usize),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionArgSizeSpec {
+    pub rows: FunctionArgDim,
+    pub cols: FunctionArgDim,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionArgumentValidation {
+    pub input_slot: usize,
+    pub size: Option<FunctionArgSizeSpec>,
+    pub class_name: Option<String>,
+    #[serde(default)]
+    pub validators: Vec<FunctionArgValidator>,
+    #[serde(default)]
+    pub default_value: Option<FunctionArgDefaultValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgValidator {
+    Finite,
+    NumericOrLogical,
+    Text,
+    Nonempty,
+    ScalarOrEmpty,
+    Real,
+    Integer,
+    Positive,
+    Negative,
+    Nonnegative,
+    Nonzero,
+    Nonpositive,
+    GreaterThanOrEqual(f64),
+    LessThanOrEqual(f64),
+    GreaterThan(f64),
+    LessThan(f64),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDefaultValue {
+    Number(f64),
+    Bool(bool),
+    String(String),
+    EmptyArray,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

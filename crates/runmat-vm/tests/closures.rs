@@ -131,10 +131,11 @@ fn feval_with_unresolved_qualified_string_handle_expand_multi_output_errors() {
 }
 
 #[test]
-fn feval_string_without_at_errors_with_identifier_contract() {
-    let err =
-        execute_source("r = feval('sin', 0);").expect_err("string handle without @ should fail");
-    assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+fn feval_string_without_at_resolves_named_callable() {
+    let vars = execute_source("r = feval('sin', 0);").expect("string name feval should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
 }
 
 #[test]

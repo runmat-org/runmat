@@ -83,7 +83,10 @@ pub fn register_class(
     {
         return Err(mex(
             "RunMat:MethodSealed",
-            &format!("Class '{}' cannot override sealed method '{}'.", name, conflict),
+            &format!(
+                "Class '{}' cannot override sealed method '{}'.",
+                name, conflict
+            ),
         ));
     }
 
@@ -99,7 +102,10 @@ pub fn register_class(
         if let Some(missing) = required_abstract.into_iter().next() {
             return Err(mex(
                 "RunMat:AbstractMethodMissing",
-                &format!("Class '{}' must implement abstract method '{}'.", name, missing),
+                &format!(
+                    "Class '{}' must implement abstract method '{}'.",
+                    name, missing
+                ),
             ));
         }
     }
@@ -114,7 +120,9 @@ pub fn register_class(
     Ok(())
 }
 
-fn collect_required_abstract_methods(super_class: Option<&str>) -> std::collections::HashSet<String> {
+fn collect_required_abstract_methods(
+    super_class: Option<&str>,
+) -> std::collections::HashSet<String> {
     let mut lineage = Vec::new();
     let mut visited = std::collections::HashSet::new();
     let mut cursor = super_class.map(str::to_string);
@@ -142,7 +150,9 @@ fn collect_required_abstract_methods(super_class: Option<&str>) -> std::collecti
     required
 }
 
-fn collect_inherited_sealed_methods(super_class: Option<&str>) -> std::collections::HashSet<String> {
+fn collect_inherited_sealed_methods(
+    super_class: Option<&str>,
+) -> std::collections::HashSet<String> {
     let mut sealed = std::collections::HashSet::new();
     let mut visited = std::collections::HashSet::new();
     let mut cursor = super_class.map(str::to_string);

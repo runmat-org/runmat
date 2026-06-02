@@ -95,6 +95,7 @@ export type FigureEventKind = "created" | "updated" | "cleared" | "closed";
 export interface FigureEvent {
   handle: number;
   kind: FigureEventKind;
+  fingerprint?: string;
   figure?: FigureSnapshot;
 }
 
@@ -751,6 +752,7 @@ interface RunMatNativeModule {
   setHoldMode?: (mode: HoldMode) => boolean;
   configureSubplot?: (rows: number, cols: number, index: number) => void;
   clearFigure?: (handle: number | null) => number;
+  resetPlotState?: () => void;
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
   renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
@@ -1065,6 +1067,16 @@ export async function clearFigure(handle?: number): Promise<number> {
   requireNativeFunction(native, "clearFigure");
   try {
     return native.clearFigure(handle ?? null);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function resetPlotState(): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "resetPlotState");
+  try {
+    native.resetPlotState();
   } catch (error) {
     throw coerceFigureError(error);
   }

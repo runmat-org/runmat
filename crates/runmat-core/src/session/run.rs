@@ -51,12 +51,13 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        self.pending_companion_class_statements =
-            Some(super::compile::discover_companion_class_source_statements_async(
+        self.pending_companion_class_statements = Some(
+            super::compile::discover_companion_source_statements_async(
                 self.current_source_name(),
                 self.compat_mode,
             )
-            .await);
+            .await,
+        );
         let previous_workspace_names = self
             .workspace_values
             .keys()
@@ -1156,6 +1157,7 @@ fn apply_requested_output_policy(
                 }
             }
         }
+        RequestedOutputCount::CurrentFunctionNargout => outcome.flow,
     };
     outcome
 }
@@ -1282,7 +1284,7 @@ async fn resolve_path_source_input(
         )
     })?;
 
-        resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
+        let resolved = resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(format!(
                     "failed to resolve source input '{}' from working directory {}: {}",
@@ -1293,6 +1295,11 @@ async fn resolve_path_source_input(
                 .with_identifier("RunMat:EntrypointResolveFailed")
                 .build(),
             )
+        })?;
+        Ok(if resolved.is_absolute() {
+            resolved
+        } else {
+            cwd.join(resolved)
         })
     }
 

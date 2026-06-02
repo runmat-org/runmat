@@ -83,6 +83,130 @@ fn unresolved_external_function_handle_zero_output_feval_fails_without_legacy_fa
 }
 
 #[test]
+fn nested_varargout_forwarding_with_nargout_slice_assignment() {
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = inner(x);
+            function varargout = inner(v)
+                varargout{1} = v + 1;
+                varargout{2} = v + 2;
+            end
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let entry = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|f| f.display_name == "outer")
+        .expect("outer bytecode present");
+    assert!(
+        entry.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { .. }
+                | runmat_vm::Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, _)
+                | runmat_vm::Instr::CallFunctionMultiUsingOutputSlot { .. }
+        )),
+        "outer should lower nested forwarding call with dynamic output-slot arity; instructions={:?}",
+        entry.instructions
+    );
+    let vars = interpret(&bytecode).expect("execute bytecode");
+    assert!(
+        has_num(&vars, 6.0),
+        "expected first forwarded output; vars={vars:?}"
+    );
+    assert!(
+        has_num(&vars, 7.0),
+        "expected second forwarded output; vars={vars:?}"
+    );
+}
+
+#[test]
+fn nested_varargout_forwarding_with_nargout_slice_assignment_via_feval() {
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = feval('pair', x);
+        end
+        function varargout = pair(v)
+            varargout{1} = v + 10;
+            varargout{2} = v + 20;
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let entry = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|f| f.display_name == "outer")
+        .expect("outer bytecode present");
+    assert!(
+        entry.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallFevalMultiUsingOutputSlot(_, _)
+        )),
+        "outer should lower feval forwarding call with dynamic output-slot arity; instructions={:?}",
+        entry.instructions
+    );
+    let vars = interpret(&bytecode).expect("execute bytecode");
+    assert!(
+        has_num(&vars, 15.0),
+        "expected first forwarded output; vars={vars:?}"
+    );
+    assert!(
+        has_num(&vars, 25.0),
+        "expected second forwarded output; vars={vars:?}"
+    );
+}
+
+#[test]
+fn nested_varargout_forwarding_with_nargout_slice_assignment_via_nested_feval() {
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = feval('inner', x);
+            function varargout = inner(v)
+                varargout{1} = v + 10;
+                varargout{2} = v + 20;
+            end
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile source");
+    let entry = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|f| f.display_name == "outer")
+        .expect("outer bytecode present");
+    assert!(
+        entry.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 1) if name == "inner"
+        )),
+        "outer should lower string feval target to a captured semantic closure; instructions={:?}",
+        entry.instructions
+    );
+    assert!(
+        entry
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMultiUsingOutputSlot(_, _))),
+        "outer should retain dynamic output-slot feval; instructions={:?}",
+        entry.instructions
+    );
+    let vars = interpret(&bytecode).expect("execute bytecode");
+    assert!(
+        has_num(&vars, 15.0),
+        "expected first forwarded output; vars={vars:?}"
+    );
+    assert!(
+        has_num(&vars, 25.0),
+        "expected second forwarded output; vars={vars:?}"
+    );
+}
+
+#[test]
 fn unresolved_external_function_handle_multi_output_feval_fails_without_legacy_fallback() {
     let err = execute_source_result("h = @definitely_missing_callback; [a,b] = feval(h, 1);")
         .expect_err("unresolved external callback should fail");
@@ -1384,6 +1508,26 @@ fn nested_function_calls() {
         })
         .expect("spawn nested_function_calls thread");
     handle.join().expect("nested_function_calls thread failed");
+}
+
+#[test]
+fn nested_function_shared_lexical_scope_read_and_write() {
+    let program = r#"
+        function r = outer(a)
+            total = 100;
+            function y = add(x)
+                total = total + x;
+                y = total;
+            end
+            r1 = add(a);
+            r2 = add(1);
+            r = r1 + r2;
+        end
+        result = outer(5);
+    "#;
+    let vars = execute_source(program);
+    // total evolves: 100 -> 105 -> 106, so r = 105 + 106 = 211.
+    assert!(has_num(&vars, 211.0), "unexpected vars: {vars:?}");
 }
 
 #[test]

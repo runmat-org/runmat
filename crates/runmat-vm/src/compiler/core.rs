@@ -1,6 +1,6 @@
+use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
-use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
@@ -21,7 +21,14 @@ type ClassRegistration = (
     Option<String>,
     bool,
     bool,
-    Vec<(String, bool, bool, Option<PropertyDefaultLiteral>, String, String)>,
+    Vec<(
+        String,
+        bool,
+        bool,
+        Option<PropertyDefaultLiteral>,
+        String,
+        String,
+    )>,
     Vec<(String, String, bool, bool, bool, String)>,
     Vec<String>,
 );
@@ -29,6 +36,21 @@ type MirCellEndOffsets = Vec<(usize, isize)>;
 type MirCellEndExprs = Vec<(usize, EndExpr)>;
 type MirCellSelectorCompileResult = (usize, bool, MirCellEndOffsets, MirCellEndExprs);
 type MirCellIndexCompileResult = (MirCellEndOffsets, MirCellEndExprs);
+
+#[derive(Clone, Copy)]
+enum ResolvedCallOutputCount {
+    Fixed(usize),
+    FromSlot(usize),
+}
+
+impl ResolvedCallOutputCount {
+    fn require_fixed(self, compiler: &Compiler, message: &str) -> Result<usize, CompileError> {
+        match self {
+            ResolvedCallOutputCount::Fixed(count) => Ok(count),
+            ResolvedCallOutputCount::FromSlot(_) => Err(compiler.compile_error(message)),
+        }
+    }
+}
 
 pub struct Compiler {
     pub instructions: Vec<Instr>,
@@ -443,11 +465,12 @@ fn hir_property_default_to_value(expr: &runmat_hir::HirExpr) -> Option<PropertyD
     }
 
     match &expr.kind {
-        runmat_hir::HirExprKind::Number(text) => text
-            .parse::<f64>()
-            .ok()
-            .map(PropertyDefaultLiteral::Num),
-        runmat_hir::HirExprKind::String(text) => Some(PropertyDefaultLiteral::String(text.0.clone())),
+        runmat_hir::HirExprKind::Number(text) => {
+            text.parse::<f64>().ok().map(PropertyDefaultLiteral::Num)
+        }
+        runmat_hir::HirExprKind::String(text) => {
+            Some(PropertyDefaultLiteral::String(text.0.clone()))
+        }
         runmat_hir::HirExprKind::Constant(name) if name.0.eq_ignore_ascii_case("true") => {
             Some(PropertyDefaultLiteral::Bool(true))
         }
@@ -1356,6 +1379,46 @@ impl Compiler {
         }
         match &call.callee {
             MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
+                // Session-resolved semantic calls can target functions compiled in prior
+                // submissions; those do not exist in the current assembly layout and should
+                // compile as regular semantic calls without nested-capture wiring.
+                let captures = self
+                    .layout
+                    .as_ref()
+                    .and_then(|layout| layout.functions.get(function))
+                    .map(|layout| layout.captures.clone())
+                    .unwrap_or_default();
+                let current_function = self
+                    .function
+                    .ok_or_else(|| self.compile_error("compiler missing selected function"))?;
+                let is_nested_lexical = captures
+                    .iter()
+                    .all(|capture| capture.from_function == current_function);
+                if is_nested_lexical && !captures.is_empty() {
+                    let capture_slots = captures
+                        .iter()
+                        .map(|capture| self.binding_slot(capture.binding))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    for arg in &call.args {
+                        self.compile_mir_call_arg(arg)?;
+                    }
+                    if has_expansion {
+                        self.emit(Instr::CallSemanticNestedFunctionExpandMultiOutput {
+                            function: *function,
+                            capture_slots,
+                            specs,
+                            out_count: output_count,
+                        });
+                    } else {
+                        self.emit(Instr::CallSemanticNestedFunctionMulti {
+                            function: *function,
+                            capture_slots,
+                            arg_count: call.args.len(),
+                            out_count: output_count,
+                        });
+                    }
+                    return Ok(());
+                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1374,7 +1437,7 @@ impl Compiler {
                 ));
             }
             MirCallee::Dynamic(_) => {
-                self.compile_mir_operand(match &call.callee {
+                self.compile_mir_dynamic_callee_operand(match &call.callee {
                     MirCallee::Dynamic(callee) => callee,
                     _ => unreachable!(),
                 })?;
@@ -2229,21 +2292,90 @@ impl Compiler {
         }
         match &call.callee {
             MirCallee::Static(CallableIdentity::BoundFunction(function)) => {
+                // Session-resolved semantic calls can target functions compiled in prior
+                // submissions; those do not exist in the current assembly layout and should
+                // compile as regular semantic calls without nested-capture wiring.
+                let captures = self
+                    .layout
+                    .as_ref()
+                    .and_then(|layout| layout.functions.get(function))
+                    .map(|layout| layout.captures.clone())
+                    .unwrap_or_default();
+                let current_function = self
+                    .function
+                    .ok_or_else(|| self.compile_error("compiler missing selected function"))?;
+                let is_nested_lexical = captures
+                    .iter()
+                    .all(|capture| capture.from_function == current_function);
+                if is_nested_lexical && !captures.is_empty() {
+                    let capture_slots = captures
+                        .iter()
+                        .map(|capture| self.binding_slot(capture.binding))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    for arg in &call.args {
+                        self.compile_mir_call_arg(arg)?;
+                    }
+                    if has_expansion {
+                        let out_count = requested_outputs.require_fixed(
+                            self,
+                            "dynamic output count is not supported for expanded nested semantic calls",
+                        )?;
+                        self.emit(Instr::CallSemanticNestedFunctionExpandMultiOutput {
+                            function: *function,
+                            capture_slots,
+                            specs,
+                            out_count,
+                        });
+                    } else {
+                        match requested_outputs {
+                            ResolvedCallOutputCount::Fixed(out_count) => {
+                                self.emit(Instr::CallSemanticNestedFunctionMulti {
+                                    function: *function,
+                                    capture_slots,
+                                    arg_count: call.args.len(),
+                                    out_count,
+                                });
+                            }
+                            ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                                self.emit(Instr::CallSemanticNestedFunctionMultiUsingOutputSlot {
+                                    function: *function,
+                                    capture_slots,
+                                    arg_count: call.args.len(),
+                                    out_count_slot,
+                                });
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
+                    let out_count = requested_outputs.require_fixed(
+                        self,
+                        "dynamic output count is not supported for expanded semantic calls",
+                    )?;
                     self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                        *function,
-                        specs,
-                        requested_outputs,
+                        *function, specs, out_count,
                     ));
                 } else {
-                    self.emit(Instr::CallSemanticFunctionMulti(
-                        *function,
-                        call.args.len(),
-                        requested_outputs,
-                    ));
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit(Instr::CallSemanticFunctionMulti(
+                                *function,
+                                call.args.len(),
+                                out_count,
+                            ));
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit(Instr::CallSemanticFunctionMultiUsingOutputSlot(
+                                *function,
+                                call.args.len(),
+                                out_count_slot,
+                            ));
+                        }
+                    }
                 }
             }
             MirCallee::SuperConstructor {
@@ -2253,6 +2385,10 @@ impl Compiler {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
+                let requested_outputs = requested_outputs.require_fixed(
+                    self,
+                    "dynamic output count is not supported for super constructor calls",
+                )?;
                 if has_expansion {
                     self.emit(Instr::CallSuperConstructorExpandMultiOutput {
                         current_class: current_class.clone(),
@@ -2277,6 +2413,10 @@ impl Compiler {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
+                let requested_outputs = requested_outputs.require_fixed(
+                    self,
+                    "dynamic output count is not supported for super method calls",
+                )?;
                 if has_expansion {
                     self.emit(Instr::CallSuperMethodExpandMultiOutput {
                         current_class: current_class.clone(),
@@ -2296,14 +2436,34 @@ impl Compiler {
                 }
             }
             MirCallee::Dynamic(callee) => {
-                self.compile_mir_operand(callee)?;
+                self.compile_mir_dynamic_callee_operand(callee)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallFevalExpandMultiOutput(specs, requested_outputs));
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit(Instr::CallFevalExpandMultiOutput(specs, out_count));
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit(Instr::CallFevalExpandMultiOutputUsingOutputSlot(
+                                specs,
+                                out_count_slot,
+                            ));
+                        }
+                    }
                 } else {
-                    self.emit(Instr::CallFevalMulti(call.args.len(), requested_outputs));
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit(Instr::CallFevalMulti(call.args.len(), out_count));
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit(Instr::CallFevalMultiUsingOutputSlot(
+                                call.args.len(),
+                                out_count_slot,
+                            ));
+                        }
+                    }
                 }
             }
             MirCallee::Static(CallableIdentity::Builtin(id)) => {
@@ -2312,17 +2472,28 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
+                    let requested_outputs = requested_outputs.require_fixed(
+                        self,
+                        "dynamic output count is not supported for expanded builtin calls",
+                    )?;
                     self.emit(Instr::CallBuiltinExpandMultiOutput(
                         name,
                         specs,
                         requested_outputs,
                     ));
                 } else {
-                    self.emit(Instr::CallBuiltinMulti(
-                        name,
-                        call.args.len(),
-                        requested_outputs,
-                    ));
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit(Instr::CallBuiltinMulti(name, call.args.len(), out_count));
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit(Instr::CallBuiltinMultiUsingOutputSlot(
+                                name,
+                                call.args.len(),
+                                out_count_slot,
+                            ));
+                        }
+                    }
                 }
             }
             MirCallee::Static(identity) => {
@@ -2347,6 +2518,10 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
+                    let requested_outputs = requested_outputs.require_fixed(
+                        self,
+                        "dynamic output count is not supported for expanded static calls",
+                    )?;
                     self.emit(Instr::CallFunctionExpandMultiOutput {
                         identity: identity.clone(),
                         fallback_policy,
@@ -2354,24 +2529,69 @@ impl Compiler {
                         out_count: requested_outputs,
                     });
                 } else {
-                    self.emit(Instr::CallFunctionMulti {
-                        identity: identity.clone(),
-                        fallback_policy,
-                        arg_count: call.args.len(),
-                        out_count: requested_outputs,
-                    });
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => {
+                            self.emit(Instr::CallFunctionMulti {
+                                identity: identity.clone(),
+                                fallback_policy,
+                                arg_count: call.args.len(),
+                                out_count,
+                            });
+                        }
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => {
+                            self.emit(Instr::CallFunctionMultiUsingOutputSlot {
+                                identity: identity.clone(),
+                                fallback_policy,
+                                arg_count: call.args.len(),
+                                out_count_slot,
+                            });
+                        }
+                    }
                 }
             }
         }
         Ok(())
     }
 
-    fn call_requested_output_count(&self, call: &MirCall) -> Result<usize, CompileError> {
-        Ok(call.requested_outputs.fixed_count())
+    fn call_requested_output_count(
+        &self,
+        call: &MirCall,
+    ) -> Result<ResolvedCallOutputCount, CompileError> {
+        match call.requested_outputs {
+            RequestedOutputCount::CurrentFunctionNargout => {
+                let slot = self.current_function_nargout_slot()?;
+                Ok(ResolvedCallOutputCount::FromSlot(slot))
+            }
+            _ => Ok(ResolvedCallOutputCount::Fixed(
+                call.requested_outputs.fixed_count(),
+            )),
+        }
     }
 
-    fn resolved_call_output_count(&self, call: &MirCall) -> Result<usize, CompileError> {
+    fn resolved_call_output_count(
+        &self,
+        call: &MirCall,
+    ) -> Result<ResolvedCallOutputCount, CompileError> {
         self.call_requested_output_count(call)
+    }
+
+    fn current_function_nargout_slot(&self) -> Result<usize, CompileError> {
+        let layout = self
+            .layout
+            .as_ref()
+            .ok_or_else(|| self.compile_error("compiler missing VM layout"))?;
+        let function = self
+            .function
+            .ok_or_else(|| self.compile_error("compiler missing selected function"))?;
+        let function_layout = layout.functions.get(&function).ok_or_else(|| {
+            self.compile_error(format!("missing VM layout for function {function:?}"))
+        })?;
+        let slot = function_layout.frame_abi.implicit_nargout.ok_or_else(|| {
+            self.compile_error(
+                "dynamic requested output count requires function implicit nargout slot",
+            )
+        })?;
+        Ok(slot.0)
     }
 
     fn output_count_for_targets(
@@ -2459,7 +2679,10 @@ impl Compiler {
         }
         if has_expansion {
             let (specs, _) = self.mir_call_arg_specs(&call.args);
-            let output_count = self.resolved_call_output_count(call)?;
+            let output_count = self.resolved_call_output_count(call)?.require_fixed(
+                self,
+                "dynamic output count is not supported for expanded method/member calls",
+            )?;
             self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput {
                 identity,
                 fallback_policy,
@@ -2469,7 +2692,10 @@ impl Compiler {
             return Ok(());
         }
         let argc = call.args.len().saturating_sub(1);
-        let output_count = self.resolved_call_output_count(call)?;
+        let output_count = self.resolved_call_output_count(call)?.require_fixed(
+            self,
+            "dynamic output count is not supported for method/member calls",
+        )?;
         self.emit(Instr::CallMethodOrMemberIndexMulti {
             identity,
             fallback_policy,
@@ -3262,6 +3488,18 @@ impl Compiler {
         }
     }
 
+    fn compile_mir_dynamic_callee_operand(
+        &mut self,
+        operand: &MirOperand,
+    ) -> Result<(), CompileError> {
+        if let Some(name) = callback_name_from_mir_operand(operand) {
+            if self.compile_semantic_function_handle_for_name(&name)? {
+                return Ok(());
+            }
+        }
+        self.compile_mir_operand(operand)
+    }
+
     fn compile_mir_function_handle(
         &mut self,
         target: &CallableIdentity,
@@ -3354,6 +3592,61 @@ impl Compiler {
         }
     }
 
+    fn compile_semantic_function_handle_for_name(
+        &mut self,
+        name: &str,
+    ) -> Result<bool, CompileError> {
+        let Some((function, captures, display_name)) =
+            self.resolve_visible_semantic_function_layout(name)
+        else {
+            return Ok(false);
+        };
+        if captures.is_empty() {
+            self.emit(Instr::CreateBoundFunctionHandle(function, display_name));
+            return Ok(true);
+        }
+        for capture in &captures {
+            let slot = self.binding_slot(capture.binding)?;
+            self.emit(Instr::LoadVar(slot));
+        }
+        self.emit(Instr::CreateSemanticClosure(
+            function,
+            display_name,
+            captures.len(),
+        ));
+        Ok(true)
+    }
+
+    fn resolve_visible_semantic_function_layout(
+        &self,
+        name: &str,
+    ) -> Option<(FunctionId, Vec<crate::layout::VmCaptureSlot>, String)> {
+        let layout = self.layout.as_ref()?;
+        let current_function = self.function;
+        let mut ids: Vec<_> = layout.functions.keys().copied().collect();
+        ids.sort_by_key(|id| id.0);
+        ids.into_iter().find_map(|function| {
+            let function_layout = layout.functions.get(&function)?;
+            if function_layout.display_name != name {
+                return None;
+            }
+            let visible = function_layout.captures.is_empty()
+                || current_function.is_some_and(|current| {
+                    function_layout
+                        .captures
+                        .iter()
+                        .all(|capture| capture.from_function == current)
+                });
+            visible.then(|| {
+                (
+                    function,
+                    function_layout.captures.clone(),
+                    function_layout.display_name.clone(),
+                )
+            })
+        })
+    }
+
     fn mir_place_slot(&self, place: &MirPlace) -> Result<usize, CompileError> {
         match place {
             MirPlace::Local(local) => self.mir_local_slot(*local),
@@ -3434,14 +3727,32 @@ impl Compiler {
     }
 }
 
-fn emit_string_literal(compiler: &mut Compiler, value: &str) {
+fn callback_name_from_mir_operand(operand: &MirOperand) -> Option<String> {
+    let MirOperand::Constant(MirConstant::String(value)) = operand else {
+        return None;
+    };
+    let text = string_literal_runtime_text(&value.0);
+    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn string_literal_runtime_text(value: &str) -> String {
     if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
         let inner = &value[1..value.len() - 1];
-        compiler.emit(Instr::LoadString(inner.replace("\"\"", "\"")));
+        inner.replace("\"\"", "\"")
     } else if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
         let inner = &value[1..value.len() - 1];
-        compiler.emit(Instr::LoadCharRow(inner.replace("''", "'")));
+        inner.replace("''", "'")
     } else {
-        compiler.emit(Instr::LoadString(value.to_string()));
+        value.to_string()
+    }
+}
+
+fn emit_string_literal(compiler: &mut Compiler, value: &str) {
+    let text = string_literal_runtime_text(value);
+    if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
+        compiler.emit(Instr::LoadCharRow(text));
+    } else {
+        compiler.emit(Instr::LoadString(text));
     }
 }

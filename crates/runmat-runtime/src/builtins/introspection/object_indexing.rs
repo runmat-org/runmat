@@ -138,16 +138,19 @@ pub(crate) async fn dispatch_subsref(
 ) -> crate::BuiltinResult<Value> {
     match obj {
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
-                crate::runtime_descriptor_error("subsref", &SUBSREF_ERRORS[0])
-            })?;
+            let class_name = crate::object_receiver_class_name(&receiver)
+                .ok_or_else(|| crate::runtime_descriptor_error("subsref", &SUBSREF_ERRORS[0]))?;
             let dispatch_receiver = receiver.clone();
             let dispatch_kind = kind.clone();
             let dispatch_payload = payload.clone();
             match crate::dispatch_object_external_member(
                 class_name,
                 crate::OBJECT_SUBSREF_METHOD,
-                vec![dispatch_receiver, Value::String(dispatch_kind), dispatch_payload],
+                vec![
+                    dispatch_receiver,
+                    Value::String(dispatch_kind),
+                    dispatch_payload,
+                ],
                 crate::current_requested_outputs(),
             )
             .await
@@ -169,7 +172,10 @@ pub(crate) async fn dispatch_subsref(
                             .await;
                         }
                     }
-                    Err(crate::runtime_descriptor_error("subsref", &SUBSREF_ERRORS[1]))
+                    Err(crate::runtime_descriptor_error(
+                        "subsref",
+                        &SUBSREF_ERRORS[1],
+                    ))
                 }
                 Err(err) => Err(err),
             }
@@ -240,12 +246,12 @@ pub(crate) async fn dispatch_subsasgn(
                 Err(err) => Err(err),
             }
         }
-        other => Err(crate::build_runtime_error(format!(
-            "receiver must be object, got {other:?}"
-        ))
-        .with_builtin("subsasgn")
-        .with_identifier("RunMat:InvalidObjectDispatch")
-        .build()),
+        other => Err(
+            crate::build_runtime_error(format!("receiver must be object, got {other:?}"))
+                .with_builtin("subsasgn")
+                .with_identifier("RunMat:InvalidObjectDispatch")
+                .build(),
+        ),
     }
 }
 
@@ -257,7 +263,11 @@ pub(crate) async fn dispatch_subsasgn(
     descriptor(crate::builtins::introspection::object_indexing::SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::object_indexing"
 )]
-pub async fn subsref_builtin(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+pub async fn subsref_builtin(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> crate::BuiltinResult<Value> {
     dispatch_subsref(obj, kind, payload).await
 }
 

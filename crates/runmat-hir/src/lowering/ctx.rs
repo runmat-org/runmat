@@ -1,3 +1,7 @@
+use crate::hir::{
+    FunctionArgDefaultValue, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidator,
+    FunctionArgumentValidation,
+};
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
@@ -9,10 +13,11 @@ use crate::{
     HirEntrypoint, HirError, HirExpr, HirExprKind, HirFunction, HirImport, HirIndex, HirModule,
     HirPlace, HirStmt as HirStmtNode, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
     IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, MemberAccess,
-    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
-    ReferenceResolution, RequestedOutputCount, SourceId, SourceUnitKind, Span, StmtId,
-    StringLiteral, SymbolName, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    MemberName, ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind,
+    QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount, SourceId,
+    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
+    WorkspaceVisibility, AWAIT_EXTENSION_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME,
+    SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -32,6 +37,15 @@ const IDENT_CLASS_MEMBER_NAME_CONFLICT: &str = "RunMat:ClassMemberNameConflict";
 const IDENT_AGGREGATE_SHAPE_MISMATCH: &str = "RunMat:AggregateShapeMismatch";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN: &str = "RunMat:FunctionArgumentValidationUnknown";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_DUPLICATE: &str =
+    "RunMat:FunctionArgumentValidationDuplicate";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNSUPPORTED: &str =
+    "RunMat:FunctionArgumentValidationUnsupported";
+const IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR: &str =
+    "RunMat:FunctionArgumentValidationUnknownValidator";
+const IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED: &str =
+    "RunMat:FunctionArgumentDefaultUnsupported";
 
 #[derive(Clone)]
 struct ScopeFrame {
@@ -65,6 +79,7 @@ struct LowerFunctionSpec<'a> {
     name: &'a str,
     params: &'a [String],
     outputs: &'a [String],
+    argument_validations: &'a [runmat_parser::FunctionArgValidationDecl],
     body: &'a [AstStmt],
     span: Span,
     kind: FunctionKind,
@@ -100,7 +115,9 @@ impl LoweringCtx {
                 }
             }
         }
-        if let Some((property, _owner)) = runmat_builtins::lookup_property(class_name, property_name) {
+        if let Some((property, _owner)) =
+            runmat_builtins::lookup_property(class_name, property_name)
+        {
             return property.is_static
                 && property.get_access == runmat_builtins::Access::Public
                 && property.set_access == runmat_builtins::Access::Public;
@@ -260,6 +277,7 @@ impl LoweringCtx {
                     name,
                     params,
                     outputs,
+                    argument_validations,
                     body,
                     isolated,
                     is_async,
@@ -271,6 +289,7 @@ impl LoweringCtx {
                         name,
                         params,
                         outputs,
+                        argument_validations,
                         body,
                         span: *span,
                         kind: FunctionKind::Named,
@@ -290,13 +309,8 @@ impl LoweringCtx {
                     members,
                     span,
                 } => {
-                    let class = ctx.lower_class(
-                        attributes,
-                        name,
-                        super_class.as_deref(),
-                        members,
-                        *span,
-                    )?;
+                    let class =
+                        ctx.lower_class(attributes, name, super_class.as_deref(), members, *span)?;
                     ctx.assembly.classes.push(class);
                 }
                 _ => {}
@@ -342,6 +356,7 @@ impl LoweringCtx {
                 params: vec![],
                 outputs: vec![],
                 abi: FunctionAbi::empty(),
+                argument_validations: vec![],
                 locals,
                 captures: vec![],
                 modifiers: FunctionModifiers::default(),
@@ -596,6 +611,7 @@ impl LoweringCtx {
             name,
             params,
             outputs,
+            argument_validations,
             body,
             span,
             kind,
@@ -646,12 +662,89 @@ impl LoweringCtx {
                     BindingStorage::Lexical,
                     span,
                 ));
+                let mut argument_validations_hir = Vec::with_capacity(argument_validations.len());
+                let mut seen_argument_validation_bindings = HashSet::new();
+                for decl in argument_validations {
+                    if decl.has_unsupported_trailing {
+                        return Err(
+                            HirError::new("unsupported arguments-block validator syntax")
+                                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNSUPPORTED)
+                                .with_span(span),
+                        );
+                    }
+                    let Some(binding) = ctx.lookup_binding(&decl.name) else {
+                        return Err(HirError::new(format!(
+                            "arguments block declaration '{}' does not match a function input",
+                            decl.name
+                        ))
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN)
+                        .with_span(span));
+                    };
+                    if !param_ids.contains(&binding) {
+                        return Err(HirError::new(format!(
+                            "arguments block declaration '{}' must reference an input parameter",
+                            decl.name
+                        ))
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN)
+                        .with_span(span));
+                    }
+                    if !seen_argument_validation_bindings.insert(binding) {
+                        return Err(HirError::new(format!(
+                            "arguments block declaration '{}' appears more than once",
+                            decl.name
+                        ))
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_DUPLICATE)
+                        .with_span(span));
+                    }
+                    let default_value = match &decl.default_value {
+                        None => None,
+                        Some(expr) => Some(Self::lower_function_argument_default(expr, span)?),
+                    };
+                    let mut parser_validators = decl.validators.clone();
+                    let mut class_name = decl.class_name.clone();
+                    if parser_validators.is_empty() {
+                        if let Some(name) = decl.class_name.as_deref() {
+                            if Self::is_builtin_function_argument_validator(name) {
+                                class_name = None;
+                                parser_validators.push(runmat_parser::FunctionArgValidatorDecl {
+                                    name: name.to_string(),
+                                    args: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+                    let mut validators = Vec::with_capacity(parser_validators.len());
+                    for validator in &parser_validators {
+                        validators.push(Self::lower_function_argument_validator(validator, span)?);
+                    }
+                    argument_validations_hir.push(FunctionArgumentValidation {
+                        binding,
+                        size: decl.size.as_ref().map(|size| FunctionArgSizeSpec {
+                            rows: match size.rows {
+                                runmat_parser::FunctionArgDim::Any => FunctionArgDim::Any,
+                                runmat_parser::FunctionArgDim::Exact(value) => {
+                                    FunctionArgDim::Exact(value)
+                                }
+                            },
+                            cols: match size.cols {
+                                runmat_parser::FunctionArgDim::Any => FunctionArgDim::Any,
+                                runmat_parser::FunctionArgDim::Exact(value) => {
+                                    FunctionArgDim::Exact(value)
+                                }
+                            },
+                        }),
+                        class_name,
+                        validators,
+                        default_value,
+                    });
+                }
                 let hir_body = ctx.lower_stmts_semantic(body)?;
                 for stmt in body {
                     if let AstStmt::Function {
                         name,
                         params,
                         outputs,
+                        argument_validations,
                         body,
                         isolated,
                         is_async,
@@ -664,6 +757,7 @@ impl LoweringCtx {
                             name,
                             params,
                             outputs,
+                            argument_validations,
                             body,
                             span: *span,
                             kind: FunctionKind::Named,
@@ -715,6 +809,7 @@ impl LoweringCtx {
                         implicit_nargin,
                         implicit_nargout,
                     },
+                    argument_validations: argument_validations_hir,
                     locals,
                     captures,
                     modifiers,
@@ -794,7 +889,12 @@ impl LoweringCtx {
                     let parse_abstract_signature =
                         |stmt: &AstStmt| -> Option<(String, Vec<String>, Vec<String>, Span)> {
                             match stmt {
-                                AstStmt::Assign(output, AstExpr::FuncCall(method_name, args, _), _, span) => {
+                                AstStmt::Assign(
+                                    output,
+                                    AstExpr::FuncCall(method_name, args, _),
+                                    _,
+                                    span,
+                                ) => {
                                     let params = args
                                         .iter()
                                         .map(|arg| match arg {
@@ -804,7 +904,11 @@ impl LoweringCtx {
                                         .collect::<Option<Vec<_>>>()?;
                                     Some((method_name.clone(), params, vec![output.clone()], *span))
                                 }
-                                AstStmt::ExprStmt(AstExpr::FuncCall(method_name, args, _), _, span) => {
+                                AstStmt::ExprStmt(
+                                    AstExpr::FuncCall(method_name, args, _),
+                                    _,
+                                    span,
+                                ) => {
                                     let params = args
                                         .iter()
                                         .map(|arg| match arg {
@@ -822,6 +926,7 @@ impl LoweringCtx {
                             name: method_name,
                             params,
                             outputs,
+                            argument_validations: _argument_validations,
                             body,
                             isolated,
                             is_async,
@@ -835,6 +940,7 @@ impl LoweringCtx {
                                 name: &qualified_method_name,
                                 params,
                                 outputs,
+                                argument_validations: &[],
                                 body,
                                 span: *span,
                                 kind: FunctionKind::ClassMethod { is_static },
@@ -880,6 +986,7 @@ impl LoweringCtx {
                                 name: &qualified_method_name,
                                 params: &params,
                                 outputs: &outputs,
+                                argument_validations: &[],
                                 body: &[],
                                 span: method_span,
                                 kind: FunctionKind::ClassMethod { is_static },
@@ -1011,6 +1118,141 @@ impl LoweringCtx {
         })
     }
 
+    fn lower_function_argument_default(
+        expr: &AstExpr,
+        span: Span,
+    ) -> Result<FunctionArgDefaultValue, HirError> {
+        match expr {
+            AstExpr::Number(_, _) | AstExpr::Unary(UnOp::Plus, _, _) | AstExpr::Unary(UnOp::Minus, _, _) => {
+                let parsed = Self::lower_validator_numeric_literal_expr(expr).ok_or_else(|| {
+                    HirError::new("arguments default value must be a numeric literal")
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED)
+                        .with_span(span)
+                })?;
+                Ok(FunctionArgDefaultValue::Number(parsed))
+            }
+            AstExpr::String(value, _) => {
+                let unquoted = value
+                    .strip_prefix('"')
+                    .and_then(|rest| rest.strip_suffix('"'))
+                    .or_else(|| value.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')))
+                    .unwrap_or(value)
+                    .to_string();
+                Ok(FunctionArgDefaultValue::String(unquoted))
+            }
+            AstExpr::Ident(name, _) if name.eq_ignore_ascii_case("true") => {
+                Ok(FunctionArgDefaultValue::Bool(true))
+            }
+            AstExpr::Ident(name, _) if name.eq_ignore_ascii_case("false") => {
+                Ok(FunctionArgDefaultValue::Bool(false))
+            }
+            AstExpr::Tensor(rows, _) if rows.is_empty() || rows.iter().all(Vec::is_empty) => {
+                Ok(FunctionArgDefaultValue::EmptyArray)
+            }
+            _ => Err(HirError::new(
+                "unsupported arguments default value; expected literal number, string, true, false, or []",
+            )
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_DEFAULT_UNSUPPORTED)
+            .with_span(span)),
+        }
+    }
+
+    fn lower_function_argument_validator(
+        validator: &runmat_parser::FunctionArgValidatorDecl,
+        span: Span,
+    ) -> Result<FunctionArgValidator, HirError> {
+        match validator.name.as_str() {
+            "mustBeFinite" => Ok(FunctionArgValidator::Finite),
+            "mustBeNumericOrLogical" => Ok(FunctionArgValidator::NumericOrLogical),
+            "mustBeText" => Ok(FunctionArgValidator::Text),
+            "mustBeNonempty" => Ok(FunctionArgValidator::Nonempty),
+            "mustBeScalarOrEmpty" => Ok(FunctionArgValidator::ScalarOrEmpty),
+            "mustBeReal" => Ok(FunctionArgValidator::Real),
+            "mustBeInteger" => Ok(FunctionArgValidator::Integer),
+            "mustBePositive" => Ok(FunctionArgValidator::Positive),
+            "mustBeNegative" => Ok(FunctionArgValidator::Negative),
+            "mustBeNonnegative" => Ok(FunctionArgValidator::Nonnegative),
+            "mustBeNonzero" => Ok(FunctionArgValidator::Nonzero),
+            "mustBeNonpositive" => Ok(FunctionArgValidator::Nonpositive),
+            "mustBeGreaterThanOrEqual" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::GreaterThanOrEqual(threshold))
+            }
+            "mustBeLessThanOrEqual" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::LessThanOrEqual(threshold))
+            }
+            "mustBeGreaterThan" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::GreaterThan(threshold))
+            }
+            "mustBeLessThan" => {
+                let threshold = Self::lower_validator_numeric_threshold(&validator.args, span)?;
+                Ok(FunctionArgValidator::LessThan(threshold))
+            }
+            _ => Err(HirError::new(format!(
+                "unsupported arguments validator '{}'",
+                validator.name
+            ))
+            .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+            .with_span(span)),
+        }
+    }
+
+    fn lower_validator_numeric_threshold(args: &[AstExpr], span: Span) -> Result<f64, HirError> {
+        let threshold_expr = match args {
+            [value] => value,
+            [_, value] => value,
+            _ => {
+                return Err(
+                    HirError::new("validator requires one numeric threshold argument")
+                        .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                        .with_span(span),
+                )
+            }
+        };
+        Self::lower_validator_numeric_literal_expr(threshold_expr).ok_or_else(|| {
+            HirError::new("validator threshold must be a numeric literal")
+                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
+                .with_span(span)
+        })
+    }
+
+    fn lower_validator_numeric_literal_expr(expr: &AstExpr) -> Option<f64> {
+        match expr {
+            AstExpr::Number(value, _) => value.parse::<f64>().ok(),
+            AstExpr::Unary(UnOp::Plus, inner, _) => {
+                Self::lower_validator_numeric_literal_expr(inner)
+            }
+            AstExpr::Unary(UnOp::Minus, inner, _) => {
+                Self::lower_validator_numeric_literal_expr(inner).map(|value| -value)
+            }
+            _ => None,
+        }
+    }
+
+    fn is_builtin_function_argument_validator(name: &str) -> bool {
+        matches!(
+            name,
+            "mustBeFinite"
+                | "mustBeNumericOrLogical"
+                | "mustBeText"
+                | "mustBeNonempty"
+                | "mustBeScalarOrEmpty"
+                | "mustBeReal"
+                | "mustBeInteger"
+                | "mustBePositive"
+                | "mustBeNegative"
+                | "mustBeNonnegative"
+                | "mustBeNonzero"
+                | "mustBeNonpositive"
+                | "mustBeGreaterThanOrEqual"
+                | "mustBeLessThanOrEqual"
+                | "mustBeGreaterThan"
+                | "mustBeLessThan"
+        )
+    }
+
     fn lower_stmt_refs(&mut self, stmts: &[&AstStmt]) -> Result<HirBlock, HirError> {
         let mut statements = Vec::new();
         for stmt in stmts {
@@ -1056,26 +1298,59 @@ impl LoweringCtx {
                     *suppressed,
                 )
             }
-            AstStmt::MultiAssign(names, expr, suppressed, _) => {
-                let targets = names
+            AstStmt::MultiAssign(targets, expr, suppressed, _) => {
+                if let [runmat_parser::MultiAssignTarget::LValue(lvalue)] = targets.as_slice() {
+                    let deletion = lvalue_supports_deletion(lvalue) && is_empty_array_expr(expr);
+                    let place = self.lower_lvalue_semantic(lvalue, span, deletion)?;
+                    let kind = mutation_kind_for_place(&place, deletion);
+                    let creation_policy = creation_policy_for_place(&place, deletion);
+                    self.record_mutation(
+                        place.clone(),
+                        kind,
+                        creation_policy,
+                        AssignmentShapePolicy::MatlabCompatible,
+                    );
+                    let requested = requested_outputs_for_lvalue_assignment(lvalue, expr);
+                    return Ok(Some(HirStmtNode {
+                        id: self.alloc_stmt_id(),
+                        kind: HirStmtKind::Assign(
+                            place,
+                            self.lower_expr_semantic_requested(expr, requested)?,
+                            *suppressed,
+                        ),
+                        span,
+                    }));
+                }
+                let lowered_targets = targets
                     .iter()
-                    .map(|name| {
-                        if name == DISCARD_OUTPUT_NAME {
-                            crate::OutputTarget::Discard
-                        } else {
-                            let binding = self.binding_for_write(name, span);
-                            crate::OutputTarget::Place(HirPlace::Binding(binding))
+                    .map(|target| -> Result<crate::OutputTarget, HirError> {
+                        match target {
+                            runmat_parser::MultiAssignTarget::Discard => {
+                                Ok(crate::OutputTarget::Discard)
+                            }
+                            runmat_parser::MultiAssignTarget::LValue(lvalue) => {
+                                let place = self.lower_lvalue_semantic(lvalue, span, false)?;
+                                let kind = mutation_kind_for_place(&place, false);
+                                let creation_policy = creation_policy_for_place(&place, false);
+                                self.record_mutation(
+                                    place.clone(),
+                                    kind,
+                                    creation_policy,
+                                    AssignmentShapePolicy::MatlabCompatible,
+                                );
+                                Ok(crate::OutputTarget::Place(place))
+                            }
                         }
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, HirError>>()?;
                 HirStmtKind::MultiAssign(
                     crate::OutputTargetList {
-                        requested_outputs: RequestedOutputCount::Exactly(names.len()),
-                        targets,
+                        requested_outputs: RequestedOutputCount::Exactly(lowered_targets.len()),
+                        targets: lowered_targets,
                     },
                     self.lower_expr_semantic_requested(
                         expr,
-                        RequestedOutputCount::Exactly(names.len()),
+                        RequestedOutputCount::Exactly(targets.len()),
                     )?,
                     *suppressed,
                 )
@@ -1584,6 +1859,7 @@ impl LoweringCtx {
                                 implicit_nargin: None,
                                 implicit_nargout: None,
                             },
+                            argument_validations: vec![],
                             locals,
                             captures: ctx.captures.remove(&function_id).unwrap_or_default(),
                             modifiers: FunctionModifiers::default(),
@@ -1779,9 +2055,7 @@ impl LoweringCtx {
                         let mut call_args = vec![classref];
                         call_args.extend(
                             args.iter()
-                                .map(|arg| {
-                                    self.lower_call_argument(arg, RequestedOutputCount::One)
-                                })
+                                .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
                                 .collect::<Result<Vec<_>, _>>()?,
                         );
                         return Ok(HirExpr {
@@ -1978,8 +2252,9 @@ impl LoweringCtx {
         } else {
             None
         };
-        let constructor_name_override =
-            imported_constructor.as_ref().map(|(qualified, _)| qualified.as_str());
+        let constructor_name_override = imported_constructor
+            .as_ref()
+            .map(|(qualified, _)| qualified.as_str());
         let (callee, kind) = if let Some(class) = constructor_class {
             let constructor_name = constructor_name_override.unwrap_or(name);
             let constructor_qualified_name = qualified_name(
@@ -2243,14 +2518,14 @@ impl LoweringCtx {
         if let Some((qualified_constructor, _)) =
             self.resolve_imported_constructor_target(name, span)?
         {
-            return Ok(crate::FunctionHandleTarget::DefPath(def_path_for_import_path(
-                &qualified_name(
+            return Ok(crate::FunctionHandleTarget::DefPath(
+                def_path_for_import_path(&qualified_name(
                     &qualified_constructor
                         .split('.')
                         .map(ToString::to_string)
                         .collect::<Vec<_>>(),
-                ),
-            )));
+                )),
+            ));
         }
         if name.contains('.') {
             let mut parts = name.split('.');
@@ -2460,18 +2735,63 @@ fn requested_outputs_for_lvalue_assignment(
     if !matches!(expr, AstExpr::FuncCall(_, _, _) | AstExpr::Ident(_, _)) {
         return RequestedOutputCount::One;
     }
+    if lvalue_requires_current_nargout(lvalue) {
+        return RequestedOutputCount::CurrentFunctionNargout;
+    }
     static_lvalue_assignment_count(lvalue)
         .filter(|count| *count > 1)
         .map(RequestedOutputCount::Exactly)
         .unwrap_or(RequestedOutputCount::One)
 }
 
+fn lvalue_requires_current_nargout(lvalue: &runmat_parser::LValue) -> bool {
+    use runmat_parser::LValue;
+    let indices = match lvalue {
+        LValue::IndexCell(_, indices) => indices,
+        _ => return false,
+    };
+    indices.iter().any(expr_references_nargout)
+}
+
+fn expr_references_nargout(expr: &AstExpr) -> bool {
+    match expr {
+        AstExpr::Ident(name, _) => name == NARGOUT_BUILTIN_NAME,
+        AstExpr::Range(start, step, end, _) => {
+            expr_references_nargout(start)
+                || step.as_deref().is_some_and(expr_references_nargout)
+                || expr_references_nargout(end)
+        }
+        AstExpr::Binary(left, _, right, _) => {
+            expr_references_nargout(left) || expr_references_nargout(right)
+        }
+        AstExpr::Unary(_, inner, _) => expr_references_nargout(inner),
+        AstExpr::Tensor(rows, _) | AstExpr::Cell(rows, _) => rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(expr_references_nargout),
+        AstExpr::Index(base, indices, _) | AstExpr::IndexCell(base, indices, _) => {
+            expr_references_nargout(base) || indices.iter().any(expr_references_nargout)
+        }
+        AstExpr::FuncCall(_, args, _)
+        | AstExpr::MethodCall(_, _, args, _)
+        | AstExpr::DottedInvoke(_, _, args, _) => args.iter().any(expr_references_nargout),
+        AstExpr::Member(base, _, _) => expr_references_nargout(base),
+        AstExpr::MemberDynamic(base, name, _) => {
+            expr_references_nargout(base) || expr_references_nargout(name)
+        }
+        AstExpr::AnonFunc { body, .. } => expr_references_nargout(body),
+        _ => false,
+    }
+}
+
 fn static_lvalue_assignment_count(lvalue: &runmat_parser::LValue) -> Option<usize> {
     use runmat_parser::LValue;
     match lvalue {
-        LValue::Index(_, indices) => indices.iter().try_fold(1usize, |acc, index| {
-            static_index_component_count(index).map(|count| acc.saturating_mul(count))
-        }),
+        LValue::Index(_, indices) | LValue::IndexCell(_, indices) => {
+            indices.iter().try_fold(1usize, |acc, index| {
+                static_index_component_count(index).map(|count| acc.saturating_mul(count))
+            })
+        }
         _ => None,
     }
 }

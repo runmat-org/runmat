@@ -76,6 +76,13 @@ fn is_class_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
     })
 }
 
+fn is_function_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
+    !stmts.is_empty()
+        && stmts
+            .iter()
+            .all(|stmt| matches!(stmt, runmat_parser::Stmt::Function { .. }))
+}
+
 fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<String> {
     let relative = source_path.strip_prefix(root_dir).ok()?;
     let class_name = source_path.file_stem()?.to_str()?;
@@ -110,11 +117,36 @@ fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name
     }
 }
 
-fn source_index_qualified_class_name(source: &runmat_config::project::ProjectSourceFile) -> Option<&str> {
-    source
-        .package_path
-        .as_ref()
-        .and_then(|_| source.qualified_name.contains('.').then_some(source.qualified_name.as_str()))
+fn qualify_companion_functions(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
+    for stmt in stmts {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            if !name.contains('.') {
+                *name = qualified_name.to_string();
+            }
+        }
+    }
+}
+
+fn source_index_qualified_function_name(
+    source: &runmat_config::project::ProjectSourceFile,
+) -> Option<&str> {
+    source.package_path.as_ref().and_then(|_| {
+        source
+            .qualified_name
+            .contains('.')
+            .then_some(source.qualified_name.as_str())
+    })
+}
+
+fn source_index_qualified_class_name(
+    source: &runmat_config::project::ProjectSourceFile,
+) -> Option<&str> {
+    source.package_path.as_ref().and_then(|_| {
+        source
+            .qualified_name
+            .contains('.')
+            .then_some(source.qualified_name.as_str())
+    })
 }
 
 async fn discover_companion_from_composition_graph_async(
@@ -144,23 +176,34 @@ async fn discover_companion_from_composition_graph_async(
                     if file_path == primary_source_path {
                         continue;
                     }
-                    let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await else {
+                    let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await
+                    else {
                         continue;
                     };
-                    if !contents.contains("classdef") {
+                    if !contents.contains("classdef") && !contents.contains("function") {
                         continue;
                     }
                     let Ok(program) = parse_with_options(&contents, options) else {
                         continue;
                     };
-                    if !is_class_source_body(&program.body) {
+                    let is_class_source = is_class_source_body(&program.body);
+                    let is_function_source = is_function_source_body(&program.body);
+                    if !is_class_source && !is_function_source {
                         continue;
                     }
                     let mut body = program.body;
-                    if let Some(qualified) = source_index_qualified_class_name(source) {
-                        qualify_companion_classdefs(&mut body, qualified);
+                    if is_class_source {
+                        if let Some(qualified) = source_index_qualified_class_name(source) {
+                            qualify_companion_classdefs(&mut body, qualified);
+                        } else if let Some(qualified) =
+                            package_class_name_from_path(&file_path, cwd)
+                        {
+                            qualify_companion_classdefs(&mut body, &qualified);
+                        }
+                    } else if let Some(qualified) = source_index_qualified_function_name(source) {
+                        qualify_companion_functions(&mut body, qualified);
                     } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
-                        qualify_companion_classdefs(&mut body, &qualified);
+                        qualify_companion_functions(&mut body, &qualified);
                     }
                     out.extend(body);
                 }
@@ -171,7 +214,7 @@ async fn discover_companion_from_composition_graph_async(
     out
 }
 
-pub(super) async fn discover_companion_class_source_statements_async(
+pub(super) async fn discover_companion_source_statements_async(
     source_name: &str,
     compat_mode: runmat_parser::CompatMode,
 ) -> Vec<runmat_parser::Stmt> {
@@ -223,18 +266,24 @@ pub(super) async fn discover_companion_class_source_statements_async(
             let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
                 continue;
             };
-            if !contents.contains("classdef") {
+            if !contents.contains("classdef") && !contents.contains("function") {
                 continue;
             }
             let Ok(program) = parse_with_options(&contents, options) else {
                 continue;
             };
-            if !is_class_source_body(&program.body) {
+            let is_class_source = is_class_source_body(&program.body);
+            let is_function_source = is_function_source_body(&program.body);
+            if !is_class_source && !is_function_source {
                 continue;
             }
             let mut body = program.body;
-            if let Some(qualified) = package_class_name_from_path(&path, parent) {
-                qualify_companion_classdefs(&mut body, &qualified);
+            if is_class_source {
+                if let Some(qualified) = package_class_name_from_path(&path, parent) {
+                    qualify_companion_classdefs(&mut body, &qualified);
+                }
+            } else if let Some(qualified) = package_class_name_from_path(&path, parent) {
+                qualify_companion_functions(&mut body, &qualified);
             }
             out.extend(body);
         }
@@ -270,8 +319,7 @@ impl RunMatSession {
                 .take()
                 .unwrap_or_default();
             if !companion.is_empty() {
-                companion.append(&mut ast.body);
-                ast.body = companion;
+                ast.body.append(&mut companion);
             }
             ast
         };
@@ -535,8 +583,18 @@ fn remap_semantic_function_instr(
     match instr {
         runmat_vm::Instr::CreateSemanticClosure(function, _, _)
         | runmat_vm::Instr::CreateBoundFunctionHandle(function, _)
+        | runmat_vm::Instr::CreateSemanticFuture(function, _, _)
+        | runmat_vm::Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
+        | runmat_vm::Instr::CallSemanticFunctionMultiUsingOutputSlot(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
+            if let Some(new_id) = remap.get(function).copied() {
+                *function = new_id;
+            }
+        }
+        runmat_vm::Instr::CallSemanticNestedFunctionMulti { function, .. }
+        | runmat_vm::Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
+        | runmat_vm::Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
             if let Some(new_id) = remap.get(function).copied() {
                 *function = new_id;
             }
@@ -638,7 +696,30 @@ fn bind_semantic_callback_literals(
                     }
                 }
             }
+            runmat_vm::Instr::CallFevalMultiUsingOutputSlot(argc, _) => {
+                let pops = *argc + 1;
+                if stack.len() >= pops {
+                    let producer = stack[stack.len() - pops];
+                    if let Some((function, display_name)) =
+                        callback_literal(bytecode.instructions.get(producer), registry)
+                    {
+                        replacements.push((producer, function, display_name));
+                    }
+                }
+            }
             runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
+                if let Some(effect) = instr.stack_effect() {
+                    if stack.len() >= effect.pops {
+                        let producer = stack[stack.len() - effect.pops];
+                        if let Some((function, display_name)) =
+                            callback_literal(bytecode.instructions.get(producer), registry)
+                        {
+                            replacements.push((producer, function, display_name));
+                        }
+                    }
+                }
+            }
+            runmat_vm::Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _) => {
                 if let Some(effect) = instr.stack_effect() {
                     if stack.len() >= effect.pops {
                         let producer = stack[stack.len() - effect.pops];

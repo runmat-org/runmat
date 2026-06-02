@@ -2503,7 +2503,9 @@ pub fn is_class_or_subclass(class_name: &str, ancestor_name: &str) -> bool {
         if name == ancestor_name {
             return true;
         }
-        current = reg.get(&name).and_then(|class_def| class_def.parent.clone());
+        current = reg
+            .get(&name)
+            .and_then(|class_def| class_def.parent.clone());
     }
     false
 }

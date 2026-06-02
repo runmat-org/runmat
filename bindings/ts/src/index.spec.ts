@@ -9,6 +9,7 @@ import {
   importFigureSceneFromPath,
   exportWorkspaceState,
   importWorkspaceState,
+  resetPlotState,
   createWorkspaceHoverProvider,
   createFusionPlanAdapter,
   type RunMatSessionHandle,
@@ -938,5 +939,25 @@ describe("signal trace helpers", () => {
     const result = withSignalTrace(undefined, "signal.process", () => 7);
     expect(result).toBe(7);
     expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+describe("resetPlotState", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+  });
+
+  it("delegates to the native module", async () => {
+    const spy = vi.fn();
+    const native: NativeModule = {
+      default: async () => {},
+      initRunMat: async () => createMockNativeSession(),
+      resetPlotState: spy
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await resetPlotState();
+
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

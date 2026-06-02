@@ -92,7 +92,9 @@ fn classdef_parses_class_level_attributes() {
     let src = "classdef (Sealed) A\nend";
     let stmt = single_stmt(src);
     match stmt {
-        Stmt::ClassDef { attributes, name, .. } => {
+        Stmt::ClassDef {
+            attributes, name, ..
+        } => {
             assert_eq!(name, "A");
             assert_eq!(attributes.len(), 1);
             assert_eq!(attributes[0].name, "Sealed");

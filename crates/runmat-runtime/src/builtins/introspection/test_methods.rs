@@ -1,12 +1,12 @@
 //! Test-only class/method builtins used by semantic and VM pipeline tests.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
-};
 use crate::{
     runtime_descriptor_error, runtime_descriptor_error_with_detail, OBJECT_INDEX_BRACE,
     OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
+};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
 
 const POINT_MOVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -408,7 +408,11 @@ pub const OVERIDX_SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     descriptor(self::OVERIDX_SUBSREF_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
-pub(crate) async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+pub(crate) async fn overidx_subsref(
+    obj: Value,
+    kind: String,
+    payload: Value,
+) -> crate::BuiltinResult<Value> {
     // Simple sentinel implementation: return different values for '.' vs '()'
     match (obj, kind.as_str(), payload) {
         (Value::Object(_), OBJECT_INDEX_PAREN, Value::Cell(_)) => Ok(Value::Num(99.0)),

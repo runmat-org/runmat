@@ -23,9 +23,8 @@ impl Drop for ClassAccessContextGuard {
 }
 
 pub fn push_class_access_context(class_name: Option<String>) -> ClassAccessContextGuard {
-    let previous = CLASS_ACCESS_CONTEXT.with(|slot| {
-        std::mem::replace(&mut *slot.borrow_mut(), class_name)
-    });
+    let previous =
+        CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name));
     ClassAccessContextGuard { previous }
 }
 
@@ -434,9 +433,8 @@ async fn call_registered_class_constructor(
     let requested_outputs = output_count.unwrap_or(1);
     let default_object = create_class_object(class_name.to_string()).await?;
     let constructor_method_name = class_name.rsplit('.').next().unwrap_or(class_name);
-    let Some((ctor, owner)) =
-        runmat_builtins::lookup_method(class_name, constructor_method_name)
-            .or_else(|| runmat_builtins::lookup_method(class_name, class_name))
+    let Some((ctor, owner)) = runmat_builtins::lookup_method(class_name, constructor_method_name)
+        .or_else(|| runmat_builtins::lookup_method(class_name, class_name))
     else {
         return Ok(default_object);
     };
@@ -558,7 +556,9 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
 mod tests {
     use super::{call_builtin, gather_if_needed_async, value_contains_gpu};
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
-    use runmat_builtins::{register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value};
+    use runmat_builtins::{
+        register_class, Access, ClassDef, Closure, MethodDef, StructValue, Value,
+    };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 

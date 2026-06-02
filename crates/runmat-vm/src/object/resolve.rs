@@ -11,10 +11,14 @@ use runmat_runtime::RuntimeError;
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 
-fn caller_has_internal_class_access(
-    caller_function_name: Option<&str>,
-    class_name: &str,
-) -> bool {
+fn has_builtin_member_subsref_protocol(class_name: &str) -> bool {
+    let qualified = format!("{class_name}.{}", ObjectIndexOp::Subsref.protocol_name());
+    runmat_builtins::builtin_functions()
+        .iter()
+        .any(|builtin| builtin.name == qualified)
+}
+
+fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {
     if let Some(caller_name) = caller_function_name {
         if let Some((caller_class, _)) = caller_name.rsplit_once('.') {
             if !caller_class.is_empty()
@@ -77,14 +81,17 @@ fn caller_class_for_function(caller_function_name: Option<&str>) -> Option<Strin
     if runmat_builtins::get_class(caller_function_name).is_some() {
         return Some(caller_function_name.to_string());
     }
-    if let Some(owner) = runmat_builtins::class_names().into_iter().find(|class_name| {
-        runmat_builtins::get_class(class_name).is_some_and(|class_def| {
-            class_def
-                .methods
-                .values()
-                .any(|method| method.function_name == caller_function_name)
+    if let Some(owner) = runmat_builtins::class_names()
+        .into_iter()
+        .find(|class_name| {
+            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+                class_def
+                    .methods
+                    .values()
+                    .any(|method| method.function_name == caller_function_name)
+            })
         })
-    }) {
+    {
         return Some(owner);
     }
     if let Some((class_name, method_name)) = caller_function_name.rsplit_once('.') {
@@ -109,7 +116,9 @@ fn access_permitted(
             caller_class_for_function(caller_function_name).as_deref() == Some(owner)
         }
         runmat_builtins::Access::Protected => caller_class_for_function(caller_function_name)
-            .is_some_and(|caller_class| runmat_builtins::is_class_or_subclass(&caller_class, owner)),
+            .is_some_and(|caller_class| {
+                runmat_builtins::is_class_or_subclass(&caller_class, owner)
+            }),
     }
 }
 
@@ -143,8 +152,7 @@ pub async fn load_member(
                         ),
                     ));
                 }
-                if !access_permitted(&owner, &p.get_access, caller_function_name)
-                {
+                if !access_permitted(&owner, &p.get_access, caller_function_name) {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -167,8 +175,7 @@ pub async fn load_member(
             } else if let Some((p2, owner)) =
                 runmat_builtins::lookup_property(&obj.class_name, &field)
             {
-                if !access_permitted(&owner, &p2.get_access, caller_function_name)
-                {
+                if !access_permitted(&owner, &p2.get_access, caller_function_name) {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -211,6 +218,9 @@ pub async fn load_member(
                 {
                     return call_object_member_subsref(Value::HandleObject(handle), field).await;
                 }
+            }
+            if has_builtin_member_subsref_protocol(&handle.class_name) {
+                return call_object_member_subsref(Value::HandleObject(handle), field).await;
             }
             runmat_runtime::call_builtin_async_with_outputs(
                 "getfield",
@@ -294,8 +304,7 @@ pub fn load_static_member(
                 &format!("Property '{}' is not static", field),
             ));
         }
-        if !access_permitted(&owner, &p.get_access, caller_function_name)
-        {
+        if !access_permitted(&owner, &p.get_access, caller_function_name) {
             return Err(mex(
                 IDENT_PROPERTY_PRIVATE_ACCESS,
                 &format!("Property '{}' is private", field),
@@ -306,7 +315,9 @@ pub fn load_static_member(
         } else if let Some(v) = &p.default_value {
             Ok(v.clone())
         } else {
-            Ok(Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty tensor")))
+            Ok(Value::Tensor(
+                Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
+            ))
         }
     } else if let Some((m, _owner)) = runmat_builtins::lookup_method(cls, field) {
         if !m.is_static {
@@ -322,9 +333,10 @@ pub fn load_static_member(
         }))
     } else if runmat_builtins::class_has_enumeration_member(cls, field) {
         let mut value = runmat_builtins::ObjectInstance::new(cls.to_string());
-        value
-            .properties
-            .insert("__enum_member__".to_string(), Value::String(field.to_string()));
+        value.properties.insert(
+            "__enum_member__".to_string(),
+            Value::String(field.to_string()),
+        );
         Ok(Value::Object(value))
     } else {
         let qualified = external_qualified_display_name(cls, field);
@@ -384,8 +396,7 @@ where
                         &format!("Property '{}' is constant", field),
                     ));
                 }
-                if !access_permitted(&owner, &p.set_access, caller_function_name)
-                {
+                if !access_permitted(&owner, &p.set_access, caller_function_name) {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -432,8 +443,7 @@ where
                         &format!("Property '{}' is constant", field),
                     ));
                 }
-                if !access_permitted(&owner, &p.set_access, caller_function_name)
-                {
+                if !access_permitted(&owner, &p.set_access, caller_function_name) {
                     return Err(mex(
                         IDENT_PROPERTY_PRIVATE_ACCESS,
                         &format!("Property '{}' is private", field),
@@ -726,7 +736,7 @@ mod tests {
         let obj = Value::Object(ObjectInstance::new(child_name));
         let value =
             futures::executor::block_on(load_member(obj, "missing".to_string(), false, None))
-            .expect("missing member should dispatch to inherited subsref");
+                .expect("missing member should dispatch to inherited subsref");
         assert_eq!(value, Value::Num(77.0));
     }
 

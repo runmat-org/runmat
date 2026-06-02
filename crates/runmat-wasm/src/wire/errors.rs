@@ -71,7 +71,11 @@ pub(crate) fn runtime_error_to_js(err: &RuntimeError) -> JsValue {
     }
 }
 
-pub(crate) fn run_error_to_js(err: &RunError, source_name: Option<&str>, source: Option<&str>) -> JsValue {
+pub(crate) fn run_error_to_js(
+    err: &RunError,
+    source_name: Option<&str>,
+    source: Option<&str>,
+) -> JsValue {
     serde_wasm_bindgen::to_value(&run_error_payload(err, source_name, source))
         .unwrap_or_else(|_| JsValue::from_str("RunMat error"))
 }
@@ -148,7 +152,10 @@ fn format_run_error(err: &RunError, source_name: Option<&str>, source: Option<&s
                 .with_identifier("RunMat:SyntaxError")
                 .with_span(span)
                 .build()
-                .format_diagnostic_with_source(span_source.map(|(name, _)| name), span_source.map(|(_, src)| src))
+                .format_diagnostic_with_source(
+                    span_source.map(|(name, _)| name),
+                    span_source.map(|(_, src)| src),
+                )
         }
         RunError::Semantic(err) => {
             let span = err.span.map(|span| {
@@ -164,9 +171,10 @@ fn format_run_error(err: &RunError, source_name: Option<&str>, source: Option<&s
             if let Some(span) = span {
                 builder = builder.with_span(span);
             }
-            builder
-                .build()
-                .format_diagnostic_with_source(span_source.map(|(name, _)| name), span_source.map(|(_, src)| src))
+            builder.build().format_diagnostic_with_source(
+                span_source.map(|(name, _)| name),
+                span_source.map(|(_, src)| src),
+            )
         }
         RunError::Compile(err) => {
             let span = err.span.map(|span| {
@@ -182,9 +190,10 @@ fn format_run_error(err: &RunError, source_name: Option<&str>, source: Option<&s
             if let Some(span) = span {
                 builder = builder.with_span(span);
             }
-            builder
-                .build()
-                .format_diagnostic_with_source(span_source.map(|(name, _)| name), span_source.map(|(_, src)| src))
+            builder.build().format_diagnostic_with_source(
+                span_source.map(|(name, _)| name),
+                span_source.map(|(_, src)| src),
+            )
         }
         RunError::Runtime(err) => err.format_diagnostic_with_source(
             span_source.map(|(name, _)| name),
@@ -246,7 +255,8 @@ pub(crate) fn run_error_payload(
             if let Some(found) = &err.found_token {
                 message = format!("{message} (found '{found}')");
             }
-            let span = source.map(|src| span_payload_from_source(src, err.position, err.position + 1));
+            let span =
+                source.map(|src| span_payload_from_source(src, err.position, err.position + 1));
             RunMatErrorPayload {
                 kind: RunMatErrorKind::Syntax,
                 message,

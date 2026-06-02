@@ -44,9 +44,11 @@ pub const BUILTIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 
 fn parse_substruct_type_and_subs(arg: &Value) -> crate::BuiltinResult<(String, Value)> {
     let Value::Struct(st) = arg else {
-        return Err(crate::build_runtime_error("builtin: substruct argument must be a scalar struct")
-            .with_builtin("builtin")
-            .build());
+        return Err(crate::build_runtime_error(
+            "builtin: substruct argument must be a scalar struct",
+        )
+        .with_builtin("builtin")
+        .build());
     };
     let kind_value = st.fields.get("type").ok_or_else(|| {
         crate::build_runtime_error("builtin: substruct argument missing field 'type'")
@@ -74,7 +76,10 @@ fn builtin_member_field_name(subs: &Value, op: &str) -> crate::BuiltinResult<Str
     })
 }
 
-async fn dispatch_builtin_subsref(rest: &[Value], requested_outputs: usize) -> crate::BuiltinResult<Value> {
+async fn dispatch_builtin_subsref(
+    rest: &[Value],
+    requested_outputs: usize,
+) -> crate::BuiltinResult<Value> {
     if rest.len() != 2 {
         return crate::call_builtin_async_with_outputs("subsref", rest, requested_outputs).await;
     }
@@ -103,7 +108,10 @@ async fn dispatch_builtin_subsref(rest: &[Value], requested_outputs: usize) -> c
     }
 }
 
-async fn dispatch_builtin_subsasgn(rest: &[Value], requested_outputs: usize) -> crate::BuiltinResult<Value> {
+async fn dispatch_builtin_subsasgn(
+    rest: &[Value],
+    requested_outputs: usize,
+) -> crate::BuiltinResult<Value> {
     if rest.len() != 3 {
         return crate::call_builtin_async_with_outputs("subsasgn", rest, requested_outputs).await;
     }
