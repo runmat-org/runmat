@@ -315,19 +315,28 @@ impl NativeSurfaceRenderContext {
             let mut plot_area_points: Option<egui::Rect> = None;
             let scene_stats = self.renderer.scene.statistics();
             let _ = self.renderer.calculate_data_bounds();
-            overlay
-                .egui_ctx
-                .set_pixels_per_point(self.pixels_per_point.max(0.5));
             let ppp = self.pixels_per_point.max(0.5);
+            let screen_rect = egui::Rect::from_min_size(
+                egui::Pos2::new(0.0, 0.0),
+                egui::Vec2::new(
+                    (self.config.width.max(1) as f32) / ppp,
+                    (self.config.height.max(1) as f32) / ppp,
+                ),
+            );
             let full_output = overlay.egui_ctx.run(
                 egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::new(0.0, 0.0),
-                        egui::Vec2::new(
-                            (self.config.width.max(1) as f32) / ppp,
-                            (self.config.height.max(1) as f32) / ppp,
-                        ),
-                    )),
+                    screen_rect: Some(screen_rect),
+                    viewports: std::iter::once((
+                        egui::ViewportId::ROOT,
+                        egui::ViewportInfo {
+                            native_pixels_per_point: Some(ppp),
+                            inner_rect: Some(screen_rect),
+                            outer_rect: Some(screen_rect),
+                            focused: Some(true),
+                            ..Default::default()
+                        },
+                    ))
+                    .collect(),
                     ..Default::default()
                 },
                 |ctx| {

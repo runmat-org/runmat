@@ -720,15 +720,26 @@ impl WebRenderer {
                 // Ensure bounds are current before drawing overlay (keeps axes in sync with render).
                 let _ = self.plot_renderer.calculate_data_bounds();
 
-                overlay.egui_ctx.set_pixels_per_point(self.pixels_per_point);
+                let screen_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(0.0, 0.0),
+                    egui::Vec2::new(
+                        (self.surface_config.width.max(1) as f32) / self.pixels_per_point,
+                        (self.surface_config.height.max(1) as f32) / self.pixels_per_point,
+                    ),
+                );
                 let raw_input = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::new(0.0, 0.0),
-                        egui::Vec2::new(
-                            (self.surface_config.width.max(1) as f32) / self.pixels_per_point,
-                            (self.surface_config.height.max(1) as f32) / self.pixels_per_point,
-                        ),
-                    )),
+                    screen_rect: Some(screen_rect),
+                    viewports: std::iter::once((
+                        egui::ViewportId::ROOT,
+                        egui::ViewportInfo {
+                            native_pixels_per_point: Some(self.pixels_per_point),
+                            inner_rect: Some(screen_rect),
+                            outer_rect: Some(screen_rect),
+                            focused: Some(true),
+                            ..Default::default()
+                        },
+                    ))
+                    .collect(),
                     ..Default::default()
                 };
 
