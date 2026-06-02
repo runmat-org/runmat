@@ -123,7 +123,7 @@ impl RunMatSession {
             compat_mode: CompatMode::Matlab,
             top_level_await_enabled: true,
             format_mode: runmat_builtins::FormatMode::default(),
-            pending_companion_class_statements: None,
+            pending_companion_source_discovery: None,
         };
 
         runmat_vm::set_call_stack_limit(session.callstack_limit);

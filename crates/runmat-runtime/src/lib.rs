@@ -1409,6 +1409,12 @@ mod tests {
             ("feval", "[varargout] = feval(f, varargin)"),
             ("str2func", "fh = str2func(name)"),
             ("func2str", "name = func2str(fh)"),
+            ("functions", "info = functions(fh)"),
+            ("inputname", "name = inputname(argNumber)"),
+            ("localfunctions", "handles = localfunctions()"),
+            ("narginchk", "narginchk(minArgs, maxArgs)"),
+            ("nargoutchk", "nargoutchk(minArgs, maxArgs)"),
+            ("mfilename", "name = mfilename()"),
             ("getmethod", "fh = getmethod(obj_or_class, name)"),
         ];
 

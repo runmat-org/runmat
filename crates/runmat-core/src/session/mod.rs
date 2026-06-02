@@ -103,8 +103,8 @@ pub struct RunMatSession {
     top_level_await_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
     format_mode: runmat_builtins::FormatMode,
-    /// Preloaded companion class statements discovered asynchronously by the request path.
-    pending_companion_class_statements: Option<Vec<runmat_parser::Stmt>>,
+    /// Preloaded companion statements discovered asynchronously by the request path.
+    pending_companion_source_discovery: Option<compile::CompanionSourceDiscovery>,
 }
 
 pub(crate) struct PreparedExecution {

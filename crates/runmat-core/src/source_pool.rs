@@ -40,6 +40,13 @@ impl SourcePool {
     pub(crate) fn get(&self, id: SourceId) -> Option<&SourceText> {
         self.sources.get(id.0)
     }
+
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (SourceId, &SourceText)> {
+        self.sources
+            .iter()
+            .enumerate()
+            .map(|(index, source)| (SourceId(index), source))
+    }
 }
 
 pub(crate) fn line_col_from_offset(source: &str, offset: usize) -> (usize, usize) {

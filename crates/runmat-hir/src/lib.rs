@@ -32,8 +32,9 @@ pub use hir::{
     RequestedOutputCount, ShapeFact, SourceUnitKind, SpawnSafetyFact, SpawnSafetyReason,
     StringLiteral, SymbolName, TaskHandleFact, TensorElementDomainFact, TensorTypeFact, TypeFact,
     ValueFlowFact, WorkspaceEffect, WorkspaceExportPolicy, WorkspaceVisibility,
-    AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, FEVAL_BUILTIN_NAME, NARGIN_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME, TEST_CLASS_REGISTRATION_BUILTIN_NAME,
+    AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, FEVAL_BUILTIN_NAME, NARGINCHK_BUILTIN_NAME,
+    NARGIN_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
 pub use ids::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId};
 pub use lowering::lower;

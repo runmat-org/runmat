@@ -1,5 +1,5 @@
 use crate::bytecode::instr::PropertyDefaultLiteral;
-use crate::call::builtins::is_vm_intrinsic_counter_builtin;
+use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
 use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
@@ -1388,34 +1388,32 @@ impl Compiler {
                     .and_then(|layout| layout.functions.get(function))
                     .map(|layout| layout.captures.clone())
                     .unwrap_or_default();
-                let current_function = self
-                    .function
-                    .ok_or_else(|| self.compile_error("compiler missing selected function"))?;
-                let is_nested_lexical = captures
-                    .iter()
-                    .all(|capture| capture.from_function == current_function);
-                if is_nested_lexical && !captures.is_empty() {
-                    let capture_slots = captures
-                        .iter()
-                        .map(|capture| self.binding_slot(capture.binding))
-                        .collect::<Result<Vec<_>, _>>()?;
+                if let Some(capture_slots) =
+                    self.semantic_capture_slots_for_call(*function, &captures)?
+                {
                     for arg in &call.args {
                         self.compile_mir_call_arg(arg)?;
                     }
                     if has_expansion {
-                        self.emit(Instr::CallSemanticNestedFunctionExpandMultiOutput {
-                            function: *function,
-                            capture_slots,
-                            specs,
-                            out_count: output_count,
-                        });
+                        self.emit_call(
+                            Instr::CallSemanticNestedFunctionExpandMultiOutput {
+                                function: *function,
+                                capture_slots,
+                                specs,
+                                out_count: output_count,
+                            },
+                            call,
+                        );
                     } else {
-                        self.emit(Instr::CallSemanticNestedFunctionMulti {
-                            function: *function,
-                            capture_slots,
-                            arg_count: call.args.len(),
-                            out_count: output_count,
-                        });
+                        self.emit_call(
+                            Instr::CallSemanticNestedFunctionMulti {
+                                function: *function,
+                                capture_slots,
+                                arg_count: call.args.len(),
+                                out_count: output_count,
+                            },
+                            call,
+                        );
                     }
                     return Ok(());
                 }
@@ -1423,18 +1421,20 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                        *function,
-                        specs,
-                        output_count,
-                    ));
+                    self.emit_call(
+                        Instr::CallSemanticFunctionExpandMultiOutput(
+                            *function,
+                            specs,
+                            output_count,
+                        ),
+                        call,
+                    );
                     return Ok(());
                 }
-                self.emit(Instr::CallSemanticFunctionMulti(
-                    *function,
-                    call.args.len(),
-                    output_count,
-                ));
+                self.emit_call(
+                    Instr::CallSemanticFunctionMulti(*function, call.args.len(), output_count),
+                    call,
+                );
             }
             MirCallee::Dynamic(_) => {
                 self.compile_mir_dynamic_callee_operand(match &call.callee {
@@ -1445,9 +1445,9 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                    self.emit_call(Instr::CallFevalExpandMultiOutput(specs, output_count), call);
                 } else {
-                    self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                    self.emit_call(Instr::CallFevalMulti(call.args.len(), output_count), call);
                 }
             }
             MirCallee::SuperConstructor {
@@ -1458,19 +1458,25 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallSuperConstructorExpandMultiOutput {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        specs,
-                        out_count: output_count,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperConstructorExpandMultiOutput {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            specs,
+                            out_count: output_count,
+                        },
+                        call,
+                    );
                 } else {
-                    self.emit(Instr::CallSuperConstructorMulti {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        arg_count: call.args.len(),
-                        out_count: output_count,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperConstructorMulti {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            arg_count: call.args.len(),
+                            out_count: output_count,
+                        },
+                        call,
+                    );
                 }
             }
             MirCallee::SuperMethod {
@@ -1482,21 +1488,27 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallSuperMethodExpandMultiOutput {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        method: method.clone(),
-                        specs,
-                        out_count: output_count,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperMethodExpandMultiOutput {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            method: method.clone(),
+                            specs,
+                            out_count: output_count,
+                        },
+                        call,
+                    );
                 } else {
-                    self.emit(Instr::CallSuperMethodMulti {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        method: method.clone(),
-                        arg_count: call.args.len(),
-                        out_count: output_count,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperMethodMulti {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            method: method.clone(),
+                            arg_count: call.args.len(),
+                            out_count: output_count,
+                        },
+                        call,
+                    );
                 }
             }
             MirCallee::Static(CallableIdentity::Builtin(id)) => {
@@ -1505,13 +1517,15 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallBuiltinExpandMultiOutput(
-                        name,
-                        specs,
-                        output_count,
-                    ));
+                    self.emit_call(
+                        Instr::CallBuiltinExpandMultiOutput(name, specs, output_count),
+                        call,
+                    );
                 } else {
-                    self.emit(Instr::CallBuiltinMulti(name, call.args.len(), output_count));
+                    self.emit_call(
+                        Instr::CallBuiltinMulti(name, call.args.len(), output_count),
+                        call,
+                    );
                 }
             }
             MirCallee::Static(identity) => {
@@ -1536,19 +1550,25 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallFunctionExpandMultiOutput {
-                        identity: identity.clone(),
-                        fallback_policy,
-                        specs,
-                        out_count: output_count,
-                    });
+                    self.emit_call(
+                        Instr::CallFunctionExpandMultiOutput {
+                            identity: identity.clone(),
+                            fallback_policy,
+                            specs,
+                            out_count: output_count,
+                        },
+                        call,
+                    );
                 } else {
-                    self.emit(Instr::CallFunctionMulti {
-                        identity: identity.clone(),
-                        fallback_policy,
-                        arg_count: call.args.len(),
-                        out_count: output_count,
-                    });
+                    self.emit_call(
+                        Instr::CallFunctionMulti {
+                            identity: identity.clone(),
+                            fallback_policy,
+                            arg_count: call.args.len(),
+                            out_count: output_count,
+                        },
+                        call,
+                    );
                 }
             }
         }
@@ -2301,17 +2321,9 @@ impl Compiler {
                     .and_then(|layout| layout.functions.get(function))
                     .map(|layout| layout.captures.clone())
                     .unwrap_or_default();
-                let current_function = self
-                    .function
-                    .ok_or_else(|| self.compile_error("compiler missing selected function"))?;
-                let is_nested_lexical = captures
-                    .iter()
-                    .all(|capture| capture.from_function == current_function);
-                if is_nested_lexical && !captures.is_empty() {
-                    let capture_slots = captures
-                        .iter()
-                        .map(|capture| self.binding_slot(capture.binding))
-                        .collect::<Result<Vec<_>, _>>()?;
+                if let Some(capture_slots) =
+                    self.semantic_capture_slots_for_call(*function, &captures)?
+                {
                     for arg in &call.args {
                         self.compile_mir_call_arg(arg)?;
                     }
@@ -2320,29 +2332,38 @@ impl Compiler {
                             self,
                             "dynamic output count is not supported for expanded nested semantic calls",
                         )?;
-                        self.emit(Instr::CallSemanticNestedFunctionExpandMultiOutput {
-                            function: *function,
-                            capture_slots,
-                            specs,
-                            out_count,
-                        });
+                        self.emit_call(
+                            Instr::CallSemanticNestedFunctionExpandMultiOutput {
+                                function: *function,
+                                capture_slots,
+                                specs,
+                                out_count,
+                            },
+                            call,
+                        );
                     } else {
                         match requested_outputs {
                             ResolvedCallOutputCount::Fixed(out_count) => {
-                                self.emit(Instr::CallSemanticNestedFunctionMulti {
-                                    function: *function,
-                                    capture_slots,
-                                    arg_count: call.args.len(),
-                                    out_count,
-                                });
+                                self.emit_call(
+                                    Instr::CallSemanticNestedFunctionMulti {
+                                        function: *function,
+                                        capture_slots,
+                                        arg_count: call.args.len(),
+                                        out_count,
+                                    },
+                                    call,
+                                );
                             }
                             ResolvedCallOutputCount::FromSlot(out_count_slot) => {
-                                self.emit(Instr::CallSemanticNestedFunctionMultiUsingOutputSlot {
-                                    function: *function,
-                                    capture_slots,
-                                    arg_count: call.args.len(),
-                                    out_count_slot,
-                                });
+                                self.emit_call(
+                                    Instr::CallSemanticNestedFunctionMultiUsingOutputSlot {
+                                        function: *function,
+                                        capture_slots,
+                                        arg_count: call.args.len(),
+                                        out_count_slot,
+                                    },
+                                    call,
+                                );
                             }
                         }
                     }
@@ -2356,24 +2377,31 @@ impl Compiler {
                         self,
                         "dynamic output count is not supported for expanded semantic calls",
                     )?;
-                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                        *function, specs, out_count,
-                    ));
+                    self.emit_call(
+                        Instr::CallSemanticFunctionExpandMultiOutput(*function, specs, out_count),
+                        call,
+                    );
                 } else {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {
-                            self.emit(Instr::CallSemanticFunctionMulti(
-                                *function,
-                                call.args.len(),
-                                out_count,
-                            ));
+                            self.emit_call(
+                                Instr::CallSemanticFunctionMulti(
+                                    *function,
+                                    call.args.len(),
+                                    out_count,
+                                ),
+                                call,
+                            );
                         }
                         ResolvedCallOutputCount::FromSlot(out_count_slot) => {
-                            self.emit(Instr::CallSemanticFunctionMultiUsingOutputSlot(
-                                *function,
-                                call.args.len(),
-                                out_count_slot,
-                            ));
+                            self.emit_call(
+                                Instr::CallSemanticFunctionMultiUsingOutputSlot(
+                                    *function,
+                                    call.args.len(),
+                                    out_count_slot,
+                                ),
+                                call,
+                            );
                         }
                     }
                 }
@@ -2390,19 +2418,25 @@ impl Compiler {
                     "dynamic output count is not supported for super constructor calls",
                 )?;
                 if has_expansion {
-                    self.emit(Instr::CallSuperConstructorExpandMultiOutput {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        specs,
-                        out_count: requested_outputs,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperConstructorExpandMultiOutput {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            specs,
+                            out_count: requested_outputs,
+                        },
+                        call,
+                    );
                 } else {
-                    self.emit(Instr::CallSuperConstructorMulti {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        arg_count: call.args.len(),
-                        out_count: requested_outputs,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperConstructorMulti {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            arg_count: call.args.len(),
+                            out_count: requested_outputs,
+                        },
+                        call,
+                    );
                 }
             }
             MirCallee::SuperMethod {
@@ -2418,21 +2452,27 @@ impl Compiler {
                     "dynamic output count is not supported for super method calls",
                 )?;
                 if has_expansion {
-                    self.emit(Instr::CallSuperMethodExpandMultiOutput {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        method: method.clone(),
-                        specs,
-                        out_count: requested_outputs,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperMethodExpandMultiOutput {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            method: method.clone(),
+                            specs,
+                            out_count: requested_outputs,
+                        },
+                        call,
+                    );
                 } else {
-                    self.emit(Instr::CallSuperMethodMulti {
-                        current_class: current_class.clone(),
-                        super_class: super_class.clone(),
-                        method: method.clone(),
-                        arg_count: call.args.len(),
-                        out_count: requested_outputs,
-                    });
+                    self.emit_call(
+                        Instr::CallSuperMethodMulti {
+                            current_class: current_class.clone(),
+                            super_class: super_class.clone(),
+                            method: method.clone(),
+                            arg_count: call.args.len(),
+                            out_count: requested_outputs,
+                        },
+                        call,
+                    );
                 }
             }
             MirCallee::Dynamic(callee) => {
@@ -2443,25 +2483,34 @@ impl Compiler {
                 if has_expansion {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {
-                            self.emit(Instr::CallFevalExpandMultiOutput(specs, out_count));
+                            self.emit_call(
+                                Instr::CallFevalExpandMultiOutput(specs, out_count),
+                                call,
+                            );
                         }
                         ResolvedCallOutputCount::FromSlot(out_count_slot) => {
-                            self.emit(Instr::CallFevalExpandMultiOutputUsingOutputSlot(
-                                specs,
-                                out_count_slot,
-                            ));
+                            self.emit_call(
+                                Instr::CallFevalExpandMultiOutputUsingOutputSlot(
+                                    specs,
+                                    out_count_slot,
+                                ),
+                                call,
+                            );
                         }
                     }
                 } else {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {
-                            self.emit(Instr::CallFevalMulti(call.args.len(), out_count));
+                            self.emit_call(Instr::CallFevalMulti(call.args.len(), out_count), call);
                         }
                         ResolvedCallOutputCount::FromSlot(out_count_slot) => {
-                            self.emit(Instr::CallFevalMultiUsingOutputSlot(
-                                call.args.len(),
-                                out_count_slot,
-                            ));
+                            self.emit_call(
+                                Instr::CallFevalMultiUsingOutputSlot(
+                                    call.args.len(),
+                                    out_count_slot,
+                                ),
+                                call,
+                            );
                         }
                     }
                 }
@@ -2476,22 +2525,27 @@ impl Compiler {
                         self,
                         "dynamic output count is not supported for expanded builtin calls",
                     )?;
-                    self.emit(Instr::CallBuiltinExpandMultiOutput(
-                        name,
-                        specs,
-                        requested_outputs,
-                    ));
+                    self.emit_call(
+                        Instr::CallBuiltinExpandMultiOutput(name, specs, requested_outputs),
+                        call,
+                    );
                 } else {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {
-                            self.emit(Instr::CallBuiltinMulti(name, call.args.len(), out_count));
+                            self.emit_call(
+                                Instr::CallBuiltinMulti(name, call.args.len(), out_count),
+                                call,
+                            );
                         }
                         ResolvedCallOutputCount::FromSlot(out_count_slot) => {
-                            self.emit(Instr::CallBuiltinMultiUsingOutputSlot(
-                                name,
-                                call.args.len(),
-                                out_count_slot,
-                            ));
+                            self.emit_call(
+                                Instr::CallBuiltinMultiUsingOutputSlot(
+                                    name,
+                                    call.args.len(),
+                                    out_count_slot,
+                                ),
+                                call,
+                            );
                         }
                     }
                 }
@@ -2522,29 +2576,38 @@ impl Compiler {
                         self,
                         "dynamic output count is not supported for expanded static calls",
                     )?;
-                    self.emit(Instr::CallFunctionExpandMultiOutput {
-                        identity: identity.clone(),
-                        fallback_policy,
-                        specs,
-                        out_count: requested_outputs,
-                    });
+                    self.emit_call(
+                        Instr::CallFunctionExpandMultiOutput {
+                            identity: identity.clone(),
+                            fallback_policy,
+                            specs,
+                            out_count: requested_outputs,
+                        },
+                        call,
+                    );
                 } else {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {
-                            self.emit(Instr::CallFunctionMulti {
-                                identity: identity.clone(),
-                                fallback_policy,
-                                arg_count: call.args.len(),
-                                out_count,
-                            });
+                            self.emit_call(
+                                Instr::CallFunctionMulti {
+                                    identity: identity.clone(),
+                                    fallback_policy,
+                                    arg_count: call.args.len(),
+                                    out_count,
+                                },
+                                call,
+                            );
                         }
                         ResolvedCallOutputCount::FromSlot(out_count_slot) => {
-                            self.emit(Instr::CallFunctionMultiUsingOutputSlot {
-                                identity: identity.clone(),
-                                fallback_policy,
-                                arg_count: call.args.len(),
-                                out_count_slot,
-                            });
+                            self.emit_call(
+                                Instr::CallFunctionMultiUsingOutputSlot {
+                                    identity: identity.clone(),
+                                    fallback_policy,
+                                    arg_count: call.args.len(),
+                                    out_count_slot,
+                                },
+                                call,
+                            );
                         }
                     }
                 }
@@ -2683,12 +2746,15 @@ impl Compiler {
                 self,
                 "dynamic output count is not supported for expanded method/member calls",
             )?;
-            self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput {
-                identity,
-                fallback_policy,
-                specs,
-                out_count: output_count,
-            });
+            self.emit_call(
+                Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                    identity,
+                    fallback_policy,
+                    specs,
+                    out_count: output_count,
+                },
+                call,
+            );
             return Ok(());
         }
         let argc = call.args.len().saturating_sub(1);
@@ -2696,12 +2762,15 @@ impl Compiler {
             self,
             "dynamic output count is not supported for method/member calls",
         )?;
-        self.emit(Instr::CallMethodOrMemberIndexMulti {
-            identity,
-            fallback_policy,
-            arg_count: argc,
-            out_count: output_count,
-        });
+        self.emit_call(
+            Instr::CallMethodOrMemberIndexMulti {
+                identity,
+                fallback_policy,
+                arg_count: argc,
+                out_count: output_count,
+            },
+            call,
+        );
         Ok(())
     }
 
@@ -2760,7 +2829,7 @@ impl Compiler {
         builtin: &runmat_hir::BuiltinId,
     ) -> Result<String, CompileError> {
         let candidate = builtin.0.clone();
-        if is_vm_intrinsic_counter_builtin(&candidate) {
+        if is_vm_intrinsic_builtin(&candidate) {
             return Ok(candidate);
         }
         if let Some(builtin) = runmat_builtins::builtin_function_by_name(&candidate) {
@@ -3647,6 +3716,33 @@ impl Compiler {
         })
     }
 
+    fn semantic_capture_slots_for_call(
+        &self,
+        target_function: FunctionId,
+        captures: &[crate::layout::VmCaptureSlot],
+    ) -> Result<Option<Vec<usize>>, CompileError> {
+        if captures.is_empty() {
+            return Ok(None);
+        }
+
+        let current_function = self
+            .function
+            .ok_or_else(|| self.compile_error("compiler missing selected function"))?;
+        let captures_are_parent_to_child = captures
+            .iter()
+            .all(|capture| capture.from_function == current_function);
+        let captures_are_self_recursive = target_function == current_function;
+        if !captures_are_parent_to_child && !captures_are_self_recursive {
+            return Ok(None);
+        }
+
+        captures
+            .iter()
+            .map(|capture| self.binding_slot(capture.binding))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+
     fn mir_place_slot(&self, place: &MirPlace) -> Result<usize, CompileError> {
         match place {
             MirPlace::Local(local) => self.mir_local_slot(*local),
@@ -3711,6 +3807,12 @@ impl Compiler {
         let span = self.current_span.unwrap_or_default();
         self.instr_spans.push(span);
         self.call_arg_spans.push(None);
+        pc
+    }
+
+    fn emit_call(&mut self, instr: Instr, call: &MirCall) -> usize {
+        let pc = self.emit(instr);
+        self.call_arg_spans[pc] = Some(call.arg_spans.clone());
         pc
     }
 

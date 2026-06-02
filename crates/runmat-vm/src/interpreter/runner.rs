@@ -223,6 +223,7 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
+    bytecode.source_id = func.source_id;
     bytecode.bound_functions = function_registry.functions.clone();
     bytecode.function_registry = function_registry.clone();
     let result_vars = interpret_function_with_counts(
@@ -881,6 +882,12 @@ async fn run_interpreter_inner(
         fusion_accel_graph,
         bytecode,
     } = state;
+    let _source_context_guard =
+        runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
+    let _arity_call_counts_guard =
+        runmat_runtime::builtins::introspection::arity_check::replace_call_counts(
+            call_counts.clone(),
+        );
     let function_registry = Arc::new(bytecode.function_registry());
     let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let registry_for_function_invoker = Arc::clone(&function_registry);
@@ -920,6 +927,22 @@ async fn run_interpreter_inner(
                 .as_ref()
                 .and_then(|resolver| resolver(name))
         })));
+    let mut source_function_catalog = function_registry
+        .functions
+        .values()
+        .filter_map(|function| {
+            function.source_id.map(
+                |source_id| runmat_runtime::user_functions::SourceFunctionInfo {
+                    source_id,
+                    name: function.display_name.clone(),
+                    function: function.function.0,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    source_function_catalog.sort_by_key(|info| info.function);
+    let _source_function_catalog_guard =
+        user_functions::install_source_function_catalog(Some(Arc::new(source_function_catalog)));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });

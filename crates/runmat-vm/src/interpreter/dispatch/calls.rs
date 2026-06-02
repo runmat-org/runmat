@@ -100,6 +100,8 @@ pub struct UserCallContext<'a> {
     pub identity: CallableIdentity,
     pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
+    pub source_id: Option<runmat_hir::SourceId>,
+    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub current_function_name: &'a str,
     pub imports: &'a [(Vec<String>, bool)],
     pub exception: ExceptionRouteContext<'a>,
@@ -265,10 +267,16 @@ async fn handle_builtin_call_inner(
         pc,
     } = &exception;
     debug::trace_call_builtin(**pc, name, arg_count, stack);
-    if let Some(value) = call_builtins::vm_intrinsic_counter_builtin(name, arg_count, call_counts)?
-    {
-        stack.push(value);
-        return Ok(BuiltinHandling::Completed);
+    if call_builtins::is_vm_intrinsic_builtin(name) {
+        let result = call_builtins::vm_intrinsic_builtin(stack, name, arg_count, call_counts);
+        return handle_builtin_outcome(
+            result,
+            ImportedBuiltinResolution::NotFound,
+            requested_outputs,
+            stack,
+            exception,
+            refresh_vars,
+        );
     }
     let args = call_builtins::collect_call_args(stack, arg_count)?;
 
@@ -319,11 +327,15 @@ pub async fn handle_prepared_user_function_call(
         identity,
         fallback_policy,
         out_count,
+        source_id,
+        call_arg_spans,
         current_function_name,
         imports,
         exception,
     } = ctx;
     let current_class_context = current_class_context_from_function_name(current_function_name);
+    let _function_input_callsite_guard =
+        runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
     let ExceptionRouteContext {
         try_stack,
         vars,

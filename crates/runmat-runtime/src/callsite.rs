@@ -11,6 +11,7 @@ pub struct CallsiteInfo {
 
 runmat_thread_local! {
     static CALLSITE_STACK: RefCell<Vec<CallsiteInfo>> = const { RefCell::new(Vec::new()) };
+    static FUNCTION_INPUT_CALLSITE_STACK: RefCell<Vec<CallsiteInfo>> = const { RefCell::new(Vec::new()) };
 }
 
 pub struct CallsiteGuard {
@@ -23,6 +24,22 @@ impl Drop for CallsiteGuard {
             return;
         }
         CALLSITE_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            let _ = stack.pop();
+        });
+    }
+}
+
+pub struct FunctionInputCallsiteGuard {
+    did_push: bool,
+}
+
+impl Drop for FunctionInputCallsiteGuard {
+    fn drop(&mut self) {
+        if !self.did_push {
+            return;
+        }
+        FUNCTION_INPUT_CALLSITE_STACK.with(|stack| {
             let mut stack = stack.borrow_mut();
             let _ = stack.pop();
         });
@@ -42,8 +59,28 @@ pub fn push_callsite(source_id: Option<SourceId>, arg_spans: Option<Vec<Span>>) 
     CallsiteGuard { did_push: true }
 }
 
+pub fn push_function_input_callsite(
+    source_id: Option<SourceId>,
+    arg_spans: Option<Vec<Span>>,
+) -> FunctionInputCallsiteGuard {
+    let Some(arg_spans) = arg_spans else {
+        return FunctionInputCallsiteGuard { did_push: false };
+    };
+    FUNCTION_INPUT_CALLSITE_STACK.with(|stack| {
+        stack.borrow_mut().push(CallsiteInfo {
+            source_id,
+            arg_spans,
+        });
+    });
+    FunctionInputCallsiteGuard { did_push: true }
+}
+
 pub fn current_callsite() -> Option<CallsiteInfo> {
     CALLSITE_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+pub fn current_function_input_callsite() -> Option<CallsiteInfo> {
+    FUNCTION_INPUT_CALLSITE_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
 fn clamp_to_char_boundary(s: &str, mut idx: usize) -> usize {
@@ -73,7 +110,24 @@ fn normalize_label_text(raw: &str) -> String {
 
 pub fn arg_text(arg_index: usize) -> Option<String> {
     let callsite = current_callsite()?;
-    let source = source_context::current_source()?;
+    arg_text_for_callsite(&callsite, arg_index)
+}
+
+pub fn function_input_arg_text(arg_index: usize) -> Option<String> {
+    let callsite = current_function_input_callsite()?;
+    arg_text_for_callsite(&callsite, arg_index)
+}
+
+fn source_for_callsite(callsite: &CallsiteInfo) -> Option<std::sync::Arc<str>> {
+    callsite
+        .source_id
+        .and_then(source_context::source_info)
+        .map(|source| source.text)
+        .or_else(source_context::current_source)
+}
+
+fn arg_text_for_callsite(callsite: &CallsiteInfo, arg_index: usize) -> Option<String> {
+    let source = source_for_callsite(callsite)?;
     let span = callsite.arg_spans.get(arg_index)?;
 
     let start = clamp_to_char_boundary(&source, span.start);

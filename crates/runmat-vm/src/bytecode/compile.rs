@@ -87,11 +87,20 @@ pub fn compile(
     };
     let async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
+    let source_id = entrypoint_target
+        .and_then(|function_id| {
+            hir.functions
+                .iter()
+                .find(|function| function.id == function_id)
+        })
+        .and_then(|function| hir.modules.get(function.module.0))
+        .map(|module| module.source_id);
+
     Ok(Bytecode {
         instructions: c.instructions,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,
-        source_id: None,
+        source_id,
         var_count: c.var_count,
         bound_functions,
         function_registry,
@@ -770,12 +779,16 @@ fn compile_semantic_functions(
         let function_layout = layout.functions.get(&function.id).ok_or_else(|| {
             CompileError::new(format!("missing VM layout for function {:?}", function.id))
         })?;
+        let source_id = hir
+            .modules
+            .get(function.module.0)
+            .map(|module| module.source_id);
         functions.insert(
             function.id,
             FunctionBytecode {
                 function: function.id,
                 display_name: function_layout.display_name.clone(),
-                source_id: None,
+                source_id,
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,

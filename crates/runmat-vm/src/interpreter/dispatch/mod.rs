@@ -1371,6 +1371,11 @@ pub async fn dispatch_instruction(
         Instr::CallFevalMulti(argc, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
@@ -1386,6 +1391,11 @@ pub async fn dispatch_instruction(
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
                 .await?
             {
@@ -1400,6 +1410,11 @@ pub async fn dispatch_instruction(
         Instr::CallFevalExpandMultiOutput(specs, out_count) => {
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
@@ -1415,6 +1430,11 @@ pub async fn dispatch_instruction(
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
                 .await?
             {
@@ -1475,6 +1495,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1509,6 +1531,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1548,6 +1572,11 @@ pub async fn dispatch_instruction(
             }
             call_args.extend(args);
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
                     function.0,
@@ -1580,6 +1609,11 @@ pub async fn dispatch_instruction(
             }
             call_args.extend(args);
             let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
                     function.0,
@@ -1610,6 +1644,8 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1649,6 +1685,8 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1738,6 +1776,8 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1772,6 +1812,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {

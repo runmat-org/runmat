@@ -935,6 +935,33 @@ fn parse_function_arguments_block_tracks_unsupported_trailing_tokens() {
 }
 
 #[test]
+fn parse_function_arguments_block_marks_unsupported_trailing_syntax() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double < 10
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with unsupported trailing syntax");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
 fn parse_function_arguments_block_supports_default_literal() {
     let source = r#"
         function y = typed(x)
