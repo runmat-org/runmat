@@ -91,6 +91,7 @@ pub struct BuiltinCallContext<'a> {
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub imports: &'a [(Vec<String>, bool)],
     pub call_counts: &'a [(usize, usize)],
+    pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub current_function_name: &'a str,
     pub exception: ExceptionRouteContext<'a>,
 }
@@ -257,6 +258,7 @@ async fn handle_builtin_call_inner(
         call_arg_spans,
         imports,
         call_counts,
+        function_registry,
         current_function_name,
         exception,
     } = ctx;
@@ -269,6 +271,25 @@ async fn handle_builtin_call_inner(
     debug::trace_call_builtin(**pc, name, arg_count, stack);
     if call_builtins::is_vm_intrinsic_builtin(name) {
         let result = call_builtins::vm_intrinsic_builtin(stack, name, arg_count, call_counts);
+        return handle_builtin_outcome(
+            result,
+            ImportedBuiltinResolution::NotFound,
+            requested_outputs,
+            stack,
+            exception,
+            refresh_vars,
+        );
+    }
+    if call_builtins::is_vm_dynamic_workspace_builtin(name) {
+        let result = call_builtins::vm_dynamic_workspace_builtin(
+            stack,
+            name,
+            arg_count,
+            requested_outputs,
+            function_registry,
+            source_id,
+        )
+        .await;
         return handle_builtin_outcome(
             result,
             ImportedBuiltinResolution::NotFound,

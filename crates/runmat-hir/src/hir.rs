@@ -563,6 +563,9 @@ impl CallableFallbackPolicy {
 }
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
+pub const EVAL_BUILTIN_NAME: &str = "eval";
+pub const EVALIN_BUILTIN_NAME: &str = "evalin";
+pub const ASSIGNIN_BUILTIN_NAME: &str = "assignin";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
 pub const NARGINCHK_BUILTIN_NAME: &str = "narginchk";

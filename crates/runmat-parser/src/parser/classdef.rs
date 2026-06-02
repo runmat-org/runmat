@@ -151,7 +151,7 @@ impl Parser {
         Ok(names)
     }
 
-    fn parse_optional_attr_list(&mut self) -> Vec<Attr> {
+    pub(super) fn parse_optional_attr_list(&mut self) -> Vec<Attr> {
         // Minimal parsing of attribute lists: (Attr, Attr=Value, ...)
         let mut attrs: Vec<Attr> = Vec::new();
         if !self.consume(&Token::LParen) {

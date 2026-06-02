@@ -15,12 +15,14 @@ pub enum SourceInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostExecutionPolicy {
     pub top_level_await: bool,
+    pub dynamic_eval: bool,
 }
 
 impl Default for HostExecutionPolicy {
     fn default() -> Self {
         Self {
             top_level_await: true,
+            dynamic_eval: true,
         }
     }
 }

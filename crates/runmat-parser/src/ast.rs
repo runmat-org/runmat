@@ -216,6 +216,7 @@ pub enum Stmt {
         params: Vec<String>,
         outputs: Vec<String>,
         argument_validations: Vec<FunctionArgValidationDecl>,
+        argument_block_kinds: Vec<FunctionArgumentsBlockKind>,
         body: Vec<Stmt>,
         isolated: bool,
         is_async: bool,
@@ -306,6 +307,14 @@ pub struct FunctionArgValidationDecl {
     pub validators: Vec<FunctionArgValidatorDecl>,
     pub default_value: Option<Expr>,
     pub has_unsupported_trailing: bool,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgumentsBlockKind {
+    Input,
+    Repeating,
+    Output,
+    Unsupported(Vec<Attr>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

@@ -35,19 +35,31 @@ const GETMETHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureD
     outputs: &GETMETHOD_OUTPUT,
 }];
 
-const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    BuiltinErrorDescriptor {
-        code: "RM.GETMETHOD.NAME_INVALID",
-        identifier: Some("RunMat:GetMethodNameInvalid"),
-        when: "Method name is empty.",
-        message: "getmethod: method name must not be empty",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.GETMETHOD.RECEIVER_UNSUPPORTED",
-        identifier: Some("RunMat:GetMethodReceiverUnsupported"),
-        when: "Receiver is neither object nor class reference.",
-        message: "getmethod: unsupported receiver",
-    },
+const GETMETHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETMETHOD.NAME_INVALID",
+    identifier: Some("RunMat:GetMethodNameInvalid"),
+    when: "Method name is empty.",
+    message: "getmethod: method name must not be empty",
+};
+
+const GETMETHOD_ERROR_RECEIVER_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETMETHOD.RECEIVER_UNSUPPORTED",
+    identifier: Some("RunMat:GetMethodReceiverUnsupported"),
+    when: "Receiver is neither object nor class reference.",
+    message: "getmethod: unsupported receiver",
+};
+
+const GETMETHOD_ERROR_METHOD_PRIVATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GETMETHOD.METHOD_PRIVATE",
+    identifier: Some("RunMat:MethodPrivate"),
+    when: "Resolved method exists but is inaccessible from the current class scope.",
+    message: "getmethod: method is not accessible from current scope",
+};
+
+const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    GETMETHOD_ERROR_NAME_INVALID,
+    GETMETHOD_ERROR_RECEIVER_UNSUPPORTED,
+    GETMETHOD_ERROR_METHOD_PRIVATE,
 ];
 
 pub const GETMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
@@ -73,23 +85,19 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         if access_allowed {
             return Ok(());
         }
-        Err(crate::build_runtime_error(format!(
-            "Method '{}.{}' is not accessible from current scope.",
-            class_name, method_name
+        Err(crate::runtime_descriptor_error_with_detail(
+            "getmethod",
+            &GETMETHOD_ERROR_METHOD_PRIVATE,
+            format!("{}.{}", class_name, method_name),
         ))
-        .with_builtin("getmethod")
-        .with_identifier("RunMat:MethodPrivate")
-        .build())
     }
 
     let method_name = name.trim();
     if method_name.is_empty() {
-        return Err(
-            crate::build_runtime_error("getmethod: method name must not be empty")
-                .with_builtin("getmethod")
-                .with_identifier("RunMat:GetMethodNameInvalid")
-                .build(),
-        );
+        return Err(crate::runtime_descriptor_error(
+            "getmethod",
+            &GETMETHOD_ERROR_NAME_INVALID,
+        ));
     }
     let caller_scope = crate::class_access_context()
         .map(Value::String)
@@ -147,12 +155,11 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 format!("@{cls}.{method_name}"),
             ))
         }
-        other => Err(crate::build_runtime_error(format!(
-            "getmethod: unsupported receiver ({other:?})"
-        ))
-        .with_builtin("getmethod")
-        .with_identifier("RunMat:GetMethodReceiverUnsupported")
-        .build()),
+        other => Err(crate::runtime_descriptor_error_with_detail(
+            "getmethod",
+            &GETMETHOD_ERROR_RECEIVER_UNSUPPORTED,
+            format!("{other:?}"),
+        )),
     }
 }
 

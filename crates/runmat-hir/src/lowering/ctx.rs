@@ -84,6 +84,7 @@ struct LowerFunctionSpec<'a> {
     params: &'a [String],
     outputs: &'a [String],
     argument_validations: &'a [runmat_parser::FunctionArgValidationDecl],
+    argument_block_kinds: &'a [runmat_parser::FunctionArgumentsBlockKind],
     body: &'a [AstStmt],
     span: Span,
     kind: FunctionKind,
@@ -286,6 +287,7 @@ impl LoweringCtx {
                     params,
                     outputs,
                     argument_validations,
+                    argument_block_kinds,
                     body,
                     isolated,
                     is_async,
@@ -298,6 +300,7 @@ impl LoweringCtx {
                         params,
                         outputs,
                         argument_validations,
+                        argument_block_kinds,
                         body,
                         span: *span,
                         kind: FunctionKind::Named,
@@ -678,6 +681,7 @@ impl LoweringCtx {
             params,
             outputs,
             argument_validations,
+            argument_block_kinds,
             body,
             span,
             kind,
@@ -731,6 +735,13 @@ impl LoweringCtx {
                     ));
                     let mut argument_validations_hir =
                         Vec::with_capacity(argument_validations.len());
+                    for block_kind in argument_block_kinds {
+                        if !matches!(block_kind, runmat_parser::FunctionArgumentsBlockKind::Input) {
+                            return Err(HirError::new("unsupported function arguments-block kind")
+                                .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNSUPPORTED)
+                                .with_span(span));
+                        }
+                    }
                     let mut seen_argument_validation_bindings = HashSet::new();
                     for decl in argument_validations {
                         if decl.has_unsupported_trailing {
@@ -816,6 +827,7 @@ impl LoweringCtx {
                             params,
                             outputs,
                             argument_validations,
+                            argument_block_kinds,
                             body,
                             isolated,
                             is_async,
@@ -829,6 +841,7 @@ impl LoweringCtx {
                                 params,
                                 outputs,
                                 argument_validations,
+                                argument_block_kinds,
                                 body,
                                 span: *span,
                                 kind: FunctionKind::Named,
@@ -998,7 +1011,8 @@ impl LoweringCtx {
                             name: method_name,
                             params,
                             outputs,
-                            argument_validations: _argument_validations,
+                            argument_validations,
+                            argument_block_kinds,
                             body,
                             isolated,
                             is_async,
@@ -1012,7 +1026,8 @@ impl LoweringCtx {
                                 name: &qualified_method_name,
                                 params,
                                 outputs,
-                                argument_validations: &[],
+                                argument_validations,
+                                argument_block_kinds,
                                 body,
                                 span: *span,
                                 kind: FunctionKind::ClassMethod { is_static },
@@ -1059,6 +1074,7 @@ impl LoweringCtx {
                                 params: &params,
                                 outputs: &outputs,
                                 argument_validations: &[],
+                                argument_block_kinds: &[],
                                 body: &[],
                                 span: method_span,
                                 kind: FunctionKind::ClassMethod { is_static },
@@ -1280,7 +1296,7 @@ impl LoweringCtx {
                     HirError::new("validator requires one numeric threshold argument")
                         .with_identifier(IDENT_FUNCTION_ARGUMENT_VALIDATION_UNKNOWN_VALIDATOR)
                         .with_span(span),
-                )
+                );
             }
         };
         Self::lower_validator_numeric_literal_expr(threshold_expr).ok_or_else(|| {

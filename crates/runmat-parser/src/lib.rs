@@ -6,7 +6,8 @@ mod span;
 
 pub use ast::{
     Attr, BinOp, ClassMember, Expr, FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidationDecl,
-    FunctionArgValidatorDecl, LValue, MultiAssignTarget, Program, Stmt, UnOp,
+    FunctionArgValidatorDecl, FunctionArgumentsBlockKind, LValue, MultiAssignTarget, Program, Stmt,
+    UnOp,
 };
 pub use error::SyntaxError;
 pub use options::{CompatMode, ParserOptions};

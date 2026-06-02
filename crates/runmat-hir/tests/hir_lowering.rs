@@ -91,6 +91,24 @@ fn isolated_function_cannot_capture_outer_binding() {
 }
 
 #[test]
+fn mixed_script_arguments_block_default_kind_lowers() {
+    let ast = runmat_parser::parse(
+        r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+        "#,
+    )
+    .unwrap();
+
+    lower(&ast, &LoweringContext::empty()).expect("default arguments block kind lowers");
+}
+
+#[test]
 fn arguments_block_unsupported_trailing_syntax_has_stable_identifier() {
     let ast = runmat_parser::parse(
         r#"
@@ -99,6 +117,48 @@ fn arguments_block_unsupported_trailing_syntax_has_stable_identifier() {
                 x (1,1) double < 10
             end
             y = x;
+        end
+        "#,
+    )
+    .unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationUnsupported")
+    );
+}
+
+#[test]
+fn arguments_block_advanced_kind_has_stable_identifier() {
+    let ast = runmat_parser::parse(
+        r#"
+        function y = typed(x, varargin)
+            arguments (Repeating)
+                varargin double
+            end
+            y = x;
+        end
+        "#,
+    )
+    .unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationUnsupported")
+    );
+}
+
+#[test]
+fn arguments_block_name_value_declaration_has_stable_identifier() {
+    let ast = runmat_parser::parse(
+        r#"
+        function y = typed(opts)
+            arguments
+                opts.Name (1,1) double = 1
+            end
+            y = opts.Name;
         end
         "#,
     )
@@ -307,6 +367,86 @@ fn scoped_private_function_alias_resolves_only_for_owner_scope() {
                 if *id == private_function_id
         ),
         "owner scope should resolve @helper to the package private helper"
+    );
+}
+
+#[test]
+fn scoped_private_function_alias_resolves_for_class_folder_owner_scope() {
+    let mut ast = runmat_parser::parse(
+        r#"
+        leak = helper(1);
+        function y = entry(x)
+            a = helper(x);
+            h = @helper;
+            b = h(x);
+            y = a + b;
+        end
+        function y = helper(x)
+            y = x + 1;
+        end
+        "#,
+    )
+    .unwrap();
+    for stmt in &mut ast.body {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            if name == "entry" {
+                *name = "C.entry".to_string();
+            } else if name == "helper" {
+                *name = "C.__private__.helper".to_string();
+            }
+        }
+    }
+    let mut owners = HashMap::new();
+    owners.insert("C.__private__.helper".to_string(), "C".to_string());
+    let mut class_aliases = HashMap::new();
+    class_aliases.insert("helper".to_string(), "C.__private__.helper".to_string());
+    let mut aliases = HashMap::new();
+    aliases.insert("C".to_string(), class_aliases);
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_private_functions(&owners, &aliases),
+    )
+    .unwrap();
+
+    let private_function_id = result
+        .assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "C.__private__.helper")
+        .map(|function| function.id)
+        .expect("private helper function");
+    let entry = result
+        .assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "C.entry")
+        .expect("entry function");
+
+    assert!(
+        result.hir_index.calls.iter().any(|call| {
+            call.name.0[0].0 == "helper"
+                && matches!(call.kind, CallKind::Dynamic)
+                && matches!(call.callee, HirCallableRef::Unresolved(_))
+        }),
+        "root scope should not resolve the class-folder private helper"
+    );
+    assert!(
+        result.hir_index.calls.iter().any(|call| {
+            matches!(call.kind, CallKind::DirectFunction(id) if id == private_function_id)
+        }),
+        "class owner scope should resolve direct helper calls to the class-folder private helper"
+    );
+
+    let HirStmtKind::Assign(_, handle_expr, _) = &entry.body.statements[1].kind else {
+        panic!("expected handle assignment");
+    };
+    assert!(
+        matches!(
+            &handle_expr.kind,
+            HirExprKind::FunctionHandle(runmat_hir::FunctionHandleTarget::Function(id))
+                if *id == private_function_id
+        ),
+        "class owner scope should resolve @helper to the class-folder private helper"
     );
 }
 

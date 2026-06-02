@@ -95,6 +95,11 @@ fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<S
                     return None;
                 }
                 package_segments.push(pkg.to_string());
+            } else if let Some(class) = segment.strip_prefix('@') {
+                if class.is_empty() {
+                    return None;
+                }
+                package_segments.push(class.to_string());
             } else {
                 return None;
             }
@@ -133,12 +138,9 @@ fn source_index_qualified_function_name(
     if source.is_private {
         return None;
     }
-    source.package_path.as_ref().and_then(|_| {
-        source
-            .qualified_name
-            .contains('.')
-            .then_some(source.qualified_name.as_str())
-    })
+    (source.package_path.is_some() || source.class_name.is_some())
+        .then_some(source.qualified_name.as_str())
+        .filter(|name| name.contains('.'))
 }
 
 fn source_index_qualified_class_name(
@@ -247,6 +249,7 @@ pub(super) struct CompanionSourceDiscovery {
     pub private_function_names: HashSet<String>,
     pub private_function_owners: HashMap<String, String>,
     pub private_function_aliases: HashMap<String, HashMap<String, String>>,
+    pub function_source_contexts: HashMap<String, (String, String)>,
     private_statement_flags: Vec<bool>,
 }
 
@@ -260,13 +263,51 @@ fn function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> impl Iterator<
     })
 }
 
+fn source_context_function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> Vec<String> {
+    let mut names = Vec::new();
+    for stmt in stmts {
+        match stmt {
+            runmat_parser::Stmt::Function { name, .. } => names.push(name.clone()),
+            runmat_parser::Stmt::ClassDef {
+                name: class_name,
+                members,
+                ..
+            } => {
+                for member in members {
+                    if let runmat_parser::ClassMember::Methods { body, .. } = member {
+                        for stmt in body {
+                            if let runmat_parser::Stmt::Function { name, .. } = stmt {
+                                let display_name = if name.contains('.') {
+                                    name.clone()
+                                } else {
+                                    format!("{class_name}.{name}")
+                                };
+                                names.push(display_name);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
 impl CompanionSourceDiscovery {
     fn extend_body(
         &mut self,
         body: Vec<runmat_parser::Stmt>,
         private_owner_scope: Option<&str>,
         private_aliases: HashMap<String, String>,
+        source_context: Option<(String, String)>,
     ) {
+        if let Some((source_name, source_text)) = source_context {
+            for function_name in source_context_function_names_in_statements(&body) {
+                self.function_source_contexts
+                    .insert(function_name, (source_name.clone(), source_text.clone()));
+            }
+        }
         let is_private = private_owner_scope.is_some();
         if is_private {
             let owner_scope = private_owner_scope.unwrap_or_default();
@@ -321,6 +362,9 @@ impl CompanionSourceDiscovery {
                 _ => true,
             };
             if !keep {
+                if let runmat_parser::Stmt::Function { name, .. } = &stmt {
+                    self.function_source_contexts.remove(name);
+                }
                 continue;
             }
             if is_private {
@@ -421,7 +465,12 @@ async fn discover_companion_from_composition_graph_async(
                             qualify_companion_functions(&mut body, &qualified);
                         }
                     }
-                    out.extend_body(body, private_owner_scope.as_deref(), private_aliases);
+                    out.extend_body(
+                        body,
+                        private_owner_scope.as_deref(),
+                        private_aliases,
+                        Some((file_path.to_string_lossy().to_string(), contents)),
+                    );
                 }
             }
         }
@@ -467,7 +516,11 @@ pub(super) async fn discover_companion_source_statements_async(
                     .file_name()
                     .to_str()
                     .is_some_and(|name| name.starts_with('+'));
-                if is_package_dir || is_private_dir(&path) {
+                let is_class_dir = entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with('@'));
+                if is_package_dir || is_class_dir || is_private_dir(&path) {
                     stack.push(path);
                 }
                 continue;
@@ -512,7 +565,12 @@ pub(super) async fn discover_companion_source_statements_async(
                     qualify_companion_functions(&mut body, &qualified);
                 }
             }
-            out.extend_body(body, private_owner_scope.as_deref(), private_aliases);
+            out.extend_body(
+                body,
+                private_owner_scope.as_deref(),
+                private_aliases,
+                Some((path.to_string_lossy().to_string(), contents)),
+            );
         }
     }
     out
@@ -543,6 +601,7 @@ impl RunMatSession {
             private_companion_function_names,
             private_companion_function_owners,
             private_companion_function_aliases,
+            companion_function_source_ids,
         ) = {
             let _span = info_span!("runtime.parse").entered();
             let mut ast = parse_with_options(input, ParserOptions::new(self.compat_mode))?;
@@ -560,6 +619,16 @@ impl RunMatSession {
                 std::mem::take(&mut companion.private_function_owners);
             let private_companion_function_aliases =
                 std::mem::take(&mut companion.private_function_aliases);
+            let companion_function_source_ids =
+                std::mem::take(&mut companion.function_source_contexts)
+                    .into_iter()
+                    .map(|(function_name, (source_name, source_text))| {
+                        (
+                            function_name,
+                            self.source_pool.intern(&source_name, &source_text),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
             if !companion.statements.is_empty() {
                 ast.body.append(&mut companion.statements);
             }
@@ -568,6 +637,7 @@ impl RunMatSession {
                 private_companion_function_names,
                 private_companion_function_owners,
                 private_companion_function_aliases,
+                companion_function_source_ids,
             )
         };
         let lowering = {
@@ -601,6 +671,13 @@ impl RunMatSession {
             self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
         };
         bytecode.source_id = Some(source_id);
+        for function in bytecode.function_registry.functions.values_mut() {
+            function.source_id = companion_function_source_ids
+                .get(&function.display_name)
+                .copied()
+                .or(Some(source_id));
+        }
+        bytecode.bound_functions = bytecode.function_registry.functions.clone();
         let (function_registry_after_success, next_semantic_function_id_after_success) = self
             .prepare_session_semantic_function_registry(
                 &mut bytecode,
@@ -716,7 +793,7 @@ impl RunMatSession {
             };
             let mut function = function;
             function.function = new_id;
-            function.source_id = bytecode.source_id;
+            function.source_id = function.source_id.or(bytecode.source_id);
             for instr in &mut function.instructions {
                 remap_semantic_function_instr(instr, &remap);
             }

@@ -210,6 +210,7 @@ fn test_request_host_policy_disables_top_level_await() {
             compatibility: CompatMode::Matlab,
             host_policy: abi::HostExecutionPolicy {
                 top_level_await: false,
+                dynamic_eval: true,
             },
             requested_outputs: runmat_hir::RequestedOutputCount::Zero,
             workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(13)),

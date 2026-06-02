@@ -67,12 +67,10 @@ fn text_value(value: &Value) -> Option<String> {
 
 fn mode_from_args(args: &[Value]) -> crate::BuiltinResult<MfilenameMode> {
     if args.len() > 1 {
-        return Err(
-            crate::build_runtime_error("mfilename: too many input arguments")
-                .with_identifier("RunMat:TooManyInputs")
-                .with_builtin("mfilename")
-                .build(),
-        );
+        return Err(crate::runtime_descriptor_error(
+            "mfilename",
+            &MFILENAME_ERROR_TOO_MANY_INPUTS,
+        ));
     }
     let Some(option) = args.first().and_then(text_value) else {
         return Ok(MfilenameMode::Name);

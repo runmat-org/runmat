@@ -1,4 +1,6 @@
-use runmat_parser::{Attr, BinOp, ClassMember, Expr, LValue, Program, Span, Stmt, UnOp};
+use runmat_parser::{
+    Attr, BinOp, ClassMember, Expr, FunctionArgumentsBlockKind, LValue, Program, Span, Stmt, UnOp,
+};
 
 mod parse;
 mod support;
@@ -107,6 +109,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             params,
             outputs,
             argument_validations,
+            argument_block_kinds,
             body,
             isolated,
             is_async,
@@ -116,6 +119,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             params: params.clone(),
             outputs: outputs.clone(),
             argument_validations: argument_validations.clone(),
+            argument_block_kinds: argument_block_kinds.clone(),
             body: body.iter().map(strip_stmt).collect(),
             isolated: *isolated,
             is_async: *is_async,
@@ -847,6 +851,7 @@ fn parse_function_definition() {
                 params: vec!["x".to_string()],
                 outputs: vec!["y".to_string()],
                 argument_validations: vec![],
+                argument_block_kinds: vec![],
                 body: vec![assign(
                     "y".to_string(),
                     binary_boxed(
@@ -886,11 +891,13 @@ fn parse_function_definition_with_arguments_block() {
     assert_eq!(params, &vec!["x".to_string()]);
     let Stmt::Function {
         argument_validations,
+        argument_block_kinds,
         ..
     } = &parsed.body[0]
     else {
         unreachable!()
     };
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
     assert_eq!(argument_validations.len(), 1);
     assert_eq!(argument_validations[0].name, "x");
     assert_eq!(
@@ -903,6 +910,106 @@ fn parse_function_definition_with_arguments_block() {
             .any(|stmt| matches!(stmt, Stmt::Assign(var, _, _, _) if var == "y"),),
         "expected function body assignment after arguments block"
     );
+}
+
+#[test]
+fn parse_mixed_script_function_arguments_block_preserves_input_kind() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+    "#;
+    let parsed = parse(source).expect("parse mixed script and function source");
+    assert_eq!(parsed.body.len(), 2);
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected leading function statement");
+    };
+
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+}
+
+#[test]
+fn parse_function_arguments_block_supports_input_attribute() {
+    let source = r#"
+        function y = typed(x)
+            arguments (Input)
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with input arguments block");
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_records_repeating_and_output_kinds() {
+    let source = r#"
+        function [y, z] = typed(x, varargin)
+            arguments
+                x double
+            end
+            arguments (Repeating)
+                varargin double
+            end
+            arguments (Output)
+                y double
+                z double
+            end
+            y = x;
+            z = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with advanced arguments blocks");
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+
+    assert_eq!(
+        argument_block_kinds,
+        &[
+            FunctionArgumentsBlockKind::Input,
+            FunctionArgumentsBlockKind::Repeating,
+            FunctionArgumentsBlockKind::Output,
+        ]
+    );
+    assert_eq!(argument_validations.len(), 4);
 }
 
 #[test]
@@ -958,6 +1065,32 @@ fn parse_function_arguments_block_marks_unsupported_trailing_syntax() {
         argument_validations[0].class_name.as_deref(),
         Some("double")
     );
+    assert!(argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_marks_name_value_declaration_unsupported() {
+    let source = r#"
+        function y = typed(opts)
+            arguments
+                opts.Name (1,1) double = 1
+            end
+            y = opts.Name;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with unsupported name-value syntax");
+    let Stmt::Function {
+        argument_validations,
+        argument_block_kinds,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+
+    assert_eq!(argument_block_kinds, &[FunctionArgumentsBlockKind::Input]);
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "opts");
     assert!(argument_validations[0].has_unsupported_trailing);
 }
 

@@ -15,6 +15,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+type ViewBounds2D = (f64, f64, f64, f64);
+type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
+
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
     vertex_signature: (usize, usize),
@@ -94,7 +97,7 @@ pub struct PlotRenderer {
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
     /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
-    last_axes_view_bounds: Option<Vec<Option<(f64, f64, f64, f64)>>>,
+    last_axes_view_bounds: Option<PerAxesViewBounds>,
     /// Last figure view contract used to decide whether script-owned axes state changed.
     last_axes_view_contract: Option<AxesViewContract>,
 
@@ -597,7 +600,7 @@ impl PlotRenderer {
         self.needs_update = true;
     }
 
-    fn axes_view_bounds_for_count(&self, axes_count: usize) -> Vec<Option<(f64, f64, f64, f64)>> {
+    fn axes_view_bounds_for_count(&self, axes_count: usize) -> PerAxesViewBounds {
         (0..axes_count)
             .map(|idx| self.view_bounds_for_axes(idx))
             .collect()
@@ -1014,7 +1017,7 @@ impl PlotRenderer {
                 .unwrap_or_else(|| self.axes_cameras[idx].target)
             })
             .collect();
-        let display_bounds: Vec<Option<(f64, f64, f64, f64)>> = (0..self.axes_cameras.len())
+        let display_bounds: PerAxesViewBounds = (0..self.axes_cameras.len())
             .map(|idx| self.display_bounds_for_axes(idx))
             .collect();
         for (idx, c) in self.axes_cameras.iter_mut().enumerate() {

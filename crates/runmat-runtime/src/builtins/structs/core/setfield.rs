@@ -229,6 +229,13 @@ const SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS: BuiltinErrorDescriptor = BuiltinEr
     message: "setfield: private property access denied",
 };
 
+const SETFIELD_ERROR_PROPERTY_STATIC_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.PROPERTY_STATIC_ACCESS",
+    identifier: Some("RunMat:PropertyStaticAccess"),
+    when: "Property exists but is static and cannot be assigned through an instance.",
+    message: "setfield: static property access denied",
+};
+
 const SETFIELD_ERROR_OBJECT_PROPERTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SETFIELD.OBJECT_PROPERTY",
     identifier: Some("RunMat:setfield:ObjectProperty"),
@@ -250,7 +257,7 @@ const SETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "setfield: internal error",
 };
 
-const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 13] = [
+const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 14] = [
     SETFIELD_ERROR_NOT_ENOUGH_INPUTS,
     SETFIELD_ERROR_FIELD_EXPECTED,
     SETFIELD_ERROR_INDEX_SELECTOR_TYPE,
@@ -261,6 +268,7 @@ const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 13] = [
     SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
     SETFIELD_ERROR_MISSING_FIELD,
     SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS,
+    SETFIELD_ERROR_PROPERTY_STATIC_ACCESS,
     SETFIELD_ERROR_OBJECT_PROPERTY,
     SETFIELD_ERROR_INVALID_HANDLE,
     SETFIELD_ERROR_INTERNAL,
@@ -296,10 +304,7 @@ fn setfield_private_access(message: impl Into<String>) -> RuntimeError {
 }
 
 fn setfield_static_access(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier("RunMat:PropertyStaticAccess")
-        .build()
+    setfield_error_with_message(message, &SETFIELD_ERROR_PROPERTY_STATIC_ACCESS)
 }
 
 fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError {

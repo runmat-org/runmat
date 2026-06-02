@@ -94,12 +94,14 @@ impl RunMatSession {
         let (source_name, source_text) = source_input_text(request.source).await?;
         let previous_compat = self.compat_mode;
         let previous_top_level_await_enabled = self.top_level_await_enabled;
+        let previous_dynamic_eval_enabled = self.dynamic_eval_enabled;
         let previous_source_name = self.active_source_name.clone();
         let previous_workspace_handle = self.abi_workspace_handle;
         let previous_source_identity = self.active_source_identity.clone();
 
         self.compat_mode = request.compatibility;
         self.top_level_await_enabled = request.host_policy.top_level_await;
+        self.dynamic_eval_enabled = request.host_policy.dynamic_eval;
         self.active_source_name = source_name;
         self.abi_workspace_handle = request.workspace;
         self.active_source_identity = resolve_source_identity(&source_input, &source_text);
@@ -108,6 +110,7 @@ impl RunMatSession {
 
         self.compat_mode = previous_compat;
         self.top_level_await_enabled = previous_top_level_await_enabled;
+        self.dynamic_eval_enabled = previous_dynamic_eval_enabled;
         self.active_source_name = previous_source_name;
         self.abi_workspace_handle = previous_workspace_handle;
         self.active_source_identity = previous_source_identity;
@@ -130,6 +133,12 @@ impl RunMatSession {
         })?;
         runmat_vm::set_call_stack_limit(self.callstack_limit);
         runmat_vm::set_error_namespace(&self.error_namespace);
+        runmat_vm::set_dynamic_eval_options(
+            self.compat_mode,
+            self.compat_mode.allows_runmat_extensions(),
+            self.top_level_await_enabled,
+            self.dynamic_eval_enabled,
+        );
         runmat_hir::set_error_namespace(&self.error_namespace);
         let exec_span = info_span!(
             "runtime.execute",
@@ -570,7 +579,9 @@ impl RunMatSession {
                                         } else {
                                             suppressed_value = Some(assignment_value);
                                             if self.verbose {
-                                                debug!("JIT assignment suppressed due to semicolon, captured for type info");
+                                                debug!(
+                                                    "JIT assignment suppressed due to semicolon, captured for type info"
+                                                );
                                             }
                                         }
                                     }
@@ -668,7 +679,9 @@ impl RunMatSession {
                                     } else {
                                         suppressed_value = Some(assignment_value);
                                         if self.verbose {
-                                            debug!("Interpreter assignment suppressed due to semicolon, captured for type info");
+                                            debug!(
+                                                "Interpreter assignment suppressed due to semicolon, captured for type info"
+                                            );
                                         }
                                     }
                                 }
@@ -698,12 +711,16 @@ impl RunMatSession {
                                 ans_update = Some((temp_var_id, expression_value.clone()));
                                 result_value = Some(expression_value);
                                 if self.verbose {
-                                    debug!("Expression result from temp var {temp_var_id}: {result_value:?}");
+                                    debug!(
+                                        "Expression result from temp var {temp_var_id}: {result_value:?}"
+                                    );
                                 }
                             } else {
                                 suppressed_value = Some(expression_value);
                                 if self.verbose {
-                                    debug!("Expression suppressed, captured for type info from temp var {temp_var_id}: {suppressed_value:?}");
+                                    debug!(
+                                        "Expression suppressed, captured for type info from temp var {temp_var_id}: {suppressed_value:?}"
+                                    );
                                 }
                             }
                         }

@@ -12,6 +12,7 @@ pub mod classref;
 pub mod clear;
 pub mod clearvars;
 pub mod dependent_property;
+pub mod dynamic_workspace;
 pub mod feval;
 pub mod function_handle_text;
 pub mod function_metadata;

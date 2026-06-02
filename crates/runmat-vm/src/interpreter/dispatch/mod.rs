@@ -1267,6 +1267,7 @@ pub async fn dispatch_instruction(
                     call_arg_spans: call_arg_spans.clone(),
                     imports: imports.as_slice(),
                     call_counts,
+                    function_registry,
                     current_function_name,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
@@ -1303,6 +1304,7 @@ pub async fn dispatch_instruction(
                     call_arg_spans: call_arg_spans.clone(),
                     imports: imports.as_slice(),
                     call_counts,
+                    function_registry,
                     current_function_name,
                     exception: calls::ExceptionRouteContext {
                         try_stack,

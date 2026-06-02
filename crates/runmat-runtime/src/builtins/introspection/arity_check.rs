@@ -2,6 +2,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
 };
+use runmat_hir::{NARGINCHK_BUILTIN_NAME, NARGOUTCHK_BUILTIN_NAME};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 
@@ -248,61 +249,60 @@ fn validate_arg_count(
 }
 
 pub(crate) fn dispatch_narginchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let builtin = NARGINCHK_BUILTIN_NAME;
     validate_arg_count(
         &args,
-        "narginchk",
+        builtin,
         &NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
         &NARGINCHK_ERROR_TOO_MANY_INPUTS,
     )?;
     let (actual_inputs, _) = CALL_COUNTS
         .with(|slot| slot.borrow().last().copied())
-        .ok_or_else(|| descriptor_error("narginchk", &NARGINCHK_ERROR_CONTEXT_UNAVAILABLE))?;
+        .ok_or_else(|| descriptor_error(builtin, &NARGINCHK_ERROR_CONTEXT_UNAVAILABLE))?;
     let (min, max) = validate_bounds(
         &args,
-        "narginchk",
+        builtin,
         &NARGINCHK_ERROR_ARGUMENT_INVALID,
         &NARGINCHK_ERROR_BOUNDS_INVALID,
     )?;
     if actual_inputs < min {
         return Err(descriptor_error(
-            "narginchk",
+            builtin,
             &NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
         ));
     }
     if !max.permits(actual_inputs) {
-        return Err(descriptor_error(
-            "narginchk",
-            &NARGINCHK_ERROR_TOO_MANY_INPUTS,
-        ));
+        return Err(descriptor_error(builtin, &NARGINCHK_ERROR_TOO_MANY_INPUTS));
     }
     Ok(Value::Num(0.0))
 }
 
 pub(crate) fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let builtin = NARGOUTCHK_BUILTIN_NAME;
     validate_arg_count(
         &args,
-        "nargoutchk",
+        builtin,
         &NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS,
         &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
     )?;
     let (_, actual_outputs) = CALL_COUNTS
         .with(|slot| slot.borrow().last().copied())
-        .ok_or_else(|| descriptor_error("nargoutchk", &NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE))?;
+        .ok_or_else(|| descriptor_error(builtin, &NARGOUTCHK_ERROR_CONTEXT_UNAVAILABLE))?;
     let (min, max) = validate_bounds(
         &args,
-        "nargoutchk",
+        builtin,
         &NARGOUTCHK_ERROR_ARGUMENT_INVALID,
         &NARGOUTCHK_ERROR_BOUNDS_INVALID,
     )?;
     if actual_outputs < min {
         return Err(descriptor_error(
-            "nargoutchk",
+            builtin,
             &NARGOUTCHK_ERROR_NOT_ENOUGH_OUTPUTS,
         ));
     }
     if !max.permits(actual_outputs) {
         return Err(descriptor_error(
-            "nargoutchk",
+            builtin,
             &NARGOUTCHK_ERROR_TOO_MANY_OUTPUTS,
         ));
     }
