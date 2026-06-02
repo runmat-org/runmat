@@ -196,12 +196,8 @@ pub(crate) async fn dispatch_subsasgn(
 ) -> crate::BuiltinResult<Value> {
     match obj {
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
-                crate::build_runtime_error("subsasgn: requires object receiver")
-                    .with_builtin("subsasgn")
-                    .with_identifier("RunMat:InvalidObjectDispatch")
-                    .build()
-            })?;
+            let class_name = crate::object_receiver_class_name(&receiver)
+                .ok_or_else(|| crate::runtime_descriptor_error("subsasgn", &SUBSASGN_ERRORS[0]))?;
             let dispatch_receiver = receiver.clone();
             let dispatch_kind = kind.clone();
             let dispatch_payload = payload.clone();
@@ -236,22 +232,19 @@ pub(crate) async fn dispatch_subsasgn(
                             .await;
                         }
                     }
-                    Err(crate::build_runtime_error(
-                        "subsasgn: class does not define subsasgn for indexed assignment",
-                    )
-                    .with_builtin("subsasgn")
-                    .with_identifier("RunMat:MissingSubsasgn")
-                    .build())
+                    Err(crate::runtime_descriptor_error(
+                        "subsasgn",
+                        &SUBSASGN_ERRORS[1],
+                    ))
                 }
                 Err(err) => Err(err),
             }
         }
-        other => Err(
-            crate::build_runtime_error(format!("receiver must be object, got {other:?}"))
-                .with_builtin("subsasgn")
-                .with_identifier("RunMat:InvalidObjectDispatch")
-                .build(),
-        ),
+        other => Err(crate::runtime_descriptor_error_with_detail(
+            "subsasgn",
+            &SUBSASGN_ERRORS[0],
+            format!("receiver must be object, got {other:?}"),
+        )),
     }
 }
 

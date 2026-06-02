@@ -6,7 +6,7 @@
 
 use crate::core::renderer::Vertex;
 use crate::core::{BoundingBox, Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
-use crate::plots::figure::{LegendEntry, TextStyle};
+use crate::plots::figure::{AxesViewBounds, AxisViewBounds, LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
 use glam::{Mat4, Vec3, Vec4};
@@ -94,7 +94,7 @@ pub struct PlotRenderer {
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
     /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
-    last_axes_view_bounds: Option<Vec<Option<(f64, f64, f64, f64)>>>,
+    last_axes_view_bounds: Option<AxesViewBounds>,
     /// Last figure view contract used to decide whether script-owned axes state changed.
     last_axes_view_contract: Option<AxesViewContract>,
 
@@ -597,7 +597,7 @@ impl PlotRenderer {
         self.needs_update = true;
     }
 
-    fn axes_view_bounds_for_count(&self, axes_count: usize) -> Vec<Option<(f64, f64, f64, f64)>> {
+    fn axes_view_bounds_for_count(&self, axes_count: usize) -> AxesViewBounds {
         (0..axes_count)
             .map(|idx| self.view_bounds_for_axes(idx))
             .collect()
@@ -752,7 +752,7 @@ impl PlotRenderer {
         }
     }
 
-    fn display_bounds_for_axes(&self, axes_index: usize) -> Option<(f64, f64, f64, f64)> {
+    fn display_bounds_for_axes(&self, axes_index: usize) -> Option<AxisViewBounds> {
         let base = self.axes_bounds(axes_index)?;
         let mut x_min = base.min.x as f64;
         let mut x_max = base.max.x as f64;

@@ -1036,6 +1036,7 @@ fn test_jit_direct_semantic_function_call() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1092,6 +1093,7 @@ fn test_jit_named_call_resolves_semantic_registry() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1151,6 +1153,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1212,6 +1215,7 @@ fn test_jit_semantic_multi_output_call() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1273,6 +1277,7 @@ fn test_jit_named_semantic_multi_output_call() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1335,6 +1340,7 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1404,6 +1410,7 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1474,6 +1481,7 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
         varargout_slot: None,
         implicit_nargout_slot: None,
         capture_slots: Vec::new(),
+        argument_validations: Vec::new(),
     };
 
     let mut bound_functions = HashMap::new();
@@ -1687,6 +1695,7 @@ fn test_jit_mixed_execution_patterns() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -1762,6 +1771,7 @@ fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -1833,6 +1843,7 @@ fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_displa
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -1914,6 +1925,7 @@ fn test_jit_named_multi_output_call_resolves_imported_identity_with_qualified_na
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -1994,6 +2006,7 @@ fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2068,6 +2081,7 @@ fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2218,6 +2232,7 @@ fn test_jit_simple_function_compilation() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2297,6 +2312,7 @@ fn test_jit_nested_function_calls_compilation() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
     bound_functions.insert(
@@ -2325,6 +2341,7 @@ fn test_jit_nested_function_calls_compilation() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2398,6 +2415,7 @@ fn test_jit_function_parameter_validation() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2485,6 +2503,7 @@ fn test_jit_function_variable_isolation() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2562,6 +2581,7 @@ fn test_jit_function_compilation_performance() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 
@@ -2649,6 +2669,7 @@ fn test_jit_function_error_handling() {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         },
     );
 

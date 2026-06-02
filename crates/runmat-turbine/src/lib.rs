@@ -1982,6 +1982,7 @@ mod tests {
             varargout_slot: None,
             implicit_nargout_slot: None,
             capture_slots: Vec::new(),
+            argument_validations: Vec::new(),
         }
     }
 
