@@ -323,7 +323,18 @@ fn sparse_from_value(value: Value) -> BuiltinResult<SparseTensor> {
             }
             sparse_from_dense_tensor(&tensor)
         }
-        Value::LogicalArray(logical) => sparse_from_logical_array(&logical),
+        Value::LogicalArray(logical) => {
+            if logical.shape.len() != 2 {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!(
+                        "sparse: input must be a 2-D matrix, got {}-D logical array",
+                        logical.shape.len()
+                    ),
+                ));
+            }
+            sparse_from_logical_array(&logical)
+        }
         Value::Num(n) => sparse_from_dense_tensor(
             &Tensor::new(vec![n], vec![1, 1])
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("sparse: {err}")))?,
@@ -365,6 +376,15 @@ fn sparse_from_dense_tensor(tensor: &Tensor) -> BuiltinResult<SparseTensor> {
 }
 
 fn sparse_from_logical_array(logical: &LogicalArray) -> BuiltinResult<SparseTensor> {
+    if logical.shape.len() != 2 {
+        return Err(sparse_error(
+            &SPARSE_ERROR_INVALID_INPUT,
+            format!(
+                "sparse: input must be a 2-D matrix, got {}-D logical array",
+                logical.shape.len()
+            ),
+        ));
+    }
     let shape = match logical.shape.as_slice() {
         [] => vec![1, 1],
         [n] => vec![1, *n],
