@@ -109,6 +109,36 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
     }
 }
 
+fn requested_outputs_from_slot(vars: &[Value], slot: usize) -> Result<usize, RuntimeError> {
+    let value = vars.get(slot).ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "OutputCountSlotOutOfBounds",
+            "requested output slot is out of bounds",
+        )
+    })?;
+    match value {
+        Value::Num(n) => {
+            if !n.is_finite() || *n < 0.0 || (*n - n.round()).abs() > f64::EPSILON {
+                return Err(crate::interpreter::errors::mex(
+                    "InvalidOutputCountValue",
+                    "requested output count slot must contain a nonnegative integer scalar",
+                ));
+            }
+            Ok(*n as usize)
+        }
+        Value::Int(i) => usize::try_from(i.to_i64()).map_err(|_| {
+            crate::interpreter::errors::mex(
+                "InvalidOutputCountValue",
+                "requested output count slot must contain a nonnegative integer scalar",
+            )
+        }),
+        _ => Err(crate::interpreter::errors::mex(
+            "InvalidOutputCountValue",
+            "requested output count slot must contain a nonnegative integer scalar",
+        )),
+    }
+}
+
 fn for_each_gpu_handle_in_value(
     value: &Value,
     f: &mut impl FnMut(&GpuTensorHandle) -> Result<(), RuntimeError>,
@@ -1262,6 +1292,42 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallBuiltinMultiUsingOutputSlot(name, arg_count, out_count_slot) => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            match handle_builtin_call_multi(
+                calls::BuiltinCallContext {
+                    stack,
+                    name,
+                    arg_count: *arg_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    imports: imports.as_slice(),
+                    call_counts,
+                    current_function_name,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                out_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                BuiltinHandling::Completed => {}
+                BuiltinHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                BuiltinHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallSuperConstructorMulti {
             current_class,
             super_class,
@@ -1305,6 +1371,11 @@ pub async fn dispatch_instruction(
         Instr::CallFevalMulti(argc, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
@@ -1316,14 +1387,59 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallFevalMultiUsingOutputSlot(argc, out_count_slot) => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = crate::call::builtins::collect_call_args(stack, *argc)?;
+            let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
+            match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
+                .await?
+            {
+                crate::call::feval::FevalDispatch::Completed(result) => {
+                    stack.push(calls::normalize_requested_outputs(result, out_count));
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallFevalExpandMultiOutput(specs, out_count) => {
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
             match crate::call::feval::execute_feval(func_val, args, *out_count, function_registry)
                 .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
                     stack.push(calls::normalize_requested_outputs(result, *out_count));
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, out_count_slot) => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = build_feval_expand_multi_args(stack, specs).await?;
+            let func_val = crate::interpreter::stack::pop_value(stack)?;
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
+            match crate::call::feval::execute_feval(func_val, args, out_count, function_registry)
+                .await?
+            {
+                crate::call::feval::FevalDispatch::Completed(result) => {
+                    stack.push(calls::normalize_requested_outputs(result, out_count));
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -1379,6 +1495,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1405,6 +1523,115 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallSemanticFunctionMultiUsingOutputSlot(function, arg_count, out_count_slot) => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            match handle_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: runmat_hir::CallableIdentity::BoundFunction(*function),
+                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                    out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSemanticNestedFunctionMulti {
+            function,
+            capture_slots,
+            arg_count,
+            out_count,
+        } => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
+            for slot in capture_slots {
+                call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+            }
+            call_args.extend(args);
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
+            let (result, updated_captures) =
+                crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
+                    function.0,
+                    &call_args,
+                    *out_count,
+                    function_registry,
+                )
+                .await?;
+            for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
+                if *slot < vars.len() {
+                    vars[*slot] = value;
+                }
+            }
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSemanticNestedFunctionMultiUsingOutputSlot {
+            function,
+            capture_slots,
+            arg_count,
+            out_count_slot,
+        } => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
+            for slot in capture_slots {
+                call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+            }
+            call_args.extend(args);
+            let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
+            let _function_input_callsite_guard =
+                runmat_runtime::callsite::push_function_input_callsite(
+                    source_id,
+                    call_arg_spans.clone(),
+                );
+            let (result, updated_captures) =
+                crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
+                    function.0,
+                    &call_args,
+                    out_count,
+                    function_registry,
+                )
+                .await?;
+            for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
+                if *slot < vars.len() {
+                    vars[*slot] = value;
+                }
+            }
+            stack.push(calls::normalize_requested_outputs(result, out_count));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallFunctionMulti {
             identity,
             fallback_policy,
@@ -1417,6 +1644,49 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    current_function_name,
+                    imports: imports.as_slice(),
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallFunctionMultiUsingOutputSlot {
+            identity,
+            fallback_policy,
+            arg_count,
+            out_count_slot,
+        } => {
+            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            match handle_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: identity.clone(),
+                    fallback_policy: *fallback_policy,
+                    out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1506,6 +1776,8 @@ pub async fn dispatch_instruction(
                     identity: identity.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1540,6 +1812,8 @@ pub async fn dispatch_instruction(
                     identity: runmat_hir::CallableIdentity::BoundFunction(*function),
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
                     current_function_name,
                     imports: imports.as_slice(),
                     exception: calls::ExceptionRouteContext {
@@ -1562,6 +1836,37 @@ pub async fn dispatch_instruction(
                 }
                 UserCallHandling::Uncaught(err) => return Err(*err),
             }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSemanticNestedFunctionExpandMultiOutput {
+            function,
+            capture_slots,
+            specs,
+            out_count,
+        } => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
+            for slot in capture_slots {
+                call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+            }
+            call_args.extend(args);
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let (result, updated_captures) =
+                crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
+                    function.0,
+                    &call_args,
+                    *out_count,
+                    function_registry,
+                )
+                .await?;
+            for (slot, value) in capture_slots.iter().zip(updated_captures.into_iter()) {
+                if *slot < vars.len() {
+                    vars[*slot] = value;
+                }
+            }
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

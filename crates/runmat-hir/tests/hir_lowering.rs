@@ -4,6 +4,7 @@ use runmat_hir::{
     IndexResultContext, IndexingSemantics, LoweringContext, MemberAccess, OutputTarget,
     PlaceMutationKind, RequestedOutputCount, SourceUnitKind, WorkspaceVisibility,
 };
+use std::collections::HashMap;
 
 fn lower_result(src: &str) -> runmat_hir::LoweringResult {
     let ast = runmat_parser::parse(src).unwrap();
@@ -86,6 +87,27 @@ fn isolated_function_cannot_capture_outer_binding() {
     assert_eq!(
         err.identifier.as_deref(),
         Some("RunMat:IsolatedLexicalCaptureUnsupported")
+    );
+}
+
+#[test]
+fn arguments_block_unsupported_trailing_syntax_has_stable_identifier() {
+    let ast = runmat_parser::parse(
+        r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double < 10
+            end
+            y = x;
+        end
+        "#,
+    )
+    .unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationUnsupported")
     );
 }
 
@@ -187,6 +209,105 @@ fn local_function_call_resolves_to_function_id() {
         panic!("expected call expression");
     };
     assert!(matches!(call.callee, HirCallableRef::Function(id) if id == function_id));
+}
+
+#[test]
+fn recursive_function_call_resolves_to_self_function_id() {
+    let assembly = lower_semantic("function y = fact(n); y = fact(n - 1); end");
+    let function_id = assembly.modules[0].top_level_functions[0];
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == function_id)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, expr, _) = &function.body.statements[0].kind else {
+        panic!("expected recursive assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected recursive call expression");
+    };
+    assert!(matches!(call.callee, HirCallableRef::Function(id) if id == function_id));
+}
+
+#[test]
+fn scoped_private_function_alias_resolves_only_for_owner_scope() {
+    let mut ast = runmat_parser::parse(
+        r#"
+        leak = helper(1);
+        function y = entry(x)
+            a = helper(x);
+            h = @helper;
+            b = h(x);
+            y = a + b;
+        end
+        function y = helper(x)
+            y = x + 1;
+        end
+        "#,
+    )
+    .unwrap();
+    for stmt in &mut ast.body {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            if name == "entry" {
+                *name = "pkg.entry".to_string();
+            } else if name == "helper" {
+                *name = "pkg.__private__.helper".to_string();
+            }
+        }
+    }
+    let mut owners = HashMap::new();
+    owners.insert("pkg.__private__.helper".to_string(), "pkg".to_string());
+    let mut pkg_aliases = HashMap::new();
+    pkg_aliases.insert("helper".to_string(), "pkg.__private__.helper".to_string());
+    let mut aliases = HashMap::new();
+    aliases.insert("pkg".to_string(), pkg_aliases);
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_private_functions(&owners, &aliases),
+    )
+    .unwrap();
+
+    let private_function_id = result
+        .assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "pkg.__private__.helper")
+        .map(|function| function.id)
+        .expect("private helper function");
+    let entry = result
+        .assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "pkg.entry")
+        .expect("entry function");
+
+    assert!(
+        result.hir_index.calls.iter().any(|call| {
+            call.name.0[0].0 == "helper"
+                && matches!(call.kind, CallKind::Dynamic)
+                && matches!(call.callee, HirCallableRef::Unresolved(_))
+        }),
+        "root scope should not resolve the package private helper"
+    );
+    assert!(
+        result.hir_index.calls.iter().any(|call| {
+            matches!(call.kind, CallKind::DirectFunction(id) if id == private_function_id)
+        }),
+        "owner scope should resolve direct helper calls to the package private helper"
+    );
+
+    let HirStmtKind::Assign(_, handle_expr, _) = &entry.body.statements[1].kind else {
+        panic!("expected handle assignment");
+    };
+    assert!(
+        matches!(
+            &handle_expr.kind,
+            HirExprKind::FunctionHandle(runmat_hir::FunctionHandleTarget::Function(id))
+                if *id == private_function_id
+        ),
+        "owner scope should resolve @helper to the package private helper"
+    );
 }
 
 #[test]

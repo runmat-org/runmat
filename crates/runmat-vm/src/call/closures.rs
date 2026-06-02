@@ -76,6 +76,14 @@ fn method_member_name(identity: &CallableIdentity) -> Option<String> {
 }
 
 fn runtime_named_identity(name: &str) -> (CallableIdentity, CallableFallbackPolicy) {
+    if let Some(function) =
+        runmat_runtime::user_functions::resolve_semantic_function_by_name(name.trim())
+    {
+        return (
+            CallableIdentity::BoundFunction(runmat_hir::FunctionId(function)),
+            CallableFallbackPolicy::None,
+        );
+    }
     let segments: Vec<&str> = name.split('.').collect();
     if segments.len() > 1 && segments.iter().all(|segment| !segment.trim().is_empty()) {
         let qualified = QualifiedName(
@@ -96,19 +104,99 @@ fn runtime_named_identity(name: &str) -> (CallableIdentity, CallableFallbackPoli
     }
 }
 
+fn resolve_method_semantic_function_id(
+    owner: &str,
+    method_name: &str,
+    function_name: &str,
+) -> Option<usize> {
+    let trimmed = function_name.trim();
+    if !trimmed.is_empty() {
+        if let Some(function) =
+            runmat_runtime::user_functions::resolve_semantic_function_by_name(trimmed)
+        {
+            return Some(function);
+        }
+        if !trimmed.contains('.') {
+            let owner_qualified = format!("{owner}.{trimmed}");
+            if let Some(function) =
+                runmat_runtime::user_functions::resolve_semantic_function_by_name(&owner_qualified)
+            {
+                return Some(function);
+            }
+        }
+    }
+    let canonical = format!("{owner}.{method_name}");
+    runmat_runtime::user_functions::resolve_semantic_function_by_name(&canonical)
+}
+
+fn method_function_identity(
+    owner: &str,
+    method_name: &str,
+    function_name: &str,
+) -> (CallableIdentity, CallableFallbackPolicy) {
+    let trimmed = function_name.trim();
+    if let Some(function) = resolve_method_semantic_function_id(owner, method_name, trimmed) {
+        return (
+            CallableIdentity::BoundFunction(runmat_hir::FunctionId(function)),
+            CallableFallbackPolicy::None,
+        );
+    }
+    if trimmed.is_empty() {
+        return (
+            external_qualified_identity(owner, method_name),
+            CallableFallbackPolicy::ExternalBoundary,
+        );
+    }
+    if trimmed.contains('.') {
+        return runtime_named_identity(trimmed);
+    }
+    (
+        external_qualified_identity(owner, trimmed),
+        CallableFallbackPolicy::ExternalBoundary,
+    )
+}
+
+fn is_operator_overload_name(name: &str) -> bool {
+    matches!(
+        name,
+        "plus"
+            | "minus"
+            | "times"
+            | "mtimes"
+            | "rdivide"
+            | "mrdivide"
+            | "ldivide"
+            | "mldivide"
+            | "power"
+            | "mpower"
+            | "uminus"
+            | "uplus"
+            | "lt"
+            | "le"
+            | "gt"
+            | "ge"
+            | "eq"
+            | "ne"
+            | "and"
+            | "or"
+            | "xor"
+            | "not"
+    )
+}
+
 async fn call_identity_with_policy(
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    execute_callable_descriptor(CallableDescriptor::resolved(
+    Box::pin(execute_callable_descriptor(CallableDescriptor::resolved(
         identity,
         args,
         requested_outputs,
         fallback_policy,
         CallableCallKind::Direct,
-    ))
+    )))
     .await
 }
 
@@ -118,12 +206,14 @@ async fn try_call_identity_with_policy(
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
-    try_execute_callable_descriptor(CallableDescriptor::resolved(
-        identity,
-        args,
-        requested_outputs,
-        fallback_policy,
-        CallableCallKind::Direct,
+    Box::pin(try_execute_callable_descriptor(
+        CallableDescriptor::resolved(
+            identity,
+            args,
+            requested_outputs,
+            fallback_policy,
+            CallableCallKind::Direct,
+        ),
     ))
     .await
 }
@@ -161,7 +251,7 @@ async fn call_member_index_on_object_like(
         let mut full_args = Vec::with_capacity(1 + args.len());
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
-        let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
+        let (identity, fallback_policy) = method_function_identity(&owner, &name, &m.function_name);
         return call_identity_with_policy(identity, full_args, requested_outputs, fallback_policy)
             .await;
     }
@@ -170,7 +260,6 @@ async fn call_member_index_on_object_like(
     method_args.push(receiver.clone());
     method_args.extend(args.iter().cloned());
     let qualified_identity = external_qualified_identity(class_name, &name);
-    let (name_identity, name_fallback) = runtime_named_identity(&name);
     if let Some(v) = try_call_identity_with_policy(
         qualified_identity.clone(),
         method_args.clone(),
@@ -181,6 +270,20 @@ async fn call_member_index_on_object_like(
     {
         return Ok(v);
     }
+    // Prevent recursive re-entry for operator overloading (e.g. builtin `plus` calling back
+    // into object dispatch). If class-qualified lookup fails, surface the miss to arithmetic
+    // fallback instead of resolving unqualified operator names at runtime.
+    if is_operator_overload_name(&name) {
+        return call_identity_with_policy(
+            qualified_identity,
+            method_args,
+            requested_outputs,
+            CallableFallbackPolicy::ExternalBoundary,
+        )
+        .await;
+    }
+
+    let (name_identity, name_fallback) = runtime_named_identity(&name);
     if let Some(v) = try_call_identity_with_policy(
         name_identity.clone(),
         method_args.clone(),
@@ -291,10 +394,11 @@ pub fn load_method_closure(
                     ));
                 }
                 return Ok(Value::Closure(Closure {
-                    bound_function:
-                        runmat_runtime::user_functions::resolve_semantic_function_by_name(
-                            &m.function_name,
-                        ),
+                    bound_function: resolve_method_semantic_function_id(
+                        &owner,
+                        &name,
+                        &m.function_name,
+                    ),
                     function_name: m.function_name,
                     captures: vec![],
                 }));

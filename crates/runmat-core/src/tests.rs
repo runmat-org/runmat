@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 static CWD_LOCK: Mutex<()> = Mutex::new(());
+const DEEP_SEMANTIC_TEST_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 struct CwdGuard {
     original: PathBuf,
@@ -19,6 +20,17 @@ fn push_cwd(path: &Path) -> CwdGuard {
     let original = std::env::current_dir().expect("read cwd");
     std::env::set_current_dir(path).expect("set cwd");
     CwdGuard { original }
+}
+
+fn run_deep_semantic_test(f: impl FnOnce() + Send + 'static) {
+    let handle = std::thread::Builder::new()
+        .name("runmat-core-deep-semantic-test".to_string())
+        .stack_size(DEEP_SEMANTIC_TEST_STACK_BYTES)
+        .spawn(f)
+        .expect("spawn deep semantic test thread");
+    if let Err(panic) = handle.join() {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 fn end_expr_contains_display_name(expr: &runmat_vm::EndExpr, name: &str) -> bool {
@@ -146,6 +158,1303 @@ fn execute_outcome_exposes_workspace_upserts() {
         })
         .expect("ABI workspace delta should expose assigned x");
     assert_eq!(upsert.value, runmat_builtins::Value::Num(42.0));
+}
+
+#[test]
+fn execute_text_request_accepts_function_arguments_block_syntax() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(6.0)),
+        "arguments block syntax should parse and execute function body"
+    );
+}
+
+#[test]
+fn execute_text_request_enforces_function_arguments_size_and_class() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+        a = typed(3);
+        try, b = typed([1 2]); sid = 'BAD'; catch e, sid = e.identifier; end
+        try, c = typed("x"); tid = 'BAD'; catch e, tid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "sid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationSize".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "tid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationClass".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_rejects_arguments_block_unknown_parameter_declaration() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                z (1,1) double
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+    "#;
+    let err = execute_text_request(&mut session, source).expect_err("expected semantic failure");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for invalid arguments declaration");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationUnknown")
+    );
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_finite_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double mustBeFinite
+            end
+            y = x * 2;
+        end
+        a = typed(3);
+        try, b = typed(0/0); fid = 'BAD'; catch e, fid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "fid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_treats_single_token_arguments_constraint_as_class_name() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeNope
+            end
+            y = 1;
+        end
+        try, typed(3); cid = 'BAD'; catch e, cid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationClass".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_must_be_finite_accepts_char_and_logical() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeFinite
+            end
+            y = 1;
+        end
+        a = typed('hello');
+        b = typed(true);
+        try, typed(0/0); zid = 'BAD'; catch e, zid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "zid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_text_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeText
+            end
+            y = 1;
+        end
+        a = typed("hello");
+        b = typed('world');
+        c = typed({'a', "b"});
+        try, typed(3); tid = 'BAD'; catch e, tid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "c",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "tid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeNonempty
+            end
+            y = 1;
+        end
+        a = typed(3);
+        b = typed("");
+        try, typed([]); eid1 = 'BAD'; catch e, eid1 = e.identifier; end
+        try, typed(''); eid2 = 'BAD'; catch e, eid2 = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid1",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid2",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeScalarOrEmpty
+            end
+            y = 1;
+        end
+        a = typed(3);
+        b = typed([]);
+        try, typed([1 2]); eid = 'BAD'; catch e, eid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_real_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeReal
+            end
+            y = 1;
+        end
+        a = typed(3);
+        b = typed(complex(1,0));
+        try, typed(complex(1,2)); eid = 'BAD'; catch e, eid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_integer_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeInteger
+            end
+            y = 1;
+        end
+        a = typed(3);
+        b = typed(3.0);
+        try, typed(3.5); eid = 'BAD'; catch e, eid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_positive_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBePositive
+            end
+            y = 1;
+        end
+        a = typed(1);
+        try, typed(0); eid0 = 'BAD'; catch e, eid0 = e.identifier; end
+        try, typed(-2); eidn = 'BAD'; catch e, eidn = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid0",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eidn",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeNonnegative
+            end
+            y = 1;
+        end
+        a = typed(0);
+        b = typed(2);
+        try, typed(-1); eidn = 'BAD'; catch e, eidn = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eidn",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeNonzero
+            end
+            y = 1;
+        end
+        a = typed(2);
+        try, typed(0); eid0 = 'BAD'; catch e, eid0 = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid0",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeNonpositive
+            end
+            y = 1;
+        end
+        a = typed(0);
+        b = typed(-2);
+        try, typed(1); eidp = 'BAD'; catch e, eidp = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eidp",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_negative_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeNegative
+            end
+            y = 1;
+        end
+        a = typed(-1);
+        try, typed(0); eid0 = 'BAD'; catch e, eid0 = e.identifier; end
+        try, typed(2); eidp = 'BAD'; catch e, eidp = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid0",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eidp",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeGreaterThanOrEqual(x, 0)
+            end
+            y = 1;
+        end
+        a = typed(0);
+        b = typed(2);
+        try, typed(-1); eidn = 'BAD'; catch e, eidn = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eidn",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeLessThanOrEqual(x, 3)
+            end
+            y = x;
+        end
+        a = typed(3);
+        try, typed(4); eid = 'BAD'; catch e, eid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(3.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_arguments_validator_threshold_supports_unary_minus_literal() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeGreaterThanOrEqual(x, -2)
+            end
+            y = x;
+        end
+        a = typed(-2);
+        try, typed(-3); eid = 'BAD'; catch e, eid = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(-2.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eid",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_validators() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = gtcheck(x)
+            arguments
+                x mustBeGreaterThan(x, 1)
+            end
+            y = x;
+        end
+        function y = ltcheck(x)
+            arguments
+                x mustBeLessThan(x, 5)
+            end
+            y = x;
+        end
+        a = gtcheck(2);
+        b = ltcheck(4);
+        try, gtcheck(1); e1 = 'BAD'; catch e, e1 = e.identifier; end
+        try, ltcheck(5); e2 = 'BAD'; catch e, e2 = e.identifier; end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(2.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "e1",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "e2",
+        &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+    ));
+}
+
+#[test]
+fn execute_text_request_rejects_arguments_block_unknown_validator() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double mustBeNope
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+    "#;
+    let err = execute_text_request(&mut session, source).expect_err("expected semantic failure");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for unknown arguments validator");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationUnknownValidator")
+    );
+}
+
+#[test]
+fn execute_text_request_rejects_arguments_block_unsupported_trailing_syntax() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double < 10
+            end
+            y = x;
+        end
+        r = typed(3);
+    "#;
+    let err = execute_text_request(&mut session, source).expect_err("expected semantic failure");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for unsupported arguments syntax");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationUnsupported")
+    );
+}
+
+#[test]
+fn execute_text_request_rejects_arguments_block_duplicate_declarations() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+        r = typed(3);
+    "#;
+    let err = execute_text_request(&mut session, source).expect_err("expected semantic failure");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for duplicate arguments declarations");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentValidationDuplicate")
+    );
+}
+
+#[test]
+fn execute_text_request_supports_arguments_default_for_omitted_input() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double = 3
+            end
+            y = x * 2;
+        end
+        a = typed();
+        b = typed(4);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(8.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_arguments_signed_numeric_default_for_omitted_input() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double = -3
+            end
+            y = x * 2;
+        end
+        a = typed();
+        b = typed(4);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(-6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(8.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_rejects_arguments_default_non_literal_expression() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double = sqrt(9)
+            end
+            y = x * 2;
+        end
+        r = typed();
+    "#;
+    let err = execute_text_request(&mut session, source).expect_err("expected semantic failure");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for non-literal arguments default");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:FunctionArgumentDefaultUnsupported")
+    );
+}
+
+#[test]
+fn execute_text_request_supports_arguments_empty_array_default_for_omitted_input() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x = []
+            end
+            y = isempty(x);
+        end
+        a = typed();
+        b = typed(4);
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Bool(true)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Bool(false)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_multi_assign_index_cell_targets() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        function varargout = pair(x)
+            varargout{1} = x + 1;
+            varargout{2} = x + 2;
+        end
+        [a, b] = pair(5);
+        c = {0, 0};
+        [c{1}, c{2}] = pair(10);
+        d = c{1};
+        e = c{2};
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "d",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "e",
+        &runmat_builtins::Value::Num(12.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_cell_brace_range_assignment_from_multi_output_call() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        c = {0, 0};
+        c{1:2} = pair(10);
+        a = c{1};
+        b = c{2};
+        function varargout = pair(x)
+            varargout{1} = x + 1;
+            varargout{2} = x + 2;
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(11.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(12.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = inner(x);
+            function varargout = inner(v)
+                varargout{1} = v + 1;
+                varargout{2} = v + 2;
+            end
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(7.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_via_feval() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = feval('pair', x);
+        end
+        function varargout = pair(v)
+            varargout{1} = v + 10;
+            varargout{2} = v + 20;
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(15.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(25.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_nested_varargout_forwarding_with_nargout_slice_via_nested_feval() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        [a,b] = outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = feval('inner', x);
+            function varargout = inner(v)
+                varargout{1} = v + 10;
+                varargout{2} = v + 20;
+            end
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "a",
+        &runmat_builtins::Value::Num(15.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "b",
+        &runmat_builtins::Value::Num(25.0)
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_direct_recursive_function() {
+    run_deep_semantic_test(|| {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let source = r#"
+            y = fact(5);
+            function out = fact(n)
+                if n <= 1
+                    out = 1;
+                else
+                    out = n * fact(n - 1);
+                end
+            end
+        "#;
+        let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "y",
+            &runmat_builtins::Value::Num(120.0)
+        ));
+    });
+}
+
+#[test]
+fn execute_text_request_supports_dynamic_recursive_function_routes() {
+    run_deep_semantic_test(|| {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let source = r#"
+            h = @fact_handle;
+            a = h(5);
+            b = feval('fact_feval', 5);
+            function out = fact_handle(n)
+                if n <= 1
+                    out = 1;
+                else
+                    out = n * fact_handle(n - 1);
+                end
+            end
+            function out = fact_feval(n)
+                if n <= 1
+                    out = 1;
+                else
+                    out = n * feval('fact_feval', n - 1);
+                end
+            end
+        "#;
+        let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "a",
+            &runmat_builtins::Value::Num(120.0)
+        ));
+        assert!(outcome_has_named_upsert(
+            &outcome,
+            "b",
+            &runmat_builtins::Value::Num(120.0)
+        ));
+    });
+}
+
+#[test]
+fn execute_text_request_supports_arity_check_helpers() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        ok = guarded(1, 2, 3);
+        try
+            too_many_input(1, 2);
+            id_in = "NOERR";
+        catch e
+            id_in = e.identifier;
+        end
+        try
+            one = needs_two_outputs();
+            id_out_low = "NOERR";
+        catch e
+            id_out_low = e.identifier;
+        end
+        try
+            [a, b] = one_output_only();
+            id_out_high = "NOERR";
+        catch e
+            id_out_high = e.identifier;
+        end
+
+        function y = guarded(a, b, varargin)
+            narginchk(2, Inf);
+            nargoutchk(1, 1);
+            y = a + b + length(varargin);
+        end
+
+        function y = too_many_input(a, varargin)
+            narginchk(1, 1);
+            y = a;
+        end
+
+        function [a, b] = needs_two_outputs()
+            nargoutchk(2, 2);
+            a = 1;
+            b = 2;
+        end
+
+        function varargout = one_output_only()
+            nargoutchk(0, 1);
+            varargout{1} = 1;
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Num(4.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id_in",
+        &runmat_builtins::Value::String("RunMat:TooManyInputs".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id_out_low",
+        &runmat_builtins::Value::String("RunMat:NotEnoughOutputs".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "id_out_high",
+        &runmat_builtins::Value::String("RunMat:TooManyOutputs".into())
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_dynamic_arity_check_helpers() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        ok = guarded_inputs(1, 2);
+        one = guarded_outputs(1);
+        try
+            guarded_inputs(1, 2, 3);
+            in_eid = "BAD";
+        catch e
+            in_eid = e.identifier;
+        end
+        try
+            [a, b] = guarded_outputs(1);
+            out_eid = "BAD";
+        catch e
+            out_eid = e.identifier;
+        end
+
+        function y = guarded_inputs(a, varargin)
+            checker = @narginchk;
+            feval(checker, 1, 2);
+            y = a;
+        end
+
+        function [a, b] = guarded_outputs(x)
+            checker = @nargoutchk;
+            feval(checker, 1, 1);
+            a = x;
+            b = x;
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "ok",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "one",
+        &runmat_builtins::Value::Num(1.0)
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "in_eid",
+        &runmat_builtins::Value::String("RunMat:TooManyInputs".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "out_eid",
+        &runmat_builtins::Value::String("RunMat:TooManyOutputs".into())
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_mfilename_name_and_fullpath() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source_path = tmp.path().join("named_source.m");
+    std::fs::write(
+        &source_path,
+        r#"
+        name = mfilename();
+        full = mfilename("fullpath");
+        fallback = mfilename("not-a-mode");
+    "#,
+    )
+    .expect("write source");
+    let mut expected_full = source_path.clone();
+    expected_full.set_extension("");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute path source");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "name",
+        &runmat_builtins::Value::String("named_source".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "fallback",
+        &runmat_builtins::Value::String("named_source".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "full",
+        &runmat_builtins::Value::String(expected_full.to_string_lossy().to_string())
+    ));
+}
+
+#[test]
+fn execute_path_request_supports_mfilename_class_option_for_static_method() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("C.m"),
+        r#"
+classdef C
+  methods(Static)
+    function cls = who()
+      cls = mfilename("class");
+    end
+  end
+end
+"#,
+    )
+    .expect("write class source");
+    let source_path = tmp.path().join("main.m");
+    std::fs::write(
+        &source_path,
+        r#"
+        cls = C.who();
+        outside = mfilename("class");
+    "#,
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute path source");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "cls",
+        &runmat_builtins::Value::String("C".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "outside",
+        &runmat_builtins::Value::String(String::new())
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_functions_metadata_builtin() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        from_text = functions(str2func("sin"));
+        text_name = getfield(from_text, "function");
+        text_type = from_text.type;
+        local_handle = @local_id;
+        local_info = functions(local_handle);
+        local_name = getfield(local_info, "function");
+        anon_info = functions(@(x) x + 1);
+        anon_type = anon_info.type;
+
+        function y = local_id(x)
+            y = x;
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "text_name",
+        &runmat_builtins::Value::String("sin".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "text_type",
+        &runmat_builtins::Value::String("simple".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "local_name",
+        &runmat_builtins::Value::String("local_id".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "anon_type",
+        &runmat_builtins::Value::String("anonymous".into())
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_inputname_builtin() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        alpha = 10;
+        beta = 20;
+        [n1, n2, n3, n4] = probe(alpha, alpha + 1, 7, beta);
+        [f1, f2] = feval(@probe2, beta, beta + 1);
+
+        function [a, b, c, d] = probe(x, y, z, w)
+            a = inputname(1);
+            b = inputname(2);
+            c = inputname(3);
+            d = inputname(4);
+        end
+
+        function [a, b] = probe2(x, y)
+            a = inputname(1);
+            b = inputname(2);
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n1",
+        &runmat_builtins::Value::String("alpha".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n2",
+        &runmat_builtins::Value::String(String::new())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n3",
+        &runmat_builtins::Value::String(String::new())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "n4",
+        &runmat_builtins::Value::String("beta".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "f1",
+        &runmat_builtins::Value::String("beta".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "f2",
+        &runmat_builtins::Value::String(String::new())
+    ));
+}
+
+#[test]
+fn execute_text_request_supports_localfunctions_builtin() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        handles = localfunctions();
+        h1 = handles{1};
+        h2 = handles{2};
+        total = feval(h1, 5) + feval(h2, 5);
+
+        function y = helper_one(x)
+            y = x + 1;
+        end
+
+        function y = helper_two(x)
+            y = x + 2;
+        end
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "total",
+        &runmat_builtins::Value::Num(13.0)
+    ));
 }
 
 #[test]
@@ -959,11 +2268,14 @@ end
 
 #[test]
 fn execute_path_request_source_authoring_oop_smoke() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        tmp.path().join("Vec2.m"),
-        r#"
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            std::fs::write(
+                tmp.path().join("Vec2.m"),
+                r#"
 classdef Vec2
   properties
     x
@@ -985,11 +2297,11 @@ classdef Vec2
   end
 end
 "#,
-    )
-    .expect("write Vec2 source");
-    std::fs::write(
-        tmp.path().join("Money.m"),
-        r#"
+            )
+            .expect("write Vec2 source");
+            std::fs::write(
+                tmp.path().join("Money.m"),
+                r#"
 classdef Money
   properties
     amount
@@ -1004,11 +2316,11 @@ classdef Money
   end
 end
 "#,
-    )
-    .expect("write Money source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        r#"
+            )
+            .expect("write Money source");
+            std::fs::write(
+                tmp.path().join("main.m"),
+                r#"
 v = Vec2(3, 4);
 cls = class(v);
 isVec = isa(v, 'Vec2');
@@ -1021,44 +2333,51 @@ c = a + b;
 isMoney = isa(c, 'Money');
 amt = c.amount;
 "#,
-    )
-    .expect("write main source");
+            )
+            .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
+            let mut session =
+                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let source_path = tmp.path().join("main.m");
+            let outcome =
+                execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+                    .expect("execute script");
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "cls",
-        &runmat_builtins::Value::String("Vec2".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "isVec",
-        &runmat_builtins::Value::Bool(true)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "mag",
-        &runmat_builtins::Value::Num(5.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "uxx",
-        &runmat_builtins::Value::Num(1.0)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "isMoney",
-        &runmat_builtins::Value::Bool(true)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "amt",
-        &runmat_builtins::Value::Num(15.0)
-    ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "cls",
+                &runmat_builtins::Value::String("Vec2".into())
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "isVec",
+                &runmat_builtins::Value::Bool(true)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "mag",
+                &runmat_builtins::Value::Num(5.0)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "uxx",
+                &runmat_builtins::Value::Num(1.0)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "isMoney",
+                &runmat_builtins::Value::Bool(true)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "amt",
+                &runmat_builtins::Value::Num(15.0)
+            ));
+        })
+        .expect("spawn source authoring oop smoke thread");
+    handle
+        .join()
+        .expect("source authoring oop smoke thread failed");
 }
 
 #[test]
@@ -1128,12 +2447,15 @@ ux = u.x;
 
 #[test]
 fn execute_path_request_source_authoring_one_file_operator_overload_plus() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let source = tmp.path().join("main.m");
-    std::fs::write(
-        &source,
-        r#"
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            let source = tmp.path().join("main.m");
+            std::fs::write(
+                &source,
+                r#"
 classdef Money
   properties
     amount
@@ -1155,28 +2477,34 @@ cls = class(c);
 ism = isa(c, 'Money');
 v = c.amount;
 "#,
-    )
-    .expect("write single-file source");
+            )
+            .expect("write single-file source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let outcome = execute_path_request(&mut session, source.to_string_lossy().as_ref())
-        .expect("execute script");
+            let mut session =
+                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let outcome = execute_path_request(&mut session, source.to_string_lossy().as_ref())
+                .expect("execute script");
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "cls",
-        &runmat_builtins::Value::String("Money".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "ism",
-        &runmat_builtins::Value::Bool(true)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "v",
-        &runmat_builtins::Value::Num(15.0)
-    ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "cls",
+                &runmat_builtins::Value::String("Money".into())
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "ism",
+                &runmat_builtins::Value::Bool(true)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "v",
+                &runmat_builtins::Value::Num(15.0)
+            ));
+        })
+        .expect("spawn one-file operator overload plus thread");
+    handle
+        .join()
+        .expect("one-file operator overload plus thread failed");
 }
 
 #[test]
@@ -2417,7 +3745,7 @@ end
 
 #[test]
 fn execute_path_request_supports_qualified_superclass_constructor_syntax() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
     std::fs::create_dir_all(root.join("+pkg1")).expect("create package");
@@ -2991,11 +4319,14 @@ end
 
 #[test]
 fn execute_path_request_supports_source_class_operator_overload_plus() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        tmp.path().join("Money.m"),
-        r#"
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            std::fs::write(
+                tmp.path().join("Money.m"),
+                r#"
 classdef Money
   properties
     amount
@@ -3010,34 +4341,40 @@ classdef Money
   end
 end
 "#,
-    )
-    .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "a = Money(10); b = Money(5); c = a + b; cls = class(c); isaMoney = isa(c, 'Money'); v = c.amount;",
-    )
-    .expect("write script source");
+            )
+            .expect("write class source");
+            std::fs::write(
+                tmp.path().join("main.m"),
+                "a = Money(10); b = Money(5); c = a + b; cls = class(c); isaMoney = isa(c, 'Money'); v = c.amount;",
+            )
+            .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
+            let mut session =
+                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let source_path = tmp.path().join("main.m");
+            let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+                .expect("execute script");
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "cls",
-        &runmat_builtins::Value::String("Money".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "isaMoney",
-        &runmat_builtins::Value::Bool(true)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "v",
-        &runmat_builtins::Value::Num(15.0)
-    ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "cls",
+                &runmat_builtins::Value::String("Money".into())
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "isaMoney",
+                &runmat_builtins::Value::Bool(true)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "v",
+                &runmat_builtins::Value::Num(15.0)
+            ));
+        })
+        .expect("spawn operator overload plus e2e thread");
+    handle
+        .join()
+        .expect("operator overload plus e2e thread failed");
 }
 
 #[test]
@@ -3377,14 +4714,12 @@ end
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
-
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "id",
-        &runmat_builtins::Value::String("RunMat:AmbiguousImport".to_string())
-    ));
+    let err = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect_err("ambiguous wildcard static method should fail semantic resolution");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error, got {err:?}");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportAmbiguous"));
 }
 
 #[test]
@@ -3557,11 +4892,14 @@ end
 
 #[test]
 fn execute_path_request_supports_multilevel_super_constructor_chain_for_handle_classes() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        tmp.path().join("A.m"),
-        r#"
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            std::fs::write(
+                tmp.path().join("A.m"),
+                r#"
 classdef A < handle
   properties
     x
@@ -3573,11 +4911,11 @@ classdef A < handle
   end
 end
 "#,
-    )
-    .expect("write class source");
-    std::fs::write(
-        tmp.path().join("B.m"),
-        r#"
+            )
+            .expect("write class source");
+            std::fs::write(
+                tmp.path().join("B.m"),
+                r#"
 classdef B < A
   methods
     function obj = B(v)
@@ -3586,11 +4924,11 @@ classdef B < A
   end
 end
 "#,
-    )
-    .expect("write class source");
-    std::fs::write(
-        tmp.path().join("C.m"),
-        r#"
+            )
+            .expect("write class source");
+            std::fs::write(
+                tmp.path().join("C.m"),
+                r#"
 classdef C < B
   methods
     function obj = C(v)
@@ -3599,34 +4937,41 @@ classdef C < B
   end
 end
 "#,
-    )
-    .expect("write class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        "c = C(1); cls = class(c); isaA = isa(c,'A'); y = c.x;",
-    )
-    .expect("write script source");
+            )
+            .expect("write class source");
+            std::fs::write(
+                tmp.path().join("main.m"),
+                "c = C(1); cls = class(c); isaA = isa(c,'A'); y = c.x;",
+            )
+            .expect("write script source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
+            let mut session =
+                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let source_path = tmp.path().join("main.m");
+            let outcome =
+                execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+                    .expect("execute script");
 
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "cls",
-        &runmat_builtins::Value::String("C".into())
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "isaA",
-        &runmat_builtins::Value::Bool(true)
-    ));
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "y",
-        &runmat_builtins::Value::Num(4.0)
-    ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "cls",
+                &runmat_builtins::Value::String("C".into())
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "isaA",
+                &runmat_builtins::Value::Bool(true)
+            ));
+            assert!(outcome_has_named_upsert(
+                &outcome,
+                "y",
+                &runmat_builtins::Value::Num(4.0)
+            ));
+        })
+        .expect("spawn multilevel super ctor e2e thread");
+    handle
+        .join()
+        .expect("multilevel super ctor e2e thread failed");
 }
 
 #[test]
@@ -3684,7 +5029,7 @@ end
 
 #[test]
 fn execute_path_request_supports_source_class_subsref_signature() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -3733,7 +5078,7 @@ y = o(2);
 
 #[test]
 fn execute_path_request_supports_source_class_subsasgn_signature() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -3791,7 +5136,7 @@ y = o(2);
 
 #[test]
 fn execute_path_request_supports_source_class_subsref_and_member_index_chains() {
-    let _cwd_lock = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let _cwd_lock = CWD_LOCK.lock().unwrap();
     let project = tempfile::tempdir().expect("tempdir");
     let root = project.path();
 
@@ -3851,11 +5196,14 @@ d = c.data(3);
 
 #[test]
 fn execute_path_request_supports_idiomatic_classdef_source_layout_end_to_end() {
-    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    std::fs::write(
-        tmp.path().join("Vec2.m"),
-        r#"
+    let handle = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            std::fs::write(
+                tmp.path().join("Vec2.m"),
+                r#"
 classdef Vec2
   properties
     x
@@ -3877,11 +5225,11 @@ classdef Vec2
   end
 end
 "#,
-    )
-    .expect("write Vec2 class source");
-    std::fs::write(
-        tmp.path().join("Money.m"),
-        r#"
+            )
+            .expect("write Vec2 class source");
+            std::fs::write(
+                tmp.path().join("Money.m"),
+                r#"
 classdef Money
   properties
     amount
@@ -3896,11 +5244,11 @@ classdef Money
   end
 end
 "#,
-    )
-    .expect("write Money class source");
-    std::fs::write(
-        tmp.path().join("main.m"),
-        r#"
+            )
+            .expect("write Money class source");
+            std::fs::write(
+                tmp.path().join("main.m"),
+                r#"
 p = Vec2(3,4);
 m = p.magnitude();
 u = Vec2.unit();
@@ -3910,38 +5258,43 @@ ok = isa(p,'Vec2');
 ux = u.x;
 total = c.amount;
 "#,
-    )
-    .expect("write main source");
+            )
+            .expect("write main source");
 
-    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let source_path = tmp.path().join("main.m");
-    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
-        .expect("execute script");
+            let mut session =
+                RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+            let source_path = tmp.path().join("main.m");
+            let outcome =
+                execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+                    .expect("execute script");
 
-    assert!(
-        outcome_has_named_upsert(
-            &outcome,
-            "t",
-            &runmat_builtins::Value::String("Vec2".to_string())
-        ),
-        "class() should preserve source class identity"
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Bool(true)),
-        "isa() should report source class membership"
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
-        "dot-method dispatch should resolve source-authored instance methods"
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "ux", &runmat_builtins::Value::Num(1.0)),
-        "static method dispatch should resolve Class.method() calls"
-    );
-    assert!(
-        outcome_has_named_upsert(&outcome, "total", &runmat_builtins::Value::Num(15.0)),
-        "operator overload dispatch should resolve source-authored plus"
-    );
+            assert!(
+                outcome_has_named_upsert(
+                    &outcome,
+                    "t",
+                    &runmat_builtins::Value::String("Vec2".to_string())
+                ),
+                "class() should preserve source class identity"
+            );
+            assert!(
+                outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Bool(true)),
+                "isa() should report source class membership"
+            );
+            assert!(
+                outcome_has_named_upsert(&outcome, "m", &runmat_builtins::Value::Num(5.0)),
+                "dot-method dispatch should resolve source-authored instance methods"
+            );
+            assert!(
+                outcome_has_named_upsert(&outcome, "ux", &runmat_builtins::Value::Num(1.0)),
+                "static method dispatch should resolve Class.method() calls"
+            );
+            assert!(
+                outcome_has_named_upsert(&outcome, "total", &runmat_builtins::Value::Num(15.0)),
+                "operator overload dispatch should resolve source-authored plus"
+            );
+        })
+        .expect("spawn idiomatic classdef e2e thread");
+    handle.join().expect("idiomatic classdef e2e thread failed");
 }
 
 #[test]
@@ -5232,7 +6585,676 @@ roots = ["."]
 }
 
 #[test]
-fn execute_outcome_qualified_package_function_call_requires_registered_symbol() {
+fn execute_path_request_resolves_wildcard_import_package_function_call_with_manifest() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/foo.m"),
+        "function y = foo(x); y = x + 2; end",
+    )
+    .expect("write package function");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; r = foo(40);")
+        .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
+
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "wildcard-imported package function call should resolve; diagnostics={:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "expected wildcard-imported package function result binding; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_wildcard_import_package_function_call_with_manifest_relative_path()
+{
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/foo.m"),
+        "function y = foo(x); y = x + 2; end",
+    )
+    .expect("write package function");
+    std::fs::write(tmp.path().join("main.m"), "import pkg.*; r = foo(40);")
+        .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "wildcard-imported package function call should resolve with relative source path; diagnostics={:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "expected wildcard-imported package function result binding; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_subdir_helper_function_with_manifest_relative_path() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("helpers")).expect("create helper dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("helpers/add1.m"),
+        "function y = add1(x); y = x + 1; end",
+    )
+    .expect("write helper function");
+    std::fs::write(tmp.path().join("main.m"), "r = add1(41);").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "subdir helper function call should resolve with relative source path; diagnostics={:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "expected helper function result binding; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_private_function_for_parent_source() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "h = @helper; s = str2func('helper'); a = helper(40); b = h(41); c = feval('helper', 42); d = feval(s, 43); r = a + b + c + d;",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "parent source should resolve private helper through direct, handle, and feval routes; diagnostics={:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(170.0)),
+        "expected private helper result binding; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_private_function_without_manifest_for_parent_source() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(tmp.path().join("main.m"), "r = helper(41);").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome.diagnostics.is_empty(),
+        "parent source should resolve private helper without a manifest; diagnostics={:?}",
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "expected private helper result binding without manifest; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_does_not_resolve_private_function_for_sibling_source() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::create_dir_all(tmp.path().join("sub")).expect("create sub dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(
+        tmp.path().join("sub/main.m"),
+        "try; direct = helper(1); direct_eid = 'NOERR'; catch e; direct_eid = e.identifier; end; try; s = str2func('helper'); dyn = feval(s, 1); dyn_eid = 'NOERR'; catch e; dyn_eid = e.identifier; end;",
+    )
+    .expect("write sub source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "sub/main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "direct_eid",
+            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+        ),
+        "sibling source should not resolve parent private helper directly; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "dyn_eid",
+            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+        ),
+        "sibling source should not resolve parent private helper through str2func/feval; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_private_function_does_not_persist_into_session_registry() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::create_dir_all(tmp.path().join("sub")).expect("create sub dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(tmp.path().join("main.m"), "r = helper(41);").expect("write main source");
+    std::fs::write(
+        tmp.path().join("sub/main.m"),
+        "try; r = helper(1); eid = 'NOERR'; catch e; eid = e.identifier; end;",
+    )
+    .expect("write sub source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let parent_outcome = execute_path_request(&mut session, "main.m").expect("parent succeeds");
+    assert!(
+        outcome_has_named_upsert(&parent_outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "parent source should resolve private helper; upserts={:?}",
+        parent_outcome.workspace_delta.upserts
+    );
+
+    let sibling_outcome =
+        execute_path_request(&mut session, "sub/main.m").expect("sibling succeeds");
+    assert!(
+        outcome_has_named_upsert(
+            &sibling_outcome,
+            "eid",
+            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+        ),
+        "sibling source should not resolve private helper through session registry; upserts={:?}, diagnostics={:?}",
+        sibling_outcome.workspace_delta.upserts,
+        sibling_outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_local_function_shadows_private_function() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 100; end",
+    )
+    .expect("write private helper");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "r = helper(1);\nfunction y = helper(x)\ny = x + 1;\nend\n",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(2.0)),
+        "local function should shadow same-named private helper; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_private_function_shadows_public_sibling_function() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("helper.m"),
+        "function y = helper(x); y = x + 100; end",
+    )
+    .expect("write public helper");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(tmp.path().join("main.m"), "r = helper(41);").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "visible private helper should shadow same-named public sibling; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_private_function_shadows_imported_and_builtin_names() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/helper.m"),
+        "function y = helper(x); y = x + 100; end",
+    )
+    .expect("write package helper");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(
+        tmp.path().join("private/sum.m"),
+        "function y = sum(x); y = x + 10; end",
+    )
+    .expect("write private builtin-name helper");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import pkg.*; a = helper(41); b = sum(32); r = a + b;",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(84.0)),
+        "private helpers should shadow wildcard-imported and builtin names; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_private_function_shadows_dependency_alias_import() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let dep_root = tmp.path().join("deps/statslib");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create private dir");
+    std::fs::create_dir_all(&dep_root).expect("create dependency dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+
+[dependencies]
+statsdep = { path = "deps/statslib" }
+"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        dep_root.join("runmat.toml"),
+        r#"
+[package]
+name = "statslib"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write dependency manifest");
+    std::fs::write(
+        dep_root.join("helper.m"),
+        "function y = helper(x); y = x + 100; end",
+    )
+    .expect("write dependency helper");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write private helper");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "import statsdep.*; r = helper(41);",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "private helper should shadow same-named dependency-alias wildcard import; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_package_private_function_for_active_package_source() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(tmp.path().join("+pkg/main.m"), "r = helper(41);")
+        .expect("write package source");
+    std::fs::write(
+        tmp.path().join("+pkg/private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write package private helper");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "+pkg/main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "active package source should resolve its package private helper; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_class_folder_private_function_for_active_class_folder_source() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("@C/private")).expect("create class private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(tmp.path().join("@C/main.m"), "r = helper(41);")
+        .expect("write class-folder source");
+    std::fs::write(
+        tmp.path().join("@C/private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write class private helper");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "@C/main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "active class-folder source should resolve its class-folder private helper; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_package_private_function_for_package_callee_only() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/entry.m"),
+        "function y = entry(); a = helper(40); h = @helper; b = h(41); c = feval(@helper, 42); y = a + b + c; end",
+    )
+    .expect("write package entry");
+    std::fs::write(
+        tmp.path().join("+pkg/private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write package private helper");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "r = pkg.entry(); try; leak = helper(1); leak_eid = 'NOERR'; catch e; leak_eid = e.identifier; end;",
+    )
+    .expect("write root source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(126.0)),
+        "package callee should resolve its private helper through direct, handle, and feval(@handle) routes; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "leak_eid",
+            &runmat_builtins::Value::String("RunMat:UndefinedFunction".to_string())
+        ),
+        "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_package_private_function_precedes_root_private_for_package_callee() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("private")).expect("create root private dir");
+    std::fs::create_dir_all(tmp.path().join("+pkg/private")).expect("create package private dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("private/helper.m"),
+        "function y = helper(x); y = x + 100; end",
+    )
+    .expect("write root private helper");
+    std::fs::write(
+        tmp.path().join("+pkg/private/helper.m"),
+        "function y = helper(x); y = x + 1; end",
+    )
+    .expect("write package private helper");
+    std::fs::write(
+        tmp.path().join("+pkg/entry.m"),
+        "function y = entry(); y = helper(41); end",
+    )
+    .expect("write package entry");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "root_value = helper(1); pkg_value = pkg.entry();",
+    )
+    .expect("write root source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "root_value", &runmat_builtins::Value::Num(101.0)),
+        "root source should resolve root private helper; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "pkg_value", &runmat_builtins::Value::Num(42.0)),
+        "package callee should prefer its package private helper over root private helper; upserts={:?}, diagnostics={:?}",
+        outcome.workspace_delta.upserts,
+        outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_outcome_qualified_package_function_call_resolves_from_source_roots() {
     let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
@@ -5252,7 +7274,7 @@ roots = ["."]
         "function y = foo(); y = 42; end",
     )
     .expect("write package function");
-    std::fs::write(tmp.path().join("main.m"), "pkg.foo()").expect("write main source");
+    std::fs::write(tmp.path().join("main.m"), "r = pkg.foo();").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let _cwd = push_cwd(tmp.path());
@@ -5260,12 +7282,14 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
     assert!(
-        outcome
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("pkg.foo")),
-        "qualified package function should report unresolved symbol without registration; diagnostics={:?}",
+        outcome.diagnostics.is_empty(),
+        "qualified package function in configured sources root should resolve; diagnostics={:?}",
         outcome.diagnostics
+    );
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(42.0)),
+        "qualified package function should execute and bind result; upserts={:?}",
+        outcome.workspace_delta.upserts
     );
 }
 
@@ -5325,12 +7349,124 @@ roots = ["."]
     let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
 
     assert!(
-        outcome
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "RunMat:UndefinedFunction" && d.message.contains("add1")),
-        "unqualified helper function should report unresolved symbol without registration; diagnostics={:?}",
+        outcome.diagnostics.is_empty(),
+        "unqualified helper function in configured sources root should resolve; diagnostics={:?}",
         outcome.diagnostics
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_sibling_function_file() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("outer.m"),
+        "function out = outer(a)\nbase = 100;\nfunction y = add(x)\nbase = base + x;\ny = base;\nend\nout = add(a);\nend\n",
+    )
+    .expect("write outer function");
+    std::fs::write(tmp.path().join("main.m"), "r = outer(5);").expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "r", &runmat_builtins::Value::Num(105.0)),
+        "sibling function file should resolve and execute; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_sibling_function_with_arguments_block_validation() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("typed.m"),
+        "function y = typed(x)\narguments\nx (1,1) double\nend\ny = x * 2;\nend\n",
+    )
+    .expect("write typed function");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "ok = typed(3); try; typed('x'); catch e; eid = e.identifier; end;",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let source_name = tmp.path().join("main.m").to_string_lossy().to_string();
+    let outcome = execute_path_request(&mut session, &source_name).expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Num(6.0)),
+        "typed sibling function should execute; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "eid",
+            &runmat_builtins::Value::String("RunMat:ArgumentValidationClass".to_string())
+        ),
+        "typed sibling function should enforce arguments class validation; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+}
+
+#[test]
+fn execute_path_request_resolves_package_function_with_arguments_block_validation() {
+    let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+pkg")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+pkg/typed.m"),
+        "function y = typed(x)\narguments\nx (1,1) double mustBeFinite\nend\ny = x * 2;\nend\n",
+    )
+    .expect("write package typed function");
+    std::fs::write(
+        tmp.path().join("main.m"),
+        "ok = pkg.typed(3); try; pkg.typed([1 2]); catch e; sid = e.identifier; end; try; pkg.typed(0/0); catch e; fid = e.identifier; end;",
+    )
+    .expect("write main source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let _cwd = push_cwd(tmp.path());
+    let outcome = execute_path_request(&mut session, "main.m").expect("exec succeeds");
+
+    assert!(
+        outcome_has_named_upsert(&outcome, "ok", &runmat_builtins::Value::Num(6.0)),
+        "package typed function should execute; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "sid",
+            &runmat_builtins::Value::String("RunMat:ArgumentValidationSize".to_string())
+        ),
+        "package typed function should enforce size validation; upserts={:?}",
+        outcome.workspace_delta.upserts
+    );
+    assert!(
+        outcome_has_named_upsert(
+            &outcome,
+            "fid",
+            &runmat_builtins::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        ),
+        "package typed function should enforce mustBeFinite validation; upserts={:?}",
+        outcome.workspace_delta.upserts
     );
 }
 

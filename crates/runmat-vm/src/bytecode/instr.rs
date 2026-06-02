@@ -243,7 +243,9 @@ pub enum Instr {
 
     // `feval` keeps the callable value on the stack instead of naming the target statically.
     CallFevalMulti(usize, usize),
+    CallFevalMultiUsingOutputSlot(usize, usize),
     CallFevalExpandMultiOutput(Vec<ArgSpec>, usize),
+    CallFevalExpandMultiOutputUsingOutputSlot(Vec<ArgSpec>, usize),
     // Create a lazy semantic-future descriptor from call arguments.
     CreateSemanticFuture(FunctionId, usize, usize),
     CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
@@ -261,6 +263,7 @@ pub enum Instr {
 
     // User-function invocation variants.
     CallBuiltinMulti(String, usize, usize),
+    CallBuiltinMultiUsingOutputSlot(String, usize, usize),
     CallSuperConstructorMulti {
         current_class: String,
         super_class: String,
@@ -282,7 +285,26 @@ pub enum Instr {
         arg_count: usize,
         out_count: usize,
     },
+    CallFunctionMultiUsingOutputSlot {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count_slot: usize,
+    },
     CallSemanticFunctionMulti(FunctionId, usize, usize),
+    CallSemanticFunctionMultiUsingOutputSlot(FunctionId, usize, usize),
+    CallSemanticNestedFunctionMulti {
+        function: FunctionId,
+        capture_slots: Vec<usize>,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallSemanticNestedFunctionMultiUsingOutputSlot {
+        function: FunctionId,
+        capture_slots: Vec<usize>,
+        arg_count: usize,
+        out_count_slot: usize,
+    },
 
     CallFunctionExpandMultiOutput {
         identity: CallableIdentity,
@@ -291,6 +313,12 @@ pub enum Instr {
         out_count: usize,
     },
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
+    CallSemanticNestedFunctionExpandMultiOutput {
+        function: FunctionId,
+        capture_slots: Vec<usize>,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
     CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
     CallSuperConstructorExpandMultiOutput {
         current_class: String,
@@ -398,6 +426,7 @@ impl Instr {
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
+            Instr::CallBuiltinMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
             Instr::CallSuperConstructorMulti { arg_count, .. } => effect(*arg_count, 1),
             Instr::CallSuperMethodMulti { arg_count, .. } => effect(*arg_count, 1),
             Instr::CallFunctionMulti {
@@ -405,9 +434,20 @@ impl Instr {
                 out_count,
                 ..
             } => effect(*arg_count, *out_count),
+            Instr::CallFunctionMultiUsingOutputSlot { arg_count, .. } => effect(*arg_count, 1),
             Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
+            Instr::CallSemanticFunctionMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
+            Instr::CallSemanticNestedFunctionMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
+            Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { arg_count, .. } => {
+                effect(*arg_count, 1)
+            }
             Instr::CallMethodOrMemberIndexMulti { arg_count, .. } => effect(arg_count + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
+            Instr::CallFevalMultiUsingOutputSlot(argc, _) => effect(argc + 1, 1),
             Instr::CreateSemanticFuture(_, arg_count, _) => effect(*arg_count, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
@@ -469,9 +509,11 @@ impl Instr {
             Instr::LoadStaticProperty(_, _) => effect(0, 1),
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMultiOutput(specs, _)
+            | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)
             | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
             | Instr::CallFunctionExpandMultiOutput { specs, .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
+            | Instr::CallSemanticNestedFunctionExpandMultiOutput { specs, .. }
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
             | Instr::CallSuperConstructorExpandMultiOutput { specs, .. }
             | Instr::CallSuperMethodExpandMultiOutput { specs, .. }
@@ -482,7 +524,11 @@ impl Instr {
                     .filter(|s| s.is_expand)
                     .map(|s| 1 + s.num_indices)
                     .sum();
-                let handle = usize::from(matches!(self, Instr::CallFevalExpandMultiOutput(_, _)));
+                let handle = usize::from(matches!(
+                    self,
+                    Instr::CallFevalExpandMultiOutput(_, _)
+                        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
+                ));
                 effect(handle + fixed + expanded, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),

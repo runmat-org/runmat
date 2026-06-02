@@ -1073,6 +1073,7 @@ pub enum FigureEventKind {
 pub struct FigureEventView<'a> {
     pub handle: FigureHandle,
     pub kind: FigureEventKind,
+    pub revision: Option<u64>,
     pub figure: Option<&'a Figure>,
 }
 
@@ -1809,6 +1810,7 @@ fn notify_with_figure(handle: FigureHandle, figure: &Figure, kind: FigureEventKi
     notify_event(FigureEventView {
         handle,
         kind,
+        revision: current_figure_revision(handle),
         figure: Some(figure),
     });
 }
@@ -1817,6 +1819,7 @@ fn notify_without_figure(handle: FigureHandle, kind: FigureEventKind) {
     notify_event(FigureEventView {
         handle,
         kind,
+        revision: current_figure_revision(handle),
         figure: None,
     });
 }
@@ -2338,7 +2341,6 @@ where
 /// Monotonic revision counter that increments on each successful mutation of the figure.
 /// Used by web surface presentation logic to avoid redundant `render_figure` calls when
 /// a surface is already up-to-date for a handle.
-#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 pub fn current_figure_revision(handle: FigureHandle) -> Option<u64> {
     let reg = registry();
     reg.figures.get(&handle).map(|state| state.revision)

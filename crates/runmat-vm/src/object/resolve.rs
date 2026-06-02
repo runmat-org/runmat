@@ -11,6 +11,13 @@ use runmat_runtime::RuntimeError;
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 
+fn has_builtin_member_subsref_protocol(class_name: &str) -> bool {
+    let qualified = format!("{class_name}.{}", ObjectIndexOp::Subsref.protocol_name());
+    runmat_builtins::builtin_functions()
+        .iter()
+        .any(|builtin| builtin.name == qualified)
+}
+
 fn caller_has_internal_class_access(caller_function_name: Option<&str>, class_name: &str) -> bool {
     if let Some(caller_name) = caller_function_name {
         if let Some((caller_class, _)) = caller_name.rsplit_once('.') {
@@ -211,6 +218,9 @@ pub async fn load_member(
                 {
                     return call_object_member_subsref(Value::HandleObject(handle), field).await;
                 }
+            }
+            if has_builtin_member_subsref_protocol(&handle.class_name) {
+                return call_object_member_subsref(Value::HandleObject(handle), field).await;
             }
             runmat_runtime::call_builtin_async_with_outputs(
                 "getfield",

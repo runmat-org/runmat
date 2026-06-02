@@ -1129,7 +1129,7 @@ impl Figure {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
-        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, None, gpu)
+        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, None, None, gpu)
             .into_iter()
             .map(|(_, render_data)| render_data)
             .collect()
@@ -1139,6 +1139,7 @@ impl Figure {
         &mut self,
         viewport_px: Option<(u32, u32)>,
         axes_viewports_px: Option<&[(u32, u32)]>,
+        axes_view_bounds: Option<&[Option<(f64, f64, f64, f64)>]>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<(usize, RenderData)> {
         fn push_with_optional_markers(
@@ -1160,6 +1161,9 @@ impl Figure {
                 continue;
             }
             let axes_index = self.plot_axes_indices.get(plot_idx).copied().unwrap_or(0);
+            let axes_view_bounds = axes_view_bounds
+                .and_then(|bounds| bounds.get(axes_index).copied())
+                .flatten();
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
                     s.set_color_limits(meta.color_limits);
@@ -1169,10 +1173,16 @@ impl Figure {
 
             match p {
                 PlotElement::Line(plot) => {
+                    let axes_viewport_px = axes_viewports_px
+                        .and_then(|viewports| viewports.get(axes_index).copied())
+                        .or(viewport_px);
                     trace!(
                         target: "runmat_plot",
-                        "figure: render_data line viewport_px={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
+                        "figure: render_data line viewport_px={:?} axes_index={} axes_viewport_px={:?} axes_view_bounds={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
                         viewport_px,
+                        axes_index,
+                        axes_viewport_px,
+                        axes_view_bounds,
                         gpu.is_some(),
                         plot.has_gpu_line_inputs(),
                         plot.has_gpu_vertices()
@@ -1180,12 +1190,7 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport_gpu(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                            gpu,
-                        ),
+                        plot.render_data_with_viewport_gpu(axes_viewport_px, axes_view_bounds, gpu),
                         plot.marker_render_data(),
                     );
                 }

@@ -1,5 +1,8 @@
 use runmat_lexer::Token;
 
+use crate::ast::{
+    FunctionArgDim, FunctionArgSizeSpec, FunctionArgValidationDecl, FunctionArgValidatorDecl,
+};
 use crate::{Expr, Stmt, SyntaxError};
 
 use super::{Parser, TokenInfo};
@@ -189,32 +192,44 @@ impl Parser {
         if self.peek_token() != Some(&Token::LBracket) {
             return false;
         }
-        let mut i = self.pos + 1;
-        let mut expect_name = true;
-        loop {
-            let token = match self.tokens.get(i) {
-                Some(info) => &info.token,
-                None => return false,
-            };
-            match (expect_name, token) {
-                (true, Token::Ident | Token::Tilde) => {
-                    expect_name = false;
-                    i += 1;
+        let mut i = self.pos;
+        let mut paren_depth = 0usize;
+        let mut brace_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        while let Some(info) = self.tokens.get(i) {
+            match info.token {
+                Token::LParen => paren_depth += 1,
+                Token::RParen => {
+                    if paren_depth == 0 {
+                        return false;
+                    }
+                    paren_depth -= 1;
                 }
-                (false, Token::Comma) => {
-                    expect_name = true;
-                    i += 1;
+                Token::LBrace => brace_depth += 1,
+                Token::RBrace => {
+                    if brace_depth == 0 {
+                        return false;
+                    }
+                    brace_depth -= 1;
                 }
-                (false, Token::RBracket) => {
-                    i += 1;
-                    return matches!(
-                        self.tokens.get(i).map(|info| &info.token),
-                        Some(Token::Assign)
-                    );
+                Token::LBracket => bracket_depth += 1,
+                Token::RBracket => {
+                    if bracket_depth == 0 {
+                        return false;
+                    }
+                    bracket_depth -= 1;
+                    if bracket_depth == 0 {
+                        return matches!(
+                            self.tokens.get(i + 1).map(|next| &next.token),
+                            Some(Token::Assign)
+                        );
+                    }
                 }
-                _ => return false,
+                _ => {}
             }
+            i += 1;
         }
+        false
     }
 
     fn parse_if(&mut self) -> Result<Stmt, String> {
@@ -363,24 +378,32 @@ impl Parser {
         }
 
         // Optional function-level arguments block.
+        // Allow leading separators/newlines between the signature and `arguments`.
+        while self.consume(&Token::Semicolon)
+            || self.consume(&Token::Comma)
+            || self.consume(&Token::Newline)
+        {}
+        let mut argument_validations = Vec::new();
         if self.peek_token() == Some(&Token::Arguments) {
             self.pos += 1;
-            loop {
-                if self.consume(&Token::End) {
+            // Parse simple MATLAB function arguments-block declarations.
+            while let Some(token) = self.peek_token() {
+                if matches!(token, Token::End) {
+                    self.pos += 1;
                     break;
                 }
-                if self.consume(&Token::Semicolon) || self.consume(&Token::Comma) {
+                if self.consume(&Token::Semicolon)
+                    || self.consume(&Token::Comma)
+                    || self.consume(&Token::Newline)
+                {
                     continue;
                 }
-                if matches!(self.peek_token(), Some(Token::Ident)) {
-                    let _ = self.expect_ident()?;
-                    continue;
-                }
-                if self.peek_token().is_none() {
-                    break;
-                }
-                break;
+                argument_validations.push(self.parse_function_argument_validation_decl()?);
             }
+            while self.consume(&Token::Semicolon)
+                || self.consume(&Token::Comma)
+                || self.consume(&Token::Newline)
+            {}
         }
 
         let body = self.parse_block(|t| matches!(t, Token::End))?;
@@ -392,11 +415,142 @@ impl Parser {
             name,
             params,
             outputs,
+            argument_validations,
             body,
             isolated,
             is_async,
             span: self.span_from(start, end),
         })
+    }
+
+    fn parse_function_argument_validation_decl(
+        &mut self,
+    ) -> Result<FunctionArgValidationDecl, String> {
+        let name = self.expect_ident()?;
+        let mut size = None;
+        if self.consume(&Token::LParen) {
+            let rows = self.parse_function_argument_dim()?;
+            if !self.consume(&Token::Comma) {
+                return Err("expected ',' in arguments size spec".into());
+            }
+            let cols = self.parse_function_argument_dim()?;
+            if !self.consume(&Token::RParen) {
+                return Err("expected ')' after arguments size spec".into());
+            }
+            size = Some(FunctionArgSizeSpec { rows, cols });
+        }
+
+        let mut class_name = None;
+        let mut validators = Vec::new();
+        if matches!(self.peek_token(), Some(Token::Ident)) {
+            let candidate = self.parse_qualified_name_in_stmt()?;
+            if self.peek_token() == Some(&Token::LParen) {
+                validators.push(self.parse_function_argument_validator_decl_with_name(candidate)?);
+            } else {
+                class_name = Some(candidate);
+            }
+        }
+        loop {
+            if self.consume(&Token::LBrace) {
+                loop {
+                    let validator = self.parse_function_argument_validator_decl()?;
+                    validators.push(validator);
+                    if self.consume(&Token::Comma) {
+                        continue;
+                    }
+                    if !self.consume(&Token::RBrace) {
+                        return Err("expected '}' after arguments validators".into());
+                    }
+                    break;
+                }
+                continue;
+            }
+            if matches!(self.peek_token(), Some(Token::Ident)) {
+                validators.push(self.parse_function_argument_validator_decl()?);
+                continue;
+            }
+            break;
+        }
+
+        let default_value = if self.consume(&Token::Assign) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        // Record unsupported trailing tokens on the same logical line.
+        let mut has_unsupported_trailing = false;
+        while let Some(token) = self.peek_token() {
+            if matches!(
+                token,
+                Token::Semicolon | Token::Comma | Token::Newline | Token::End
+            ) {
+                break;
+            }
+            has_unsupported_trailing = true;
+            self.pos += 1;
+        }
+
+        Ok(FunctionArgValidationDecl {
+            name,
+            size,
+            class_name,
+            validators,
+            default_value,
+            has_unsupported_trailing,
+        })
+    }
+
+    fn parse_function_argument_dim(&mut self) -> Result<FunctionArgDim, String> {
+        if self.consume(&Token::Colon) {
+            return Ok(FunctionArgDim::Any);
+        }
+        match self.next() {
+            Some(token) if matches!(token.token, Token::Integer | Token::Float) => {
+                let parsed = token
+                    .lexeme
+                    .parse::<usize>()
+                    .map_err(|_| "arguments size spec must use non-negative integer dimensions")?;
+                Ok(FunctionArgDim::Exact(parsed))
+            }
+            _ => Err("expected numeric dimension or ':' in arguments size spec".into()),
+        }
+    }
+
+    fn parse_qualified_name_in_stmt(&mut self) -> Result<String, String> {
+        let mut parts = Vec::new();
+        parts.push(self.expect_ident()?);
+        while self.consume(&Token::Dot) {
+            parts.push(self.expect_ident()?);
+        }
+        Ok(parts.join("."))
+    }
+
+    fn parse_function_argument_validator_decl(
+        &mut self,
+    ) -> Result<FunctionArgValidatorDecl, String> {
+        let name = self.parse_qualified_name_in_stmt()?;
+        self.parse_function_argument_validator_decl_with_name(name)
+    }
+
+    fn parse_function_argument_validator_decl_with_name(
+        &mut self,
+        name: String,
+    ) -> Result<FunctionArgValidatorDecl, String> {
+        let mut args = Vec::new();
+        if self.consume(&Token::LParen) && !self.consume(&Token::RParen) {
+            loop {
+                args.push(self.parse_expr()?);
+                if self.consume(&Token::Comma) {
+                    continue;
+                }
+                if !self.consume(&Token::RParen) {
+                    return Err("expected ')' after arguments validator arguments".into());
+                }
+                break;
+            }
+        }
+        Ok(FunctionArgValidatorDecl { name, args })
     }
 
     pub(super) fn parse_block<F>(&mut self, term: F) -> Result<Vec<Stmt>, String>

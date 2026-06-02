@@ -51,13 +51,12 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        self.pending_companion_class_statements = Some(
-            super::compile::discover_companion_class_source_statements_async(
-                self.current_source_name(),
-                self.compat_mode,
-            )
-            .await,
-        );
+        let companion = super::compile::discover_companion_source_statements_async(
+            self.current_source_name(),
+            self.compat_mode,
+        )
+        .await;
+        self.pending_companion_source_discovery = Some(companion);
         let previous_workspace_names = self
             .workspace_values
             .keys()
@@ -112,7 +111,7 @@ impl RunMatSession {
         self.active_source_name = previous_source_name;
         self.abi_workspace_handle = previous_workspace_handle;
         self.active_source_identity = previous_source_identity;
-        self.pending_companion_class_statements = None;
+        self.pending_companion_source_discovery = None;
 
         result.map(|outcome| apply_requested_output_policy(outcome, &requested_outputs))
     }
@@ -353,7 +352,11 @@ impl RunMatSession {
             debug!("Executing: {}", input.trim());
         }
 
-        let _source_guard = runmat_runtime::source_context::replace_current_source(Some(input));
+        let source_name_for_context = self.current_source_name().to_string();
+        let _fallback_source_guard = runmat_runtime::source_context::replace_current_source_context(
+            Some(&source_name_for_context),
+            Some(input),
+        );
 
         let PreparedExecution {
             ast,
@@ -363,6 +366,17 @@ impl RunMatSession {
             function_registry_after_success,
             next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
+        let source_catalog_entries = self
+            .source_pool
+            .entries()
+            .map(|(source_id, source)| {
+                (source_id, source.name.to_string(), source.text.to_string())
+            })
+            .collect::<Vec<_>>();
+        let _source_catalog_guard =
+            runmat_runtime::source_context::replace_source_catalog(source_catalog_entries);
+        let _source_id_guard =
+            runmat_runtime::source_context::replace_current_source_id(bytecode.source_id);
         #[cfg(target_arch = "wasm32")]
         let _ = &analysis;
         if self.verbose {
@@ -1157,6 +1171,7 @@ fn apply_requested_output_policy(
                 }
             }
         }
+        RequestedOutputCount::CurrentFunctionNargout => outcome.flow,
     };
     outcome
 }
@@ -1283,7 +1298,7 @@ async fn resolve_path_source_input(
         )
     })?;
 
-        resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
+        let resolved = resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(format!(
                     "failed to resolve source input '{}' from working directory {}: {}",
@@ -1294,6 +1309,11 @@ async fn resolve_path_source_input(
                 .with_identifier("RunMat:EntrypointResolveFailed")
                 .build(),
             )
+        })?;
+        Ok(if resolved.is_absolute() {
+            resolved
+        } else {
+            cwd.join(resolved)
         })
     }
 

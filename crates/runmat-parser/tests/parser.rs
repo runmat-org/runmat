@@ -106,6 +106,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             name,
             params,
             outputs,
+            argument_validations,
             body,
             isolated,
             is_async,
@@ -114,6 +115,7 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             name: name.clone(),
             params: params.clone(),
             outputs: outputs.clone(),
+            argument_validations: argument_validations.clone(),
             body: body.iter().map(strip_stmt).collect(),
             isolated: *isolated,
             is_async: *is_async,
@@ -844,6 +846,7 @@ fn parse_function_definition() {
                 name: "add".to_string(),
                 params: vec!["x".to_string()],
                 outputs: vec!["y".to_string()],
+                argument_validations: vec![],
                 body: vec![assign(
                     "y".to_string(),
                     binary_boxed(
@@ -859,6 +862,203 @@ fn parse_function_definition() {
             }],
         },
     );
+}
+
+#[test]
+fn parse_function_definition_with_arguments_block() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double
+            end
+            y = x * 2;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with arguments block");
+    assert_eq!(parsed.body.len(), 1);
+    let Stmt::Function {
+        name, params, body, ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(name, "typed");
+    assert_eq!(params, &vec!["x".to_string()]);
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+    assert!(
+        body.iter()
+            .any(|stmt| matches!(stmt, Stmt::Assign(var, _, _, _) if var == "y"),),
+        "expected function body assignment after arguments block"
+    );
+}
+
+#[test]
+fn parse_function_arguments_block_tracks_unsupported_trailing_tokens() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double mustBeFinite
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with validator");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(
+        argument_validations[0].validators,
+        vec![runmat_parser::FunctionArgValidatorDecl {
+            name: "mustBeFinite".to_string(),
+            args: vec![],
+        }]
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_marks_unsupported_trailing_syntax() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double < 10
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with unsupported trailing syntax");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].name, "x");
+    assert_eq!(
+        argument_validations[0].class_name.as_deref(),
+        Some("double")
+    );
+    assert!(argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_supports_default_literal() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double = 3
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with default literal");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert!(argument_validations[0].default_value.is_some());
+}
+
+#[test]
+fn parse_function_arguments_block_supports_empty_array_default() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x = []
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with [] default");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert!(argument_validations[0].default_value.is_some());
+}
+
+#[test]
+fn parse_function_arguments_block_supports_brace_validators() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x (1,1) double {mustBeFinite}
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with brace validators");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(
+        argument_validations[0].validators,
+        vec![runmat_parser::FunctionArgValidatorDecl {
+            name: "mustBeFinite".to_string(),
+            args: vec![],
+        }]
+    );
+    assert!(!argument_validations[0].has_unsupported_trailing);
+}
+
+#[test]
+fn parse_function_arguments_block_supports_parameterized_validator() {
+    let source = r#"
+        function y = typed(x)
+            arguments
+                x mustBeGreaterThanOrEqual(x, 0)
+            end
+            y = x;
+        end
+    "#;
+    let parsed = parse(source).expect("parse function with parameterized validator");
+    let Stmt::Function {
+        argument_validations,
+        ..
+    } = &parsed.body[0]
+    else {
+        panic!("expected function statement");
+    };
+    assert_eq!(argument_validations.len(), 1);
+    assert_eq!(argument_validations[0].validators.len(), 1);
+    assert_eq!(
+        argument_validations[0].validators[0].name,
+        "mustBeGreaterThanOrEqual"
+    );
+    assert_eq!(argument_validations[0].validators[0].args.len(), 2);
 }
 
 #[test]

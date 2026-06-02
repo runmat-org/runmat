@@ -174,7 +174,7 @@ pub enum UnOp {
 pub enum Stmt {
     ExprStmt(Expr, bool, Span), // Expression and whether it's semicolon-terminated (suppressed)
     Assign(String, Expr, bool, Span), // Variable, Expression, and whether it's semicolon-terminated (suppressed)
-    MultiAssign(Vec<String>, Expr, bool, Span),
+    MultiAssign(Vec<MultiAssignTarget>, Expr, bool, Span),
     AssignLValue(LValue, Expr, bool, Span),
     If {
         cond: Expr,
@@ -215,6 +215,7 @@ pub enum Stmt {
         name: String,
         params: Vec<String>,
         outputs: Vec<String>,
+        argument_validations: Vec<FunctionArgValidationDecl>,
         body: Vec<Stmt>,
         isolated: bool,
         is_async: bool,
@@ -232,6 +233,12 @@ pub enum Stmt {
         members: Vec<ClassMember>,
         span: Span,
     },
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum MultiAssignTarget {
+    Discard,
+    LValue(LValue),
 }
 
 impl Stmt {
@@ -277,6 +284,34 @@ pub struct Attr {
 pub struct ClassPropertyDecl {
     pub name: String,
     pub default: Option<Expr>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FunctionArgDim {
+    Any,
+    Exact(usize),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgSizeSpec {
+    pub rows: FunctionArgDim,
+    pub cols: FunctionArgDim,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgValidationDecl {
+    pub name: String,
+    pub size: Option<FunctionArgSizeSpec>,
+    pub class_name: Option<String>,
+    pub validators: Vec<FunctionArgValidatorDecl>,
+    pub default_value: Option<Expr>,
+    pub has_unsupported_trailing: bool,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionArgValidatorDecl {
+    pub name: String,
+    pub args: Vec<Expr>,
 }
 
 #[derive(Debug, PartialEq)]

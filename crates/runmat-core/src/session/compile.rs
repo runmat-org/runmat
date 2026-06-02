@@ -1,6 +1,6 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 fn entrypoint_target_function(
@@ -76,6 +76,13 @@ fn is_class_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
     })
 }
 
+fn is_function_source_body(stmts: &[runmat_parser::Stmt]) -> bool {
+    !stmts.is_empty()
+        && stmts
+            .iter()
+            .all(|stmt| matches!(stmt, runmat_parser::Stmt::Function { .. }))
+}
+
 fn package_class_name_from_path(source_path: &Path, root_dir: &Path) -> Option<String> {
     let relative = source_path.strip_prefix(root_dir).ok()?;
     let class_name = source_path.file_stem()?.to_str()?;
@@ -110,6 +117,30 @@ fn qualify_companion_classdefs(stmts: &mut [runmat_parser::Stmt], qualified_name
     }
 }
 
+fn qualify_companion_functions(stmts: &mut [runmat_parser::Stmt], qualified_name: &str) {
+    for stmt in stmts {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            if !name.contains('.') {
+                *name = qualified_name.to_string();
+            }
+        }
+    }
+}
+
+fn source_index_qualified_function_name(
+    source: &runmat_config::project::ProjectSourceFile,
+) -> Option<&str> {
+    if source.is_private {
+        return None;
+    }
+    source.package_path.as_ref().and_then(|_| {
+        source
+            .qualified_name
+            .contains('.')
+            .then_some(source.qualified_name.as_str())
+    })
+}
+
 fn source_index_qualified_class_name(
     source: &runmat_config::project::ProjectSourceFile,
 ) -> Option<&str> {
@@ -121,17 +152,211 @@ fn source_index_qualified_class_name(
     })
 }
 
+fn is_private_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("private"))
+}
+
+fn private_parent_dir_for_source(path: &Path) -> Option<PathBuf> {
+    let private_dir = path.parent()?;
+    if !is_private_dir(private_dir) {
+        return None;
+    }
+    private_dir.parent().map(Path::to_path_buf)
+}
+
+fn private_source_visible_to(primary_source_path: &Path, source_path: &Path) -> bool {
+    let Some(private_parent) = private_parent_dir_for_source(source_path) else {
+        return true;
+    };
+    primary_source_path
+        .parent()
+        .is_some_and(|caller_dir| caller_dir == private_parent)
+}
+
+fn function_owner_scope_from_qualified_name(qualified_name: &str) -> String {
+    qualified_name
+        .rsplit_once('.')
+        .map(|(owner, _)| owner.to_string())
+        .unwrap_or_default()
+}
+
+fn function_leaf_name(name: &str) -> &str {
+    name.rsplit_once('.').map(|(_, leaf)| leaf).unwrap_or(name)
+}
+
+fn synthetic_private_function_name(owner_scope: &str, leaf_name: &str) -> String {
+    if owner_scope.is_empty() {
+        format!("__private__.{leaf_name}")
+    } else {
+        format!("{owner_scope}.__private__.{leaf_name}")
+    }
+}
+
+fn owner_scope_from_path_skipping_private(source_path: &Path, root_dir: &Path) -> Option<String> {
+    let relative = source_path.strip_prefix(root_dir).ok()?;
+    let parent = relative.parent()?;
+    let mut segments = Vec::new();
+    for component in parent.components() {
+        let segment = component.as_os_str().to_str()?;
+        if segment.eq_ignore_ascii_case("private") {
+            continue;
+        }
+        if let Some(pkg) = segment.strip_prefix('+') {
+            if pkg.is_empty() {
+                return None;
+            }
+            segments.push(pkg.to_string());
+        } else if let Some(class) = segment.strip_prefix('@') {
+            if class.is_empty() {
+                return None;
+            }
+            segments.push(class.to_string());
+        } else {
+            segments.push(segment.to_string());
+        }
+    }
+    Some(segments.join("."))
+}
+
+fn qualify_private_companion_functions(
+    stmts: &mut [runmat_parser::Stmt],
+    owner_scope: &str,
+    primary_visible: bool,
+) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    for stmt in stmts {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            let leaf = function_leaf_name(name).to_string();
+            let display_name = if primary_visible {
+                leaf.clone()
+            } else {
+                synthetic_private_function_name(owner_scope, &leaf)
+            };
+            *name = display_name.clone();
+            aliases.insert(leaf, display_name);
+        }
+    }
+    aliases
+}
+
+#[derive(Default)]
+pub(super) struct CompanionSourceDiscovery {
+    pub statements: Vec<runmat_parser::Stmt>,
+    pub private_function_names: HashSet<String>,
+    pub private_function_owners: HashMap<String, String>,
+    pub private_function_aliases: HashMap<String, HashMap<String, String>>,
+    private_statement_flags: Vec<bool>,
+}
+
+fn function_names_in_statements(stmts: &[runmat_parser::Stmt]) -> impl Iterator<Item = &str> {
+    stmts.iter().filter_map(|stmt| {
+        if let runmat_parser::Stmt::Function { name, .. } = stmt {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+impl CompanionSourceDiscovery {
+    fn extend_body(
+        &mut self,
+        body: Vec<runmat_parser::Stmt>,
+        private_owner_scope: Option<&str>,
+        private_aliases: HashMap<String, String>,
+    ) {
+        let is_private = private_owner_scope.is_some();
+        if is_private {
+            let owner_scope = private_owner_scope.unwrap_or_default();
+            for function_name in function_names_in_statements(&body) {
+                self.private_function_names
+                    .insert(function_name.to_string());
+                self.private_function_owners
+                    .insert(function_name.to_string(), owner_scope.to_string());
+            }
+            if !private_aliases.is_empty() {
+                self.private_function_aliases
+                    .entry(owner_scope.to_string())
+                    .or_default()
+                    .extend(private_aliases);
+            }
+        }
+        for stmt in body {
+            self.statements.push(stmt);
+            self.private_statement_flags.push(is_private);
+        }
+    }
+
+    fn apply_function_precedence(&mut self, primary_function_names: &HashSet<String>) {
+        let discovered_private_function_names: HashSet<String> = self
+            .statements
+            .iter()
+            .zip(self.private_statement_flags.iter())
+            .filter_map(|(stmt, is_private)| {
+                if !*is_private {
+                    return None;
+                }
+                if let runmat_parser::Stmt::Function { name, .. } = stmt {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let old_statements = std::mem::take(&mut self.statements);
+        let old_private_flags = std::mem::take(&mut self.private_statement_flags);
+        self.private_function_names.clear();
+        self.private_function_owners.clear();
+        self.private_function_aliases.clear();
+
+        for (stmt, is_private) in old_statements.into_iter().zip(old_private_flags) {
+            let keep = match &stmt {
+                runmat_parser::Stmt::Function { name, .. } => {
+                    !primary_function_names.contains(name)
+                        && (is_private || !discovered_private_function_names.contains(name))
+                }
+                _ => true,
+            };
+            if !keep {
+                continue;
+            }
+            if is_private {
+                if let runmat_parser::Stmt::Function { name, .. } = &stmt {
+                    self.private_function_names.insert(name.clone());
+                    let owner_scope = function_owner_scope_from_qualified_name(name);
+                    let owner_scope = if let Some((owner, _)) = name.split_once(".__private__.") {
+                        owner.to_string()
+                    } else {
+                        owner_scope
+                    };
+                    self.private_function_owners
+                        .insert(name.clone(), owner_scope.clone());
+                    self.private_function_aliases
+                        .entry(owner_scope)
+                        .or_default()
+                        .insert(function_leaf_name(name).to_string(), name.clone());
+                }
+            }
+            self.statements.push(stmt);
+            self.private_statement_flags.push(is_private);
+        }
+    }
+}
+
 async fn discover_companion_from_composition_graph_async(
     source_name: &str,
     cwd: &Path,
     primary_source_path: &Path,
     compat_mode: runmat_parser::CompatMode,
-) -> Vec<runmat_parser::Stmt> {
+) -> CompanionSourceDiscovery {
     use runmat_config::project::{
         build_project_composition_graph_async, discover_project_symbols_from_source_name_async,
     };
     let options = ParserOptions::new(compat_mode);
-    let mut out = Vec::new();
+    let mut out = CompanionSourceDiscovery::default();
 
     if let Ok(Some(discovered_symbols)) =
         discover_project_symbols_from_source_name_async(source_name, cwd).await
@@ -152,22 +377,51 @@ async fn discover_companion_from_composition_graph_async(
                     else {
                         continue;
                     };
-                    if !contents.contains("classdef") {
+                    if !contents.contains("classdef") && !contents.contains("function") {
                         continue;
                     }
                     let Ok(program) = parse_with_options(&contents, options) else {
                         continue;
                     };
-                    if !is_class_source_body(&program.body) {
+                    let is_class_source = is_class_source_body(&program.body);
+                    let is_function_source = is_function_source_body(&program.body);
+                    if !is_class_source && !is_function_source {
                         continue;
                     }
                     let mut body = program.body;
-                    if let Some(qualified) = source_index_qualified_class_name(source) {
-                        qualify_companion_classdefs(&mut body, qualified);
-                    } else if let Some(qualified) = package_class_name_from_path(&file_path, cwd) {
-                        qualify_companion_classdefs(&mut body, &qualified);
+                    let private_owner_scope = source
+                        .is_private
+                        .then(|| function_owner_scope_from_qualified_name(&source.qualified_name));
+                    let primary_visible_private = source.is_private
+                        && private_source_visible_to(primary_source_path, &file_path);
+                    let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref()
+                    {
+                        qualify_private_companion_functions(
+                            &mut body,
+                            owner_scope,
+                            primary_visible_private,
+                        )
+                    } else {
+                        HashMap::new()
+                    };
+                    if is_class_source {
+                        if let Some(qualified) = source_index_qualified_class_name(source) {
+                            qualify_companion_classdefs(&mut body, qualified);
+                        } else if let Some(qualified) =
+                            package_class_name_from_path(&file_path, cwd)
+                        {
+                            qualify_companion_classdefs(&mut body, &qualified);
+                        }
+                    } else if private_owner_scope.is_none() {
+                        if let Some(qualified) = source_index_qualified_function_name(source) {
+                            qualify_companion_functions(&mut body, qualified);
+                        } else if let Some(qualified) =
+                            package_class_name_from_path(&file_path, cwd)
+                        {
+                            qualify_companion_functions(&mut body, &qualified);
+                        }
                     }
-                    out.extend(body);
+                    out.extend_body(body, private_owner_scope.as_deref(), private_aliases);
                 }
             }
         }
@@ -176,16 +430,16 @@ async fn discover_companion_from_composition_graph_async(
     out
 }
 
-pub(super) async fn discover_companion_class_source_statements_async(
+pub(super) async fn discover_companion_source_statements_async(
     source_name: &str,
     compat_mode: runmat_parser::CompatMode,
-) -> Vec<runmat_parser::Stmt> {
+) -> CompanionSourceDiscovery {
     let Some(cwd) = source_lookup_cwd(source_name) else {
-        return Vec::new();
+        return CompanionSourceDiscovery::default();
     };
     let primary_source_path = resolved_source_path(source_name, &cwd);
     let Some(parent) = primary_source_path.parent() else {
-        return Vec::new();
+        return CompanionSourceDiscovery::default();
     };
     let mut out = discover_companion_from_composition_graph_async(
         source_name,
@@ -194,7 +448,7 @@ pub(super) async fn discover_companion_class_source_statements_async(
         compat_mode,
     )
     .await;
-    if !out.is_empty() {
+    if !out.statements.is_empty() {
         return out;
     }
     let options = ParserOptions::new(compat_mode);
@@ -209,11 +463,11 @@ pub(super) async fn discover_companion_class_source_statements_async(
                 continue;
             }
             if entry.is_dir() {
-                if entry
+                let is_package_dir = entry
                     .file_name()
                     .to_str()
-                    .is_some_and(|name| name.starts_with('+'))
-                {
+                    .is_some_and(|name| name.starts_with('+'));
+                if is_package_dir || is_private_dir(&path) {
                     stack.push(path);
                 }
                 continue;
@@ -228,20 +482,37 @@ pub(super) async fn discover_companion_class_source_statements_async(
             let Ok(contents) = runmat_filesystem::read_to_string_async(&path).await else {
                 continue;
             };
-            if !contents.contains("classdef") {
+            if !contents.contains("classdef") && !contents.contains("function") {
                 continue;
             }
             let Ok(program) = parse_with_options(&contents, options) else {
                 continue;
             };
-            if !is_class_source_body(&program.body) {
+            let is_class_source = is_class_source_body(&program.body);
+            let is_function_source = is_function_source_body(&program.body);
+            if !is_class_source && !is_function_source {
                 continue;
             }
             let mut body = program.body;
-            if let Some(qualified) = package_class_name_from_path(&path, parent) {
-                qualify_companion_classdefs(&mut body, &qualified);
+            let private_owner_scope = private_parent_dir_for_source(&path)
+                .and_then(|_| owner_scope_from_path_skipping_private(&path, parent));
+            let primary_visible_private = private_owner_scope.is_some()
+                && private_source_visible_to(&primary_source_path, &path);
+            let private_aliases = if let Some(owner_scope) = private_owner_scope.as_deref() {
+                qualify_private_companion_functions(&mut body, owner_scope, primary_visible_private)
+            } else {
+                HashMap::new()
+            };
+            if is_class_source {
+                if let Some(qualified) = package_class_name_from_path(&path, parent) {
+                    qualify_companion_classdefs(&mut body, &qualified);
+                }
+            } else if private_owner_scope.is_none() {
+                if let Some(qualified) = package_class_name_from_path(&path, parent) {
+                    qualify_companion_functions(&mut body, &qualified);
+                }
             }
-            out.extend(body);
+            out.extend_body(body, private_owner_scope.as_deref(), private_aliases);
         }
     }
     out
@@ -267,18 +538,37 @@ impl RunMatSession {
     ) -> std::result::Result<PreparedExecution, RunError> {
         let source_name = self.current_source_name().to_string();
         let source_id = self.source_pool.intern(&source_name, input);
-        let ast = {
+        let (
+            ast,
+            private_companion_function_names,
+            private_companion_function_owners,
+            private_companion_function_aliases,
+        ) = {
             let _span = info_span!("runtime.parse").entered();
             let mut ast = parse_with_options(input, ParserOptions::new(self.compat_mode))?;
+            let primary_function_names = function_names_in_statements(&ast.body)
+                .map(ToString::to_string)
+                .collect::<HashSet<_>>();
             let mut companion = self
-                .pending_companion_class_statements
+                .pending_companion_source_discovery
                 .take()
                 .unwrap_or_default();
-            if !companion.is_empty() {
-                companion.append(&mut ast.body);
-                ast.body = companion;
+            companion.apply_function_precedence(&primary_function_names);
+            let private_companion_function_names =
+                std::mem::take(&mut companion.private_function_names);
+            let private_companion_function_owners =
+                std::mem::take(&mut companion.private_function_owners);
+            let private_companion_function_aliases =
+                std::mem::take(&mut companion.private_function_aliases);
+            if !companion.statements.is_empty() {
+                ast.body.append(&mut companion.statements);
             }
-            ast
+            (
+                ast,
+                private_companion_function_names,
+                private_companion_function_owners,
+                private_companion_function_aliases,
+            )
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
@@ -290,6 +580,10 @@ impl RunMatSession {
                 &LoweringContext::new(&workspace_bindings)
                     .with_bound_functions(&function_names)
                     .with_known_project_symbols(&known_project_symbols)
+                    .with_private_functions(
+                        &private_companion_function_owners,
+                        &private_companion_function_aliases,
+                    )
                     .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
                     .with_top_level_await_enabled(self.top_level_await_enabled),
             )?
@@ -307,8 +601,11 @@ impl RunMatSession {
             self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
         };
         bytecode.source_id = Some(source_id);
-        let (function_registry_after_success, next_semantic_function_id_after_success) =
-            self.prepare_session_semantic_function_registry(&mut bytecode);
+        let (function_registry_after_success, next_semantic_function_id_after_success) = self
+            .prepare_session_semantic_function_registry(
+                &mut bytecode,
+                &private_companion_function_names,
+            );
         Ok(PreparedExecution {
             ast,
             lowering,
@@ -362,8 +659,10 @@ impl RunMatSession {
     fn prepare_session_semantic_function_registry(
         &self,
         bytecode: &mut runmat_vm::Bytecode,
+        private_companion_function_names: &HashSet<String>,
     ) -> (runmat_vm::FunctionRegistry, usize) {
         let mut session_registry = self.function_registry.clone();
+        let mut execution_registry = session_registry.clone();
         let mut next_semantic_function_id = self.next_semantic_function_id;
         let current_registry = bytecode.function_registry();
         if current_registry.functions.is_empty() {
@@ -393,6 +692,9 @@ impl RunMatSession {
 
         let mut replaced_sources = Vec::new();
         for function in current_registry.functions.values() {
+            if private_companion_function_names.contains(&function.display_name) {
+                continue;
+            }
             if let Some(existing_id) = session_registry.resolve_name(&function.display_name) {
                 if let Some(source_id) = session_registry
                     .get(existing_id)
@@ -418,16 +720,24 @@ impl RunMatSession {
             for instr in &mut function.instructions {
                 remap_semantic_function_instr(instr, &remap);
             }
-            session_registry.insert_replacing_name(function);
+            let persist_function =
+                !private_companion_function_names.contains(&function.display_name);
+            execution_registry.insert_replacing_name(function.clone());
+            if persist_function {
+                session_registry.insert_replacing_name(function);
+            }
         }
         for (name, old_id) in name_remaps {
             let Some(new_id) = remap.get(&old_id).copied() else {
                 continue;
             };
-            session_registry.names.insert(name, new_id);
+            execution_registry.names.insert(name.clone(), new_id);
+            if !private_companion_function_names.contains(&name) {
+                session_registry.names.insert(name, new_id);
+            }
         }
 
-        bytecode.function_registry = session_registry.clone();
+        bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
         bind_semantic_function_references(bytecode);
         (session_registry, next_semantic_function_id)
@@ -540,8 +850,18 @@ fn remap_semantic_function_instr(
     match instr {
         runmat_vm::Instr::CreateSemanticClosure(function, _, _)
         | runmat_vm::Instr::CreateBoundFunctionHandle(function, _)
+        | runmat_vm::Instr::CreateSemanticFuture(function, _, _)
+        | runmat_vm::Instr::CreateSemanticFutureExpandMultiOutput(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
+        | runmat_vm::Instr::CallSemanticFunctionMultiUsingOutputSlot(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
+            if let Some(new_id) = remap.get(function).copied() {
+                *function = new_id;
+            }
+        }
+        runmat_vm::Instr::CallSemanticNestedFunctionMulti { function, .. }
+        | runmat_vm::Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { function, .. }
+        | runmat_vm::Instr::CallSemanticNestedFunctionExpandMultiOutput { function, .. } => {
             if let Some(new_id) = remap.get(function).copied() {
                 *function = new_id;
             }
@@ -643,7 +963,30 @@ fn bind_semantic_callback_literals(
                     }
                 }
             }
+            runmat_vm::Instr::CallFevalMultiUsingOutputSlot(argc, _) => {
+                let pops = *argc + 1;
+                if stack.len() >= pops {
+                    let producer = stack[stack.len() - pops];
+                    if let Some((function, display_name)) =
+                        callback_literal(bytecode.instructions.get(producer), registry)
+                    {
+                        replacements.push((producer, function, display_name));
+                    }
+                }
+            }
             runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
+                if let Some(effect) = instr.stack_effect() {
+                    if stack.len() >= effect.pops {
+                        let producer = stack[stack.len() - effect.pops];
+                        if let Some((function, display_name)) =
+                            callback_literal(bytecode.instructions.get(producer), registry)
+                        {
+                            replacements.push((producer, function, display_name));
+                        }
+                    }
+                }
+            }
+            runmat_vm::Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _) => {
                 if let Some(effect) = instr.stack_effect() {
                     if stack.len() >= effect.pops {
                         let producer = stack[stack.len() - effect.pops];

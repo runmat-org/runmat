@@ -13,23 +13,36 @@ fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
 }
 
 #[derive(Clone, Copy)]
-enum VmIntrinsicCounterBuiltin {
+enum VmIntrinsicBuiltin {
     Nargin,
     Nargout,
+    Narginchk,
+    Nargoutchk,
 }
 
-impl VmIntrinsicCounterBuiltin {
+impl VmIntrinsicBuiltin {
     fn classify(name: &str) -> Option<Self> {
         match name {
             runmat_hir::NARGIN_BUILTIN_NAME => Some(Self::Nargin),
             runmat_hir::NARGOUT_BUILTIN_NAME => Some(Self::Nargout),
+            runmat_hir::NARGINCHK_BUILTIN_NAME => Some(Self::Narginchk),
+            runmat_hir::NARGOUTCHK_BUILTIN_NAME => Some(Self::Nargoutchk),
             _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Nargin => runmat_hir::NARGIN_BUILTIN_NAME,
+            Self::Nargout => runmat_hir::NARGOUT_BUILTIN_NAME,
+            Self::Narginchk => runmat_hir::NARGINCHK_BUILTIN_NAME,
+            Self::Nargoutchk => runmat_hir::NARGOUTCHK_BUILTIN_NAME,
         }
     }
 }
 
-pub fn is_vm_intrinsic_counter_builtin(name: &str) -> bool {
-    VmIntrinsicCounterBuiltin::classify(name).is_some()
+pub fn is_vm_intrinsic_builtin(name: &str) -> bool {
+    VmIntrinsicBuiltin::classify(name).is_some()
 }
 
 #[derive(Clone, Copy)]
@@ -65,27 +78,177 @@ pub fn collect_call_args(
     pop_args(stack, arg_count)
 }
 
-pub fn vm_intrinsic_counter_builtin(
+#[derive(Clone, Copy)]
+enum ArityBound {
+    Finite(usize),
+    Unbounded,
+}
+
+impl ArityBound {
+    fn permits(self, actual: usize) -> bool {
+        match self {
+            Self::Finite(max) => actual <= max,
+            Self::Unbounded => true,
+        }
+    }
+}
+
+fn parse_finite_arity_bound(
+    value: &Value,
+    builtin: &str,
+    name: &str,
+) -> Result<usize, RuntimeError> {
+    let number = match value {
+        Value::Num(value) => *value,
+        Value::Int(value) => value.to_f64(),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        other => {
+            return Err(mex(
+                &format!("{builtin}ArgumentInvalid"),
+                &format!("{builtin}: {name} must be a nonnegative integer scalar, got {other:?}"),
+            ))
+        }
+    };
+
+    if !number.is_finite() || number < 0.0 || number.fract() != 0.0 {
+        return Err(mex(
+            &format!("{builtin}ArgumentInvalid"),
+            &format!("{builtin}: {name} must be a nonnegative integer scalar"),
+        ));
+    }
+    if number > usize::MAX as f64 {
+        return Err(mex(
+            &format!("{builtin}ArgumentInvalid"),
+            &format!("{builtin}: {name} exceeds the platform argument-count range"),
+        ));
+    }
+    Ok(number as usize)
+}
+
+fn parse_max_arity_bound(value: &Value, builtin: &str) -> Result<ArityBound, RuntimeError> {
+    match value {
+        Value::Num(value) if value.is_infinite() && value.is_sign_positive() => {
+            Ok(ArityBound::Unbounded)
+        }
+        Value::Tensor(tensor)
+            if tensor.data.len() == 1
+                && tensor.data[0].is_infinite()
+                && tensor.data[0].is_sign_positive() =>
+        {
+            Ok(ArityBound::Unbounded)
+        }
+        _ => parse_finite_arity_bound(value, builtin, "maxArgs").map(ArityBound::Finite),
+    }
+}
+
+fn validate_arity_bounds(
+    builtin: &str,
+    min: &Value,
+    max: &Value,
+) -> Result<(usize, ArityBound), RuntimeError> {
+    let min = parse_finite_arity_bound(min, builtin, "minArgs")?;
+    let max = parse_max_arity_bound(max, builtin)?;
+    if let ArityBound::Finite(max_value) = max {
+        if min > max_value {
+            return Err(mex(
+                &format!("{builtin}BoundsInvalid"),
+                &format!("{builtin}: minArgs must be less than or equal to maxArgs"),
+            ));
+        }
+    }
+    Ok((min, max))
+}
+
+fn validate_narginchk(args: &[Value], actual: usize) -> Result<(), RuntimeError> {
+    let (min, max) = validate_arity_bounds("Narginchk", &args[0], &args[1])?;
+    if actual < min {
+        return Err(mex(
+            "NotEnoughInputs",
+            &format!("narginchk: expected at least {min} input arguments, got {actual}"),
+        ));
+    }
+    if !max.permits(actual) {
+        return Err(mex(
+            "TooManyInputs",
+            &format!("narginchk: input argument count {actual} exceeds maxArgs"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_nargoutchk(args: &[Value], actual: usize) -> Result<(), RuntimeError> {
+    let (min, max) = validate_arity_bounds("Nargoutchk", &args[0], &args[1])?;
+    if actual < min {
+        return Err(mex(
+            "NotEnoughOutputs",
+            &format!("nargoutchk: expected at least {min} output arguments, got {actual}"),
+        ));
+    }
+    if !max.permits(actual) {
+        return Err(mex(
+            "TooManyOutputs",
+            &format!("nargoutchk: output argument count {actual} exceeds maxArgs"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_intrinsic_arg_count(
+    builtin: &str,
+    actual: usize,
+    expected: usize,
+) -> Result<(), RuntimeError> {
+    if actual < expected {
+        return Err(mex(
+            "NotEnoughInputs",
+            &format!("{builtin} takes {expected} arguments"),
+        ));
+    }
+    if actual > expected {
+        return Err(mex(
+            "TooManyInputs",
+            &format!("{builtin} takes {expected} arguments"),
+        ));
+    }
+    Ok(())
+}
+
+pub fn vm_intrinsic_builtin(
+    stack: &mut Vec<Value>,
     name: &str,
     arg_count: usize,
     call_counts: &[(usize, usize)],
-) -> Result<Option<Value>, RuntimeError> {
-    match VmIntrinsicCounterBuiltin::classify(name) {
-        Some(VmIntrinsicCounterBuiltin::Nargin) => {
-            if arg_count != 0 {
-                return Err(mex("TooManyInputs", "nargin takes no arguments"));
-            }
+) -> Result<Value, RuntimeError> {
+    let Some(intrinsic) = VmIntrinsicBuiltin::classify(name) else {
+        return Err(mex(
+            "UndefinedFunction",
+            &format!("unknown VM intrinsic builtin '{name}'"),
+        ));
+    };
+    let args = collect_call_args(stack, arg_count)?;
+    match intrinsic {
+        VmIntrinsicBuiltin::Nargin => {
+            validate_intrinsic_arg_count(intrinsic.name(), args.len(), 0)?;
             let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
-            Ok(Some(Value::Num(nin as f64)))
+            Ok(Value::Num(nin as f64))
         }
-        Some(VmIntrinsicCounterBuiltin::Nargout) => {
-            if arg_count != 0 {
-                return Err(mex("TooManyInputs", "nargout takes no arguments"));
-            }
+        VmIntrinsicBuiltin::Nargout => {
+            validate_intrinsic_arg_count(intrinsic.name(), args.len(), 0)?;
             let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
-            Ok(Some(Value::Num(nout as f64)))
+            Ok(Value::Num(nout as f64))
         }
-        None => Ok(None),
+        VmIntrinsicBuiltin::Narginchk => {
+            validate_intrinsic_arg_count(intrinsic.name(), args.len(), 2)?;
+            let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
+            validate_narginchk(&args, nin)?;
+            Ok(Value::Num(0.0))
+        }
+        VmIntrinsicBuiltin::Nargoutchk => {
+            validate_intrinsic_arg_count(intrinsic.name(), args.len(), 2)?;
+            let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
+            validate_nargoutchk(&args, nout)?;
+            Ok(Value::Num(0.0))
+        }
     }
 }
 

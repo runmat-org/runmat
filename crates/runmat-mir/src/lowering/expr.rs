@@ -110,6 +110,8 @@ pub(crate) fn lower_expr_with_replacements(
                 .collect::<Result<_, HirError>>()?,
         },
         HirExprKind::Call(call) => {
+            let mut arg_spans: Vec<runmat_hir::Span> =
+                call.args.iter().map(|arg| arg.span).collect();
             let mut args: Vec<MirCallArg> = call
                 .args
                 .iter()
@@ -120,6 +122,7 @@ pub(crate) fn lower_expr_with_replacements(
                     call,
                     lower_operand_with_replacements(ctx, callee, temps, await_replacements)?,
                     args,
+                    arg_spans,
                 )?
             } else if call.callee.is_feval_builtin_like() {
                 if args.is_empty() {
@@ -130,7 +133,8 @@ pub(crate) fn lower_expr_with_replacements(
                         "feval: function argument cannot be a comma-list expansion",
                     ));
                 };
-                dynamic_call_rvalue(call, callee, args)?
+                arg_spans.remove(0);
+                dynamic_call_rvalue(call, callee, args, arg_spans)?
             } else if let HirCallableRef::Function(function) = call.callee {
                 if ctx.is_async_function(function) {
                     MirRvalue::Future {
@@ -140,10 +144,10 @@ pub(crate) fn lower_expr_with_replacements(
                         requested_outputs: call.requested_outputs.clone(),
                     }
                 } else {
-                    call_rvalue(call, args)?
+                    call_rvalue(call, args, arg_spans)?
                 }
             } else {
-                call_rvalue(call, args)?
+                call_rvalue(call, args, arg_spans)?
             }
         }
         HirExprKind::CommandCall(call) => lower_command_call(call)?,
@@ -486,6 +490,7 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
             .iter()
             .map(|arg| MirCallArg::Single(MirOperand::Constant(command_arg_constant(arg))))
             .collect(),
+        arg_spans: Vec::new(),
         syntax: runmat_hir::CallSyntax::Command,
         requested_outputs: RequestedOutputCount::Zero,
         fallback_policy,
@@ -498,7 +503,11 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
     }))
 }
 
-fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> Result<MirRvalue, HirError> {
+fn call_rvalue(
+    call: &runmat_hir::HirCall,
+    args: Vec<MirCallArg>,
+    arg_spans: Vec<runmat_hir::Span>,
+) -> Result<MirRvalue, HirError> {
     let callee = match &call.callee {
         HirCallableRef::SuperConstructor {
             current_class,
@@ -540,6 +549,7 @@ fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> Result<MirR
     Ok(MirRvalue::Call(MirCall {
         callee,
         args,
+        arg_spans,
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
         fallback_policy,
@@ -556,6 +566,7 @@ fn dynamic_call_rvalue(
     call: &runmat_hir::HirCall,
     callee: MirOperand,
     args: Vec<MirCallArg>,
+    arg_spans: Vec<runmat_hir::Span>,
 ) -> Result<MirRvalue, HirError> {
     let callee = MirCallee::Dynamic(callee);
     let semantics = call_semantics(&callee);
@@ -563,6 +574,7 @@ fn dynamic_call_rvalue(
     Ok(MirRvalue::Call(MirCall {
         callee,
         args,
+        arg_spans,
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
         fallback_policy,

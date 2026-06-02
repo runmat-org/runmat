@@ -314,6 +314,7 @@ mod tests {
                     implicit_nargin: None,
                     implicit_nargout: None,
                 },
+                argument_validations: Vec::new(),
                 locals: Vec::new(),
                 captures: Vec::new(),
                 modifiers: FunctionModifiers::default(),
@@ -381,6 +382,7 @@ mod tests {
                     implicit_nargin: None,
                     implicit_nargout: None,
                 },
+                argument_validations: Vec::new(),
                 locals: vec![hidden, visible],
                 captures: vec![CapturedBinding {
                     binding: hidden,
