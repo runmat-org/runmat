@@ -129,7 +129,18 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
     ) -> Result<RenderResult, String> {
-        self.prepare_scene(figure, camera, axes_cameras);
+        self.render_to_view_with_camera_state(figure, view, camera, axes_cameras, None)
+    }
+
+    pub fn render_to_view_with_camera_state(
+        &mut self,
+        figure: &Figure,
+        view: &wgpu::TextureView,
+        camera: Option<&Camera>,
+        axes_cameras: Option<&[Camera]>,
+        axes_camera_user_controlled: Option<&[bool]>,
+    ) -> Result<RenderResult, String> {
+        self.prepare_scene(figure, camera, axes_cameras, axes_camera_user_controlled);
 
         let mut encoder = self.renderer.wgpu_renderer.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
@@ -154,6 +165,17 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
     ) -> Result<Vec<u8>, String> {
+        self.render_to_rgba_with_camera_state(figure, camera, axes_cameras, None)
+            .await
+    }
+
+    pub async fn render_to_rgba_with_camera_state(
+        &mut self,
+        figure: &Figure,
+        camera: Option<&Camera>,
+        axes_cameras: Option<&[Camera]>,
+        axes_camera_user_controlled: Option<&[bool]>,
+    ) -> Result<Vec<u8>, String> {
         log::debug!(
             "runmat-plot: native_surface.render_to_rgba.start width={} height={} axes={} overrides={}",
             self.config.width.max(1),
@@ -161,7 +183,7 @@ impl NativeSurfaceRenderContext {
             figure.axes_metadata.len(),
             axes_cameras.map(|items| items.len()).unwrap_or(0)
         );
-        self.prepare_scene(figure, camera, axes_cameras);
+        self.prepare_scene(figure, camera, axes_cameras, axes_camera_user_controlled);
 
         let width = self.config.width.max(1);
         let height = self.config.height.max(1);
@@ -263,6 +285,7 @@ impl NativeSurfaceRenderContext {
         figure: &Figure,
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
+        axes_camera_user_controlled: Option<&[bool]>,
     ) {
         // Keep runtime config aligned with figure metadata, but treat the default figure
         // white background as "unspecified" and prefer active theme background for app parity.
@@ -286,6 +309,9 @@ impl NativeSurfaceRenderContext {
                     *target = override_camera.clone();
                 }
             }
+        }
+        if let Some(flags) = axes_camera_user_controlled {
+            self.renderer.set_axes_camera_interaction_flags(flags);
         }
     }
 
