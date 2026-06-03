@@ -5,6 +5,8 @@ use runmat_accelerate_api::{
 
 use super::{NumericPrecision, WgpuProvider};
 
+const WGPU_SPAWN_HANDLE_CONCURRENCY: SpawnHandleConcurrency = SpawnHandleConcurrency::Reject;
+
 impl WgpuProvider {
     pub(crate) fn device_id_exec(&self) -> u32 {
         self.runtime_device_id
@@ -49,6 +51,19 @@ impl WgpuProvider {
     }
 
     pub(crate) fn spawn_handle_concurrency_exec(&self) -> SpawnHandleConcurrency {
-        SpawnHandleConcurrency::SynchronizedMutation
+        WGPU_SPAWN_HANDLE_CONCURRENCY
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wgpu_spawn_handle_concurrency_rejects_handle_capture() {
+        assert_eq!(
+            WGPU_SPAWN_HANDLE_CONCURRENCY,
+            SpawnHandleConcurrency::Reject
+        );
     }
 }
