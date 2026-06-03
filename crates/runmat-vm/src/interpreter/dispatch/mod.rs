@@ -224,21 +224,32 @@ fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeEr
             )
         })?;
         let policy = provider.spawn_handle_concurrency();
-        if matches!(
-            policy,
-            runmat_accelerate_api::SpawnHandleConcurrency::Reject
-        ) {
-            return Err(crate::interpreter::errors::mex(
-                "SpawnGpuHandleUnsupported",
-                &format!(
-                    "spawn cannot capture GPU handle buffer {} on provider '{}' (spawn_handle_concurrency={})",
-                    handle.buffer_id,
-                    provider.device_info(),
-                    policy.as_str()
+        match policy {
+            runmat_accelerate_api::SpawnHandleConcurrency::ImmutableShare => Ok(()),
+            runmat_accelerate_api::SpawnHandleConcurrency::Reject => Err(
+                crate::interpreter::errors::mex(
+                    "SpawnGpuHandleUnsupported",
+                    &format!(
+                        "spawn cannot capture GPU handle buffer {} on provider '{}' (spawn_handle_concurrency={})",
+                        handle.buffer_id,
+                        provider.device_info(),
+                        policy.as_str()
+                    ),
                 ),
-            ));
+            ),
+            runmat_accelerate_api::SpawnHandleConcurrency::CopyOnWrite
+            | runmat_accelerate_api::SpawnHandleConcurrency::SynchronizedMutation => Err(
+                crate::interpreter::errors::mex(
+                    "SpawnGpuHandleConcurrencyUnsupported",
+                    &format!(
+                        "spawn cannot capture GPU handle buffer {} on provider '{}' because spawn_handle_concurrency={} requires VM/runtime coordination that is not implemented",
+                        handle.buffer_id,
+                        provider.device_info(),
+                        policy.as_str()
+                    ),
+                ),
+            ),
         }
-        Ok(())
     })
 }
 
@@ -2056,6 +2067,65 @@ mod tests {
         }
     }
 
+    struct SynchronizedMutationSpawnProvider;
+    static SYNCHRONIZED_MUTATION_PROVIDER: SynchronizedMutationSpawnProvider =
+        SynchronizedMutationSpawnProvider;
+
+    impl AccelProvider for SynchronizedMutationSpawnProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "synchronized-mutation-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            43
+        }
+
+        fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+            SpawnHandleConcurrency::SynchronizedMutation
+        }
+    }
+
+    struct CopyOnWriteSpawnProvider;
+    static COPY_ON_WRITE_PROVIDER: CopyOnWriteSpawnProvider = CopyOnWriteSpawnProvider;
+
+    impl AccelProvider for CopyOnWriteSpawnProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "copy-on-write-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            44
+        }
+
+        fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+            SpawnHandleConcurrency::CopyOnWrite
+        }
+    }
+
     #[test]
     fn spawn_policy_rejects_gpu_handles_when_provider_disallows_sharing() {
         let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
@@ -2083,6 +2153,40 @@ mod tests {
         });
         enforce_spawn_value_concurrency_policy(&value)
             .expect("immutable sharing policy should allow spawn capture");
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_when_synchronized_mutation_lacks_vm_coordination() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&SYNCHRONIZED_MUTATION_PROVIDER));
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 43,
+            buffer_id: 17,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("synchronized mutation should be rejected without VM coordination");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleConcurrencyUnsupported"),
+            "expected explicit spawn GPU-handle synchronization policy error identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_when_copy_on_write_lacks_vm_coordination() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&COPY_ON_WRITE_PROVIDER));
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 44,
+            buffer_id: 19,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("copy-on-write should be rejected without VM coordination");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleConcurrencyUnsupported"),
+            "expected explicit spawn GPU-handle copy-on-write policy error identifier"
+        );
     }
 
     #[test]
