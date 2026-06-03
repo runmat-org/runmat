@@ -391,6 +391,22 @@ impl PlotRenderer {
         }
     }
 
+    pub fn set_axes_camera_interaction_flags(&mut self, flags: &[bool]) {
+        self.axes_2d_camera_user_controlled
+            .resize(self.axes_cameras.len(), false);
+        let mut any_user_controlled = false;
+        for idx in 0..self.axes_cameras.len() {
+            let controlled = flags.get(idx).copied().unwrap_or(false);
+            if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(idx) {
+                *flag = controlled;
+            }
+            any_user_controlled |= controlled;
+        }
+        if any_user_controlled {
+            self.note_camera_interaction();
+        }
+    }
+
     fn clear_axes_camera_interaction(&mut self, axes_index: usize) {
         if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(axes_index) {
             *flag = false;
