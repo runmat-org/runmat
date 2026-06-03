@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use log::info;
 use owo_colors::OwoColorize;
-use runmat_config::{GcPreset, JitOptLevel, RunMatConfig};
-use runmat_core::{RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish};
+use runmat_config::runtime::{GcPreset, JitOptLevel, RunMatRuntimeConfig};
+use runmat_core::{
+    abi::{ExecutionRequest, HostExecutionPolicy, RuntimeFlow, SourceInput},
+    RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
+};
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
 use std::io::{self, Read};
@@ -13,7 +16,7 @@ use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::format_frontend_error;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 
-pub async fn execute_repl(config: &RunMatConfig) -> Result<()> {
+pub async fn execute_repl(config: &RunMatRuntimeConfig) -> Result<()> {
     info!("Starting RunMat REPL");
     if config.runtime.verbose {
         info!("Verbose mode enabled");
@@ -107,7 +110,7 @@ enum BannerTone {
     Muted,
 }
 
-fn print_repl_banner(config: &RunMatConfig, engine: &RunMatSession) {
+fn print_repl_banner(config: &RunMatRuntimeConfig, engine: &RunMatSession) {
     let caps = detect_banner_capabilities();
 
     println!(
@@ -154,7 +157,7 @@ fn detect_banner_capabilities() -> BannerCapabilities {
     }
 }
 
-fn format_gpu_line(config: &RunMatConfig, caps: &BannerCapabilities) -> String {
+fn format_gpu_line(config: &RunMatRuntimeConfig, caps: &BannerCapabilities) -> String {
     let label = style_text("GPU:", caps, BannerTone::Label);
 
     if !config.accelerate.enabled {
@@ -216,7 +219,7 @@ fn format_gpu_line(config: &RunMatConfig, caps: &BannerCapabilities) -> String {
 }
 
 fn format_runtime_line(
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
     engine: &RunMatSession,
     caps: &BannerCapabilities,
 ) -> String {
@@ -328,7 +331,7 @@ fn style_text(text: &str, caps: &BannerCapabilities, tone: BannerTone) -> String
 async fn process_repl_line(
     line: &str,
     engine: &mut RunMatSession,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<bool> {
     if line == "exit" || line == "quit" {
         return Ok(false);
@@ -378,27 +381,31 @@ async fn process_repl_line(
         return Ok(true);
     }
 
-    match engine.execute(line).await {
-        Ok(result) => {
-            emit_execution_streams(&result.streams);
-            if let Some(error) = result.error {
-                eprintln!(
-                    "{}",
-                    error.format_diagnostic_with_source(Some("<repl>"), Some(line))
-                );
-            } else if result.value.is_some()
+    let request = ExecutionRequest::for_source(
+        SourceInput::Text {
+            name: "<repl>".to_string(),
+            text: line.to_string(),
+        },
+        crate::diagnostics::parser_compat(config.language.compat),
+        HostExecutionPolicy::default(),
+        engine.workspace_handle(),
+    );
+    match engine.execute_request(request).await {
+        Ok(outcome) => {
+            emit_execution_streams(&outcome.streams);
+            for diagnostic in &outcome.diagnostics {
+                eprintln!("{}: {}", diagnostic.code, diagnostic.message);
+            }
+            if !matches!(outcome.flow, RuntimeFlow::NoValue)
                 && config.runtime.verbose
-                && result.execution_time_ms > 10
+                && outcome
+                    .profiling
+                    .as_ref()
+                    .is_some_and(|profiling| profiling.total_ms > 10)
             {
-                println!(
-                    "  ({}ms {})",
-                    result.execution_time_ms,
-                    if result.used_jit {
-                        "JIT"
-                    } else {
-                        "interpreter"
-                    }
-                );
+                if let Some(profiling) = outcome.profiling {
+                    println!("  ({}ms)", profiling.total_ms);
+                }
             }
         }
         Err(e) => {

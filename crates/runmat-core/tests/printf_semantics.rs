@@ -1,12 +1,11 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use futures::executor::block_on;
-use runmat_core::{ExecutionResult, ExecutionStreamKind, RunMatSession};
+use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn stdout_stream(result: &ExecutionResult) -> String {
+fn stdout_stream(result: &SessionExecutionResult) -> String {
     result
         .streams
         .iter()
@@ -15,7 +14,7 @@ fn stdout_stream(result: &ExecutionResult) -> String {
         .collect::<String>()
 }
 
-fn stderr_stream(result: &ExecutionResult) -> String {
+fn stderr_stream(result: &SessionExecutionResult) -> String {
     result
         .streams
         .iter()
@@ -41,7 +40,7 @@ fn fprintf_rm138_repro_is_stable_end_to_end() {
         x = single(3.14);
         fprintf("Value: %.4f\n", double(x));
     "#;
-    let result = block_on(engine.execute(script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, script).unwrap();
     assert_eq!(stdout_stream(&result), "Price: $42.50\nValue: 3.1400\n");
 }
 
@@ -52,7 +51,7 @@ fn disp_inline_cast_argument_is_stable_end_to_end() {
         x = single(3.14);
         disp(double(x));
     "#;
-    let result = block_on(engine.execute(script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, script).unwrap();
     let rendered = stdout_stream(&result);
     let parsed: f64 = rendered
         .trim()
@@ -72,7 +71,11 @@ fn disp_inline_cast_argument_is_stable_end_to_end() {
 #[test]
 fn fprintf_stream_routing_is_correct() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = block_on(engine.execute("fprintf('out'); fprintf(2, 'err');")).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "fprintf('out'); fprintf(2, 'err');",
+    )
+    .unwrap();
     assert_eq!(stdout_stream(&result), "out");
     assert_eq!(stderr_stream(&result), "err");
 }
@@ -80,7 +83,11 @@ fn fprintf_stream_routing_is_correct() {
 #[test]
 fn fprintf_grouping_and_i_flag_smoke() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = block_on(engine.execute("fprintf('%''d|%Id', 12345, 42);")).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(
+        &mut engine,
+        "fprintf('%''d|%Id', 12345, 42);",
+    )
+    .unwrap();
     assert_eq!(stdout_stream(&result), "12,345|42");
 }
 
@@ -93,7 +100,12 @@ fn fprintf_file_roundtrip_and_count_work_end_to_end() {
         "fid = fopen('{}', 'w'); n = fprintf(fid, 'hello-%d', 7); fclose(fid); fprintf('|%d|', n);",
         path_text
     );
-    let result = block_on(engine.execute(&script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, &script).unwrap();
+    assert!(
+        result.error.is_none(),
+        "expected no execution error, got {:?}",
+        result.error
+    );
     assert_eq!(stdout_stream(&result), "|7|");
     let bytes = std::fs::read(&path).expect("written file should exist");
     assert_eq!(bytes, b"hello-7");
@@ -109,7 +121,12 @@ fn fprintf_encoding_alias_smoke_utf8_underscore() {
         "fid = fopen('{}', 'w', 'native', 'utf_8'); fprintf(fid, '%s', 'é'); fclose(fid);",
         path_text
     );
-    block_on(engine.execute(&script)).unwrap();
+    let result = runmat_core::execute_text_request_for_testing(&mut engine, &script).unwrap();
+    assert!(
+        result.error.is_none(),
+        "expected no execution error, got {:?}",
+        result.error
+    );
     let bytes = std::fs::read(&path).expect("utf8 alias output should exist");
     assert_eq!(bytes, "é".as_bytes());
     let _ = std::fs::remove_file(path);
@@ -118,18 +135,31 @@ fn fprintf_encoding_alias_smoke_utf8_underscore() {
 #[test]
 fn fprintf_format_error_propagates_to_session_boundary() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
-    let result = block_on(engine.execute("fprintf('%q', 1);"));
-    match result {
-        Ok(exec) => {
-            let msg = exec
-                .error
-                .map(|err| err.message().to_string())
-                .unwrap_or_default();
-            assert!(msg.contains("unsupported format %q"), "{msg}");
+    let request = runmat_core::abi::ExecutionRequest::for_source(
+        runmat_core::abi::SourceInput::Text {
+            name: "<test>".to_string(),
+            text: "fprintf('%q', 1);".to_string(),
+        },
+        engine.compat_mode(),
+        runmat_core::abi::HostExecutionPolicy::default(),
+        engine.workspace_handle(),
+    );
+
+    match futures::executor::block_on(engine.execute_request(request)) {
+        Ok(outcome) => {
+            assert!(
+                outcome.diagnostics.iter().any(|d| d.severity
+                    == runmat_core::abi::DiagnosticSeverity::Error
+                    && d.code == "RunMat:fprintf:InvalidFormat"),
+                "expected stable unsupported-format identifier in diagnostics: {:?}",
+                outcome.diagnostics
+            );
         }
-        Err(err) => {
-            let msg = err.to_string();
-            assert!(msg.contains("unsupported format %q"), "{msg}");
-        }
+        Err(RunError::Runtime(err)) => assert_eq!(
+            err.identifier(),
+            Some("RunMat:fprintf:InvalidFormat"),
+            "expected stable unsupported-format identifier in runtime error"
+        ),
+        Err(other) => panic!("expected runtime formatting error, got {other:?}"),
     }
 }

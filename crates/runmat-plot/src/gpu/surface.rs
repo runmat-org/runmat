@@ -89,9 +89,39 @@ pub fn pack_surface_vertices(
         mapped_at_creation: false,
     }));
 
+    let min_z = if params.min_z.is_finite() {
+        params.min_z
+    } else {
+        tracing::warn!(
+            target: "runmat_plot::surface_gpu",
+            min_z = params.min_z,
+            "non-finite min_z received; sanitizing to 0.0"
+        );
+        0.0
+    };
+    let mut max_z = if params.max_z.is_finite() {
+        params.max_z
+    } else {
+        tracing::warn!(
+            target: "runmat_plot::surface_gpu",
+            max_z = params.max_z,
+            "non-finite max_z received; sanitizing to min_z + 1.0"
+        );
+        min_z + 1.0
+    };
+    if max_z <= min_z {
+        tracing::warn!(
+            target: "runmat_plot::surface_gpu",
+            min_z,
+            max_z,
+            "invalid z range received; forcing epsilon span"
+        );
+        max_z = min_z + 1e-6;
+    }
+
     let uniforms = SurfaceUniforms {
-        min_z: params.min_z,
-        max_z: params.max_z.max(params.min_z + 1e-6),
+        min_z,
+        max_z,
         alpha: params.alpha,
         flatten: if params.flatten_z { 1 } else { 0 },
         x_len: inputs.x_len,

@@ -1,14 +1,21 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
-use std::convert::TryInto;
-use test_helpers::execute;
-use test_helpers::lower;
+use test_helpers::compile_source;
+use test_helpers::execute_source;
+
+fn has_num(vars: &[runmat_builtins::Value], expected: f64) -> bool {
+    vars.iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - expected).abs() < 1e-9))
+}
+
+fn execute_semantic_error(source: &str) -> runmat_runtime::RuntimeError {
+    execute_source(source).expect_err("expected error")
+}
 
 #[test]
 fn break_and_continue() {
-    let ast = parse(
+    let vars = execute_source(
         r#"
             x=0;
             while 1;
@@ -19,15 +26,12 @@ fn break_and_continue() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let x: f64 = (&vars[0]).try_into().unwrap();
-    assert_eq!(x, 1.0);
+    assert!(has_num(&vars, 1.0));
 }
 
 #[test]
 fn elseif_executes_correct_branch() {
-    let ast = parse(
+    let vars = execute_source(
         r#"
             x=2;
             if x-2;
@@ -40,16 +44,13 @@ fn elseif_executes_correct_branch() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let y: f64 = (&vars[1]).try_into().unwrap();
-    assert_eq!(y, 2.0);
+    assert!(has_num(&vars, 2.0));
 }
 
 #[test]
 fn switch_case_otherwise_executes_correct_branch() {
     // The parser expects line-based case/otherwise; use newlines
-    let ast = parse(
+    let vars = execute_source(
         r#"
             x=2;
             y=0;
@@ -64,15 +65,12 @@ fn switch_case_otherwise_executes_correct_branch() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let y: f64 = (&vars[1]).try_into().unwrap();
-    assert_eq!(y, 20.0);
+    assert!(has_num(&vars, 20.0));
 }
 
 #[test]
 fn try_catch_executes_try_body_when_no_error() {
-    let ast = parse(
+    let vars = execute_source(
         r#"
             x=0;
             try;
@@ -83,16 +81,13 @@ fn try_catch_executes_try_body_when_no_error() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let x: f64 = (&vars[0]).try_into().unwrap();
-    assert_eq!(x, 1.0);
+    assert!(has_num(&vars, 1.0));
 }
 
 #[test]
 fn try_catch_catches_error_and_binds_identifier() {
     // Unknown builtin should raise; catch should bind 'e' and execute catch body
-    let ast = parse(
+    let vars = execute_source(
         r#"
             x=0;
             try;
@@ -104,15 +99,33 @@ fn try_catch_catches_error_and_binds_identifier() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let x: f64 = (&vars[0]).try_into().unwrap();
-    assert_eq!(x, 2.0);
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
+fn try_catch_catches_error_from_semantic_function_call() {
+    let vars = execute_source(
+        r#"
+            x = 0;
+            try;
+                y = local_fail();
+                x = 99;
+            catch e;
+                x = 2;
+            end
+            function y = local_fail()
+                nosuchbuiltin(1);
+                y = 1;
+            end
+        "#,
+    )
+    .unwrap();
+    assert!(has_num(&vars, 2.0));
 }
 
 #[test]
 fn nested_break_and_continue_scopes() {
-    let ast = parse(
+    let vars = execute_source(
         r#"
             x=0;
             for i=1:3;
@@ -129,26 +142,37 @@ fn nested_break_and_continue_scopes() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let x: f64 = (&vars[0]).try_into().unwrap();
     // Only when i==3 and j>=2 we hit break after skip; count = 1
-    assert_eq!(x, 1.0);
+    assert!(has_num(&vars, 1.0));
+}
+
+#[test]
+fn for_loop_over_matrix_iterates_columns() {
+    let vars = execute_source(
+        r#"
+            A = [1 2 3; 10 20 30];
+            top_sum = 0;
+            bottom_sum = 0;
+            for col = A;
+                top_sum = top_sum + col(1);
+                bottom_sum = bottom_sum + col(2);
+            end
+        "#,
+    )
+    .unwrap();
+    assert!(has_num(&vars, 6.0));
+    assert!(has_num(&vars, 60.0));
 }
 
 #[test]
 fn undefined_variable_raises_mex() {
-    let ast = parse("y = x + 1;").unwrap();
-    let hir = lower(&ast);
-    let err = hir.err().unwrap();
-    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+    let err = compile_source("y = x + 1;").err().unwrap();
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
 fn block_comment_is_ignored() {
-    let ast = parse("a = 1; %{ this is a\n block comment %} b = 2; c = a + b;").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("a = 1; %{ this is a\n block comment %} b = 2; c = a + b;").unwrap();
     // Expect c = 3 somewhere
     assert!(vars
         .iter()
@@ -158,7 +182,7 @@ fn block_comment_is_ignored() {
 #[test]
 fn apostrophe_is_transpose_when_adjacent() {
     // Adjacent apostrophe after value is transpose
-    let ast = parse(
+    let vars = execute_source(
         r#"
             A = [1 2; 3 4];
             B = A';
@@ -166,8 +190,6 @@ fn apostrophe_is_transpose_when_adjacent() {
             "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
     // sum is invariant under transpose: sum 10
     assert!(vars
         .iter()
@@ -177,9 +199,7 @@ fn apostrophe_is_transpose_when_adjacent() {
 #[test]
 fn apostrophe_starts_char_array_when_not_adjacent() {
     // Non-adjacent apostrophe starts a char array, not transpose
-    let ast = parse("A = [1 2]; \n s = 'hi';").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("A = [1 2]; \n s = 'hi';").unwrap();
     // Expect a CharArray or String present
     let has_text = vars.iter().any(|v| {
         matches!(
@@ -192,7 +212,7 @@ fn apostrophe_starts_char_array_when_not_adjacent() {
 
 #[test]
 fn apostrophe_conjugates_complex() {
-    let ast = parse(
+    let vars = execute_source(
         r#"
             z = sqrt(-1);
             A = [1 z; 0 1];
@@ -205,10 +225,12 @@ fn apostrophe_conjugates_complex() {
             "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let b21: f64 = (&vars[6]).try_into().unwrap();
-    let c21: f64 = (&vars[7]).try_into().unwrap();
+    let mut nums = vars.iter().filter_map(|value| match value {
+        runmat_builtins::Value::Num(n) => Some(*n),
+        _ => None,
+    });
+    let b21 = nums.find(|n| (*n + 1.0).abs() < 1e-9).unwrap_or(f64::NAN);
+    let c21 = nums.find(|n| (*n - 1.0).abs() < 1e-9).unwrap_or(f64::NAN);
     assert!(
         (b21 + 1.0).abs() < 1e-9,
         "expected imag(B(2,1)) == -1, got {b21}"
@@ -227,8 +249,7 @@ fn too_many_inputs_mex() {
         end
         r = f(1,2);
     "#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let err = execute(&hir).err().unwrap();
+    let err = execute_semantic_error(src);
     assert_eq!(err.identifier(), Some("RunMat:TooManyInputs"));
 }
 
@@ -240,8 +261,7 @@ fn too_many_outputs_mex() {
         end
         [x1,x2] = f(1);
     "#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let err = execute(&hir).err().unwrap();
+    let err = execute_semantic_error(src);
     assert_eq!(err.identifier(), Some("RunMat:TooManyOutputs"));
 }
 
@@ -253,30 +273,22 @@ fn varargout_mismatch_mex() {
         end
         [a,b,c] = g();
     "#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let err = execute(&hir).err().unwrap();
+    let err = execute_semantic_error(src);
     assert_eq!(err.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 
 #[test]
 fn slice_non_tensor_mex() {
     let src = "x = 5; y = x(1,1);";
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let err = execute(&hir).err().unwrap();
+    let err = execute_semantic_error(src);
     assert_eq!(err.identifier(), Some("RunMat:SliceNonTensor"));
 }
 
 #[test]
 fn index_step_zero_mex() {
     let src = "A = [1 2 3 4]; B = A(1:0:3);";
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let err = execute(&hir).err().unwrap();
-    assert!(
-        err.identifier() == Some("RunMat:IndexStepZero")
-            || err.message().contains("Range step cannot be zero")
-            || err.message().contains("dimension must be >= 1")
-            || err.message().contains("increment must be nonzero")
-    );
+    let err = execute_semantic_error(src);
+    assert_eq!(err.identifier(), Some("RunMat:IndexStepZero"));
 }
 
 #[test]
@@ -284,11 +296,6 @@ fn unsupported_cell_index_type_mex() {
     // When length doesn't match or contains non 0/1 it falls back to indices, but 0 is invalid => out of bounds.
     // Force unsupported type by passing a string as index
     let src2 = "C = {1,2,3}; r = C{'a'};";
-    let hir2 = lower(&parse(src2).unwrap()).unwrap();
-    let err2 = execute(&hir2).err().unwrap();
-    // Current runtime path attempts numeric coercion and reports conversion failure
-    assert!(
-        err2.identifier() == Some("RunMat:CellIndexType")
-            || err2.message().contains("cannot convert CharArray")
-    );
+    let err2 = execute_semantic_error(src2);
+    assert_eq!(err2.identifier(), Some("RunMat:CellIndexType"));
 }

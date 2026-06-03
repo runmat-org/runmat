@@ -1,7 +1,11 @@
 //! MATLAB-compatible `find` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{HostTensorView, ProviderFindResult};
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::array::type_resolvers::column_vector_type;
@@ -45,6 +49,193 @@ fn find_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     column_vector_type()
 }
 
+const BUILTIN_NAME: &str = "find";
+
+const FIND_OUTPUT_LINEAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "idx",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Linear indices of non-zero elements.",
+}];
+
+const FIND_OUTPUT_ROW_COL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row subscripts of non-zero elements.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column subscripts of non-zero elements.",
+    },
+];
+
+const FIND_OUTPUT_ROW_COL_VAL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row subscripts of non-zero elements.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column subscripts of non-zero elements.",
+    },
+    BuiltinParamDescriptor {
+        name: "v",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Values at the reported row/column locations.",
+    },
+];
+
+const FIND_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array to search.",
+}];
+
+const FIND_INPUTS_LIMIT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array to search.",
+    },
+    BuiltinParamDescriptor {
+        name: "K",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum number of indices to return.",
+    },
+];
+
+const FIND_INPUTS_LIMIT_DIR: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array to search.",
+    },
+    BuiltinParamDescriptor {
+        name: "K",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Maximum number of indices to return.",
+    },
+    BuiltinParamDescriptor {
+        name: "direction",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"first\""),
+        description: "Direction selector: `\"first\"` or `\"last\"`.",
+    },
+];
+
+const FIND_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "idx = find(X)",
+        inputs: &FIND_INPUTS_BASE,
+        outputs: &FIND_OUTPUT_LINEAR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "idx = find(X, K)",
+        inputs: &FIND_INPUTS_LIMIT,
+        outputs: &FIND_OUTPUT_LINEAR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "idx = find(X, K, direction)",
+        inputs: &FIND_INPUTS_LIMIT_DIR,
+        outputs: &FIND_OUTPUT_LINEAR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[row, col] = find(X)",
+        inputs: &FIND_INPUTS_BASE,
+        outputs: &FIND_OUTPUT_ROW_COL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[row, col] = find(X, K, direction)",
+        inputs: &FIND_INPUTS_LIMIT_DIR,
+        outputs: &FIND_OUTPUT_ROW_COL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[row, col, v] = find(X)",
+        inputs: &FIND_INPUTS_BASE,
+        outputs: &FIND_OUTPUT_ROW_COL_VAL,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[row, col, v] = find(X, K, direction)",
+        inputs: &FIND_INPUTS_LIMIT_DIR,
+        outputs: &FIND_OUTPUT_ROW_COL_VAL,
+    },
+];
+
+const FIND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIND.INVALID_INPUT",
+    identifier: Some("RunMat:find:InvalidInput"),
+    when: "Input type or option arguments are not valid for find.",
+    message: "find: invalid input arguments",
+};
+
+const FIND_ERROR_PROVIDER_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIND.PROVIDER_OUTPUT",
+    identifier: Some("RunMat:find:ProviderOutput"),
+    when: "GPU provider does not return expected output buffers for requested nargout.",
+    message: "find: provider output buffer mismatch",
+};
+
+const FIND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FIND.INTERNAL",
+    identifier: Some("RunMat:find:InternalError"),
+    when: "Internal tensor conversion/materialization fails while building outputs.",
+    message: "find: internal error",
+};
+
+const FIND_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    FIND_ERROR_INVALID_INPUT,
+    FIND_ERROR_PROVIDER_OUTPUT,
+    FIND_ERROR_INTERNAL,
+];
+
+pub const FIND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FIND_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FIND_ERRORS,
+};
+
+fn find_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    find_error_with_message(error.message, error)
+}
+
+fn find_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn parse_find_tokens(tokens: &[ArgToken]) -> crate::BuiltinResult<FindOptions> {
     match tokens.len() {
         0 => Ok(FindOptions::default()),
@@ -66,14 +257,21 @@ fn parse_find_tokens(tokens: &[ArgToken]) -> crate::BuiltinResult<FindOptions> {
         }
         2 => {
             let limit = token_to_limit(&tokens[0])?;
-            let direction = token_to_direction(&tokens[1])?
-                .ok_or_else(|| find_error("find: third argument must be 'first' or 'last'"))?;
+            let direction = token_to_direction(&tokens[1])?.ok_or_else(|| {
+                find_error_with_message(
+                    "find: third argument must be 'first' or 'last'",
+                    &FIND_ERROR_INVALID_INPUT,
+                )
+            })?;
             Ok(FindOptions {
                 limit: Some(limit),
                 direction,
             })
         }
-        _ => Err(find_error("find: too many input arguments")),
+        _ => Err(find_error_with_message(
+            "find: too many input arguments",
+            &FIND_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
@@ -82,7 +280,10 @@ fn token_to_direction(token: &ArgToken) -> crate::BuiltinResult<Option<FindDirec
         ArgToken::String(text) => match text.as_str() {
             "first" => Ok(Some(FindDirection::First)),
             "last" => Ok(Some(FindDirection::Last)),
-            _ => Err(find_error("find: direction must be 'first' or 'last'")),
+            _ => Err(find_error_with_message(
+                "find: direction must be 'first' or 'last'",
+                &FIND_ERROR_INVALID_INPUT,
+            )),
         },
         _ => Ok(None),
     }
@@ -91,17 +292,21 @@ fn token_to_direction(token: &ArgToken) -> crate::BuiltinResult<Option<FindDirec
 fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
     match token {
         ArgToken::Number(value) => parse_limit_scalar(*value),
-        _ => Err(find_error("find: second argument must be a scalar")),
+        _ => Err(find_error_with_message(
+            "find: second argument must be a scalar",
+            &FIND_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
 #[runtime_builtin(
     name = "find",
     category = "array/indexing",
-    summary = "Locate indices and values of nonzero elements.",
+    summary = "Locate nonzero indices and values.",
     keywords = "find,nonzero,indices,row,column,gpu",
     accel = "custom",
     type_resolver(find_type),
+    descriptor(crate::builtins::array::indexing::find::FIND_DESCRIPTOR),
     builtin_path = "crate::builtins::array::indexing::find"
 )]
 async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -293,7 +498,7 @@ impl FindEval {
                 .values
                 .as_ref()
                 .map(|handle| Value::GpuTensor(handle.clone()))
-                .ok_or_else(|| find_error("find: provider did not return values buffer")),
+                .ok_or_else(|| find_error(&FIND_ERROR_PROVIDER_OUTPUT)),
         }
     }
 }
@@ -306,14 +511,23 @@ async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
 
 fn parse_limit_scalar(value: f64) -> crate::BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(find_error("find: K must be a finite, non-negative integer"));
+        return Err(find_error_with_message(
+            "find: K must be a finite, non-negative integer",
+            &FIND_ERROR_INVALID_INPUT,
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(find_error("find: K must be a finite, non-negative integer"));
+        return Err(find_error_with_message(
+            "find: K must be a finite, non-negative integer",
+            &FIND_ERROR_INVALID_INPUT,
+        ));
     }
     if rounded < 0.0 {
-        return Err(find_error("find: K must be >= 0"));
+        return Err(find_error_with_message(
+            "find: K must be >= 0",
+            &FIND_ERROR_INVALID_INPUT,
+        ));
     }
     Ok(rounded as usize)
 }
@@ -326,28 +540,28 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
         }
         Value::Tensor(tensor) => Ok((DataStorage::Real(tensor), false)),
         Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|message| find_error(message))?;
+            let tensor = tensor::logical_to_tensor(&logical)
+                .map_err(|message| find_error_with_message(message, &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Num(n) => {
-            let tensor =
-                Tensor::new(vec![n], vec![1, 1]).map_err(|e| find_error(format!("find: {e}")))?;
+            let tensor = Tensor::new(vec![n], vec![1, 1])
+                .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Int(i) => {
             let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| find_error(format!("find: {e}")))?;
+                .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| find_error(format!("find: {e}")))?;
+                .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Real(tensor), false))
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| find_error(format!("find: {e}")))?;
+                .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Complex(tensor), false))
         }
         Value::ComplexTensor(tensor) => Ok((DataStorage::Complex(tensor), false)),
@@ -360,13 +574,16 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
                 }
             }
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| find_error(format!("find: {e}")))?;
+                .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))?;
             Ok((DataStorage::Real(tensor), false))
         }
-        other => Err(find_error(format!(
-            "find: unsupported input type {:?}; expected numeric, logical, or char data",
-            other
-        ))),
+        other => Err(find_error_with_message(
+            format!(
+                "find: unsupported input type {:?}; expected numeric, logical, or char data",
+                other
+            ),
+            &FIND_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
@@ -466,7 +683,8 @@ impl FindResult {
     fn linear_tensor(&self) -> crate::BuiltinResult<Tensor> {
         let data: Vec<f64> = self.indices.iter().map(|&idx| idx as f64).collect();
         let rows = data.len();
-        Tensor::new(data, vec![rows, 1]).map_err(|e| find_error(format!("find: {e}")))
+        Tensor::new(data, vec![rows, 1])
+            .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))
     }
 
     fn row_tensor(&self) -> crate::BuiltinResult<Tensor> {
@@ -477,7 +695,8 @@ impl FindResult {
             let row = (zero_based % rows) + 1;
             data.push(row as f64);
         }
-        Tensor::new(data, vec![self.indices.len(), 1]).map_err(|e| find_error(format!("find: {e}")))
+        Tensor::new(data, vec![self.indices.len(), 1])
+            .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))
     }
 
     fn column_tensor(&self) -> crate::BuiltinResult<Tensor> {
@@ -488,19 +707,23 @@ impl FindResult {
             let col = (zero_based / rows) + 1;
             data.push(col as f64);
         }
-        Tensor::new(data, vec![self.indices.len(), 1]).map_err(|e| find_error(format!("find: {e}")))
+        Tensor::new(data, vec![self.indices.len(), 1])
+            .map_err(|e| find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL))
     }
 
     fn values_value(&self, prefer_gpu: bool) -> crate::BuiltinResult<Value> {
         match &self.values {
             FindValues::Real(values) => {
-                let tensor = Tensor::new(values.clone(), vec![values.len(), 1])
-                    .map_err(|e| find_error(format!("find: {e}")))?;
+                let tensor = Tensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
+                    find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                })?;
                 Ok(tensor_to_value(tensor, prefer_gpu))
             }
             FindValues::Complex(values) => {
-                let tensor = ComplexTensor::new(values.clone(), vec![values.len(), 1])
-                    .map_err(|e| find_error(format!("find: {e}")))?;
+                let tensor =
+                    ComplexTensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
+                        find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
+                    })?;
                 Ok(complex_tensor_into_value(tensor))
             }
         }
@@ -520,10 +743,6 @@ fn tensor_to_value(tensor: Tensor, prefer_gpu: bool) -> Value {
         }
     }
     tensor::tensor_into_value(tensor)
-}
-
-fn find_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("find").build()
 }
 
 #[cfg(test)]
@@ -643,6 +862,7 @@ pub(crate) mod tests {
         )
         .expect_err("expected error");
         assert!(err.to_string().contains("direction"));
+        assert_eq!(err.identifier(), super::FIND_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

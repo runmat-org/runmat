@@ -1,44 +1,54 @@
 use crate::indexing::plan::IndexPlan;
-use crate::indexing::selectors::SliceSelector;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
-pub fn build_subsasgn_paren_cell(numeric: &[Value]) -> Result<Value, RuntimeError> {
-    let cell = CellArray::new(numeric.to_vec(), 1, numeric.len())
-        .map_err(|e| format!("subsasgn build error: {e}"))?;
-    Ok(Value::Cell(cell))
+fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
-pub async fn object_subsasgn_paren(
-    base: Value,
-    numeric: &[Value],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    let cell = build_subsasgn_paren_cell(numeric)?;
-    match base {
-        Value::Object(obj) => {
-            let args = vec![
-                Value::Object(obj),
-                Value::String("subsasgn".to_string()),
-                Value::String("()".to_string()),
-                cell,
-                rhs,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
-        }
-        Value::HandleObject(handle) => {
-            let args = vec![
-                Value::HandleObject(handle),
-                Value::String("subsasgn".to_string()),
-                Value::String("()".to_string()),
-                cell,
-                rhs,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
-        }
-        other => Err(format!("slice subsasgn requires object/handle, got {other:?}").into()),
+fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    mex("AccelerationOperationFailed", &format!("{context}: {err}"))
+}
+
+fn is_empty_delete_rhs(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Tensor(t)
+            if t.data.is_empty() || t.rows == 0 || t.cols == 0
+    ) || matches!(
+        value,
+        Value::ComplexTensor(t)
+            if t.data.is_empty() || t.rows == 0 || t.cols == 0
+    )
+}
+
+fn deleted_vector_shape(rows: usize, _cols: usize, len: usize) -> Vec<usize> {
+    if len == 0 {
+        vec![0, 0]
+    } else if rows == 1 {
+        vec![1, len]
+    } else {
+        vec![len, 1]
     }
+}
+
+fn sorted_unique_positions_desc(
+    plan: &IndexPlan,
+    total: usize,
+) -> Result<Vec<usize>, RuntimeError> {
+    let mut positions = Vec::with_capacity(plan.indices.len());
+    for &idx in &plan.indices {
+        let pos = idx as usize;
+        if pos >= total {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        positions.push(pos);
+    }
+    positions.sort_unstable();
+    positions.dedup();
+    positions.reverse();
+    Ok(positions)
 }
 
 pub enum ComplexRhsView {
@@ -65,7 +75,7 @@ pub fn build_complex_rhs_view(
             }
             if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(dims);
             }
@@ -73,7 +83,7 @@ pub fn build_complex_rhs_view(
                 let out_len = selection_lengths[d];
                 let rhs_len = shape[d];
                 if !(rhs_len == 1 || rhs_len == out_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut rstrides = vec![0usize; dims];
@@ -88,7 +98,10 @@ pub fn build_complex_rhs_view(
                 strides: rstrides,
             })
         }
-        _ => Err("rhs must be numeric or tensor".to_string().into()),
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be numeric or tensor",
+        )),
     }
 }
 
@@ -111,8 +124,17 @@ pub fn scatter_complex_with_plan(
         let mut rlin = 0usize;
         match rhs_view {
             ComplexRhsView::Scalar(val) => {
-                let pos = plan.indices[rlin] as usize;
-                t.data[pos] = *val;
+                let lin_pos = {
+                    let mut p = 0usize;
+                    let mut mul = 1usize;
+                    for d in 0..dims {
+                        p += idx[d] * mul;
+                        mul *= selection_lengths[d].max(1);
+                    }
+                    p
+                };
+                let dst = plan.indices[lin_pos] as usize;
+                t.data[dst] = *val;
             }
             ComplexRhsView::Tensor {
                 data,
@@ -182,7 +204,7 @@ pub fn build_string_rhs_view(
         }
         if shape.len() > dims {
             if shape.iter().skip(dims).any(|&s| s != 1) {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             shape.truncate(dims);
         }
@@ -190,7 +212,7 @@ pub fn build_string_rhs_view(
             let out_len = selection_lengths[d];
             let rhs_len = shape[d];
             if !(rhs_len == 1 || rhs_len == out_len) {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
         }
         let mut rstrides = vec![0usize; dims];
@@ -205,7 +227,10 @@ pub fn build_string_rhs_view(
             strides: rstrides,
         });
     }
-    Err("rhs must be string or string array".to_string().into())
+    Err(mex(
+        "InvalidSliceAssignmentRhs",
+        "rhs must be string or string array",
+    ))
 }
 
 pub fn scatter_string_with_plan(
@@ -312,9 +337,82 @@ pub async fn assign_tensor_with_plan(
     if plan.indices.is_empty() {
         return Ok(Value::Tensor(t));
     }
+    if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        let mut ct = ComplexTensor {
+            data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+            shape: t.shape,
+            rows: t.rows,
+            cols: t.cols,
+        };
+        let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+        scatter_complex_with_plan(&mut ct, plan, &rhs_view)?;
+        return Ok(Value::ComplexTensor(ct));
+    }
     let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     Ok(Value::Tensor(t))
+}
+
+pub fn delete_tensor_with_plan(
+    mut t: Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::Tensor(t));
+    }
+    if !(t.rows == 1 || t.cols == 1) {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Linear deletion is only supported for vectors",
+        ));
+    }
+    let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    for pos in positions {
+        t.data.remove(pos);
+    }
+    let shape = deleted_vector_shape(t.rows, t.cols, t.data.len());
+    t.rows = shape.first().copied().unwrap_or(0);
+    t.cols = shape.get(1).copied().unwrap_or(0);
+    t.shape = shape;
+    Ok(Value::Tensor(t))
+}
+
+pub fn delete_complex_with_plan(
+    mut t: ComplexTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::ComplexTensor(t));
+    }
+    if !(t.rows == 1 || t.cols == 1) {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Linear deletion is only supported for vectors",
+        ));
+    }
+    let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    for pos in positions {
+        t.data.remove(pos);
+    }
+    let shape = deleted_vector_shape(t.rows, t.cols, t.data.len());
+    t.rows = shape.first().copied().unwrap_or(0);
+    t.cols = shape.get(1).copied().unwrap_or(0);
+    t.shape = shape;
+    Ok(Value::ComplexTensor(t))
 }
 
 pub async fn assign_gpu_slice_with_plan(
@@ -384,10 +482,43 @@ pub async fn assign_gpu_slice_with_plan(
     let host = provider
         .download(handle)
         .await
-        .map_err(|e| format!("gather for slice assign: {e}"))?;
-    let mut t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice assign: {e}"))?;
+        .map_err(|e| map_acceleration_error("gather for slice assign", e))?;
+    let mut t =
+        Tensor::new(host.data, host.shape).map_err(|e| map_slice_shape_error("slice assign", e))?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     upload_tensor_to_gpu(&t)
+}
+
+pub async fn delete_gpu_slice_with_plan(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::GpuTensor(handle.clone()));
+    }
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered",
+        )
+    })?;
+    let host = provider
+        .download(handle)
+        .await
+        .map_err(|e| map_acceleration_error("gather for slice deletion", e))?;
+    let t = Tensor::new(host.data, host.shape)
+        .map_err(|e| map_slice_shape_error("slice deletion", e))?;
+    let Value::Tensor(updated) = delete_tensor_with_plan(t, plan, rhs)? else {
+        unreachable!()
+    };
+    upload_tensor_to_gpu(&updated)
 }
 
 pub async fn materialize_rhs_linear_real(
@@ -422,6 +553,7 @@ pub async fn materialize_rhs_linear_real(
                 Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
+        Value::OutputList(values) => materialize_output_list_real(&values, count),
         other => Err(mex(
             "InvalidSliceAssignmentRhs",
             &format!("slice assign: unsupported RHS type {:?}", other),
@@ -524,6 +656,27 @@ pub async fn materialize_rhs_nd_real(
                 strides,
             }
         }
+        Value::OutputList(values) => {
+            let count = selection_lengths
+                .iter()
+                .copied()
+                .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)));
+            let data = materialize_output_list_real(&values, count)?;
+            let shape = if selection_lengths.is_empty() {
+                vec![1]
+            } else {
+                selection_lengths.to_vec()
+            };
+            let mut strides = vec![1usize; shape.len()];
+            for d in 1..shape.len() {
+                strides[d] = strides[d - 1] * shape[d - 1].max(1);
+            }
+            RhsView::Tensor {
+                data,
+                shape,
+                strides,
+            }
+        }
         other => {
             return Err(mex(
                 "InvalidSliceAssignmentRhs",
@@ -574,6 +727,27 @@ pub async fn materialize_rhs_nd_real(
     Ok(out)
 }
 
+fn materialize_output_list_real(values: &[Value], count: usize) -> Result<Vec<f64>, RuntimeError> {
+    if values.len() == count {
+        values.iter().map(value_to_real_scalar).collect()
+    } else if values.len() == 1 {
+        let value = value_to_real_scalar(&values[0])?;
+        Ok(vec![value; count])
+    } else {
+        Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
+    }
+}
+
+fn value_to_real_scalar(value: &Value) -> Result<f64, RuntimeError> {
+    match value {
+        Value::Num(n) => Ok(*n),
+        Value::Int(int_val) => Ok(int_val.to_f64()),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        _ => f64::try_from(value).map_err(Into::into),
+    }
+}
+
 pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
         mex(
@@ -587,100 +761,67 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
     };
     let new_h = provider
         .upload(&view)
-        .map_err(|e| format!("reupload after slice assign: {e}"))?;
+        .map_err(|e| map_acceleration_error("reupload after slice assign", e))?;
     Ok(Value::GpuTensor(new_h))
 }
 
-pub struct ExprSelectorSpec<'a> {
-    pub dims: usize,
-    pub colon_mask: u32,
-    pub end_mask: u32,
-    pub range_dims: &'a [usize],
-    pub range_params: &'a [(f64, f64)],
-    pub range_start_exprs: &'a [Option<crate::bytecode::EndExpr>],
-    pub range_step_exprs: &'a [Option<crate::bytecode::EndExpr>],
-    pub range_end_exprs: &'a [crate::bytecode::EndExpr],
-    pub numeric: &'a [Value],
-    pub shape: &'a [usize],
-}
+#[cfg(test)]
+mod tests {
+    use super::{build_complex_rhs_view, build_string_rhs_view, map_acceleration_error};
+    use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 
-pub async fn build_expr_selectors<ResolveEnd, Fut>(
-    spec: ExprSelectorSpec<'_>,
-    mut resolve_end: ResolveEnd,
-) -> Result<Vec<SliceSelector>, RuntimeError>
-where
-    ResolveEnd: FnMut(usize, &crate::bytecode::EndExpr) -> Fut,
-    Fut: std::future::Future<Output = Result<i64, RuntimeError>>,
-{
-    let mut selectors: Vec<SliceSelector> = Vec::with_capacity(spec.dims);
-    let mut num_iter = 0usize;
-    let mut rp_iter = 0usize;
-    for d in 0..spec.dims {
-        if let Some(pos) = spec.range_dims.iter().position(|&rd| rd == d) {
-            let (raw_st, raw_sp) = spec.range_params[rp_iter];
-            let dim_len = *spec.shape.get(d).unwrap_or(&1);
-            let st = if let Some(expr) = &spec.range_start_exprs[rp_iter] {
-                resolve_end(dim_len, expr).await? as f64
-            } else {
-                raw_st
-            };
-            let sp = if let Some(expr) = &spec.range_step_exprs[rp_iter] {
-                resolve_end(dim_len, expr).await? as f64
-            } else {
-                raw_sp
-            };
-            rp_iter += 1;
-            let step_i = if sp >= 0.0 {
-                sp as i64
-            } else {
-                -(sp.abs() as i64)
-            };
-            let end_i = resolve_end(dim_len, &spec.range_end_exprs[pos]).await?;
-            if step_i == 0 {
-                return Err(mex("IndexStepZero", "Index step cannot be zero"));
-            }
-            let mut vals = Vec::new();
-            let mut cur = st as i64;
-            if step_i > 0 {
-                while cur <= end_i {
-                    if cur < 1 || cur > dim_len as i64 {
-                        break;
-                    }
-                    vals.push(cur as usize);
-                    cur += step_i;
-                }
-            } else {
-                while cur >= end_i {
-                    if cur < 1 || cur > dim_len as i64 {
-                        break;
-                    }
-                    vals.push(cur as usize);
-                    cur += step_i;
-                }
-            }
-            selectors.push(SliceSelector::Indices(vals));
-            continue;
-        }
-        let is_colon = (spec.colon_mask & (1u32 << d)) != 0;
-        let is_end = (spec.end_mask & (1u32 << d)) != 0;
-        if is_colon {
-            selectors.push(SliceSelector::Colon);
-        } else if is_end {
-            selectors.push(SliceSelector::Scalar(*spec.shape.get(d).unwrap_or(&1)));
-        } else {
-            let v = spec
-                .numeric
-                .get(num_iter)
-                .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
-            num_iter += 1;
-            let dim_len = *spec.shape.get(d).unwrap_or(&1);
-            selectors.push(
-                match crate::indexing::selectors::selector_from_value_dim(v, dim_len).await? {
-                    SliceSelector::LinearIndices { values, .. } => SliceSelector::Indices(values),
-                    other => other,
-                },
-            );
-        }
+    #[test]
+    fn complex_rhs_view_shape_mismatch_reports_identifier() {
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)], vec![1, 3])
+                .expect("complex tensor"),
+        );
+        let err = match build_complex_rhs_view(&rhs, &[2, 2]) {
+            Ok(_) => panic!("shape mismatch should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
-    Ok(selectors)
+
+    #[test]
+    fn complex_rhs_view_invalid_rhs_type_reports_identifier() {
+        let rhs = Value::String("x".to_string());
+        let err = match build_complex_rhs_view(&rhs, &[1]) {
+            Ok(_) => panic!("non-numeric rhs should be rejected"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+    }
+
+    #[test]
+    fn string_rhs_view_shape_mismatch_reports_identifier() {
+        let rhs = Value::StringArray(
+            StringArray::new(
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                vec![1, 3],
+            )
+            .expect("string array"),
+        );
+        let err = match build_string_rhs_view(&rhs, &[2, 2]) {
+            Ok(_) => panic!("shape mismatch should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn string_rhs_view_invalid_rhs_type_reports_identifier() {
+        let rhs = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("tensor"));
+        let err = match build_string_rhs_view(&rhs, &[1]) {
+            Ok(_) => panic!("non-string rhs should be rejected"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+    }
+
+    #[test]
+    fn slice_acceleration_error_mapping_reports_identifier() {
+        let err = map_acceleration_error("slice assign", "provider failed");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
+    }
 }

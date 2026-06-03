@@ -1,0 +1,127 @@
+{
+  "title": "load",
+  "category": "io/mat",
+  "keywords": [
+    "load",
+    "mat",
+    "workspace",
+    "io",
+    "matlab load",
+    "regex load"
+  ],
+  "summary": "Load variables from MAT-files in MATLAB and RunMat.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Files are read on the host. When auto-offload is enabled, planners may later promote tensors to the GPU; no provider hooks are required at load time."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::mat::load::tests",
+    "integration": [
+      "builtins::io::mat::load::tests::load_selected_variables",
+      "builtins::io::mat::load::tests::load_regex_selection"
+    ]
+  },
+  "description": "`load` reads variables from MAT-files (Level-5 layout). It can populate workspace variables directly or return a struct of loaded values, consistent with MATLAB semantics.",
+  "behaviors": [
+    "`load filename` reads every variable stored in `filename.mat` and assigns them into the caller's workspace. When no extension is supplied, `.mat` is appended automatically. Set `RUNMAT_LOAD_DEFAULT_PATH` to override the default `matlab.mat` target when no filename argument is provided.",
+    "`S = load(filename)` loads the file but returns a struct instead of modifying the workspace. The struct fields mirror the variables stored in the MAT-file.",
+    "`load(filename, 'A', 'B')` restricts the operation to the listed variable names. String scalars, char vectors, string arrays, or cell arrays of character vectors are accepted.",
+    "`load(filename, '-regexp', '^foo', 'bar$')` selects variables whose names match any of the supplied regular expressions.",
+    "Repeated names are deduplicated so that the last occurrence wins, mirroring MATLAB's behavior.",
+    "Unsupported data classes trigger descriptive errors. RunMat currently supports double and complex numeric arrays, logical arrays, character arrays, string arrays (stored as cell-of-char data), structs, and cells whose elements are composed of the supported types.",
+    "Files saved on platforms that produce little-endian Level-5 MAT-files (MATLAB's default) are supported. Big-endian and compressed (`miCOMPRESSED`) files currently report an error."
+  ],
+  "examples": [
+    {
+      "description": "Load the entire file into the workspace",
+      "input": "weights = [0.5, 1.0, 1.5];\nsave('results.mat', 'weights');\nload('results.mat');\ndisp(norm(weights))"
+    },
+    {
+      "description": "Load a subset of variables by name",
+      "input": "time = 0:0.25:1;\nstate = [0, 0.5, 0.8, 0.6, 0.3];\nsave('sim_state.mat', 'time', 'state');\nload('sim_state.mat', 'state', 'time');\nplot(time, state)"
+    },
+    {
+      "description": "Load variables using regular expressions",
+      "input": "layer_1 = ones(4, 4);\nlayer_2 = ones(8, 8);\nsave('checkpoint.mat', 'layer_1', 'layer_2');\nload('checkpoint.mat', '-regexp', '^layer_\\d+$')"
+    },
+    {
+      "description": "Capture loaded variables in a struct without altering the workspace",
+      "input": "x = 3.14;\ny = 2.72;\nsave('snapshot.mat', 'x', 'y');\nS = load('snapshot.mat');\ndisp(fieldnames(S))"
+    },
+    {
+      "description": "Combine explicit names and regex filters",
+      "input": "config = struct('lr', 0.01);\nweights_conv = randn(3, 3);\nweights_fc = randn(4, 2);\nsave('model.mat', 'config', 'weights_conv', 'weights_fc');\nmodel = load('model.mat', 'config', '-regexp', '^weights_(conv|fc)')"
+    },
+    {
+      "description": "Honour a custom default filename",
+      "input": "x = 0;\nsave(fullfile(tempdir, 'autosave.mat'), 'x');\nsetenv('RUNMAT_LOAD_DEFAULT_PATH', fullfile(tempdir, 'autosave.mat'));\nload()"
+    },
+    {
+      "description": "Load character and string data",
+      "input": "labels = 'hello';\nsave('strings.mat', 'labels');\nvalues = load('strings.mat', 'labels');\ndisp(values.labels)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `load` support ASCII text files?",
+      "answer": "No. RunMat (like MATLAB) restricts the `load` builtin in modern releases to MAT-files. Text and delimited files should be read using `readmatrix`, `readtable`, or other file I/O utilities such as `fileread`."
+    },
+    {
+      "question": "How are structures handled?",
+      "answer": "Structure scalars are reconstructed as `struct` values whose fields match the MAT-file content. Nested structs, cells, logical arrays, and numeric data are all supported."
+    },
+    {
+      "question": "Will `load` overwrite existing variables?",
+      "answer": "Yes. When you call `load` without capturing the output struct, any variables with matching names in the caller's workspace are overwritten with the values from the MAT-file."
+    },
+    {
+      "question": "What happens if a requested variable is missing?",
+      "answer": "RunMat raises a descriptive error: `load: variable 'foo' was not found in the file`. This mirrors MATLAB's behavior."
+    },
+    {
+      "question": "Can I load into a different workspace?",
+      "answer": "Use MATLAB-compatible functions such as `assignin` (when available) if you need to populate a different scope explicitly. The `load` builtin itself targets the caller workspace by default."
+    },
+    {
+      "question": "How are GPU arrays handled?",
+      "answer": "GPU-resident values are serialised to host data when saved. Loading the resulting MAT-file produces standard host arrays. Downstream acceleration is handled automatically by RunMat Accelerate."
+    },
+    {
+      "question": "How do I detect which variables were loaded?",
+      "answer": "Use the struct form: `info = load(filename);` and then inspect `fieldnames(info)` or `isfield` to programmatically check what was present in the MAT-file."
+    }
+  ],
+  "links": [
+    {
+      "label": "save",
+      "url": "./save"
+    },
+    {
+      "label": "who",
+      "url": "./who"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/mat/load.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/mat/load.rs"
+  },
+  "gpu_residency": "No manual action is required. `load` always creates host values. When the auto-offload planner decides that downstream computations benefit from GPU execution, it will promote tensors automatically. You can still call `gpuArray` on loaded variables explicitly if you want to pin them to the device immediately.",
+  "gpu_behavior": [
+    "`load` always reads data on the host. The resulting values start on the CPU. When RunMat Accelerate is active, auto-offload heuristics may later decide to promote tensors to the GPU if they participate in accelerated expressions, but no provider hooks are required during the `load` operation itself. GPU-resident variables that were saved earlier are gathered back to host memory as part of file serialisation, so loading them produces standard host values."
+  ]
+}

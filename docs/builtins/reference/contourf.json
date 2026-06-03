@@ -1,0 +1,117 @@
+{
+  "title": "contourf",
+  "category": "plotting",
+  "keywords": [
+    "contourf",
+    "filled contour plot",
+    "level regions",
+    "scalar field heatmap",
+    "matlab contourf"
+  ],
+  "summary": "Create filled contour plots in MATLAB and RunMat.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contourf-interference-pattern.webp",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`contourf` uses the shared filled-contour pipeline and returns a contour-fill handle."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::contourf::tests"
+  },
+  "description": "`contourf` creates filled contour plots by coloring regions between contour levels. It returns a contour-fill handle and shares contour-level generation semantics with `contour` in MATLAB and RunMat.",
+  "behaviors": [
+    "`contourf(Z)` uses implicit axes, while `contourf(X, Y, Z)` accepts explicit coordinates.",
+    "The returned value is a contour-fill handle in the plotting object system.",
+    "Level-list, level-count, and related contour workflows mirror the broader contour family semantics.",
+    "`contourf` works naturally with `colorbar` and `colormap` because filled regions are fundamentally color-mapped scalar ranges.",
+    "Filled contours and optional line overlays are handled through the shared contour stack."
+  ],
+  "examples": [
+    {
+      "description": "Create a filled contour plot",
+      "input": "[X, Y] = meshgrid(-2:0.25:2, -2:0.25:2);\nZ = X .* exp(-X.^2 - Y.^2);\ncontourf(X, Y, Z);\ncolorbar;"
+    },
+    {
+      "description": "Use explicit levels with a colormap",
+      "input": "[X, Y] = meshgrid(-3:0.2:3, -3:0.2:3);\nZ = cos(X) .* sin(Y);\ncontourf(X, Y, Z, [-0.75 -0.25 0 0.25 0.75]);\ncolormap('turbo');"
+    },
+    {
+      "description": "Inspect the returned contour-fill handle",
+      "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X - Y;\nh = contourf(X, Y, Z);\nget(h, 'Type')",
+      "output": "ans =\n    'contour'"
+    },
+    {
+      "description": "Filled scalar field with explicit levels",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 150), linspace(-3, 3, 150));\nZ = sin(X) .* cos(Y) + 0.5*sin(2*X + Y);\n\ncontourf(X, Y, Z, 25);\ncolormap('turbo');\ncolorbar;\ntitle('Interference Pattern — Filled Contours');\nxlabel('x');\nylabel('y');\naxis equal;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contourf-interference-pattern.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What's the difference between contourf and contour?",
+      "answer": "`contourf` fills the regions between contour levels with solid colors from the colormap. `contour` draws only the boundary lines. If you're building a heatmap-style visualization where color bands carry meaning, `contourf` is the right choice. If you just need iso-lines overlaid on something else, use `contour`."
+    },
+    {
+      "question": "How does the colormap interact with contourf?",
+      "answer": "Each filled region maps to a range in the active colormap based on its contour level. Calling `colormap('hot')` after `contourf` recolors all regions immediately. Pair it with `colorbar` to show the value-to-color mapping.\n\n```matlab\ncontourf(X, Y, Z, 15);\ncolormap('hot');\ncolorbar;\n```"
+    },
+    {
+      "question": "How do I control the number of filled levels?",
+      "answer": "Pass an integer as the fourth argument to set the level count: `contourf(X, Y, Z, 20)` creates 20 levels. For exact control, pass a vector of level values instead: `contourf(X, Y, Z, [-1 -0.5 0 0.5 1])`. More levels give smoother color transitions but add rendering cost on large grids."
+    }
+  ],
+  "links": [
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "surfc",
+      "url": "./surfc"
+    },
+    {
+      "label": "meshc",
+      "url": "./meshc"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/contourf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/contourf.rs"
+  }
+}

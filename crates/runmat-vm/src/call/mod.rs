@@ -1,5 +1,5 @@
-pub mod builtins;
-pub mod closures;
-pub mod feval;
-pub mod shared;
-pub mod user;
+pub(crate) mod builtins;
+pub(crate) mod closures;
+pub(crate) mod descriptor;
+pub(crate) mod feval;
+pub(crate) mod shared;

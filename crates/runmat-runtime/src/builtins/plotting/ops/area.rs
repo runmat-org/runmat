@@ -1,4 +1,8 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AreaPlot;
 use std::cell::RefCell;
@@ -11,9 +15,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
-use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_line_style_args, value_as_f64, LineStyleParseOptions};
+use crate::build_runtime_error;
 
 const BUILTIN_NAME: &str = "area";
 type AreaSeries = Vec<(Vec<f64>, Option<Vec<f64>>)>;
@@ -26,6 +30,305 @@ const MATLAB_COLOR_ORDER: [glam::Vec4; 7] = [
     glam::Vec4::new(0.301, 0.745, 0.933, 0.4),
     glam::Vec4::new(0.635, 0.078, 0.184, 0.4),
 ];
+
+const AREA_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the first area series in the rendered chart.",
+}];
+
+const AREA_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Y data vector or matrix. Columns are rendered as stacked series.",
+}];
+
+const AREA_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates matching the row count of Y.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+];
+
+const AREA_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line/color shorthand such as '--r'.",
+    },
+];
+
+const AREA_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates matching the row count of Y.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line/color shorthand such as '--r'.",
+    },
+];
+
+const AREA_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
+    },
+];
+
+const AREA_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates matching the row count of Y.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
+    },
+];
+
+const AREA_INPUTS_AX_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+];
+
+const AREA_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates matching the row count of Y.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+];
+
+const AREA_INPUTS_AX_Y_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
+    },
+];
+
+const AREA_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates matching the row count of Y.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector or matrix. Columns are rendered as stacked series.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
+    },
+];
+
+const AREA_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
+    BuiltinSignatureDescriptor {
+        label: "h = area(Y)",
+        inputs: &AREA_INPUTS_Y,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(Y, LineSpec)",
+        inputs: &AREA_INPUTS_Y_STYLE,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(Y, Name, Value, ...)",
+        inputs: &AREA_INPUTS_Y_PROPS,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(X, Y)",
+        inputs: &AREA_INPUTS_X_Y,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(X, Y, LineSpec)",
+        inputs: &AREA_INPUTS_X_Y_STYLE,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(X, Y, Name, Value, ...)",
+        inputs: &AREA_INPUTS_X_Y_PROPS,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(ax, Y)",
+        inputs: &AREA_INPUTS_AX_Y,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(ax, Y, Name, Value, ...)",
+        inputs: &AREA_INPUTS_AX_Y_PROPS,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(ax, X, Y)",
+        inputs: &AREA_INPUTS_AX_X_Y,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = area(ax, X, Y, Name, Value, ...)",
+        inputs: &AREA_INPUTS_AX_X_Y_PROPS,
+        outputs: &AREA_OUTPUT_HANDLE,
+    },
+];
+
+const AREA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.AREA.INVALID_ARGUMENT",
+    identifier: Some("RunMat:area:InvalidArgument"),
+    when: "Input data, style tokens, or name/value options are invalid.",
+    message: "area: invalid argument",
+};
+
+const AREA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.AREA.INTERNAL",
+    identifier: Some("RunMat:area:Internal"),
+    when: "Renderer/GPU conversion fails during chart construction.",
+    message: "area: internal operation failed",
+};
+
+const AREA_ERRORS: [BuiltinErrorDescriptor; 2] = [AREA_ERROR_INVALID_ARGUMENT, AREA_ERROR_INTERNAL];
+
+pub const AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &AREA_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &AREA_ERRORS,
+};
+
+fn area_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    let message = format!("{}: {}", error.message, detail.as_ref());
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::area")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -58,11 +361,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "area",
     category = "plotting",
-    summary = "Render MATLAB-compatible area plots.",
+    summary = "Create filled area plots.",
     keywords = "area,plotting,stacked,fill",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::area::AREA_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::area"
 )]
 pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -105,11 +409,11 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 .take()
                 .expect("y consumed")
                 .into_tensor(BUILTIN_NAME)?;
-            let x = vector_from_tensor(&x_tensor, BUILTIN_NAME)?;
-            let series = area_series_from_tensor(x.clone(), &y_tensor, BUILTIN_NAME)?;
+            let x = vector_from_tensor(&x_tensor)?;
+            let series = area_series_from_tensor(x.clone(), &y_tensor)?;
             for (idx, (upper, lower)) in series.iter().enumerate() {
                 let mut plot = AreaPlot::new(x.clone(), upper.clone())
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("area: {e}")))?;
+                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, &e))?;
                 if let Some(lower) = lower.clone() {
                     plot = plot.with_lower_curve(lower);
                 } else {
@@ -153,20 +457,22 @@ fn build_area_gpu_plots(
     parsed: &ParsedAreaStyle,
 ) -> crate::BuiltinResult<Vec<AreaPlot>> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "area: unable to export GPU Y data"))?;
+    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y).ok_or_else(|| {
+        area_error_with_detail(&AREA_ERROR_INTERNAL, "unable to export GPU Y data")
+    })?;
     let (rows, cols) = area_shape_from_gpu_shape(&y_ref.shape, y_ref.len);
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         y_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
     let (x_axis, x_bounds) = match x {
         NumericInput::Gpu(handle) => {
-            let x_ref = runmat_accelerate_api::export_wgpu_buffer(handle)
-                .ok_or_else(|| plotting_error(BUILTIN_NAME, "area: unable to export GPU X data"))?;
+            let x_ref = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
+                area_error_with_detail(&AREA_ERROR_INTERNAL, "unable to export GPU X data")
+            })?;
             if x_ref.len != rows {
-                return Err(plotting_error(
-                    BUILTIN_NAME,
-                    "area: X length must match rows of Y",
+                return Err(area_error_with_detail(
+                    &AREA_ERROR_INVALID_ARGUMENT,
+                    "X length must match rows of Y",
                 ));
             }
             let bounds =
@@ -177,11 +483,11 @@ fn build_area_gpu_plots(
             )
         }
         NumericInput::Host(tensor) => {
-            let values = vector_from_tensor(tensor, BUILTIN_NAME)?;
+            let values = vector_from_tensor(tensor)?;
             if values.len() != rows {
-                return Err(plotting_error(
-                    BUILTIN_NAME,
-                    "area: X length must match rows of Y",
+                return Err(area_error_with_detail(
+                    &AREA_ERROR_INVALID_ARGUMENT,
+                    "X length must match rows of Y",
                 ));
             }
             let axis = match scalar {
@@ -242,9 +548,9 @@ fn build_area_gpu_plots(
             },
         )
         .map_err(|e| {
-            plotting_error(
-                BUILTIN_NAME,
-                format!("area: failed to build GPU vertices: {e}"),
+            area_error_with_detail(
+                &AREA_ERROR_INTERNAL,
+                format!("failed to build GPU vertices: {e}"),
             )
         })?;
         let mut plot = AreaPlot::from_gpu_buffer(
@@ -285,7 +591,10 @@ fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAreaStyle
         if let Some(key) = super::style::value_as_string(&args[idx]) {
             if key.trim().eq_ignore_ascii_case("BaseValue") && idx + 1 < args.len() {
                 base_value = value_as_f64(&args[idx + 1]).ok_or_else(|| {
-                    plotting_error(BUILTIN_NAME, "area: BaseValue must be numeric")
+                    area_error_with_detail(
+                        &AREA_ERROR_INVALID_ARGUMENT,
+                        "BaseValue must be numeric",
+                    )
                 })?;
                 idx += 2;
                 continue;
@@ -334,9 +643,9 @@ fn parse_area_args(
     args: Vec<Value>,
 ) -> crate::BuiltinResult<(Option<usize>, Value, Value, Vec<Value>)> {
     if args.is_empty() {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "area: expected Y or X,Y inputs",
+        return Err(area_error_with_detail(
+            &AREA_ERROR_INVALID_ARGUMENT,
+            "expected Y or X,Y inputs",
         ));
     }
     let mut it = args.into_iter();
@@ -346,14 +655,18 @@ fn parse_area_args(
         crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
     {
         target_axes = Some(axes);
-        it.next()
-            .ok_or_else(|| plotting_error(BUILTIN_NAME, "area: expected data after axes handle"))?
+        it.next().ok_or_else(|| {
+            area_error_with_detail(
+                &AREA_ERROR_INVALID_ARGUMENT,
+                "expected data after axes handle",
+            )
+        })?
     } else {
         first
     };
     let Some(second) = it.next() else {
         let y = Tensor::try_from(&first)
-            .map_err(|e| plotting_error(BUILTIN_NAME, format!("area: {e}")))?;
+            .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, &e))?;
         let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
@@ -366,7 +679,7 @@ fn parse_area_args(
     };
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
         let y = Tensor::try_from(&first)
-            .map_err(|e| plotting_error(BUILTIN_NAME, format!("area: {e}")))?;
+            .map_err(|e| area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, &e))?;
         let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
@@ -382,11 +695,11 @@ fn parse_area_args(
     Ok((target_axes, first, second, it.collect()))
 }
 
-fn vector_from_tensor(tensor: &Tensor, builtin: &'static str) -> crate::BuiltinResult<Vec<f64>> {
+fn vector_from_tensor(tensor: &Tensor) -> crate::BuiltinResult<Vec<f64>> {
     if !(tensor.rows == 1 || tensor.cols == 1 || tensor.shape.len() <= 1) {
-        return Err(plotting_error(
-            builtin,
-            "area: X input must be a vector matching the row count of Y",
+        return Err(area_error_with_detail(
+            &AREA_ERROR_INVALID_ARGUMENT,
+            "X input must be a vector matching the row count of Y",
         ));
     }
     Ok(tensor.data.clone())
@@ -410,16 +723,12 @@ fn area_shape_from_gpu_shape(shape: &[usize], len: usize) -> (usize, usize) {
     }
 }
 
-fn area_series_from_tensor(
-    x: Vec<f64>,
-    y: &Tensor,
-    builtin: &'static str,
-) -> crate::BuiltinResult<AreaSeries> {
+fn area_series_from_tensor(x: Vec<f64>, y: &Tensor) -> crate::BuiltinResult<AreaSeries> {
     let (rows, cols) = area_shape_from_tensor(y);
     if rows != x.len() {
-        return Err(plotting_error(
-            builtin,
-            "area: X length must match the number of rows in Y",
+        return Err(area_error_with_detail(
+            &AREA_ERROR_INVALID_ARGUMENT,
+            "X length must match the number of rows in Y",
         ));
     }
     let mut out: AreaSeries = Vec::with_capacity(cols);
@@ -459,6 +768,24 @@ mod tests {
             cols,
             dtype: runmat_builtins::NumericDType::F64,
         }
+    }
+
+    #[test]
+    fn area_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = AREA_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = area(Y)"));
+        assert!(labels.contains(&"h = area(X, Y)"));
+        assert!(labels.contains(&"h = area(ax, X, Y, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn area_invalid_argument_uses_stable_identifier() {
+        let err = area_builtin(vec![]).expect_err("missing args should fail");
+        assert_eq!(err.identifier(), AREA_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

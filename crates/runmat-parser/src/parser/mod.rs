@@ -23,6 +23,7 @@ struct Parser {
     input: String,
     options: ParserOptions,
     in_matrix_expr: bool,
+    current_classdef_name: Option<String>,
 }
 
 pub fn parse(input: &str) -> Result<Program, SyntaxError> {
@@ -71,6 +72,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
         input: input.to_string(),
         options,
         in_matrix_expr: false,
+        current_classdef_name: None,
     };
     parser.parse_program()
 }

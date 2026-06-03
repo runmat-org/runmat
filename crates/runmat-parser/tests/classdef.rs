@@ -88,6 +88,60 @@ end
 }
 
 #[test]
+fn classdef_parses_class_level_attributes() {
+    let src = "classdef (Sealed) A\nend";
+    let stmt = single_stmt(src);
+    match stmt {
+        Stmt::ClassDef {
+            attributes, name, ..
+        } => {
+            assert_eq!(name, "A");
+            assert_eq!(attributes.len(), 1);
+            assert_eq!(attributes[0].name, "Sealed");
+        }
+        _ => panic!("expected classdef"),
+    }
+}
+
+#[test]
+fn classdef_parses_dependent_accessor_method_names() {
+    let src = r#"
+classdef D
+  properties(Dependent)
+    p
+  end
+  methods
+    function val = get.p(obj)
+      val = 2;
+    end
+    function obj = set.p(obj, val)
+      obj = obj;
+    end
+  end
+end
+"#;
+    let stmt = single_stmt(src);
+    let Stmt::ClassDef { members, .. } = stmt else {
+        panic!("expected classdef");
+    };
+    let methods = members
+        .into_iter()
+        .find_map(|member| match member {
+            runmat_parser::ClassMember::Methods { body, .. } => Some(body),
+            _ => None,
+        })
+        .expect("methods block");
+    let names: Vec<String> = methods
+        .into_iter()
+        .filter_map(|stmt| match stmt {
+            Stmt::Function { name, .. } => Some(name),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, vec!["get.p".to_string(), "set.p".to_string()]);
+}
+
+#[test]
 fn classdef_methods_two_functions() {
     let src = r#"
 classdef C
@@ -106,6 +160,70 @@ end
         Stmt::ClassDef { .. } => {}
         _ => panic!("expected classdef"),
     }
+}
+
+#[test]
+fn classdef_super_constructor_stmt_parses_as_semantic_super_ctor_call() {
+    let src = "classdef B < A\nmethods\nfunction obj = B(v)\nobj@A(v);\nend\nend\nend";
+    let program = runmat_parser::parse(src).expect("parse");
+    let Stmt::ClassDef { members, .. } = &program.body[0] else {
+        panic!("expected classdef");
+    };
+    let methods_body = match &members[0] {
+        runmat_parser::ClassMember::Methods { body, .. } => body,
+        _ => panic!("expected methods block"),
+    };
+    let Stmt::Function { body, .. } = &methods_body[0] else {
+        panic!("expected constructor function");
+    };
+    let Stmt::Assign(var, expr, ..) = &body[0] else {
+        panic!("expected rewritten assignment");
+    };
+    assert_eq!(var, "obj");
+    let runmat_parser::Expr::SuperConstructorCall {
+        current_class,
+        super_class,
+        args,
+        ..
+    } = expr
+    else {
+        panic!("expected semantic super constructor call");
+    };
+    assert_eq!(current_class, "B");
+    assert_eq!(super_class, "A");
+    assert_eq!(args.len(), 1);
+}
+
+#[test]
+fn classdef_qualified_super_constructor_stmt_parses_as_semantic_super_ctor_call() {
+    let src = "classdef B < pkg.A\nmethods\nfunction obj = B(v)\nobj@pkg.A(v);\nend\nend\nend";
+    let program = runmat_parser::parse(src).expect("parse");
+    let Stmt::ClassDef { members, .. } = &program.body[0] else {
+        panic!("expected classdef");
+    };
+    let methods_body = match &members[0] {
+        runmat_parser::ClassMember::Methods { body, .. } => body,
+        _ => panic!("expected methods block"),
+    };
+    let Stmt::Function { body, .. } = &methods_body[0] else {
+        panic!("expected constructor function");
+    };
+    let Stmt::Assign(var, expr, ..) = &body[0] else {
+        panic!("expected rewritten assignment");
+    };
+    assert_eq!(var, "obj");
+    let runmat_parser::Expr::SuperConstructorCall {
+        current_class,
+        super_class,
+        args,
+        ..
+    } = expr
+    else {
+        panic!("expected semantic super constructor call");
+    };
+    assert_eq!(current_class, "B");
+    assert_eq!(super_class, "pkg.A");
+    assert_eq!(args.len(), 1);
 }
 
 #[test]

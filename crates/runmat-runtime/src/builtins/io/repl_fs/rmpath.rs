@@ -1,6 +1,10 @@
 //! MATLAB-compatible `rmpath` builtin for manipulating the RunMat search path.
 
-use runmat_builtins::{CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
@@ -16,10 +20,6 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 use runmat_filesystem as vfs;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
-
-const ERROR_ARG_TYPE: &str =
-    "rmpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors";
-const ERROR_TOO_FEW_ARGS: &str = "rmpath: at least one folder must be specified";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::rmpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,10 +50,121 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "rmpath";
 
-fn rmpath_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const RMPATH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "oldpath",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Previous search path string.",
+}];
+const RMPATH_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder1",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Folder, path-list string, or container of folders to remove.",
+}];
+const RMPATH_INPUTS_FOLDER_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "folder1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First folder argument.",
+    },
+    BuiltinParamDescriptor {
+        name: "folderN",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional folder arguments.",
+    },
+];
+const RMPATH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "oldpath = rmpath(folder1)",
+        inputs: &RMPATH_INPUTS_FOLDER,
+        outputs: &RMPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "oldpath = rmpath(folder1, folder2, ...)",
+        inputs: &RMPATH_INPUTS_FOLDER_VARIADIC,
+        outputs: &RMPATH_OUTPUT,
+    },
+];
+
+const RMPATH_ERROR_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMPATH.ARG_TYPE",
+    identifier: None,
+    when: "Folder arguments are not character vectors, string scalars/arrays, tensors of character codes, or cell arrays containing those forms.",
+    message:
+        "rmpath: folder names must be character vectors, string scalars, string arrays, or cell arrays of character vectors",
+};
+const RMPATH_ERROR_TOO_FEW_ARGS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMPATH.TOO_FEW_ARGS",
+    identifier: None,
+    when: "No folder arguments are provided, or all provided folder tokens are empty.",
+    message: "rmpath: at least one folder must be specified",
+};
+const RMPATH_ERROR_CWD_RESOLVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMPATH.CWD_RESOLVE",
+    identifier: None,
+    when: "Current directory cannot be resolved while normalizing a relative folder.",
+    message: "rmpath: unable to resolve current directory",
+};
+const RMPATH_ERROR_NOT_FOLDER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMPATH.NOT_FOLDER",
+    identifier: None,
+    when: "The requested path exists but is not a folder.",
+    message: "rmpath: path is not a folder",
+};
+const RMPATH_ERROR_NOT_ON_PATH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMPATH.NOT_ON_PATH",
+    identifier: None,
+    when: "The requested folder exists but is not on the active search path.",
+    message: "rmpath: folder not on search path",
+};
+const RMPATH_ERROR_FOLDER_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMPATH.FOLDER_NOT_FOUND",
+    identifier: None,
+    when: "The requested folder path does not exist.",
+    message: "rmpath: folder not found",
+};
+const RMPATH_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    RMPATH_ERROR_ARG_TYPE,
+    RMPATH_ERROR_TOO_FEW_ARGS,
+    RMPATH_ERROR_CWD_RESOLVE,
+    RMPATH_ERROR_NOT_FOLDER,
+    RMPATH_ERROR_NOT_ON_PATH,
+    RMPATH_ERROR_FOLDER_NOT_FOUND,
+];
+pub const RMPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RMPATH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RMPATH_ERRORS,
+};
+
+fn rmpath_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    rmpath_error_with_message(error.message, error)
+}
+
+fn rmpath_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn rmpath_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    rmpath_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -70,16 +181,17 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "rmpath",
     category = "io/repl_fs",
-    summary = "Remove folders from the MATLAB search path used by RunMat.",
+    summary = "Remove folders from the active MATLAB search path.",
     keywords = "rmpath,search path,matlab path,remove folder",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::rmpath_type),
+    descriptor(crate::builtins::io::repl_fs::rmpath::RMPATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::rmpath"
 )]
 async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(rmpath_error(ERROR_TOO_FEW_ARGS));
+        return Err(rmpath_error(&RMPATH_ERROR_TOO_FEW_ARGS));
     }
 
     let gathered = gather_arguments(&args).await?;
@@ -109,7 +221,7 @@ async fn parse_directories(args: &[Value]) -> BuiltinResult<Vec<String>> {
     }
 
     if directories.is_empty() {
-        return Err(rmpath_error(ERROR_TOO_FEW_ARGS));
+        return Err(rmpath_error(&RMPATH_ERROR_TOO_FEW_ARGS));
     }
 
     let mut resolved = Vec::new();
@@ -122,7 +234,7 @@ async fn parse_directories(args: &[Value]) -> BuiltinResult<Vec<String>> {
     }
 
     if resolved.is_empty() {
-        return Err(rmpath_error(ERROR_TOO_FEW_ARGS));
+        return Err(rmpath_error(&RMPATH_ERROR_TOO_FEW_ARGS));
     }
 
     Ok(resolved)
@@ -169,8 +281,8 @@ async fn collect_strings(value: &Value, output: &mut Vec<String>) -> BuiltinResu
             }
             Ok(())
         }
-        Value::GpuTensor(_) => Err(rmpath_error(ERROR_ARG_TYPE)),
-        _ => Err(rmpath_error(ERROR_ARG_TYPE)),
+        Value::GpuTensor(_) => Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE)),
+        _ => Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE)),
     }
 }
 
@@ -223,13 +335,14 @@ async fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResul
         return Ok(true);
     }
 
-    let expanded = expand_user_path(raw, "rmpath").map_err(rmpath_error)?;
+    let expanded = expand_user_path(raw, "rmpath")
+        .map_err(|err| rmpath_error_with_detail(&RMPATH_ERROR_FOLDER_NOT_FOUND, err))?;
     let path = Path::new(&expanded);
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         vfs::current_dir()
-            .map_err(|_| rmpath_error("rmpath: unable to resolve current directory"))?
+            .map_err(|_| rmpath_error(&RMPATH_ERROR_CWD_RESOLVE))?
             .join(path)
     };
     let normalized = normalize_pathbuf(&joined);
@@ -245,14 +358,15 @@ async fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResul
     match vfs::metadata_async(&normalized).await {
         Ok(meta) => {
             if !meta.is_dir() {
-                Err(rmpath_error(format!("rmpath: '{raw}' is not a folder")))
+                Err(rmpath_error_with_detail(&RMPATH_ERROR_NOT_FOLDER, raw))
             } else {
-                Err(rmpath_error(format!(
-                    "rmpath: folder '{raw}' not on search path"
-                )))
+                Err(rmpath_error_with_detail(&RMPATH_ERROR_NOT_ON_PATH, raw))
             }
         }
-        Err(_) => Err(rmpath_error(format!("rmpath: folder '{raw}' not found"))),
+        Err(_) => Err(rmpath_error_with_detail(
+            &RMPATH_ERROR_FOLDER_NOT_FOUND,
+            raw,
+        )),
     }
 }
 
@@ -278,25 +392,26 @@ fn normalize_pathbuf(path: &Path) -> PathBuf {
 
 fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(rmpath_error(ERROR_ARG_TYPE));
+        return Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE));
     }
     if tensor.rows() > 1 {
-        return Err(rmpath_error(ERROR_ARG_TYPE));
+        return Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE));
     }
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(rmpath_error(ERROR_ARG_TYPE));
+            return Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(rmpath_error(ERROR_ARG_TYPE));
+            return Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(rmpath_error(ERROR_ARG_TYPE));
+            return Err(rmpath_error(&RMPATH_ERROR_ARG_TYPE));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| rmpath_error(ERROR_ARG_TYPE))?;
+        let ch =
+            char::from_u32(int_code as u32).ok_or_else(|| rmpath_error(&RMPATH_ERROR_ARG_TYPE))?;
         text.push(ch);
     }
     Ok(text)
@@ -339,6 +454,18 @@ pub(crate) mod tests {
 
     fn rmpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::rmpath_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rmpath_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = RMPATH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"oldpath = rmpath(folder1)"));
+        assert!(labels.contains(&"oldpath = rmpath(folder1, folder2, ...)"));
     }
 
     struct PathGuard {

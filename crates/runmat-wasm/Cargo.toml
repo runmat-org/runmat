@@ -18,6 +18,7 @@ gpu = ["runmat-accelerate/wgpu"]
 
 [dependencies]
 runmat-core = { workspace = true }
+runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
@@ -33,16 +34,13 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Response", "ReadableStream", "ReadableStreamDefaultReader", "HtmlCanvasElement", "OffscreenCanvas", "console"] }
 log = { workspace = true }
-anyhow = { workspace = true }
 miette = { workspace = true }
 console_error_panic_hook = "0.1"
-thiserror = { workspace = true }
 async-trait = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
 runmat-logging = { path = "../runmat-logging", version = "=0.4.9" }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
 runmat-telemetry = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -51,3 +49,4 @@ runmat-plot = { workspace = true, features = ["web", "egui-overlay"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
+runmat-hir = { workspace = true }

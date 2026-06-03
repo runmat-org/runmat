@@ -40,6 +40,8 @@ pub(crate) mod close;
 pub(crate) mod cmds;
 #[path = "ops/contour.rs"]
 pub(crate) mod contour;
+#[path = "ops/contour3.rs"]
+pub(crate) mod contour3;
 #[path = "ops/contourf.rs"]
 pub(crate) mod contourf;
 #[path = "ops/drawnow.rs"]
@@ -92,12 +94,16 @@ pub(crate) mod pie;
 pub(crate) mod plot;
 #[path = "ops/plot3.rs"]
 pub(crate) mod plot3;
+#[path = "ops/print.rs"]
+pub(crate) mod print;
 #[path = "ops/quiver.rs"]
 pub(crate) mod quiver;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
 pub(crate) mod scatter3;
+#[path = "ops/scatterplot.rs"]
+pub(crate) mod scatterplot;
 #[path = "ops/semilogx.rs"]
 pub(crate) mod semilogx;
 #[path = "ops/semilogy.rs"]
@@ -160,6 +166,26 @@ pub use web::{
     set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
     PlotSurfaceCameraState,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimePlottingMode {
+    Auto,
+    Interactive,
+    Static,
+}
+
+#[cfg(feature = "gui")]
+pub fn set_runtime_plotting_mode(mode: RuntimePlottingMode) {
+    let mapped = match mode {
+        RuntimePlottingMode::Auto => engine::native::RuntimePlottingMode::Auto,
+        RuntimePlottingMode::Interactive => engine::native::RuntimePlottingMode::Interactive,
+        RuntimePlottingMode::Static => engine::native::RuntimePlottingMode::Static,
+    };
+    engine::native::set_runtime_plotting_mode(mapped);
+}
+
+#[cfg(not(feature = "gui"))]
+pub fn set_runtime_plotting_mode(_mode: RuntimePlottingMode) {}
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 pub use web::handle_plot_surface_event;

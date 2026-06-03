@@ -2,11 +2,10 @@ use anyhow::{Context, Result};
 use env_logger::Env;
 use log::{debug, error, info, warn};
 use runmat_accelerate::AccelerateInitOptions;
-use runmat_config::{self as config, ConfigLoader, PlotMode, RunMatConfig};
+use runmat_config::runtime::{self as config, ConfigLoader, PlotMode, RunMatRuntimeConfig};
 
 use crate::app::dispatch;
 use crate::cli::{Cli, CliOverrideSources, GcPreset, LogLevel, OptLevel};
-use crate::commands::jupyter;
 use crate::logging::format_log_record;
 use crate::telemetry;
 
@@ -15,10 +14,6 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         let sample_config = ConfigLoader::generate_sample_config();
         println!("{sample_config}");
         return Ok(());
-    }
-
-    if cli.install_kernel {
-        return jupyter::install_jupyter_kernel().await;
     }
 
     let mut config = match load_configuration(&cli) {
@@ -59,7 +54,7 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     let wants_gui = match config.plotting.mode {
         PlotMode::Gui => true,
         PlotMode::Auto => !config.plotting.force_headless && is_gui_available(),
-        PlotMode::Headless | PlotMode::Jupyter => false,
+        PlotMode::Headless => false,
     };
 
     let _gui_initialized = if wants_gui {
@@ -104,65 +99,31 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
 }
 
 /// Load configuration from files and environment
-fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
-    let config_from_env = std::env::var("RUNMAT_CONFIG")
-        .ok()
-        .map(std::path::PathBuf::from);
-
+fn load_configuration(cli: &Cli) -> Result<RunMatRuntimeConfig> {
     if let Some(config_file) = &cli.config {
-        let is_from_env = config_from_env.as_ref() == Some(config_file);
-
-        if config_file.exists() {
-            if config_file.is_dir() {
-                info!(
-                    "Config path is a directory, ignoring: {}",
-                    config_file.display()
-                );
-            } else {
-                info!("Loading configuration from: {}", config_file.display());
-                return ConfigLoader::load_from_file(config_file);
-            }
-        } else if !is_from_env {
+        if config_file.is_dir() {
+            error!(
+                "Specified config path is a directory, expected a file: {}",
+                config_file.display()
+            );
+            std::process::exit(1);
+        }
+        if !config_file.is_file() {
             error!(
                 "Specified config file does not exist: {}",
                 config_file.display()
             );
             std::process::exit(1);
         }
+        info!("Loading configuration from: {}", config_file.display());
+        return ConfigLoader::load_from_file(config_file);
     }
 
-    match ConfigLoader::load() {
-        Ok(c) => Ok(c),
-        Err(e) => {
-            if let Ok(conf_env) = std::env::var("RUNMAT_CONFIG") {
-                let p = std::path::PathBuf::from(conf_env);
-                if p.is_dir() {
-                    info!(
-                        "Config path from env is a directory, ignoring: {}",
-                        p.display()
-                    );
-                    return Ok(RunMatConfig::default());
-                }
-            }
-
-            if let Some(home) = dirs::home_dir() {
-                let dir = home.join(".runmat");
-                if dir.is_dir() {
-                    info!(
-                        "Home config path is a directory, ignoring: {}",
-                        dir.display()
-                    );
-                    return Ok(RunMatConfig::default());
-                }
-            }
-
-            Err(e)
-        }
-    }
+    ConfigLoader::load()
 }
 
 /// Apply CLI argument overrides to configuration
-fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverrideSources) {
+fn apply_cli_overrides(config: &mut RunMatRuntimeConfig, cli: &Cli, sources: &CliOverrideSources) {
     if cli.no_jit {
         config.jit.enabled = false;
     }
@@ -178,9 +139,6 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
         };
     }
 
-    if sources.timeout {
-        config.runtime.timeout = cli.timeout;
-    }
     if sources.callstack_limit {
         config.runtime.callstack_limit = cli.callstack_limit;
     }
@@ -218,17 +176,9 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
 
     if let Some(plot_mode) = &cli.plot_mode {
         config.plotting.mode = *plot_mode;
-        let env_value = match plot_mode {
-            PlotMode::Auto => "auto",
-            PlotMode::Gui => "gui",
-            PlotMode::Headless => "headless",
-            PlotMode::Jupyter => "jupyter",
-        };
-        std::env::set_var("RUNMAT_PLOT_MODE", env_value);
     }
     if cli.plot_headless {
         config.plotting.force_headless = true;
-        std::env::set_var("RUNMAT_PLOT_MODE", "headless");
     }
     if let Some(backend) = &cli.plot_backend {
         config.plotting.backend = *backend;
@@ -255,7 +205,7 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverri
 }
 
 /// Configure GC from the loaded configuration
-fn configure_gc_from_config(config: &RunMatConfig) -> Result<()> {
+fn configure_gc_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
     let mut gc_config = if let Some(preset) = config.gc.preset {
         gc_config_from_preset(preset)
     } else {
@@ -301,10 +251,22 @@ fn gc_config_from_preset(preset: config::GcPreset) -> runmat_gc::GcConfig {
     }
 }
 
-fn configure_plotting_from_config(config: &RunMatConfig) {
+fn configure_plotting_from_config(config: &RunMatRuntimeConfig) {
     use runmat_runtime::builtins::plotting::{
-        set_scatter_target_points, set_surface_vertex_budget,
+        set_runtime_plotting_mode, set_scatter_target_points, set_surface_vertex_budget,
+        RuntimePlottingMode,
     };
+
+    let runtime_mode = if config.plotting.force_headless {
+        RuntimePlottingMode::Static
+    } else {
+        match config.plotting.mode {
+            PlotMode::Auto => RuntimePlottingMode::Auto,
+            PlotMode::Gui => RuntimePlottingMode::Interactive,
+            PlotMode::Headless => RuntimePlottingMode::Static,
+        }
+    };
+    set_runtime_plotting_mode(runtime_mode);
 
     if let Some(points) = config.plotting.scatter_target_points {
         set_scatter_target_points(points);
@@ -314,7 +276,7 @@ fn configure_plotting_from_config(config: &RunMatConfig) {
     }
 }
 
-fn report_plot_context_status(config: &RunMatConfig) {
+fn report_plot_context_status(config: &RunMatRuntimeConfig) {
     if let Err(err) = runmat_runtime::builtins::plotting::context::ensure_context_from_provider() {
         if config.accelerate.enabled {
             warn!("Shared plotting context unavailable: {err}");

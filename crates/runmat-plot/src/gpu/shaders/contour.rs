@@ -15,6 +15,7 @@ struct ContourParams {
     y_len: u32,
     color_table_len: u32,
     cell_count: u32,
+    level_z: u32,
 };
 
 @group(0) @binding(0)
@@ -107,14 +108,15 @@ fn add_ambiguous_segments(
     }
 }
 
-fn write_vertex_range(base_index: u32, segment_points: array<vec2<f32>, 4>, segment_count: u32, color: vec4<f32>) {
+fn write_vertex_range(base_index: u32, segment_points: array<vec2<f32>, 4>, segment_count: u32, color: vec4<f32>, level: f32) {
+    let z_value = if (params.level_z == 1u) { level } else { params.base_z };
     for (var i: u32 = 0u; i < VERTICES_PER_INVOCATION; i = i + 1u) {
         let idx = base_index + i;
         let vertex = if (i < segment_count * 2u) {
             let pt = segment_points[i];
-            encode_vertex(vec3<f32>(pt, params.base_z), color)
+            encode_vertex(vec3<f32>(pt, z_value), color)
         } else {
-            encode_vertex(vec3<f32>(0.0, 0.0, params.base_z), vec4<f32>(color.xyz, 0.0))
+            encode_vertex(vec3<f32>(0.0, 0.0, z_value), vec4<f32>(color.xyz, 0.0))
         };
         out_vertices[idx] = vertex;
     }
@@ -201,7 +203,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let norm = (level - params.min_z) / max(params.max_z - params.min_z, 1e-6);
     let color = sample_color(norm);
     let base_vertex = invocation * VERTICES_PER_INVOCATION;
-    write_vertex_range(base_vertex, segments, segment_count, color);
+    write_vertex_range(base_vertex, segments, segment_count, color, level);
 }
 "#;
 
@@ -222,6 +224,7 @@ struct ContourParams {
     y_len: u32,
     color_table_len: u32,
     cell_count: u32,
+    level_z: u32,
 };
 
 @group(0) @binding(0)
@@ -314,14 +317,15 @@ fn add_ambiguous_segments(
     }
 }
 
-fn write_vertex_range(base_index: u32, segment_points: array<vec2<f32>, 4>, segment_count: u32, color: vec4<f32>) {
+fn write_vertex_range(base_index: u32, segment_points: array<vec2<f32>, 4>, segment_count: u32, color: vec4<f32>, level: f32) {
+    let z_value = if (params.level_z == 1u) { level } else { params.base_z };
     for (var i: u32 = 0u; i < VERTICES_PER_INVOCATION; i = i + 1u) {
         let idx = base_index + i;
         let vertex = if (i < segment_count * 2u) {
             let pt = segment_points[i];
-            encode_vertex(vec3<f32>(pt, params.base_z), color)
+            encode_vertex(vec3<f32>(pt, z_value), color)
         } else {
-            encode_vertex(vec3<f32>(0.0, 0.0, params.base_z), vec4<f32>(color.xyz, 0.0))
+            encode_vertex(vec3<f32>(0.0, 0.0, z_value), vec4<f32>(color.xyz, 0.0))
         };
         out_vertices[idx] = vertex;
     }
@@ -408,6 +412,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let norm = (level - params.min_z) / max(params.max_z - params.min_z, 1e-6);
     let color = sample_color(norm);
     let base_vertex = invocation * VERTICES_PER_INVOCATION;
-    write_vertex_range(base_vertex, segments, segment_count, color);
+    write_vertex_range(base_vertex, segments, segment_count, color, level);
 }
 "#;

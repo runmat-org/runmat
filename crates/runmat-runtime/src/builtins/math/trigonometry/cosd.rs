@@ -7,7 +7,11 @@
 //! `cos(x*pi/180)`.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -19,10 +23,69 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "cosd";
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const COSD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise cosine result with degree input semantics.",
+}];
+
+const COSD_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, logical array, complex value, or gpuArray.",
+}];
+
+const COSD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = cosd(X)",
+    inputs: &COSD_INPUTS,
+    outputs: &COSD_OUTPUT,
+}];
+
+const COSD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COSD.INVALID_INPUT",
+    identifier: Some("RunMat:cosd:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
+    message: "cosd: invalid input",
+};
+
+const COSD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COSD.INTERNAL",
+    identifier: Some("RunMat:cosd:Internal"),
+    when: "Internal gather/conversion/allocation flow failed.",
+    message: "cosd: internal error",
+};
+
+const COSD_ERRORS: [BuiltinErrorDescriptor; 2] = [COSD_ERROR_INVALID_INPUT, COSD_ERROR_INTERNAL];
+
+pub const COSD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COSD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COSD_ERRORS,
+};
+
+fn cosd_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cosd_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Element-wise scalar implementation with exact-value snapping at
@@ -64,10 +127,11 @@ fn cosd_complex(re: f64, im: f64) -> (f64, f64) {
 #[runtime_builtin(
     name = "cosd",
     category = "math/trigonometry",
-    summary = "Cosine of input expressed in degrees.",
+    summary = "Compute cosine of degree-valued inputs.",
     keywords = "cosd,cosine,degrees,trigonometry",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::cosd::COSD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::cosd"
 )]
 async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
@@ -78,9 +142,7 @@ async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
             Ok(Value::Complex(out_re, out_im))
         }
         Value::ComplexTensor(ct) => cosd_complex_tensor(ct),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("cosd: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(cosd_error(&COSD_ERROR_INVALID_INPUT)),
         other => cosd_real(other),
     }
 }
@@ -91,7 +153,8 @@ async fn cosd_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn cosd_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INVALID_INPUT, e))?;
     cosd_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -101,7 +164,8 @@ fn cosd_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&value| cosd_scalar(value))
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|err| builtin_error(format!("cosd: {err}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|err| cosd_error_with_detail(&COSD_ERROR_INTERNAL, err))
 }
 
 fn cosd_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -111,7 +175,7 @@ fn cosd_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| cosd_complex(re, im))
         .collect::<Vec<_>>();
     let converted = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|err| builtin_error(format!("cosd: {err}")))?;
+        .map_err(|err| cosd_error_with_detail(&COSD_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
 }
 
@@ -125,8 +189,18 @@ pub(crate) mod tests {
         block_on(super::cosd_builtin(value))
     }
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn cosd_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = COSD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = cosd(X)"));
     }
 
     fn expect_num(value: Value) -> f64 {
@@ -283,6 +357,7 @@ pub(crate) mod tests {
     #[test]
     fn cosd_string_errors() {
         let err = cosd_builtin(Value::String("90".into())).expect_err("expected error");
-        assert!(error_message(err).contains("cosd: expected numeric input"));
+        assert!(error_message(&err).contains("invalid input"));
+        assert_eq!(err.identifier(), COSD_ERROR_INVALID_INPUT.identifier);
     }
 }

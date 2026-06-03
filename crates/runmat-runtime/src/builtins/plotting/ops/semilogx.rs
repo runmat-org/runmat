@@ -1,13 +1,126 @@
 use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
 use super::plot::plot_builtin;
-use super::state::{current_axes_state, set_log_modes_for_axes};
+use super::state::{current_axes_state, set_log_modes_for_axes, FigureError};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "semilogx";
+
+const SEMILOGX_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Line handle.",
+}];
+const SEMILOGX_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Y data vector/matrix.",
+}];
+const SEMILOGX_INPUTS_XY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X data vector/matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y data vector/matrix.",
+    },
+];
+const SEMILOGX_INPUTS_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "args",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Plot-style inputs: optional axes handle, style tokens, and Name/Value pairs.",
+}];
+const SEMILOGX_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "h = semilogx(Y)",
+        inputs: &SEMILOGX_INPUTS_Y,
+        outputs: &SEMILOGX_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = semilogx(X, Y)",
+        inputs: &SEMILOGX_INPUTS_XY,
+        outputs: &SEMILOGX_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = semilogx(args...)",
+        inputs: &SEMILOGX_INPUTS_ARGS,
+        outputs: &SEMILOGX_OUTPUT_HANDLE,
+    },
+];
+const SEMILOGX_ERROR_PLOT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SEMILOGX.PLOT_FAILED",
+    identifier: Some("RunMat:semilogx:PlotFailed"),
+    when: "Underlying plot rendering/parsing fails while building the semilog plot.",
+    message: "semilogx: plot operation failed",
+};
+const SEMILOGX_ERROR_LOG_AXIS_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SEMILOGX.LOG_AXIS_FAILED",
+    identifier: Some("RunMat:semilogx:LogAxisFailed"),
+    when: "Applying logarithmic X-axis mode fails.",
+    message: "semilogx: failed to apply logarithmic axis mode",
+};
+const SEMILOGX_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SEMILOGX_ERROR_PLOT_FAILED, SEMILOGX_ERROR_LOG_AXIS_FAILED];
+pub const SEMILOGX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SEMILOGX_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SEMILOGX_ERRORS,
+};
+
+fn semilogx_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn semilogx_map_plot_error(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "{}: {}",
+        SEMILOGX_ERROR_PLOT_FAILED.message,
+        err.message()
+    ))
+    .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = SEMILOGX_ERROR_PLOT_FAILED.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_source(err).build()
+}
+
+fn semilogx_map_axes_error(err: FigureError) -> RuntimeError {
+    semilogx_error_with_message(
+        format!("{}: {}", SEMILOGX_ERROR_LOG_AXIS_FAILED.message, err),
+        &SEMILOGX_ERROR_LOG_AXIS_FAILED,
+    )
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::semilogx")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,24 +152,20 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "semilogx",
     category = "plotting",
-    summary = "Create a plot with logarithmic X axis.",
+    summary = "Plot data with a logarithmic X axis.",
     keywords = "semilogx,plotting,log",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::semilogx::SEMILOGX_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::semilogx"
 )]
 pub async fn semilogx_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let result = plot_builtin(args).await;
+    let result = plot_builtin(args).await.map_err(semilogx_map_plot_error)?;
     let axes = current_axes_state();
-    set_log_modes_for_axes(axes.handle, axes.active_index, true, false).map_err(|err| {
-        crate::builtins::plotting::plotting_error_with_source(
-            "semilogx",
-            format!("semilogx: {err}"),
-            err,
-        )
-    })?;
-    result
+    set_log_modes_for_axes(axes.handle, axes.active_index, true, false)
+        .map_err(semilogx_map_axes_error)?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -129,5 +238,17 @@ mod tests {
         let fig = clone_figure(fig_handle).unwrap();
         assert!(fig.axes_metadata(1).unwrap().x_log);
         assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn semilogx_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SEMILOGX_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = semilogx(Y)"));
+        assert!(labels.contains(&"h = semilogx(X, Y)"));
+        assert!(labels.contains(&"h = semilogx(args...)"));
     }
 }

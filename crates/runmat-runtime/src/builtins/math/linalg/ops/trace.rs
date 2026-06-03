@@ -1,7 +1,11 @@
 //! MATLAB-compatible `trace` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -14,6 +18,51 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "trace";
+
+const TRACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "t",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Diagonal-sum trace result.",
+}];
+
+const TRACE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix-like value.",
+}];
+
+const TRACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "t = trace(A)",
+    inputs: &TRACE_INPUTS,
+    outputs: &TRACE_OUTPUT,
+}];
+
+const TRACE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRACE.INVALID_INPUT",
+    identifier: Some("RunMat:trace:InvalidInput"),
+    when: "Input is unsupported or not matrix-shaped.",
+    message: "trace: input must be 2-D",
+};
+
+const TRACE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TRACE.INTERNAL",
+    identifier: Some("RunMat:trace:Internal"),
+    when: "Runtime cannot materialize or transport trace results.",
+    message: "trace: internal runtime failure",
+};
+
+const TRACE_ERRORS: [BuiltinErrorDescriptor; 2] = [TRACE_ERROR_INVALID_INPUT, TRACE_ERROR_INTERNAL];
+
+pub const TRACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TRACE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TRACE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::trace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,8 +86,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Uses provider diagonal extraction followed by a sum reduction when available; otherwise gathers once, computes on the host, and uploads a 1×1 scalar back to the device.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn trace_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    trace_error_with_message(error.message, error)
+}
+
+fn trace_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn trace_invalid_input(message: impl Into<String>) -> RuntimeError {
+    trace_error_with_message(message, &TRACE_ERROR_INVALID_INPUT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -77,10 +141,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "trace",
     category = "math/linalg/ops",
-    summary = "Sum the diagonal elements of matrices and matrix-like tensors.",
+    summary = "Sum main-diagonal elements of matrix and matrix-like inputs.",
     keywords = "trace,matrix trace,diagonal sum,gpu",
     accel = "reduction",
     type_resolver(numeric_scalar_type),
+    descriptor(crate::builtins::math::linalg::ops::trace::TRACE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
 async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
@@ -94,7 +159,7 @@ async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 fn trace_numeric(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(NAME, value).map_err(builtin_error)?;
+    let tensor = tensor::value_into_tensor_for(NAME, value).map_err(trace_invalid_input)?;
     ensure_matrix_shape(NAME, &tensor.shape)?;
     let sum = trace_tensor_sum(&tensor);
     Ok(Value::Num(sum))
@@ -198,7 +263,8 @@ fn trace_tensor_sum(tensor: &Tensor) -> f64 {
 
 fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if shape.len() > 2 && shape.iter().skip(2).any(|&d| d != 1) {
-        Err(builtin_error(format!("{name}: input must be 2-D")))
+        let _ = name;
+        Err(trace_error(&TRACE_ERROR_INVALID_INPUT))
     } else {
         Ok(())
     }
@@ -239,6 +305,23 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn trace_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TRACE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"t = trace(A)"));
+    }
+
+    #[test]
+    fn trace_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = TRACE_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.TRACE.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.TRACE.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -395,7 +478,8 @@ pub(crate) mod tests {
     fn trace_rejects_higher_dimensional_inputs() {
         let tensor = Tensor::new(vec![1.0; 8], vec![2, 2, 2]).unwrap();
         let err = unwrap_error(trace_builtin(Value::Tensor(tensor)).unwrap_err());
-        assert_eq!(err.message(), "trace: input must be 2-D");
+        assert_eq!(err.identifier(), TRACE_ERROR_INVALID_INPUT.identifier);
+        assert_eq!(err.message(), TRACE_ERROR_INVALID_INPUT.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

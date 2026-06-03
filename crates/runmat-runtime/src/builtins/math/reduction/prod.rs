@@ -3,7 +3,11 @@
 use std::collections::HashSet;
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, IntValue, NumericDType, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, IntValue, NumericDType, Tensor, Type, Value,
+};
 const NAME: &str = "prod";
 
 use runmat_builtins::ResolveContext;
@@ -29,6 +33,248 @@ use crate::builtins::common::{
 use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+const PROD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Product reduction result.",
+}];
+
+const PROD_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const PROD_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const PROD_INPUTS_ALL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "all",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"all\""),
+        description: "Reduce across all dimensions.",
+    },
+];
+
+const PROD_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const PROD_INPUTS_OUTTYPE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "outtype",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Output class specifier: \"double\", \"default\", \"native\", or \"like\".",
+    },
+];
+
+const PROD_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const PROD_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const PROD_INPUTS_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"like\""),
+        description: "Prototype keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype value controlling output class/device.",
+    },
+];
+
+const PROD_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A)",
+        inputs: &PROD_INPUTS_CORE,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, dim)",
+        inputs: &PROD_INPUTS_DIM,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, \"all\")",
+        inputs: &PROD_INPUTS_ALL,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, nanflag)",
+        inputs: &PROD_INPUTS_NANFLAG,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, outtype)",
+        inputs: &PROD_INPUTS_OUTTYPE,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, dim, nanflag)",
+        inputs: &PROD_INPUTS_DIM_NANFLAG,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, nanflag, dim)",
+        inputs: &PROD_INPUTS_NANFLAG_DIM,
+        outputs: &PROD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = prod(A, \"like\", prototype)",
+        inputs: &PROD_INPUTS_LIKE,
+        outputs: &PROD_OUTPUT,
+    },
+];
+
+const PROD_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PROD.INVALID_ARGUMENT",
+    identifier: Some("RunMat:prod:InvalidArgument"),
+    when: "Dimension, nanflag, or output class argument grammar is invalid.",
+    message: "prod: invalid argument",
+};
+
+const PROD_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PROD.INVALID_INPUT",
+    identifier: Some("RunMat:prod:InvalidInput"),
+    when: "Input value type is unsupported for prod reduction.",
+    message: "prod: invalid input",
+};
+
+const PROD_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PROD.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:prod:ComplexUnsupported"),
+    when: "Complex inputs are passed to prod where complex support is not implemented.",
+    message: "prod: complex inputs are not yet supported",
+};
+
+const PROD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PROD.INTERNAL",
+    identifier: Some("RunMat:prod:Internal"),
+    when:
+        "Reduction execution fails due to conversion, provider, allocation, or coercion operations.",
+    message: "prod: internal reduction failure",
+};
+
+const PROD_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    PROD_ERROR_INVALID_ARGUMENT,
+    PROD_ERROR_INVALID_INPUT,
+    PROD_ERROR_COMPLEX_UNSUPPORTED,
+    PROD_ERROR_INTERNAL,
+];
+
+pub const PROD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PROD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PROD_ERRORS,
+};
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::prod")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "prod",
@@ -53,8 +299,30 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may specialise reduce_prod_dim / reduce_prod. Requests using 'omitnan', multi-axis reductions, or class coercions fall back to the host implementation.",
 };
 
-fn prod_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn prod_descriptor_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    prod_descriptor_error_with_message(error.message, error)
+}
+
+fn prod_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    prod_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn prod_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn prod_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    prod_descriptor_error_with_detail(&PROD_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::prod")]
@@ -80,16 +348,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "prod",
     category = "math/reduction",
-    summary = "Multiply elements of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Multiply elements across array dimensions.",
     keywords = "prod,product,reduction,gpu,omitnan",
     accel = "reduction",
     type_resolver(prod_type),
+    descriptor(crate::builtins::math::reduction::prod::PROD_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::prod"
 )]
 async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input_meta = InputMeta::from_value(&value);
     if matches!(input_meta.class, InputClass::Complex) {
-        return Err(prod_error("prod: complex inputs are not yet supported"));
+        return Err(prod_descriptor_error(&PROD_ERROR_COMPLEX_UNSUPPORTED));
     }
     let parsed = parse_arguments(&rest).await?;
     let raw_result = match value {
@@ -100,12 +369,13 @@ async fn prod_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Int(_)
         | Value::Bool(_) => prod_host(value, &parsed)?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err(prod_error("prod: complex inputs are not yet supported"));
+            return Err(prod_descriptor_error(&PROD_ERROR_COMPLEX_UNSUPPORTED));
         }
         other => {
-            return Err(prod_error(format!(
-                "prod: unsupported input value {other:?}"
-            )));
+            return Err(prod_descriptor_error_with_detail(
+                &PROD_ERROR_INVALID_INPUT,
+                format!("unsupported input value {other:?}"),
+            ));
         }
     };
     apply_output_template(raw_result, &parsed.output, &input_meta).await
@@ -231,14 +501,16 @@ impl IntClass {
 
     fn to_value(self, scalar: f64) -> BuiltinResult<Value> {
         if scalar.is_nan() {
-            return Err(prod_error(
-                "prod: cannot represent NaN as an integer output",
+            return Err(prod_descriptor_error_with_detail(
+                &PROD_ERROR_INTERNAL,
+                "cannot represent NaN as an integer output",
             ));
         }
         let rounded = scalar.round();
         if !rounded.is_finite() {
-            return Err(prod_error(
-                "prod: integer output overflowed the target type",
+            return Err(prod_descriptor_error_with_detail(
+                &PROD_ERROR_INTERNAL,
+                "integer output overflowed the target type",
             ));
         }
         Ok(match self {
@@ -279,8 +551,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if selection_set && !matches!(selection, DimSelection::Auto) {
-                        return Err(prod_error(
-                            "prod: 'all' cannot be combined with an explicit dimension",
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "'all' cannot be combined with an explicit dimension",
                         ));
                     }
                     selection = DimSelection::All;
@@ -305,8 +578,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if selection_set && !matches!(selection, DimSelection::Auto) {
-                        return Err(prod_error(
-                            "prod: 'all' cannot be combined with an explicit dimension",
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "'all' cannot be combined with an explicit dimension",
                         ));
                     }
                     selection = DimSelection::All;
@@ -316,8 +590,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "double" | "default" => {
                     if output_set {
-                        return Err(prod_error(
-                            "prod: multiple output class specifications provided",
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "multiple output class specifications provided",
                         ));
                     }
                     output = OutputTemplate::Double;
@@ -327,8 +602,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "native" => {
                     if output_set {
-                        return Err(prod_error(
-                            "prod: multiple output class specifications provided",
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "multiple output class specifications provided",
                         ));
                     }
                     output = OutputTemplate::Native;
@@ -338,17 +614,24 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "like" => {
                     if output_set {
-                        return Err(prod_error(
-                            "prod: cannot combine 'like' with another output class specifier",
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "cannot combine 'like' with another output class specifier",
                         ));
                     }
                     let Some(proto) = args.get(idx + 1).cloned() else {
-                        return Err(prod_error("prod: expected prototype after 'like'"));
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "expected prototype after 'like'",
+                        ));
                     };
                     output = OutputTemplate::Like(proto);
                     idx += 2;
                     if idx < args.len() {
-                        return Err(prod_error("prod: 'like' must be the final argument"));
+                        return Err(prod_descriptor_error_with_detail(
+                            &PROD_ERROR_INVALID_ARGUMENT,
+                            "'like' must be the final argument",
+                        ));
                     }
                     break;
                 }
@@ -365,7 +648,10 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
             }
         }
 
-        return Err(prod_error(format!("prod: unrecognised argument {arg:?}")));
+        return Err(prod_descriptor_error_with_detail(
+            &PROD_ERROR_INVALID_ARGUMENT,
+            format!("unrecognised argument {arg:?}"),
+        ));
     }
 
     Ok(ParsedArguments {
@@ -380,7 +666,7 @@ async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelectio
         Value::Int(_) | Value::Num(_) => {
             let dim = tensor::dimension_from_value_async(value, "prod", false)
                 .await
-                .map_err(prod_error)?;
+                .map_err(map_dims_error)?;
             Ok(dim.map(DimSelection::Dim))
         }
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
@@ -397,8 +683,9 @@ async fn parse_dimension_tensor(
     shape: &[usize],
 ) -> BuiltinResult<Option<DimSelection>> {
     if !is_vector_shape(shape) {
-        return Err(prod_error(
-            "prod: dimension vector must be a row or column vector",
+        return Err(prod_descriptor_error_with_detail(
+            &PROD_ERROR_INVALID_ARGUMENT,
+            "dimension vector must be a row or column vector",
         ));
     }
     let dims = tensor::dims_from_value_async(value)
@@ -412,7 +699,10 @@ async fn parse_dimension_tensor(
     }
     for &dim in &dims {
         if dim < 1 {
-            return Err(prod_error("prod: dimension indices must be >= 1"));
+            return Err(prod_descriptor_error_with_detail(
+                &PROD_ERROR_INVALID_ARGUMENT,
+                "dimension indices must be >= 1",
+            ));
         }
     }
     Ok(Some(DimSelection::Vec(dims)))
@@ -420,15 +710,24 @@ async fn parse_dimension_tensor(
 
 fn map_dims_error(message: String) -> RuntimeError {
     if message.contains("non-negative") {
-        return prod_error("prod: dimension indices must be >= 1");
+        return prod_descriptor_error_with_detail(
+            &PROD_ERROR_INVALID_ARGUMENT,
+            "dimension indices must be >= 1",
+        );
     }
     if message.contains("finite") {
-        return prod_error("prod: dimensions must be finite");
+        return prod_descriptor_error_with_detail(
+            &PROD_ERROR_INVALID_ARGUMENT,
+            "dimensions must be finite",
+        );
     }
     if message.contains("integer") {
-        return prod_error("prod: dimensions must contain integers");
+        return prod_descriptor_error_with_detail(
+            &PROD_ERROR_INVALID_ARGUMENT,
+            "dimensions must contain integers",
+        );
     }
-    prod_error(message)
+    prod_descriptor_error_with_detail(&PROD_ERROR_INVALID_ARGUMENT, message)
 }
 
 fn is_vector_shape(shape: &[usize]) -> bool {
@@ -526,7 +825,10 @@ fn resolve_dims(shape: &[usize], selection: &DimSelection) -> BuiltinResult<Reso
 
     for dim1 in dims_1_based {
         if dim1 == 0 {
-            return Err(prod_error("prod: dimension indices must be >= 1"));
+            return Err(prod_descriptor_error_with_detail(
+                &PROD_ERROR_INVALID_ARGUMENT,
+                "dimension indices must be >= 1",
+            ));
         }
         if !seen.insert(dim1) {
             continue;
@@ -660,7 +962,7 @@ fn prod_tensor(
         output.push(result);
     }
 
-    Tensor::new(output, output_shape).map_err(|e| prod_error(format!("prod: {e}")))
+    Tensor::new(output, output_shape).map_err(|e| prod_internal_error(&e))
 }
 
 async fn apply_output_template(
@@ -709,14 +1011,14 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
                 Ok(Value::Tensor(tensor))
             }
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| prod_error(format!("{NAME}: {e}")))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| prod_internal_error(&e))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|e| prod_error(format!("{NAME}: {e}")))?;
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
                 let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
@@ -743,25 +1045,27 @@ async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<
             Value::GpuTensor(_) => Ok(value),
             Value::Tensor(t) => upload_tensor(t),
             Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| prod_error(format!("prod: {e}")))?;
+                let tensor =
+                    Tensor::new(vec![n], vec![1, 1]).map_err(|e| prod_internal_error(&e))?;
                 upload_tensor(tensor)
             }
             Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(prod_error)?;
+                let tensor =
+                    tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
                 upload_tensor(tensor)
             }
-            other => Err(prod_error(format!(
-                "prod: cannot place value {other:?} on the GPU"
-            ))),
+            other => Err(prod_descriptor_error_with_detail(
+                &PROD_ERROR_INVALID_INPUT,
+                format!("cannot place value {other:?} on the GPU"),
+            )),
         },
     }
 }
 
 fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(prod_error(
-            "prod: no acceleration provider available to honour GPU output",
+        return Err(prod_internal_error(
+            "no acceleration provider available to honour GPU output",
         ));
     };
 
@@ -771,7 +1075,7 @@ fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     };
     let handle = provider
         .upload(&view)
-        .map_err(|e| prod_error(format!("prod: failed to upload GPU result: {e}")))?;
+        .map_err(|e| prod_internal_error(format!("failed to upload GPU result: {e}")))?;
     Ok(Value::GpuTensor(handle))
 }
 
@@ -795,17 +1099,19 @@ fn real_to_complex(value: Value) -> BuiltinResult<Value> {
         Value::Num(n) => Ok(Value::Complex(n, 0.0)),
         Value::Tensor(t) => {
             let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
-            let tensor = ComplexTensor::new(data, t.shape.clone())
-                .map_err(|e| prod_error(format!("prod: {e}")))?;
+            let tensor =
+                ComplexTensor::new(data, t.shape.clone()).map_err(|e| prod_internal_error(&e))?;
             Ok(complex_tensor_into_value(tensor))
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(prod_error)?;
+            let tensor =
+                tensor::logical_to_tensor(&logical).map_err(|e| prod_internal_error(&e))?;
             real_to_complex(Value::Tensor(tensor))
         }
-        other => Err(prod_error(format!(
-            "prod: cannot convert value {other:?} to a complex result"
-        ))),
+        other => Err(prod_descriptor_error_with_detail(
+            &PROD_ERROR_INVALID_INPUT,
+            format!("cannot convert value {other:?} to a complex result"),
+        )),
     }
 }
 
@@ -841,7 +1147,7 @@ async fn analyse_like_prototype(proto: &Value) -> BuiltinResult<LikeAnalysis> {
         other => {
             let gathered = crate::dispatcher::gather_if_needed_async(other)
                 .await
-                .map_err(|e| prod_error(format!("prod: {e}")))?;
+                .map_err(|e| prod_internal_error(e.to_string()))?;
             analyse_like_prototype(&gathered).await
         }
     }
@@ -859,6 +1165,10 @@ pub(crate) mod tests {
         block_on(super::prod_builtin(value, rest))
     }
 
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
+    }
+
     #[test]
     fn prod_type_reduces_first_dim() {
         let out = prod_type(
@@ -873,6 +1183,35 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn prod_descriptor_signatures_and_errors() {
+        let labels: Vec<&str> = PROD_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"B = prod(A)"));
+        assert!(labels.contains(&"B = prod(A, dim)"));
+        assert!(labels.contains(&"B = prod(A, \"all\")"));
+        assert!(labels.contains(&"B = prod(A, nanflag)"));
+        assert!(labels.contains(&"B = prod(A, outtype)"));
+        assert!(labels.contains(&"B = prod(A, dim, nanflag)"));
+        assert!(labels.contains(&"B = prod(A, nanflag, dim)"));
+        assert!(labels.contains(&"B = prod(A, \"like\", prototype)"));
+        assert!(PROD_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == PROD_ERROR_INVALID_ARGUMENT.code));
+        assert!(PROD_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == PROD_ERROR_INVALID_INPUT.code));
+        assert!(PROD_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == PROD_ERROR_COMPLEX_UNSUPPORTED.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1011,7 +1350,27 @@ pub(crate) mod tests {
     #[test]
     fn prod_rejects_complex_input() {
         let err = prod_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            PROD_ERROR_COMPLEX_UNSUPPORTED.identifier
+        );
         assert!(err.message().contains("complex inputs"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn prod_too_many_output_class_specifiers_is_invalid_argument() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = prod_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("native"), Value::from("double")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            PROD_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert!(err.message().contains(PROD_ERROR_INVALID_ARGUMENT.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

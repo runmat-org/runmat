@@ -1,7 +1,11 @@
 //! MATLAB-compatible `cosh` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -14,6 +18,51 @@ use crate::builtins::math::type_resolvers::numeric_unary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "cosh";
+
+const COSH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise hyperbolic cosine result.",
+}];
+
+const COSH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, char array, complex value, or gpuArray.",
+}];
+
+const COSH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = cosh(X)",
+    inputs: &COSH_INPUTS,
+    outputs: &COSH_OUTPUT,
+}];
+
+const COSH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COSH.INVALID_INPUT",
+    identifier: Some("RunMat:cosh:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/char/complex data.",
+    message: "cosh: invalid input",
+};
+
+const COSH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COSH.INTERNAL",
+    identifier: Some("RunMat:cosh:Internal"),
+    when: "Internal gather/conversion/allocation/provider flow failed.",
+    message: "cosh: internal error",
+};
+
+const COSH_ERRORS: [BuiltinErrorDescriptor; 2] = [COSH_ERROR_INVALID_INPUT, COSH_ERROR_INTERNAL];
+
+pub const COSH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COSH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COSH_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -32,10 +81,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may execute cosh directly on the device; runtimes gather to the host when unary_cosh is unavailable.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn cosh_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cosh_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::cosh")]
@@ -58,10 +121,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cosh",
     category = "math/trigonometry",
-    summary = "Hyperbolic cosine of scalars, vectors, matrices, or N-D tensors (element-wise).",
+    summary = "Compute hyperbolic cosine element-wise.",
     keywords = "cosh,hyperbolic cosine,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::cosh::COSH_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::cosh"
 )]
 async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
@@ -73,9 +137,7 @@ async fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
         )),
         Value::ComplexTensor(ct) => cosh_complex_tensor(ct),
         Value::CharArray(ca) => cosh_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(runtime_error_for("cosh: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(cosh_error(&COSH_ERROR_INVALID_INPUT)),
         other => cosh_real(other),
     }
 }
@@ -91,13 +153,15 @@ async fn cosh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn cosh_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("cosh", value).map_err(runtime_error_for)?;
+    let tensor = tensor::value_into_tensor_for("cosh", value)
+        .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INVALID_INPUT, e))?;
     cosh_tensor(tensor).map(tensor::tensor_into_value)
 }
 
 fn cosh_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&v| v.cosh()).collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| runtime_error_for(format!("cosh: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))
 }
 
 fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
@@ -107,7 +171,7 @@ fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| (cosh_complex_re(re, im), cosh_complex_im(re, im)))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| runtime_error_for(format!("cosh: {e}")))?;
+        .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -118,7 +182,7 @@ fn cosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| (ch as u32 as f64).cosh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| runtime_error_for(format!("cosh: {e}")))?;
+        .map_err(|e| cosh_error_with_detail(&COSH_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -139,12 +203,22 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{IntValue, LogicalArray, ResolveContext, Tensor, Type};
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
     }
 
     fn cosh_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::cosh_builtin(value))
+    }
+
+    #[test]
+    fn cosh_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = COSH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = cosh(X)"));
     }
 
     #[test]
@@ -264,8 +338,9 @@ pub(crate) mod tests {
     #[test]
     fn cosh_string_errors() {
         let err = cosh_builtin(Value::String("runmat".to_string())).expect_err("expected error");
-        let message = error_message(err);
-        assert!(message.contains("numeric"));
+        let message = error_message(&err);
+        assert!(message.contains("invalid input"));
+        assert_eq!(err.identifier(), COSH_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

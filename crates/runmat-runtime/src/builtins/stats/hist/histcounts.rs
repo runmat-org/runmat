@@ -3,7 +3,11 @@
 use std::cmp::Ordering;
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -18,6 +22,197 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "histcounts";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
+const HISTCOUNTS_OUTPUT_N: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "N",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Histogram bin counts.",
+}];
+
+const HISTCOUNTS_OUTPUT_NE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Histogram bin counts.",
+    },
+    BuiltinParamDescriptor {
+        name: "edges",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Bin edge vector.",
+    },
+];
+
+const HISTCOUNTS_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input data values.",
+}];
+
+const HISTCOUNTS_INPUTS_X_BINS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data values.",
+    },
+    BuiltinParamDescriptor {
+        name: "bins",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar NumBins or explicit edge vector.",
+    },
+];
+
+const HISTCOUNTS_INPUTS_X_NAMEVALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data values.",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Name/value pairs (BinEdges, NumBins, BinWidth, BinLimits, Normalization, BinMethod).",
+    },
+];
+
+const HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data values.",
+    },
+    BuiltinParamDescriptor {
+        name: "bins",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Scalar NumBins or explicit edge vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional name/value pairs.",
+    },
+];
+
+const HISTCOUNTS_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "N = histcounts(X)",
+        inputs: &HISTCOUNTS_INPUTS_X,
+        outputs: &HISTCOUNTS_OUTPUT_N,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = histcounts(X, bins)",
+        inputs: &HISTCOUNTS_INPUTS_X_BINS,
+        outputs: &HISTCOUNTS_OUTPUT_N,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = histcounts(X, Name, Value, ...)",
+        inputs: &HISTCOUNTS_INPUTS_X_NAMEVALUE,
+        outputs: &HISTCOUNTS_OUTPUT_N,
+    },
+    BuiltinSignatureDescriptor {
+        label: "N = histcounts(X, bins, Name, Value, ...)",
+        inputs: &HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE,
+        outputs: &HISTCOUNTS_OUTPUT_N,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges] = histcounts(X)",
+        inputs: &HISTCOUNTS_INPUTS_X,
+        outputs: &HISTCOUNTS_OUTPUT_NE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges] = histcounts(X, bins)",
+        inputs: &HISTCOUNTS_INPUTS_X_BINS,
+        outputs: &HISTCOUNTS_OUTPUT_NE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges] = histcounts(X, Name, Value, ...)",
+        inputs: &HISTCOUNTS_INPUTS_X_NAMEVALUE,
+        outputs: &HISTCOUNTS_OUTPUT_NE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[N, edges] = histcounts(X, bins, Name, Value, ...)",
+        inputs: &HISTCOUNTS_INPUTS_X_BINS_NAMEVALUE,
+        outputs: &HISTCOUNTS_OUTPUT_NE,
+    },
+];
+
+const HISTCOUNTS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HISTCOUNTS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:histcounts:InvalidArgument"),
+    when: "Arguments are malformed, inconsistent, or unsupported.",
+    message: "histcounts: invalid argument",
+};
+
+const HISTCOUNTS_ERROR_BINMETHOD_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HISTCOUNTS.BINMETHOD_CONFLICT",
+    identifier: Some("RunMat:histcounts:BinMethodConflict"),
+    when: "BinMethod is combined with incompatible bin controls.",
+    message: "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth",
+};
+
+const HISTCOUNTS_ERROR_BINWIDTH_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HISTCOUNTS.BINWIDTH_INVALID",
+    identifier: Some("RunMat:histcounts:BinWidthInvalid"),
+    when: "BinWidth is zero, negative, non-finite, or non-scalar.",
+    message: "histcounts: BinWidth must be a positive finite scalar",
+};
+
+const HISTCOUNTS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HISTCOUNTS.INTERNAL",
+    identifier: Some("RunMat:histcounts:Internal"),
+    when: "Internal tensor conversion or allocation fails.",
+    message: "histcounts: internal operation failed",
+};
+
+const HISTCOUNTS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    HISTCOUNTS_ERROR_INVALID_ARGUMENT,
+    HISTCOUNTS_ERROR_BINMETHOD_CONFLICT,
+    HISTCOUNTS_ERROR_BINWIDTH_INVALID,
+    HISTCOUNTS_ERROR_INTERNAL,
+];
+
+pub const HISTCOUNTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HISTCOUNTS_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HISTCOUNTS_ERRORS,
+};
+
+fn builtin_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn descriptor_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    builtin_error_with(error, error.message)
+}
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
@@ -55,11 +250,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "histcounts",
     category = "stats/hist",
-    summary = "Count observations in numeric arrays using configurable histogram bins.",
+    summary = "Count observations in histogram bins.",
     keywords = "histcounts,histogram,binning,normalization,probability,cdf,gpu",
     accel = "reduction",
     sink = true,
     type_resolver(histcounts_type),
+    descriptor(crate::builtins::stats::hist::histcounts::HISTCOUNTS_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
 async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -234,9 +430,7 @@ fn compute_edges_standard(
 
     if let Some(width) = options.bin_width {
         if !width.is_finite() || width <= 0.0 {
-            return Err(builtin_error(
-                "histcounts: BinWidth must be a positive finite scalar",
-            ));
+            return Err(builtin_error(HISTCOUNTS_ERROR_BINWIDTH_INVALID.message));
         }
 
         if original_range_zero && options.bin_limits.is_none() {
@@ -656,9 +850,7 @@ impl HistcountsOptions {
                 || self.bin_width.is_some()
                 || self.num_bins.is_some())
         {
-            return Err(builtin_error(
-                "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth",
-            ));
+            return Err(descriptor_error(&HISTCOUNTS_ERROR_BINMETHOD_CONFLICT));
         }
         if self.num_bins.is_some() && self.bin_width.is_some() {
             return Err(builtin_error(
@@ -898,6 +1090,9 @@ fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usiz
 fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
     let scalar = scalar_value(value, name, option)?;
     if !scalar.is_finite() || scalar <= 0.0 {
+        if name == BUILTIN_NAME && option == "BinWidth" {
+            return Err(descriptor_error(&HISTCOUNTS_ERROR_BINWIDTH_INVALID));
+        }
         return Err(builtin_error(format!(
             "{name}: {option} must be a positive finite scalar"
         )));
@@ -1009,6 +1204,18 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(5)])
             }
         );
+    }
+
+    #[test]
+    fn histcounts_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = HISTCOUNTS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"N = histcounts(X)"));
+        assert!(labels.contains(&"N = histcounts(X, bins)"));
+        assert!(labels.contains(&"[N, edges] = histcounts(X, Name, Value, ...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1148,7 +1355,7 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_binmethod_conflict_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = block_on(evaluate(
+        let err = block_on(evaluate(
             Value::Tensor(tensor),
             &[
                 Value::from("BinMethod"),
@@ -1156,19 +1363,29 @@ pub(crate) mod tests {
                 Value::from("NumBins"),
                 Value::Num(5.0),
             ],
-        ));
-        assert!(result.is_err());
+        ))
+        .err()
+        .expect("BinMethod + NumBins should fail");
+        assert_eq!(
+            err.identifier(),
+            HISTCOUNTS_ERROR_BINMETHOD_CONFLICT.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_invalid_binwidth_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = block_on(evaluate(
+        let err = block_on(evaluate(
             Value::Tensor(tensor),
             &[Value::from("BinWidth"), Value::Num(0.0)],
-        ));
-        assert!(result.is_err());
+        ))
+        .err()
+        .expect("non-positive BinWidth should fail");
+        assert_eq!(
+            err.identifier(),
+            HISTCOUNTS_ERROR_BINWIDTH_INVALID.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `isfinite` builtin with GPU-aware semantics for RunMat.
 
-use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -54,8 +58,68 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isfinite";
-const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isfinite:InvalidInput";
-const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
+
+const ISFINITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical mask for finite elements.",
+}];
+
+const ISFINITE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to test for finiteness.",
+}];
+
+const ISFINITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isfinite(A)",
+    inputs: &ISFINITE_INPUTS,
+    outputs: &ISFINITE_OUTPUT,
+}];
+
+const ISFINITE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFINITE.INVALID_INPUT",
+    identifier: Some("RunMat:isfinite:InvalidInput"),
+    when: "Input is not numeric, logical, char, or string.",
+    message: "isfinite: expected numeric, logical, char, or string input",
+};
+
+const ISFINITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFINITE.INTERNAL",
+    identifier: Some("RunMat:isfinite:InternalError"),
+    when: "Internal mask-construction or gather path fails.",
+    message: "isfinite: internal error",
+};
+
+const ISFINITE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [ISFINITE_ERROR_INVALID_INPUT, ISFINITE_ERROR_INTERNAL];
+
+pub const ISFINITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISFINITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISFINITE_ERRORS,
+};
+
+fn isfinite_error(name: &str, error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    isfinite_error_with_message(name, error.message, error)
+}
+
+fn isfinite_error_with_message(
+    name: &str,
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(name);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
 
 #[runtime_builtin(
     name = "isfinite",
@@ -64,6 +128,7 @@ const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
     keywords = "isfinite,finite,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_unary_type),
+    descriptor(crate::builtins::logical::tests::isfinite::ISFINITE_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::tests::isfinite"
 )]
 async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
@@ -76,7 +141,13 @@ async fn isfinite_builtin(value: Value) -> BuiltinResult<Value> {
             }
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|err| internal_error(BUILTIN_NAME, format!("{BUILTIN_NAME}: {err}")))?;
+                .map_err(|err| {
+                    isfinite_error_with_message(
+                        BUILTIN_NAME,
+                        format!("{BUILTIN_NAME}: {err}"),
+                        &ISFINITE_ERROR_INTERNAL,
+                    )
+                })?;
             isfinite_tensor(BUILTIN_NAME, tensor)
         }
         other => isfinite_host(other),
@@ -94,12 +165,7 @@ fn isfinite_host(value: Value) -> BuiltinResult<Value> {
         Value::CharArray(array) => logical_full(BUILTIN_NAME, vec![array.rows, array.cols], true),
         Value::String(_) => Ok(Value::Bool(false)),
         Value::StringArray(array) => logical_full(BUILTIN_NAME, array.shape, false),
-        _ => Err(build_runtime_error(format!(
-            "{BUILTIN_NAME}: expected numeric, logical, char, or string input"
-        ))
-        .with_identifier(IDENTIFIER_INVALID_INPUT)
-        .with_builtin(BUILTIN_NAME)
-        .build()),
+        _ => Err(isfinite_error(BUILTIN_NAME, &ISFINITE_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -165,10 +231,7 @@ fn logical_array_error(name: &str, err: impl std::fmt::Display) -> RuntimeError 
 }
 
 fn internal_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(IDENTIFIER_INTERNAL)
-        .with_builtin(name)
-        .build()
+    isfinite_error_with_message(name, message, &ISFINITE_ERROR_INTERNAL)
 }
 
 #[cfg(test)]

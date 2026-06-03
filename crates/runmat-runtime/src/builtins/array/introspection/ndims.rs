@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::ndims")]
@@ -45,6 +49,37 @@ fn ndims_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
+const NDIMS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::IntegerScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of dimensions of input.",
+}];
+
+const NDIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const NDIMS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "n = ndims(A)",
+    inputs: &NDIMS_INPUTS,
+    outputs: &NDIMS_OUTPUT,
+}];
+
+const NDIMS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const NDIMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NDIMS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NDIMS_ERRORS,
+};
+
 #[runtime_builtin(
     name = "ndims",
     category = "array/introspection",
@@ -52,6 +87,7 @@ fn ndims_type(args: &[Type], _context: &ResolveContext) -> Type {
     keywords = "ndims,number of dimensions,array rank,gpu metadata,MATLAB compatibility",
     accel = "metadata",
     type_resolver(ndims_type),
+    descriptor(crate::builtins::array::introspection::ndims::NDIMS_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::ndims"
 )]
 async fn ndims_builtin(value: Value) -> crate::BuiltinResult<Value> {

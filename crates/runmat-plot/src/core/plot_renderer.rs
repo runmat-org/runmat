@@ -5,7 +5,7 @@
 //! high-quality output across all use cases.
 
 use crate::core::renderer::Vertex;
-use crate::core::{Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
+use crate::core::{BoundingBox, Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
 use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
@@ -15,12 +15,36 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+type ViewBounds2D = (f64, f64, f64, f64);
+type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
+
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
     vertex_signature: (usize, usize),
     vertex_buffer: Arc<wgpu::Buffer>,
     index_signature: Option<(usize, usize)>,
     index_buffer: Option<Arc<wgpu::Buffer>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct AxesViewContract {
+    rows: usize,
+    cols: usize,
+    axes: Vec<AxesViewContractEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct AxesViewContractEntry {
+    has_3d_content: bool,
+    x_limits: Option<(f64, f64)>,
+    y_limits: Option<(f64, f64)>,
+    z_limits: Option<(f64, f64)>,
+    axis_equal: bool,
+    x_log: bool,
+    y_log: bool,
+    view_azimuth_deg: Option<f32>,
+    view_elevation_deg: Option<f32>,
+    view_revision: u64,
 }
 
 const PATCH_3D_ABS_EPSILON: f32 = 1e-9;
@@ -72,12 +96,18 @@ pub struct PlotRenderer {
     last_scene_viewport_px: Option<(u32, u32)>,
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
+    /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
+    last_axes_view_bounds: Option<PerAxesViewBounds>,
+    /// Last figure view contract used to decide whether script-owned axes state changed.
+    last_axes_view_contract: Option<AxesViewContract>,
 
     /// If false, do not auto-fit camera when the figure updates (user has interacted).
     camera_auto_fit: bool,
     /// Per-axes 2D camera ownership. True means the user has interacted and automatic 2D refits
     /// should not overwrite the camera during ordinary figure updates.
     axes_2d_camera_user_controlled: Vec<bool>,
+    /// Last script-owned `view(...)` revision applied to each axes camera.
+    axes_applied_view_revisions: Vec<Option<u64>>,
     /// Per-node GPU buffer cache for stable interactive redraws.
     scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
 }
@@ -264,8 +294,11 @@ impl PlotRenderer {
             last_figure: None,
             last_scene_viewport_px: None,
             last_axes_plot_sizes_px: None,
+            last_axes_view_bounds: None,
+            last_axes_view_contract: None,
             camera_auto_fit: true,
             axes_2d_camera_user_controlled: vec![false],
+            axes_applied_view_revisions: vec![None],
             scene_buffer_cache: RefCell::new(HashMap::new()),
         })
     }
@@ -289,6 +322,7 @@ impl PlotRenderer {
             }
             crate::plots::figure::PlotElement::Line3(_) => true,
             crate::plots::figure::PlotElement::Scatter3(_) => true,
+            crate::plots::figure::PlotElement::Contour(contour) => contour.is_3d(),
             _ => false,
         }
     }
@@ -307,6 +341,38 @@ impl PlotRenderer {
             .unwrap_or(false)
     }
 
+    fn axes_view_contract_for_figure(figure: &Figure) -> AxesViewContract {
+        let (rows, cols) = figure.axes_grid();
+        let axes_count = rows.max(1) * cols.max(1);
+        let mut has_3d_content = vec![false; axes_count];
+        for (plot, axes_index) in figure
+            .plots()
+            .zip(figure.plot_axes_indices().iter().copied())
+        {
+            if axes_index < axes_count && Self::plot_element_is_3d(plot) {
+                has_3d_content[axes_index] = true;
+            }
+        }
+        let axes = (0..axes_count)
+            .map(|axes_index| {
+                let meta = figure.axes_metadata(axes_index);
+                AxesViewContractEntry {
+                    has_3d_content: has_3d_content[axes_index],
+                    x_limits: meta.and_then(|m| m.x_limits),
+                    y_limits: meta.and_then(|m| m.y_limits),
+                    z_limits: meta.and_then(|m| m.z_limits),
+                    axis_equal: meta.map(|m| m.axis_equal).unwrap_or(false),
+                    x_log: meta.map(|m| m.x_log).unwrap_or(false),
+                    y_log: meta.map(|m| m.y_log).unwrap_or(false),
+                    view_azimuth_deg: meta.and_then(|m| m.view_azimuth_deg),
+                    view_elevation_deg: meta.and_then(|m| m.view_elevation_deg),
+                    view_revision: meta.map(|m| m.view_revision).unwrap_or(0),
+                }
+            })
+            .collect();
+        AxesViewContract { rows, cols, axes }
+    }
+
     /// Mark that the user has interacted with the camera (disable auto-fit-on-update).
     pub fn note_camera_interaction(&mut self) {
         if self.camera_auto_fit {
@@ -322,6 +388,22 @@ impl PlotRenderer {
         }
         if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(axes_index) {
             *flag = true;
+        }
+    }
+
+    pub fn set_axes_camera_interaction_flags(&mut self, flags: &[bool]) {
+        self.axes_2d_camera_user_controlled
+            .resize(self.axes_cameras.len(), false);
+        let mut any_user_controlled = false;
+        for idx in 0..self.axes_cameras.len() {
+            let controlled = flags.get(idx).copied().unwrap_or(false);
+            if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(idx) {
+                *flag = controlled;
+            }
+            any_user_controlled |= controlled;
+        }
+        if any_user_controlled {
+            self.note_camera_interaction();
         }
     }
 
@@ -347,14 +429,31 @@ impl PlotRenderer {
         self.cache_figure_meta(&figure);
         self.last_figure = Some(figure.clone());
         self.last_axes_plot_sizes_px = None;
+        self.last_axes_view_bounds = None;
         // Initialize axes cameras for subplot grid
         let (rows, cols) = figure.axes_grid();
         let num_axes = rows.max(1) * cols.max(1);
+        let axes_view_contract = Self::axes_view_contract_for_figure(&figure);
+        let axes_view_contract_changed =
+            self.last_axes_view_contract.as_ref() != Some(&axes_view_contract);
+        if axes_view_contract_changed {
+            log::debug!(
+                target: "runmat_plot.camera_refit",
+                "figure axes view contract changed; resetting script-owned camera fit rows={} cols={} axes_count={}",
+                rows,
+                cols,
+                num_axes
+            );
+            self.clear_all_axes_camera_interaction();
+            self.camera_auto_fit = true;
+        }
+        self.last_axes_view_contract = Some(axes_view_contract);
 
         if self.axes_cameras.len() != num_axes {
             self.axes_cameras
                 .resize_with(num_axes, Self::create_default_camera);
             self.axes_2d_camera_user_controlled.resize(num_axes, false);
+            self.axes_applied_view_revisions.resize(num_axes, None);
             self.camera_auto_fit = true;
         }
 
@@ -377,6 +476,9 @@ impl PlotRenderer {
                     Self::create_default_camera()
                 };
                 self.clear_axes_camera_interaction(axes_index);
+                if let Some(revision) = self.axes_applied_view_revisions.get_mut(axes_index) {
+                    *revision = None;
+                }
                 self.camera_auto_fit = true;
             }
         }
@@ -416,7 +518,11 @@ impl PlotRenderer {
     ) {
         use crate::core::SceneNode;
 
-        // Convert figure to render data first, then create scene nodes
+        let (rows, cols) = figure.axes_grid();
+
+        // Convert figure to render data first, then create scene nodes.
+        // For subplot figures, avoid baking full-surface line stroke geometry before overlay
+        // layout has provided per-axes plot viewports.
         let viewport_px = (
             self.wgpu_renderer.surface_config.width.max(1),
             self.wgpu_renderer.surface_config.height.max(1),
@@ -426,12 +532,18 @@ impl PlotRenderer {
             device: &self.wgpu_renderer.device,
             queue: &self.wgpu_renderer.queue,
         };
+        let view_bounds = self.axes_view_bounds_for_count(rows.max(1) * cols.max(1));
+        let viewport_hint = if axes_plot_sizes_px.is_some() || rows.max(1) * cols.max(1) <= 1 {
+            Some(viewport_px)
+        } else {
+            None
+        };
         let render_data_list = figure.render_data_with_axes_with_viewport_and_gpu(
-            Some(viewport_px),
+            viewport_hint,
             axes_plot_sizes_px,
+            Some(&view_bounds),
             Some(&gpu),
         );
-        let (rows, cols) = figure.axes_grid();
 
         for (node_id_counter, (axes_index, render_data)) in render_data_list.into_iter().enumerate()
         {
@@ -470,11 +582,23 @@ impl PlotRenderer {
             .iter()
             .map(|&(w, h)| (w.max(1), h.max(1)))
             .collect();
-        if self.last_axes_plot_sizes_px.as_ref() == Some(&normalized) {
+        if normalized.iter().any(|&(w, h)| w < 2 || h < 2) {
+            log::debug!(
+                target: "runmat_plot.viewport_rebuild",
+                "skipped viewport-dependent scene geometry rebuild for unstable viewport_sizes={:?}",
+                normalized
+            );
+            return;
+        }
+        let view_bounds = self.axes_view_bounds_for_count(normalized.len().max(1));
+        if self.last_axes_plot_sizes_px.as_ref() == Some(&normalized)
+            && self.last_axes_view_bounds.as_ref() == Some(&view_bounds)
+        {
             return;
         }
         let Some(figure) = self.last_figure.clone() else {
             self.last_axes_plot_sizes_px = Some(normalized);
+            self.last_axes_view_bounds = Some(view_bounds);
             return;
         };
         self.scene.clear();
@@ -488,7 +612,14 @@ impl PlotRenderer {
         );
         self.refit_2d_cameras_to_scene_bounds();
         self.last_axes_plot_sizes_px = Some(normalized);
+        self.last_axes_view_bounds = Some(view_bounds);
         self.needs_update = true;
+    }
+
+    fn axes_view_bounds_for_count(&self, axes_count: usize) -> PerAxesViewBounds {
+        (0..axes_count)
+            .map(|idx| self.view_bounds_for_axes(idx))
+            .collect()
     }
 
     fn refit_2d_cameras_to_scene_bounds(&mut self) {
@@ -624,7 +755,17 @@ impl PlotRenderer {
             }
             if let Some(meta) = fig.axes_metadata(idx) {
                 if let (Some(az), Some(el)) = (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                    if self.axes_applied_view_revisions.get(idx).copied().flatten()
+                        == Some(meta.view_revision)
+                    {
+                        continue;
+                    }
                     cam.set_view_angles_deg(az, el);
+                    if let Some(revision) = self.axes_applied_view_revisions.get_mut(idx) {
+                        *revision = Some(meta.view_revision);
+                    }
+                } else if let Some(revision) = self.axes_applied_view_revisions.get_mut(idx) {
+                    *revision = None;
                 }
             }
         }
@@ -662,11 +803,60 @@ impl PlotRenderer {
         Some((x_min, x_max, y_min, y_max))
     }
 
+    fn apply_3d_display_limits_to_bounds(
+        bounds: BoundingBox,
+        figure: Option<&Figure>,
+        axes_index: usize,
+    ) -> BoundingBox {
+        let Some(meta) = figure.and_then(|fig| fig.axes_metadata(axes_index)) else {
+            return bounds;
+        };
+        let mut min = bounds.min;
+        let mut max = bounds.max;
+        if let Some((lo, hi)) = meta.x_limits {
+            min.x = lo as f32;
+            max.x = hi as f32;
+        }
+        if let Some((lo, hi)) = meta.y_limits {
+            min.y = lo as f32;
+            max.y = hi as f32;
+        }
+        if let Some((lo, hi)) = meta.z_limits {
+            min.z = lo as f32;
+            max.z = hi as f32;
+        }
+        BoundingBox { min, max }
+    }
+
+    fn bounds_are_finite(bounds: BoundingBox) -> bool {
+        bounds.min.x.is_finite()
+            && bounds.min.y.is_finite()
+            && bounds.min.z.is_finite()
+            && bounds.max.x.is_finite()
+            && bounds.max.y.is_finite()
+            && bounds.max.z.is_finite()
+    }
+
+    fn current_3d_display_bounds_for_axes(&self, axes_index: usize) -> Option<BoundingBox> {
+        let bounds = self.axes_bounds(axes_index)?;
+        let bounds =
+            Self::apply_3d_display_limits_to_bounds(bounds, self.last_figure.as_ref(), axes_index);
+        Self::bounds_are_finite(bounds).then_some(bounds)
+    }
+
+    fn display_bounds_3d_for_axes(&self, axes_index: usize) -> Option<BoundingBox> {
+        self.current_3d_display_bounds_for_axes(axes_index)
+    }
+
+    fn axes_model_matrix(&self, _axes_index: usize) -> Mat4 {
+        Mat4::IDENTITY
+    }
+
     fn fit_cameras_to_axes_data(&mut self) -> bool {
         let mut applied = false;
         for idx in 0..self.axes_cameras.len() {
             if self.axes_has_3d_content(idx) {
-                let Some(bounds) = self.axes_bounds(idx) else {
+                let Some(bounds) = self.display_bounds_3d_for_axes(idx) else {
                     continue;
                 };
                 let center = (bounds.min + bounds.max) * 0.5;
@@ -766,7 +956,7 @@ impl PlotRenderer {
         }
 
         if self.axes_has_3d_content(0) {
-            let Some(bounds) = self.axes_bounds(0) else {
+            let Some(bounds) = self.display_bounds_3d_for_axes(0) else {
                 return false;
             };
             let center = (bounds.min + bounds.max) * 0.5;
@@ -834,12 +1024,16 @@ impl PlotRenderer {
         let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
         let data_centers: Vec<Vec3> = (0..self.axes_cameras.len())
             .map(|idx| {
-                self.axes_bounds(idx)
-                    .map(|b| (b.min + b.max) * 0.5)
-                    .unwrap_or_else(|| self.axes_cameras[idx].target)
+                if self.axes_has_3d_content(idx) {
+                    self.display_bounds_3d_for_axes(idx)
+                } else {
+                    self.axes_bounds(idx)
+                }
+                .map(|b| (b.min + b.max) * 0.5)
+                .unwrap_or_else(|| self.axes_cameras[idx].target)
             })
             .collect();
-        let display_bounds: Vec<Option<(f64, f64, f64, f64)>> = (0..self.axes_cameras.len())
+        let display_bounds: PerAxesViewBounds = (0..self.axes_cameras.len())
             .map(|idx| self.display_bounds_for_axes(idx))
             .collect();
         for (idx, c) in self.axes_cameras.iter_mut().enumerate() {
@@ -1029,7 +1223,7 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         cam.update_aspect_ratio(aspect_ratio);
         let view_proj_matrix = cam.view_proj_matrix();
-        let model_matrix = Mat4::IDENTITY;
+        let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, model_matrix);
 
@@ -1134,7 +1328,10 @@ impl PlotRenderer {
         let mut point_style_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
         for (render_data, _vb, _ib) in &render_items {
-            if render_data.pipeline_type == crate::core::PipelineType::Points {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) {
                 let style = crate::core::renderer::PointStyleUniforms {
                     face_color: render_data.material.albedo.to_array(),
                     edge_color: render_data.material.emissive.to_array(),
@@ -1148,6 +1345,28 @@ impl PlotRenderer {
                 point_style_bind_groups.push(None);
             }
         }
+        // Expand CPU marker vertices to billboard quads.
+        let mut point_buffers: Vec<Option<(wgpu::Buffer, usize)>> =
+            Vec::with_capacity(render_items.len());
+        for (render_data, _vb, _ib) in &render_items {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) && !render_data.vertices.is_empty()
+            {
+                let expanded = self
+                    .wgpu_renderer
+                    .create_direct_point_vertices(&render_data.vertices, 0.0);
+                let buffer = self.wgpu_renderer.create_vertex_buffer(&expanded);
+                point_buffers.push(Some((buffer, expanded.len())));
+            } else {
+                point_buffers.push(None);
+            }
+        }
+        self.wgpu_renderer.update_marker_screen_uniforms([
+            config.width.max(1) as f32,
+            config.height.max(1) as f32,
+        ]);
 
         // Create render pass
         {
@@ -1262,9 +1481,34 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     // Set the uniform bind group (required by shaders)
                     render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
+                    if matches!(
+                        render_data.pipeline_type,
+                        crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                    ) {
+                        if let Some(ref bg) = point_style_bind_groups[i] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                        render_pass.set_bind_group(
+                            2,
+                            self.wgpu_renderer.get_marker_screen_bind_group(),
+                            &[],
+                        );
+                    }
                 }
 
-                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                let is_markers = matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                );
+                if is_markers {
+                    if let Some((ref expanded, _len)) = point_buffers[i] {
+                        render_pass.set_vertex_buffer(0, expanded.slice(..));
+                    } else {
+                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    }
+                } else {
+                    render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                }
 
                 if let Some(index_buffer) = index_buffer {
                     render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -1277,6 +1521,12 @@ impl PlotRenderer {
                     if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
                         render_pass.draw_indirect(args, offset);
                         continue;
+                    }
+                    if is_markers {
+                        if let Some((_, len)) = point_buffers[i] {
+                            render_pass.draw(0..len as u32, 0..1);
+                            continue;
+                        }
                     }
                     // Use draw_calls from render_data for proper vertex range handling
                     for draw_call in &render_data.draw_calls {
@@ -1498,8 +1748,9 @@ impl PlotRenderer {
             }
         }
         let view_proj_matrix = cam.view_proj_matrix();
+        let model_matrix = self.axes_model_matrix(axes_index);
         self.wgpu_renderer
-            .update_uniforms_for_axes(axes_index, view_proj_matrix, Mat4::IDENTITY);
+            .update_uniforms_for_axes(axes_index, view_proj_matrix, model_matrix);
         log::debug!(
             "runmat-plot: renderer.camera_to_target_viewport.uniforms_updated axes_index={}",
             axes_index
@@ -1895,7 +2146,11 @@ impl PlotRenderer {
         let mut point_buffers: Vec<Option<(wgpu::Buffer, usize)>> =
             Vec::with_capacity(render_items.len());
         for (render_data, _vb, _ib) in render_items.iter() {
-            if matches!(render_data.pipeline_type, crate::core::PipelineType::Points) {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) && !render_data.vertices.is_empty()
+            {
                 let expanded = self
                     .wgpu_renderer
                     // size_px=0.0 => use per-vertex normal.z sizes
@@ -1939,7 +2194,10 @@ impl PlotRenderer {
         let mut point_style_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
         for (render_data, _vb, _ib) in render_items.iter() {
-            if matches!(render_data.pipeline_type, crate::core::PipelineType::Points) {
+            if matches!(
+                render_data.pipeline_type,
+                crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+            ) {
                 let style = crate::core::renderer::PointStyleUniforms {
                     face_color: render_data.material.albedo.to_array(),
                     edge_color: render_data.material.emissive.to_array(),
@@ -2041,6 +2299,10 @@ impl PlotRenderer {
             self.wgpu_renderer
                 .ensure_pipeline(crate::core::PipelineType::Points);
         }
+        self.wgpu_renderer.update_marker_screen_uniforms_for_axes(
+            axes_index,
+            [sw.max(1) as f32, sh.max(1) as f32],
+        );
 
         // Begin pass with Load (preserve egui)
         {
@@ -2167,8 +2429,6 @@ impl PlotRenderer {
                 None
             };
 
-            // Keep transient point buffers alive during this pass
-            let mut __temp_point_buffers_cam: Vec<wgpu::Buffer> = Vec::new();
             for (idx, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate()
             {
                 let is_triangles = matches!(
@@ -2177,8 +2437,10 @@ impl PlotRenderer {
                 );
                 let is_lines =
                     matches!(render_data.pipeline_type, crate::core::PipelineType::Lines);
-                let is_points =
-                    matches!(render_data.pipeline_type, crate::core::PipelineType::Points);
+                let is_points = matches!(
+                    render_data.pipeline_type,
+                    crate::core::PipelineType::Points | crate::core::PipelineType::Scatter3
+                );
                 let is_textured = matches!(
                     render_data.pipeline_type,
                     crate::core::PipelineType::Textured
@@ -2217,6 +2479,11 @@ impl PlotRenderer {
                         .get_direct_uniform_bind_group_for_axes(axes_index);
                     render_pass.set_pipeline(pipeline_ref);
                     render_pass.set_bind_group(0, uniform_bg, &[]);
+                    if is_points {
+                        if let Some(ref bg) = point_style_bind_groups[idx] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                    }
                     log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=direct",
                         axes_index,
@@ -2250,6 +2517,17 @@ impl PlotRenderer {
                             .get_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
+                    if is_points {
+                        if let Some(ref bg) = point_style_bind_groups[idx] {
+                            render_pass.set_bind_group(1, bg, &[]);
+                        }
+                        render_pass.set_bind_group(
+                            2,
+                            self.wgpu_renderer
+                                .get_marker_screen_bind_group_for_axes(axes_index),
+                            &[],
+                        );
+                    }
                     log::debug!(
                         "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=standard",
                         axes_index,
@@ -2259,9 +2537,6 @@ impl PlotRenderer {
 
                 if is_points && use_direct {
                     if let Some((ref buf, len)) = point_buffers[idx] {
-                        if let Some(ref bg) = point_style_bind_groups[idx] {
-                            render_pass.set_bind_group(1, bg, &[]);
-                        }
                         render_pass.set_vertex_buffer(0, buf.slice(..));
                         render_pass.draw(0..len as u32, 0..1);
                         log::debug!(
@@ -2271,6 +2546,12 @@ impl PlotRenderer {
                             len
                         );
                         continue;
+                    }
+                } else if is_points {
+                    if let Some((ref buf, _len)) = point_buffers[idx] {
+                        render_pass.set_vertex_buffer(0, buf.slice(..));
+                    } else {
+                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                     }
                 } else {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -2288,6 +2569,12 @@ impl PlotRenderer {
                         );
                     }
                 } else {
+                    if is_points {
+                        if let Some((_, len)) = point_buffers[idx] {
+                            render_pass.draw(0..len as u32, 0..1);
+                            continue;
+                        }
+                    }
                     for dc in &render_data.draw_calls {
                         render_pass.draw(
                             dc.vertex_offset as u32..(dc.vertex_offset + dc.vertex_count) as u32,
@@ -2701,7 +2988,7 @@ impl PlotRenderer {
         let Some(meta) = fig.axes_metadata(axes_index) else {
             return Vec::new();
         };
-        let Some(bounds) = self.axes_bounds(axes_index) else {
+        let Some(bounds) = self.display_bounds_3d_for_axes(axes_index) else {
             return Vec::new();
         };
         let dx = (bounds.max.x - bounds.min.x).abs().max(1.0e-3);
@@ -2962,6 +3249,48 @@ mod tests {
         ]);
 
         assert!(!PlotRenderer::plot_element_is_3d(&patch));
+    }
+
+    #[test]
+    fn applies_z_limits_to_3d_display_bounds() {
+        let mut figure = Figure::new();
+        figure.set_axes_z_limits(0, Some((-2.0, 3.0)));
+        let bounds = BoundingBox::new(Vec3::new(-1.0, -1.0, -10.0), Vec3::new(1.0, 1.0, 10.0));
+
+        let limited = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
+
+        assert_eq!(limited.min.z, -2.0);
+        assert_eq!(limited.max.z, 3.0);
+        assert_eq!(limited.min.x, -1.0);
+        assert_eq!(limited.max.x, 1.0);
+    }
+
+    #[test]
+    fn degenerate_z_bounds_remain_finite_for_3d_display_bounds() {
+        let figure = Figure::new();
+        let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
+
+        let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
+
+        assert!(PlotRenderer::bounds_are_finite(display));
+        assert_eq!(display.min.z, 0.0);
+        assert_eq!(display.max.z, 0.0);
+    }
+
+    #[test]
+    fn axes_view_contract_tracks_subplot_limits() {
+        let mut base = Figure::new();
+        base.set_subplot_grid(2, 1);
+        let mut limited = base.clone();
+        limited.set_axes_limits(0, Some((0.0, 30.0)), None);
+        limited.set_axes_limits(1, Some((200.0, 450.0)), None);
+
+        let base_contract = PlotRenderer::axes_view_contract_for_figure(&base);
+        let limited_contract = PlotRenderer::axes_view_contract_for_figure(&limited);
+
+        assert_ne!(base_contract, limited_contract);
+        assert_eq!(limited_contract.axes[0].x_limits, Some((0.0, 30.0)));
+        assert_eq!(limited_contract.axes[1].x_limits, Some((200.0, 450.0)));
     }
 }
 

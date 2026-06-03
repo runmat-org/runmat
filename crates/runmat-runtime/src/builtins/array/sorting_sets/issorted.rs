@@ -2,7 +2,11 @@
 
 use std::cmp::Ordering;
 
-use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::bool_output_type;
@@ -43,10 +47,235 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Predicate builtin evaluated outside fusion; planner prevents kernel generation.",
 };
 
-fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("issorted")
-        .build()
+const BUILTIN_NAME: &str = "issorted";
+
+const ISSORTED_OUTPUT_TF: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when data is already sorted by requested criteria.",
+}];
+
+const ISSORTED_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const ISSORTED_INPUTS_A_ARG1: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension selector or direction token (including 'rows').",
+    },
+];
+
+const ISSORTED_INPUTS_A_ARG1_ARG2: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension selector or direction token (including 'rows').",
+    },
+    BuiltinParamDescriptor {
+        name: "arg2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Direction token or additional mode selector.",
+    },
+];
+
+const ISSORTED_INPUTS_COMPARISON_METHOD: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional dimension/direction/rows arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"ComparisonMethod\""),
+        description: "Name-value option key.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"auto\""),
+        description: "Comparison method: 'auto', 'real', or 'abs'.",
+    },
+];
+
+const ISSORTED_INPUTS_MISSING_PLACEMENT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional dimension/direction/rows arguments.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"MissingPlacement\""),
+        description: "Name-value option key.",
+    },
+    BuiltinParamDescriptor {
+        name: "placement",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"auto\""),
+        description: "Missing placement policy: 'auto', 'first', or 'last'.",
+    },
+];
+
+const ISSORTED_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = issorted(A)",
+        inputs: &ISSORTED_INPUTS_A,
+        outputs: &ISSORTED_OUTPUT_TF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = issorted(A, arg1)",
+        inputs: &ISSORTED_INPUTS_A_ARG1,
+        outputs: &ISSORTED_OUTPUT_TF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = issorted(A, arg1, arg2)",
+        inputs: &ISSORTED_INPUTS_A_ARG1_ARG2,
+        outputs: &ISSORTED_OUTPUT_TF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = issorted(A, ..., \"ComparisonMethod\", method)",
+        inputs: &ISSORTED_INPUTS_COMPARISON_METHOD,
+        outputs: &ISSORTED_OUTPUT_TF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = issorted(A, ..., \"MissingPlacement\", placement)",
+        inputs: &ISSORTED_INPUTS_MISSING_PLACEMENT,
+        outputs: &ISSORTED_OUTPUT_TF,
+    },
+];
+
+const ISSORTED_ERROR_ROWS_REQUIRES_2D: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISSORTED.ROWS_REQUIRES_2D",
+    identifier: Some("RunMat:issorted:RowsRequiresTwoDimensionalInput"),
+    when: "'rows' mode is used with non-2D input.",
+    message: "issorted: 'rows' expects a 2-D matrix",
+};
+
+const ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED: BuiltinErrorDescriptor =
+    BuiltinErrorDescriptor {
+        code: "RM.ISSORTED.STRING_COMPARISON_UNSUPPORTED",
+        identifier: Some("RunMat:issorted:StringComparisonMethodUnsupported"),
+        when: "ComparisonMethod is used with string arrays.",
+        message: "issorted: 'ComparisonMethod' is not supported for string arrays",
+    };
+
+const ISSORTED_ERROR_DUPLICATE_DIRECTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISSORTED.DUPLICATE_DIRECTION",
+    identifier: Some("RunMat:issorted:DuplicateDirection"),
+    when: "Multiple direction tokens are provided.",
+    message: "issorted: sorting direction specified more than once",
+};
+
+const ISSORTED_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISSORTED.INVALID_ARGUMENT",
+    identifier: Some("RunMat:issorted:InvalidArgument"),
+    when: "Parser encounters invalid or unrecognized option/value arguments.",
+    message: "issorted: invalid argument sequence",
+};
+
+const ISSORTED_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISSORTED.INVALID_INPUT",
+    identifier: Some("RunMat:issorted:InvalidInput"),
+    when: "Input type cannot be normalized into a supported sortable representation.",
+    message: "issorted: invalid input type",
+};
+
+const ISSORTED_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISSORTED.INTERNAL",
+    identifier: Some("RunMat:issorted:Internal"),
+    when: "Internal conversion/allocation paths fail.",
+    message: "issorted: internal operation failed",
+};
+
+const ISSORTED_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    ISSORTED_ERROR_ROWS_REQUIRES_2D,
+    ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED,
+    ISSORTED_ERROR_DUPLICATE_DIRECTION,
+    ISSORTED_ERROR_INVALID_ARGUMENT,
+    ISSORTED_ERROR_INVALID_INPUT,
+    ISSORTED_ERROR_INTERNAL,
+];
+
+pub const ISSORTED_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISSORTED_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISSORTED_ERRORS,
+};
+
+fn issorted_error(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn issorted_invalid_argument(message: impl Into<String>) -> crate::RuntimeError {
+    issorted_error(&ISSORTED_ERROR_INVALID_ARGUMENT, message)
+}
+
+fn issorted_invalid_input(message: impl Into<String>) -> crate::RuntimeError {
+    issorted_error(&ISSORTED_ERROR_INVALID_INPUT, message)
+}
+
+fn issorted_internal(message: impl Into<String>) -> crate::RuntimeError {
+    issorted_error(&ISSORTED_ERROR_INTERNAL, message)
 }
 
 #[runtime_builtin(
@@ -57,6 +286,7 @@ fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
     accel = "sink",
     sink = true,
     type_resolver(bool_output_type),
+    descriptor(crate::builtins::array::sorting_sets::issorted::ISSORTED_DESCRIPTOR),
     builtin_path = "crate::builtins::array::sorting_sets::issorted"
 )]
 async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -174,12 +404,12 @@ impl IssortedArgs {
                 match token.as_str() {
                     "rows" => {
                         if saw_rows {
-                            return Err(issorted_error(
+                            return Err(issorted_invalid_argument(
                                 "issorted: 'rows' specified more than once",
                             ));
                         }
                         if dim_arg.is_some() {
-                            return Err(issorted_error(
+                            return Err(issorted_invalid_argument(
                                 "issorted: cannot combine 'rows' with a dimension argument",
                             ));
                         }
@@ -227,19 +457,21 @@ impl IssortedArgs {
                     "comparisonmethod" => {
                         idx += 1;
                         if idx >= args.len() {
-                            return Err(issorted_error(
+                            return Err(issorted_invalid_argument(
                                 "issorted: expected a value for 'ComparisonMethod'",
                             ));
                         }
                         let value = value_to_string_lower(&args[idx]).ok_or_else(|| {
-                            issorted_error("issorted: 'ComparisonMethod' expects a string value")
+                            issorted_invalid_argument(
+                                "issorted: 'ComparisonMethod' expects a string value",
+                            )
                         })?;
                         comparison = match value.as_str() {
                             "auto" => ComparisonMethod::Auto,
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(issorted_error(format!(
+                                return Err(issorted_invalid_argument(format!(
                                     "issorted: unsupported ComparisonMethod '{other}'"
                                 )));
                             }
@@ -250,19 +482,21 @@ impl IssortedArgs {
                     "missingplacement" => {
                         idx += 1;
                         if idx >= args.len() {
-                            return Err(issorted_error(
+                            return Err(issorted_invalid_argument(
                                 "issorted: expected a value for 'MissingPlacement'",
                             ));
                         }
                         let value = value_to_string_lower(&args[idx]).ok_or_else(|| {
-                            issorted_error("issorted: 'MissingPlacement' expects a string value")
+                            issorted_invalid_argument(
+                                "issorted: 'MissingPlacement' expects a string value",
+                            )
                         })?;
                         missing = match value.as_str() {
                             "auto" => MissingPlacement::Auto,
                             "first" => MissingPlacement::First,
                             "last" => MissingPlacement::Last,
                             other => {
-                                return Err(issorted_error(format!(
+                                return Err(issorted_invalid_argument(format!(
                                     "issorted: unsupported MissingPlacement '{other}'"
                                 )));
                             }
@@ -282,7 +516,7 @@ impl IssortedArgs {
                 }
             }
 
-            return Err(issorted_error(format!(
+            return Err(issorted_invalid_argument(format!(
                 "issorted: unrecognised argument {:?}",
                 arg
             )));
@@ -304,7 +538,8 @@ impl IssortedArgs {
 fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResult<()> {
     if direction.is_some() {
         Err(issorted_error(
-            "issorted: sorting direction specified more than once",
+            &ISSORTED_ERROR_DUPLICATE_DIRECTION,
+            ISSORTED_ERROR_DUPLICATE_DIRECTION.message,
         ))
     } else {
         Ok(())
@@ -316,18 +551,18 @@ async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::Tensor(tensor) => Ok(InputArray::Real(tensor)),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| issorted_error(e))?;
+                .map_err(issorted_internal)?;
             Ok(InputArray::Real(tensor))
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             let tensor = tensor::value_into_tensor_for("issorted", value)
-                .map_err(|e| issorted_error(e))?;
+                .map_err(issorted_internal)?;
             Ok(InputArray::Real(tensor))
         }
         Value::ComplexTensor(ct) => Ok(InputArray::Complex(ct)),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| issorted_error(format!("issorted: {e}")))?;
+                .map_err(|e| issorted_internal(format!("issorted: {e}")))?;
             Ok(InputArray::Complex(tensor))
         }
         Value::CharArray(ca) => {
@@ -337,14 +572,15 @@ async fn normalize_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::StringArray(sa) => Ok(InputArray::String(sa)),
         Value::String(s) => {
             let array =
-                StringArray::new(vec![s], vec![1, 1]).map_err(|e| issorted_error(format!("issorted: {e}")))?;
+                StringArray::new(vec![s], vec![1, 1])
+                    .map_err(|e| issorted_internal(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
             Ok(InputArray::Real(tensor))
         }
-        other => Err(issorted_error(format!(
+        other => Err(issorted_invalid_input(format!(
             "issorted: unsupported input type {:?}; expected numeric, logical, complex, char, or string arrays",
             other
         ))),
@@ -377,6 +613,7 @@ fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinRe
     }
     if !matches!(args.comparison, ComparisonMethod::Auto) {
         return Err(issorted_error(
+            &ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED,
             "issorted: 'ComparisonMethod' is not supported for string arrays",
         ));
     }
@@ -478,7 +715,10 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
 
 fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
-        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
+        return Err(issorted_error(
+            &ISSORTED_ERROR_ROWS_REQUIRES_2D,
+            ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
+        ));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -500,7 +740,10 @@ fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult
 
 fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
-        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
+        return Err(issorted_error(
+            &ISSORTED_ERROR_ROWS_REQUIRES_2D,
+            ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
+        ));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -522,7 +765,10 @@ fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::Bui
 
 fn check_string_rows(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if array.shape.len() > 2 {
-        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
+        return Err(issorted_error(
+            &ISSORTED_ERROR_ROWS_REQUIRES_2D,
+            ISSORTED_ERROR_ROWS_REQUIRES_2D.message,
+        ));
     }
     let rows = array.rows;
     let cols = array.cols;
@@ -1042,7 +1288,7 @@ fn char_array_to_tensor(array: &CharArray) -> crate::BuiltinResult<Tensor> {
             data[idx] = ch as u32 as f64;
         }
     }
-    Tensor::new(data, vec![rows, cols]).map_err(|e| issorted_error(format!("issorted: {e}")))
+    Tensor::new(data, vec![rows, cols]).map_err(|e| issorted_internal(format!("issorted: {e}")))
 }
 
 #[cfg(test)]
@@ -1216,8 +1462,8 @@ pub(crate) mod tests {
     #[test]
     fn issorted_rows_dimension_error() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).unwrap();
-        let result = issorted_builtin(Value::Tensor(tensor), vec![Value::from("rows")]);
-        assert!(result.is_err());
+        let err = issorted_builtin(Value::Tensor(tensor), vec![Value::from("rows")]).unwrap_err();
+        assert_eq!(err.identifier(), ISSORTED_ERROR_ROWS_REQUIRES_2D.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1277,8 +1523,11 @@ pub(crate) mod tests {
     fn issorted_string_comparison_method_error() {
         let array = StringArray::new(vec!["apple".into(), "berry".into()], vec![2, 1]).unwrap();
         let args = vec![Value::from("ComparisonMethod"), Value::from("real")];
-        let result = issorted_builtin(Value::StringArray(array), args);
-        assert!(result.is_err());
+        let err = issorted_builtin(Value::StringArray(array), args).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            ISSORTED_ERROR_STRING_COMPARISON_UNSUPPORTED.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1294,8 +1543,11 @@ pub(crate) mod tests {
     fn issorted_duplicate_direction_error() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("ascend"), Value::from("descend")];
-        let result = issorted_builtin(Value::Tensor(tensor), args);
-        assert!(result.is_err());
+        let err = issorted_builtin(Value::Tensor(tensor), args).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            ISSORTED_ERROR_DUPLICATE_DIRECTION.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -4,7 +4,10 @@
 //! identifiers, or all open files. The implementation integrates with the
 //! shared file registry managed by `fopen` and always executes on the host.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -17,9 +20,113 @@ use crate::builtins::io::filetext::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INVALID_IDENTIFIER_MESSAGE: &str =
-    "Invalid file identifier. Use fopen to generate a valid file ID.";
 const BUILTIN_NAME: &str = "fclose";
+
+const FCLOSE_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "0 on success, -1 on failure.",
+}];
+
+const FCLOSE_OUTPUT_MESSAGE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "0 on success, -1 on failure.",
+    },
+    BuiltinParamDescriptor {
+        name: "msg",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"\""),
+        description: "Failure message when status is -1.",
+    },
+];
+
+const FCLOSE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const FCLOSE_INPUTS_FID: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "fid",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "File identifier scalar, vector, cell list, or keyword \"all\".",
+}];
+const FCLOSE_INPUTS_ALL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"all\""),
+    description: "Close all open user file identifiers.",
+}];
+
+const FCLOSE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "status = fclose()",
+        inputs: &FCLOSE_INPUTS_NONE,
+        outputs: &FCLOSE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = fclose(fid)",
+        inputs: &FCLOSE_INPUTS_FID,
+        outputs: &FCLOSE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = fclose(\"all\")",
+        inputs: &FCLOSE_INPUTS_ALL,
+        outputs: &FCLOSE_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, msg] = fclose(...)",
+        inputs: &FCLOSE_INPUTS_FID,
+        outputs: &FCLOSE_OUTPUT_MESSAGE,
+    },
+];
+
+const FCLOSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FCLOSE.INVALID_INPUT",
+    identifier: Some("RunMat:fclose:InvalidInput"),
+    when: "Input argument count or file identifier value/type is invalid.",
+    message: "fclose: invalid input arguments",
+};
+
+const FCLOSE_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FCLOSE.INVALID_IDENTIFIER",
+    identifier: Some("RunMat:fclose:InvalidIdentifier"),
+    when: "The provided file identifier does not refer to an open file.",
+    message: "fclose: invalid file identifier. Use fopen to generate a valid file ID.",
+};
+
+const FCLOSE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FCLOSE.IO",
+    identifier: Some("RunMat:fclose:IoFailure"),
+    when: "Closing an open file failed due to I/O error.",
+    message: "fclose: failed to close file",
+};
+
+const FCLOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FCLOSE.INTERNAL",
+    identifier: None,
+    when: "Internal runtime control-flow or conversion failed.",
+    message: "fclose: internal error",
+};
+
+const FCLOSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    FCLOSE_ERROR_INVALID_INPUT,
+    FCLOSE_ERROR_INVALID_IDENTIFIER,
+    FCLOSE_ERROR_IO,
+    FCLOSE_ERROR_INTERNAL,
+];
+
+pub const FCLOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FCLOSE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FCLOSE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fclose")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,19 +145,29 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Host-only operation: closes identifiers stored in the shared file registry; GPU inputs are gathered automatically.",
 };
 
-fn fclose_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn fclose_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    fclose_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn fclose_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let message = err.message().to_string();
-    let identifier = err.identifier().map(|value| value.to_string());
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
         .with_source(err);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = FCLOSE_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -70,10 +187,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fclose",
     category = "io/filetext",
-    summary = "Close one file, multiple files, or all files opened with fopen.",
+    summary = "Close file identifiers.",
     keywords = "fclose,file,close,io,identifier",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fclose_type),
+    descriptor(crate::builtins::io::filetext::fclose::FCLOSE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::fclose"
 )]
 async fn fclose_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -135,7 +253,10 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
     match gathered.len() {
         0 => Ok(close_all().await),
         1 => handle_single_argument(&gathered[0]).await,
-        _ => Err(fclose_error("fclose: too many input arguments")),
+        _ => Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "too many input arguments",
+        )),
     }
 }
 
@@ -143,7 +264,7 @@ async fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
         return Ok(close_all().await);
     }
-    let fids = collect_file_ids(value).map_err(|err| fclose_error(format!("fclose: {err}")))?;
+    let fids = collect_file_ids(value)?;
     Ok(close_fids(&fids).await)
 }
 
@@ -178,7 +299,7 @@ async fn close_fids(fids: &[i32]) -> FcloseEval {
         if fid < 0 {
             status_ok = false;
             if message.is_empty() {
-                message = INVALID_IDENTIFIER_MESSAGE.to_string();
+                message = FCLOSE_ERROR_INVALID_IDENTIFIER.message.to_string();
             }
             continue;
         }
@@ -190,7 +311,7 @@ async fn close_fids(fids: &[i32]) -> FcloseEval {
             Ok(None) => {
                 status_ok = false;
                 if message.is_empty() {
-                    message = INVALID_IDENTIFIER_MESSAGE.to_string();
+                    message = FCLOSE_ERROR_INVALID_IDENTIFIER.message.to_string();
                 }
             }
             Err(err) => {
@@ -235,9 +356,15 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
             Ok(ids)
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err(fclose_error("file identifier must be numeric or 'all'"))
+            Err(fclose_error_with_detail(
+                &FCLOSE_ERROR_INVALID_INPUT,
+                "file identifier must be numeric or 'all'",
+            ))
         }
-        _ => Err(fclose_error("file identifier must be numeric or 'all'")),
+        _ => Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "file identifier must be numeric or 'all'",
+        )),
     }
 }
 
@@ -246,26 +373,41 @@ fn parse_scalar_fid(value: &Value) -> BuiltinResult<i32> {
         Value::Int(i) => {
             let v = i.to_i64();
             if v < i32::MIN as i64 || v > i32::MAX as i64 {
-                return Err(fclose_error("file identifier is out of range"));
+                return Err(fclose_error_with_detail(
+                    &FCLOSE_ERROR_INVALID_INPUT,
+                    "file identifier is out of range",
+                ));
             }
             Ok(v as i32)
         }
         Value::Num(n) => parse_fid_from_f64(*n),
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
-        _ => Err(fclose_error("file identifier must be numeric or 'all'")),
+        _ => Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "file identifier must be numeric or 'all'",
+        )),
     }
 }
 
 fn parse_fid_from_f64(value: f64) -> BuiltinResult<i32> {
     if !value.is_finite() {
-        return Err(fclose_error("file identifier must be finite"));
+        return Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "file identifier must be finite",
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(fclose_error("file identifier must be an integer"));
+        return Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "file identifier must be an integer",
+        ));
     }
     if rounded < i32::MIN as f64 || rounded > i32::MAX as f64 {
-        return Err(fclose_error("file identifier is out of range"));
+        return Err(fclose_error_with_detail(
+            &FCLOSE_ERROR_INVALID_INPUT,
+            "file identifier is out of range",
+        ));
     }
     Ok(rounded as i32)
 }
@@ -455,6 +597,20 @@ pub(crate) mod tests {
         registry::test_guard()
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fclose_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FCLOSE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = fclose()"));
+        assert!(labels.contains(&"status = fclose(fid)"));
+        assert!(labels.contains(&"status = fclose(\"all\")"));
+        assert!(labels.contains(&"[status, msg] = fclose(...)"));
+    }
+
     fn unique_path(prefix: &str) -> PathBuf {
         let now = system_time_now()
             .duration_since(UNIX_EPOCH)
@@ -495,7 +651,7 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let eval = run_evaluate(&[Value::Num(9999.0)]).expect("fclose");
         assert_eq!(eval.status(), -1.0);
-        assert_eq!(eval.message(), INVALID_IDENTIFIER_MESSAGE);
+        assert_eq!(eval.message(), FCLOSE_ERROR_INVALID_IDENTIFIER.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -562,7 +718,7 @@ pub(crate) mod tests {
         assert_eq!(first.status(), 0.0);
         let second = run_evaluate(&[Value::Num(fid)]).expect("fclose second");
         assert_eq!(second.status(), -1.0);
-        assert_eq!(second.message(), INVALID_IDENTIFIER_MESSAGE);
+        assert_eq!(second.message(), FCLOSE_ERROR_INVALID_IDENTIFIER.message);
         test_support::fs::remove_file(path).unwrap();
     }
 
@@ -668,7 +824,13 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let tensor = Tensor::new(vec![1.5], vec![1, 1]).expect("tensor");
         let err = unwrap_error_message(run_evaluate(&[Value::Tensor(tensor)]).unwrap_err());
-        assert_eq!(err, "fclose: file identifier must be an integer");
+        assert_eq!(
+            err,
+            format!(
+                "{}: file identifier must be an integer",
+                FCLOSE_ERROR_INVALID_INPUT.message
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -699,6 +861,12 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let err = unwrap_error_message(run_evaluate(&[Value::from("not-a-fid")]).unwrap_err());
-        assert_eq!(err, "fclose: file identifier must be numeric or 'all'");
+        assert_eq!(
+            err,
+            format!(
+                "{}: file identifier must be numeric or 'all'",
+                FCLOSE_ERROR_INVALID_INPUT.message
+            )
+        );
     }
 }

@@ -14,6 +14,9 @@ use glam::Vec4;
 use log::trace;
 use std::collections::HashMap;
 
+type ViewBounds2D = (f64, f64, f64, f64);
+type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
+
 /// A figure that can contain multiple overlaid plots
 #[derive(Debug, Clone)]
 pub struct Figure {
@@ -135,6 +138,7 @@ pub struct AxesMetadata {
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
     pub view_elevation_deg: Option<f32>,
+    pub view_revision: u64,
     pub grid_enabled: bool,
     pub box_enabled: bool,
     pub axis_equal: bool,
@@ -608,6 +612,7 @@ impl Figure {
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.view_azimuth_deg = Some(azimuth_deg);
             meta.view_elevation_deg = Some(elevation_deg);
+            meta.view_revision = meta.view_revision.wrapping_add(1);
         }
         self.dirty = true;
     }
@@ -1127,7 +1132,7 @@ impl Figure {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
-        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, None, gpu)
+        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, None, None, gpu)
             .into_iter()
             .map(|(_, render_data)| render_data)
             .collect()
@@ -1137,6 +1142,7 @@ impl Figure {
         &mut self,
         viewport_px: Option<(u32, u32)>,
         axes_viewports_px: Option<&[(u32, u32)]>,
+        axes_view_bounds: Option<PerAxesViewBoundsRef<'_>>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<(usize, RenderData)> {
         fn push_with_optional_markers(
@@ -1158,6 +1164,9 @@ impl Figure {
                 continue;
             }
             let axes_index = self.plot_axes_indices.get(plot_idx).copied().unwrap_or(0);
+            let axes_view_bounds = axes_view_bounds
+                .and_then(|bounds| bounds.get(axes_index).copied())
+                .flatten();
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
                     s.set_color_limits(meta.color_limits);
@@ -1167,14 +1176,28 @@ impl Figure {
 
             match p {
                 PlotElement::Line(plot) => {
+                    let axes_viewport_px = axes_viewports_px
+                        .and_then(|viewports| viewports.get(axes_index).copied())
+                        .or(viewport_px);
                     trace!(
                         target: "runmat_plot",
-                        "figure: render_data line viewport_px={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
+                        "figure: render_data line viewport_px={:?} axes_index={} axes_viewport_px={:?} axes_view_bounds={:?} gpu_ctx_present={} gpu_line_inputs_present={} gpu_vertices_present={}",
                         viewport_px,
+                        axes_index,
+                        axes_viewport_px,
+                        axes_view_bounds,
                         gpu.is_some(),
                         plot.has_gpu_line_inputs(),
                         plot.has_gpu_vertices()
                     );
+                    push_with_optional_markers(
+                        &mut out,
+                        axes_index,
+                        plot.render_data_with_viewport_gpu(axes_viewport_px, axes_view_bounds, gpu),
+                        plot.marker_render_data(),
+                    );
+                }
+                PlotElement::ErrorBar(plot) => {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
@@ -1183,18 +1206,6 @@ impl Figure {
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
                             gpu,
-                        ),
-                        plot.marker_render_data(),
-                    );
-                }
-                PlotElement::ErrorBar(plot) => {
-                    push_with_optional_markers(
-                        &mut out,
-                        axes_index,
-                        plot.render_data_with_viewport(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
                         ),
                         plot.marker_render_data(),
                     );
@@ -1252,10 +1263,29 @@ impl Figure {
                 }
                 PlotElement::Patch(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data() {
+                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                    ) {
                         out.push((axes_index, edge_data));
                     }
                 }
+                PlotElement::Line3(plot) => out.push((
+                    axes_index,
+                    plot.render_data_with_viewport_gpu(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                        self.axes_metadata.get(axes_index).and_then(|meta| {
+                            match (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                                (Some(az), Some(el)) => Some((az, el)),
+                                _ => None,
+                            }
+                        }),
+                        gpu,
+                    ),
+                )),
                 _ => out.push((axes_index, p.render_data())),
             }
         }
@@ -2143,6 +2173,19 @@ mod tests {
             figure.axes_metadata(1).unwrap().view_elevation_deg,
             Some(20.0)
         );
+    }
+
+    #[test]
+    fn axes_view_revision_advances_for_each_explicit_view_update() {
+        let mut figure = Figure::new();
+
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 0);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 1);
+
+        figure.set_axes_view(0, 45.0, 20.0);
+        assert_eq!(figure.axes_metadata(0).unwrap().view_revision, 2);
     }
 
     #[test]

@@ -10,12 +10,196 @@ use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResul
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::lu::PivotMode;
 
 const BUILTIN_NAME: &str = "qr";
+
+const QR_OUTPUT_R: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Upper triangular (or trapezoidal) factor.",
+}];
+
+const QR_OUTPUT_QR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Q",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Orthogonal/unitary factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "R",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper triangular (or trapezoidal) factor.",
+    },
+];
+
+const QR_OUTPUT_QRP: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Q",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Orthogonal/unitary factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "R",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper triangular (or trapezoidal) factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "P",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Permutation matrix or vector based on pivot mode.",
+    },
+];
+
+const QR_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix to factorize.",
+}];
+
+const QR_INPUTS_A_OPTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to factorize.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option token (`0`, `econ`, `matrix`, or `vector`).",
+    },
+];
+
+const QR_INPUTS_A_OPTION_OPTION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix to factorize.",
+    },
+    BuiltinParamDescriptor {
+        name: "option1",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First option token (`0`, `econ`, `matrix`, or `vector`).",
+    },
+    BuiltinParamDescriptor {
+        name: "option2",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second option token (`0`, `econ`, `matrix`, or `vector`).",
+    },
+];
+
+const QR_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "R = qr(A)",
+        inputs: &QR_INPUTS_A,
+        outputs: &QR_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = qr(A, option)",
+        inputs: &QR_INPUTS_A_OPTION,
+        outputs: &QR_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "R = qr(A, option1, option2)",
+        inputs: &QR_INPUTS_A_OPTION_OPTION,
+        outputs: &QR_OUTPUT_R,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R] = qr(A)",
+        inputs: &QR_INPUTS_A,
+        outputs: &QR_OUTPUT_QR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R] = qr(A, option)",
+        inputs: &QR_INPUTS_A_OPTION,
+        outputs: &QR_OUTPUT_QR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R] = qr(A, option1, option2)",
+        inputs: &QR_INPUTS_A_OPTION_OPTION,
+        outputs: &QR_OUTPUT_QR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R, P] = qr(A)",
+        inputs: &QR_INPUTS_A,
+        outputs: &QR_OUTPUT_QRP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R, P] = qr(A, option)",
+        inputs: &QR_INPUTS_A_OPTION,
+        outputs: &QR_OUTPUT_QRP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[Q, R, P] = qr(A, option1, option2)",
+        inputs: &QR_INPUTS_A_OPTION_OPTION,
+        outputs: &QR_OUTPUT_QRP,
+    },
+];
+
+const QR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.QR.INVALID_ARGUMENT",
+    identifier: Some("RunMat:qr:InvalidArgument"),
+    when: "Options are invalid or output count exceeds supported forms.",
+    message: "qr currently supports at most three outputs",
+};
+
+const QR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.QR.INVALID_INPUT",
+    identifier: Some("RunMat:qr:InvalidInput"),
+    when: "Input is non-numeric or has rank greater than two.",
+    message: "qr: expected a numeric 2-D input matrix",
+};
+
+const QR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.QR.INTERNAL",
+    identifier: Some("RunMat:qr:Internal"),
+    when: "QR runtime fails to materialize output values.",
+    message: "qr: internal runtime failure",
+};
+
+const QR_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    QR_ERROR_INVALID_ARGUMENT,
+    QR_ERROR_INVALID_INPUT,
+    QR_ERROR_INTERNAL,
+];
+
+pub const QR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &QR_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &QR_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::qr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,10 +217,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may download to host and re-upload results; the bundled WGPU backend currently uses the runtime QR implementation.",
 };
 
-fn qr_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn qr_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    qr_error_with_message(error.message, error)
+}
+
+fn qr_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn qr_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    qr_error_with_message(message, &QR_ERROR_INVALID_ARGUMENT)
+}
+
+fn qr_invalid_input(message: impl Into<String>) -> RuntimeError {
+    qr_error_with_message(message, &QR_ERROR_INVALID_INPUT)
+}
+
+fn qr_internal_error(message: impl Into<String>) -> RuntimeError {
+    qr_error_with_message(message, &QR_ERROR_INTERNAL)
 }
 
 fn qr_type(args: &[Type], _context: &ResolveContext) -> Type {
@@ -90,11 +295,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "qr",
     category = "math/linalg/factor",
-    summary = "QR factorization with optional column pivoting and economy-size outputs.",
+    summary = "Compute QR factorizations with optional pivoting.",
     keywords = "qr,factorization,decomposition,householder",
     accel = "sink",
     sink = true,
     type_resolver(qr_type),
+    descriptor(crate::builtins::math::linalg::factor::qr::QR_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
 async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -116,7 +322,7 @@ async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
                 eval.permutation(),
             ]));
         }
-        return Err(qr_error("qr currently supports at most three outputs"));
+        return Err(qr_error(&QR_ERROR_INVALID_ARGUMENT));
     }
     Ok(eval.r())
 }
@@ -275,7 +481,7 @@ async fn evaluate_host_value(
 
 async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
     if args.len() > 2 {
-        return Err(qr_error("qr: too many option arguments"));
+        return Err(qr_invalid_argument("qr: too many option arguments"));
     }
     let mut opts = QrOptions::default();
     for arg in args {
@@ -297,9 +503,9 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
                 opts.pivot = PivotMode::Matrix;
                 continue;
             }
-            return Err(qr_error(format!("qr: unknown option '{text}'")));
+            return Err(qr_invalid_argument(format!("qr: unknown option '{text}'")));
         }
-        return Err(qr_error(
+        return Err(qr_invalid_argument(
             "qr: option must be numeric zero or a string ('econ', 'matrix', 'vector')",
         ));
     }
@@ -343,7 +549,7 @@ async fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
         Value::ComplexTensor(ct) => ColMajorMatrix::from_complex_tensor(&ct),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| qr_error(format!("qr: {err}")))?;
+                .map_err(|err| qr_invalid_input(format!("qr: {err}")))?;
             ColMajorMatrix::from_tensor(&tensor)
         }
         Value::Num(n) => Ok(ColMajorMatrix::from_scalar(Complex64::new(n, 0.0))),
@@ -359,9 +565,11 @@ async fn extract_matrix(value: Value) -> BuiltinResult<ColMajorMatrix> {
             ColMajorMatrix::from_tensor(&tensor)
         }
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err(qr_error("qr: expected a numeric matrix"))
+            Err(qr_invalid_input("qr: expected a numeric matrix"))
         }
-        other => Err(qr_error(format!("qr: unsupported input type {other:?}"))),
+        other => Err(qr_invalid_input(format!(
+            "qr: unsupported input type {other:?}"
+        ))),
     }
 }
 
@@ -422,8 +630,8 @@ fn pivot_vector_to_value(pivot: &[usize]) -> BuiltinResult<Value> {
     for &idx in pivot {
         data.push((idx + 1) as f64);
     }
-    let tensor =
-        Tensor::new(data, vec![pivot.len(), 1]).map_err(|e| qr_error(format!("qr: {e}")))?;
+    let tensor = Tensor::new(data, vec![pivot.len(), 1])
+        .map_err(|e| qr_internal_error(format!("qr: {e}")))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -690,7 +898,7 @@ impl ColMajorMatrix {
 
     fn from_tensor(tensor: &Tensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(qr_error("qr: input must be 2-D"));
+            return Err(qr_invalid_input("qr: input must be 2-D"));
         }
         let rows = tensor.rows();
         let cols = tensor.cols();
@@ -706,7 +914,7 @@ impl ColMajorMatrix {
 
     fn from_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Self> {
         if tensor.shape.len() > 2 {
-            return Err(qr_error("qr: input must be 2-D"));
+            return Err(qr_invalid_input("qr: input must be 2-D"));
         }
         let rows = tensor.rows;
         let cols = tensor.cols;
@@ -730,7 +938,7 @@ impl ColMajorMatrix {
                 }
             }
             let tensor = Tensor::new(real_data, vec![self.rows, self.cols])
-                .map_err(|e| qr_error(format!("{label}: {e}")))?;
+                .map_err(|e| qr_internal_error(format!("{label}: {e}")))?;
             Ok(Value::Tensor(tensor))
         } else {
             let mut complex_data = Vec::with_capacity(self.rows * self.cols);
@@ -741,7 +949,7 @@ impl ColMajorMatrix {
                 }
             }
             let tensor = ComplexTensor::new(complex_data, vec![self.rows, self.cols])
-                .map_err(|e| qr_error(format!("{label}: {e}")))?;
+                .map_err(|e| qr_internal_error(format!("{label}: {e}")))?;
             Ok(Value::ComplexTensor(tensor))
         }
     }
@@ -855,6 +1063,48 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn qr_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = QR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"R = qr(A)"));
+        assert!(labels.contains(&"R = qr(A, option)"));
+        assert!(labels.contains(&"R = qr(A, option1, option2)"));
+        assert!(labels.contains(&"[Q, R] = qr(A)"));
+        assert!(labels.contains(&"[Q, R] = qr(A, option)"));
+        assert!(labels.contains(&"[Q, R] = qr(A, option1, option2)"));
+        assert!(labels.contains(&"[Q, R, P] = qr(A)"));
+        assert!(labels.contains(&"[Q, R, P] = qr(A, option)"));
+        assert!(labels.contains(&"[Q, R, P] = qr(A, option1, option2)"));
+    }
+
+    #[test]
+    fn qr_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = QR_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.QR.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.QR.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.QR.INTERNAL"));
+    }
+
+    #[test]
+    fn qr_invalid_argument_identifier_is_stable() {
+        match evaluate(Value::Num(1.0), &[Value::from("nope")]) {
+            Err(err) => assert_eq!(err.identifier(), QR_ERROR_INVALID_ARGUMENT.identifier),
+            Ok(_) => panic!("expected invalid option error"),
+        }
+    }
+
+    #[test]
+    fn qr_invalid_input_identifier_is_stable() {
+        match evaluate(Value::from("x"), &[]) {
+            Err(err) => assert_eq!(err.identifier(), QR_ERROR_INVALID_INPUT.identifier),
+            Ok(_) => panic!("expected invalid input error"),
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn qr_single_output_returns_upper_triangular() {
@@ -894,8 +1144,8 @@ pub(crate) mod tests {
         .unwrap();
         tensor_close(&qtq, &identity, 1e-10);
 
-        let qr = crate::matrix::matrix_mul(&q, &r).expect("Q*R");
-        let ae = crate::matrix::matrix_mul(&a, &e).expect("A*E");
+        let qr = crate::builtins::common::matrix::matrix_mul(&q, &r).expect("Q*R");
+        let ae = crate::builtins::common::matrix::matrix_mul(&a, &e).expect("A*E");
         tensor_close(&qr, &ae, 1e-10);
     }
 
@@ -1091,7 +1341,7 @@ pub(crate) mod tests {
         tensor_close(&qtq, &identity, 1e-3);
 
         // Q*R reconstructs the input (no pivoting)
-        let qr_product = crate::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
+        let qr_product = crate::builtins::common::matrix::matrix_mul(&gpu_q, &gpu_r).expect("Q*R");
         let a_matrix = Matrix::new(tensor.data.clone(), tensor.shape.clone()).unwrap();
         tensor_close(&qr_product, &a_matrix, 1e-3);
     }

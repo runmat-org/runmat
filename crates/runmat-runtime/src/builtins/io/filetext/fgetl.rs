@@ -1,6 +1,9 @@
 //! MATLAB-compatible `fgetl` builtin for RunMat.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -13,9 +16,64 @@ use crate::builtins::io::filetext::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INVALID_IDENTIFIER_MESSAGE: &str =
-    "Invalid file identifier. Use fopen to generate a valid file ID.";
 const BUILTIN_NAME: &str = "fgetl";
+
+const FGETL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tline",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Next line without terminator, or -1 at end-of-file.",
+}];
+const FGETL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "fid",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "File identifier opened by fopen.",
+}];
+const FGETL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tline = fgetl(fid)",
+    inputs: &FGETL_INPUTS,
+    outputs: &FGETL_OUTPUT,
+}];
+
+const FGETL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FGETL.INVALID_INPUT",
+    identifier: Some("RunMat:fgetl:InvalidInput"),
+    when: "Input argument count or identifier form is invalid.",
+    message: "fgetl: invalid input arguments",
+};
+const FGETL_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FGETL.INVALID_IDENTIFIER",
+    identifier: Some("RunMat:fgetl:InvalidIdentifier"),
+    when: "Identifier does not refer to a readable open file.",
+    message: "fgetl: invalid file identifier. Use fopen to generate a valid file ID.",
+};
+const FGETL_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FGETL.IO",
+    identifier: Some("RunMat:fgetl:IoFailure"),
+    when: "Line read or decode fails.",
+    message: "fgetl: file I/O failed",
+};
+const FGETL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FGETL.INTERNAL",
+    identifier: None,
+    when: "Internal control-flow conversion failed.",
+    message: "fgetl: internal error",
+};
+const FGETL_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    FGETL_ERROR_INVALID_INPUT,
+    FGETL_ERROR_INVALID_IDENTIFIER,
+    FGETL_ERROR_IO,
+    FGETL_ERROR_INTERNAL,
+];
+pub const FGETL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FGETL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FGETL_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fgetl")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -33,19 +91,33 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only file I/O; arguments gathered from the GPU when necessary.",
 };
 
-fn fgetl_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn fgetl_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fgetl_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    fgetl_error_with_message(error.message, error)
+}
+
+fn fgetl_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    fgetl_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let message = err.message().to_string();
-    let identifier = err.identifier().map(|value| value.to_string());
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
         .with_builtin(BUILTIN_NAME)
         .with_source(err);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = FGETL_ERROR_INTERNAL.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -65,10 +137,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "fgetl",
     category = "io/filetext",
-    summary = "Read the next line from a file, excluding newline characters.",
+    summary = "Read the next line without newline characters.",
     keywords = "fgetl,file,io,line,newline",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fgetl_type),
+    descriptor(crate::builtins::io::filetext::fgetl::FGETL_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::fgetl"
 )]
 async fn fgetl_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -108,37 +181,49 @@ impl FgetlEval {
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlEval> {
     if !rest.is_empty() {
-        return Err(fgetl_error("fgetl: too many input arguments"));
+        return Err(fgetl_error_with_detail(
+            &FGETL_ERROR_INVALID_INPUT,
+            "too many input arguments",
+        ));
     }
 
     let fid_host = gather_value(fid_value).await?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
-        return Err(fgetl_error("fgetl: file identifier must be non-negative"));
+        return Err(fgetl_error_with_detail(
+            &FGETL_ERROR_INVALID_INPUT,
+            "file identifier must be non-negative",
+        ));
     }
     if fid < 3 {
-        return Err(fgetl_error(
-            "fgetl: standard input/output identifiers are not supported yet",
+        return Err(fgetl_error_with_detail(
+            &FGETL_ERROR_INVALID_INPUT,
+            "standard input/output identifiers are not supported yet",
         ));
     }
 
-    let info = registry::info_for(fid)
-        .ok_or_else(|| fgetl_error(format!("fgetl: {INVALID_IDENTIFIER_MESSAGE}")))?;
+    let info =
+        registry::info_for(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
     if !permission_allows_read(&info.permission) {
-        return Err(fgetl_error(
-            "fgetl: file identifier is not open for reading",
+        return Err(fgetl_error_with_detail(
+            &FGETL_ERROR_INVALID_IDENTIFIER,
+            "file identifier is not open for reading",
         ));
     }
-    let handle = registry::take_handle(fid)
-        .ok_or_else(|| fgetl_error(format!("fgetl: {INVALID_IDENTIFIER_MESSAGE}")))?;
+    let handle =
+        registry::take_handle(fid).ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
 
-    let mut guard = handle
-        .lock()
-        .map_err(|_| fgetl_error("fgetl: failed to lock file handle (poisoned mutex)"))?;
+    let mut guard = handle.lock().map_err(|_| {
+        fgetl_error_with_detail(
+            &FGETL_ERROR_INTERNAL,
+            "failed to lock file handle (poisoned mutex)",
+        )
+    })?;
     let file = guard
         .as_mut()
-        .ok_or_else(|| fgetl_error(format!("fgetl: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let read = read_text_line(file, None, BUILTIN_NAME)?;
+        .ok_or_else(|| fgetl_error(&FGETL_ERROR_INVALID_IDENTIFIER))?;
+    let read = read_text_line(file, None, BUILTIN_NAME)
+        .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
     if read.eof_before_any {
         return Ok(FgetlEval::end_of_file());
     }
@@ -150,7 +235,8 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlE
     };
 
     let line_len = read.data.len().saturating_sub(read.terminators.len());
-    let line_value = bytes_to_char_array(&read.data[..line_len], &encoding, BUILTIN_NAME)?;
+    let line_value = bytes_to_char_array(&read.data[..line_len], &encoding, BUILTIN_NAME)
+        .map_err(|e| fgetl_error_with_detail(&FGETL_ERROR_IO, e.message()))?;
     Ok(FgetlEval::new(line_value))
 }
 
@@ -163,23 +249,35 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     fn checked_f64_to_i32(n: f64) -> BuiltinResult<i32> {
         if n < i32::MIN as f64 || n > i32::MAX as f64 {
-            return Err(fgetl_error("fgetl: file identifier is out of range"));
+            return Err(fgetl_error_with_detail(
+                &FGETL_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            ));
         }
         Ok(n as i32)
     }
 
     fn checked_i64_to_i32(n: i64) -> BuiltinResult<i32> {
-        i32::try_from(n).map_err(|_| fgetl_error("fgetl: file identifier is out of range"))
+        i32::try_from(n).map_err(|_| {
+            fgetl_error_with_detail(
+                &FGETL_ERROR_INVALID_INPUT,
+                "file identifier is out of range",
+            )
+        })
     }
 
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(fgetl_error("fgetl: file identifier must be finite"));
+                return Err(fgetl_error_with_detail(
+                    &FGETL_ERROR_INVALID_INPUT,
+                    "file identifier must be finite",
+                ));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err(fgetl_error(
-                    "fgetl: file identifier must be an integer scalar",
+                return Err(fgetl_error_with_detail(
+                    &FGETL_ERROR_INVALID_INPUT,
+                    "file identifier must be an integer scalar",
                 ));
             }
             checked_f64_to_i32(*n)
@@ -188,17 +286,22 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
         Value::Tensor(t) if t.data.len() == 1 => {
             let n = t.data[0];
             if !n.is_finite() {
-                return Err(fgetl_error("fgetl: file identifier must be finite"));
+                return Err(fgetl_error_with_detail(
+                    &FGETL_ERROR_INVALID_INPUT,
+                    "file identifier must be finite",
+                ));
             }
             if (n.fract()).abs() > f64::EPSILON {
-                return Err(fgetl_error(
-                    "fgetl: file identifier must be an integer scalar",
+                return Err(fgetl_error_with_detail(
+                    &FGETL_ERROR_INVALID_INPUT,
+                    "file identifier must be an integer scalar",
                 ));
             }
             checked_f64_to_i32(n)
         }
-        _ => Err(fgetl_error(
-            "fgetl: file identifier must be a numeric scalar",
+        _ => Err(fgetl_error_with_detail(
+            &FGETL_ERROR_INVALID_INPUT,
+            "file identifier must be a numeric scalar",
         )),
     }
 }
@@ -234,6 +337,17 @@ pub(crate) mod tests {
 
     fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
         registry::test_guard()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fgetl_descriptor_signature_covers_core_form() {
+        let labels: Vec<&str> = FGETL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"tline = fgetl(fid)"));
     }
 
     fn unique_path(prefix: &str) -> PathBuf {
@@ -286,20 +400,44 @@ pub(crate) mod tests {
     fn parse_fid_rejects_values_outside_i32_range() {
         let too_large =
             unwrap_error_message(parse_fid(&Value::Num(i32::MAX as f64 + 1.0)).unwrap_err());
-        assert_eq!(too_large, "fgetl: file identifier is out of range");
+        assert_eq!(
+            too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
 
         let too_small =
             unwrap_error_message(parse_fid(&Value::Num(i32::MIN as f64 - 1.0)).unwrap_err());
-        assert_eq!(too_small, "fgetl: file identifier is out of range");
+        assert_eq!(
+            too_small,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
 
         let int_too_large = unwrap_error_message(
             parse_fid(&Value::Int(IntValue::I64(i32::MAX as i64 + 1))).unwrap_err(),
         );
-        assert_eq!(int_too_large, "fgetl: file identifier is out of range");
+        assert_eq!(
+            int_too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
 
         let tensor = Tensor::new(vec![i32::MAX as f64 + 1.0], vec![1, 1]).expect("tensor");
         let tensor_too_large = unwrap_error_message(parse_fid(&Value::Tensor(tensor)).unwrap_err());
-        assert_eq!(tensor_too_large, "fgetl: file identifier is out of range");
+        assert_eq!(
+            tensor_too_large,
+            format!(
+                "{}: file identifier is out of range",
+                FGETL_ERROR_INVALID_INPUT.message
+            )
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -408,7 +546,13 @@ pub(crate) mod tests {
         assert!(open.fid >= 3.0);
 
         let err = unwrap_error_message(run_evaluate(&Value::Num(open.fid), &[]).unwrap_err());
-        assert_eq!(err, "fgetl: file identifier is not open for reading");
+        assert_eq!(
+            err,
+            format!(
+                "{}: file identifier is not open for reading",
+                FGETL_ERROR_INVALID_IDENTIFIER.message
+            )
+        );
         let _ = registry::close(open.fid as i32);
         test_support::fs::remove_file(&path).unwrap();
     }
@@ -426,10 +570,7 @@ pub(crate) mod tests {
         std::mem::forget(handle);
 
         let err = unwrap_error_message(run_evaluate(&Value::Num(fid as f64), &[]).unwrap_err());
-        assert_eq!(
-            err,
-            "fgetl: Invalid file identifier. Use fopen to generate a valid file ID."
-        );
+        assert_eq!(err, FGETL_ERROR_INVALID_IDENTIFIER.message);
         test_support::fs::remove_file(&path).unwrap();
     }
 

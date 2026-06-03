@@ -154,7 +154,7 @@ pub fn pack_vertices_from_xyz(
 
     let lod_stride = params.lod_stride.max(1);
     let max_points = inputs.len.div_ceil(lod_stride);
-    let output_size = max_points as u64 * std::mem::size_of::<Vertex>() as u64;
+    let output_size = max_points as u64 * 6 * std::mem::size_of::<Vertex>() as u64;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("scatter3-gpu-vertices"),
         size: output_size,
@@ -255,7 +255,7 @@ pub fn pack_vertices_from_xyz(
 
     Ok(GpuVertexBuffer::with_indirect(
         output_buffer,
-        max_points as usize,
+        (max_points as usize) * 6,
         indirect_args,
     ))
 }
@@ -450,6 +450,6 @@ mod stress_tests {
 
         let gpu_vertices =
             pack_vertices_from_xyz(&device, &queue, &inputs, &params).expect("gpu scatter3 pack");
-        assert_eq!(gpu_vertices.vertex_count, max_points as usize);
+        assert_eq!(gpu_vertices.vertex_count, max_points as usize * 6);
     }
 }

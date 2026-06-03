@@ -37,12 +37,17 @@ fn validate_classdefs_basic() {
 fn collect_imports_list() {
     let src = "import pkg.sub.*; import top.mid.leaf; x=1;";
     let ast = parse(src).unwrap();
-    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
-    let imports = runmat_hir::collect_imports(&hir);
+    let assembly = lower(&ast, &LoweringContext::empty()).unwrap().assembly;
+    let imports = &assembly.modules[0].imports;
     assert_eq!(imports.len(), 2);
-    assert!(imports[0].1);
+    assert!(imports[0].wildcard);
     assert_eq!(
-        imports[1].0,
+        imports[1]
+            .path
+            .0
+            .iter()
+            .map(|segment| segment.0.clone())
+            .collect::<Vec<_>>(),
         vec!["top".to_string(), "mid".to_string(), "leaf".to_string()]
     );
 }

@@ -3,7 +3,11 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::linalg;
@@ -17,6 +21,61 @@ use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mldivide";
+
+const MLDIVIDE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Solution to A * X = B.",
+}];
+
+const MLDIVIDE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left coefficient matrix or scalar.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right-hand side matrix or vector.",
+    },
+];
+
+const MLDIVIDE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "X = mldivide(A, B)",
+    inputs: &MLDIVIDE_INPUTS,
+    outputs: &MLDIVIDE_OUTPUT,
+}];
+
+const MLDIVIDE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MLDIVIDE.INVALID_INPUT",
+    identifier: Some("RunMat:mldivide:InvalidInput"),
+    when: "Inputs are unsupported or incompatible for left division.",
+    message: "mldivide: invalid input",
+};
+
+const MLDIVIDE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MLDIVIDE.INTERNAL",
+    identifier: Some("RunMat:mldivide:Internal"),
+    when: "Runtime cannot materialize left-division outputs.",
+    message: "mldivide: internal runtime failure",
+};
+
+const MLDIVIDE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [MLDIVIDE_ERROR_INVALID_INPUT, MLDIVIDE_ERROR_INTERNAL];
+
+pub const MLDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MLDIVIDE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MLDIVIDE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::mldivide")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,8 +93,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider mldivide hook; WGPU currently supports selected real F32 device-resident square and rectangular solve cases, otherwise it gathers to the host solver and re-uploads the result.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn mldivide_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn mldivide_invalid_input(message: impl Into<String>) -> RuntimeError {
+    mldivide_error_with_message(message, &MLDIVIDE_ERROR_INVALID_INPUT)
+}
+
+fn mldivide_internal_error(message: impl Into<String>) -> RuntimeError {
+    mldivide_error_with_message(message, &MLDIVIDE_ERROR_INTERNAL)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -80,6 +154,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mldivide,matrix division,linear algebra,least squares,gpu",
     accel = "mldivide",
     type_resolver(left_divide_type),
+    descriptor(crate::builtins::math::linalg::ops::mldivide::MLDIVIDE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::mldivide"
 )]
 async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
@@ -181,11 +256,12 @@ fn classify_numeric(value: Value) -> BuiltinResult<NumericInput> {
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+                .map_err(|e| mldivide_invalid_input(format!("{NAME}: {e}")))?;
             Ok(NumericInput::Complex(tensor))
         }
         other => {
-            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            let tensor =
+                tensor::value_into_tensor_for(NAME, other).map_err(mldivide_invalid_input)?;
             ensure_matrix_shape(NAME, &tensor.shape)?;
             Ok(NumericInput::Real(tensor))
         }
@@ -208,7 +284,7 @@ fn mldivide_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Tensor> {
         let rows = lhs.cols();
         let cols = rhs.cols();
         let result = Tensor::new(vec![0.0; rows * cols], vec![rows, cols])
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+            .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))?;
         return Ok(result);
     }
 
@@ -235,7 +311,7 @@ fn mldivide_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<C
         let rows = lhs.cols;
         let cols = rhs.cols;
         let result = ComplexTensor::new(vec![(0.0, 0.0); rows * cols], vec![rows, cols])
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+            .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))?;
         return Ok(result);
     }
 
@@ -259,7 +335,7 @@ fn solve_real_matrix(lhs: &DMatrix<f64>, rhs: &DMatrix<f64>) -> BuiltinResult<DM
     let svd = SVD::new(lhs.clone(), true, true);
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.nrows(), lhs.ncols());
     svd.solve(rhs, tol)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| mldivide_invalid_input(format!("{NAME}: {e}")))
 }
 
 fn solve_complex_matrix(
@@ -269,7 +345,7 @@ fn solve_complex_matrix(
     let svd = SVD::new(lhs.clone(), true, true);
     let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.nrows(), lhs.ncols());
     svd.solve(rhs, tol)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| mldivide_invalid_input(format!("{NAME}: {e}")))
 }
 
 fn compute_svd_tolerance(singular_values: &[f64], rows: usize, cols: usize) -> f64 {
@@ -285,27 +361,28 @@ fn matrix_real_to_tensor(matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
 fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    ComplexTensor::new(data, vec![rows, cols])
+        .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     let data: Vec<(f64, f64)> = tensor.data.iter().map(|&re| (re, 0.0)).collect();
     ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
 fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
     if is_effectively_matrix(shape) {
         Ok(())
     } else {
-        Err(builtin_error(format!(
+        Err(mldivide_invalid_input(format!(
             "{name}: inputs must be 2-D matrices or vectors"
         )))
     }
@@ -315,7 +392,7 @@ fn ensure_row_match(lhs_rows: usize, rhs_rows: usize) -> BuiltinResult<()> {
     if lhs_rows == rhs_rows {
         Ok(())
     } else {
-        Err(builtin_error("Matrix dimensions must agree."))
+        Err(mldivide_invalid_input("Matrix dimensions must agree."))
     }
 }
 
@@ -387,7 +464,7 @@ fn prepare_gpu_operand(
             if logical.data.len() == 1 {
                 Ok(None)
             } else {
-                let tensor = tensor::logical_to_tensor(logical).map_err(builtin_error)?;
+                let tensor = tensor::logical_to_tensor(logical).map_err(mldivide_invalid_input)?;
                 let uploaded = upload_tensor(provider, &tensor)?;
                 Ok(Some(PreparedOperand::owned(uploaded)))
             }
@@ -406,7 +483,7 @@ fn upload_tensor(
     };
     provider
         .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| mldivide_internal_error(format!("{NAME}: {e}")))
 }
 
 fn release_operand(provider: &'static dyn AccelProvider, operand: &mut PreparedOperand) {
@@ -472,6 +549,27 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn mldivide_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MLDIVIDE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"X = mldivide(A, B)"));
+    }
+
+    #[test]
+    fn mldivide_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = MLDIVIDE_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|err| err.code)
+            .collect();
+        assert!(codes.contains(&"RM.MLDIVIDE.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.MLDIVIDE.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -571,6 +669,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = unwrap_error(mldivide_builtin(Value::Tensor(a), Value::Tensor(b)).unwrap_err());
+        assert_eq!(err.identifier(), MLDIVIDE_ERROR_INVALID_INPUT.identifier);
         assert!(
             err.message().contains("Matrix dimensions must agree"),
             "unexpected error message: {err}"

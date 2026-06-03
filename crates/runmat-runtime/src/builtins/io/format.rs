@@ -1,34 +1,99 @@
 //! MATLAB-compatible `format` builtin for controlling numeric display precision.
 
-use runmat_builtins::{set_display_format, FormatMode, Tensor, Value};
+use runmat_builtins::{
+    set_display_format, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
+    BuiltinSignatureDescriptor, FormatMode, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, BuiltinResult};
 
+const FORMAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ans",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Empty matrix placeholder returned by sink invocation.",
+}];
+const FORMAT_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const FORMAT_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Format mode keyword (short, long, shortE, longE, shortG, longG, rat, hex, compact, loose).",
+}];
+const FORMAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "format()",
+        inputs: &FORMAT_INPUTS_NONE,
+        outputs: &FORMAT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "format(mode)",
+        inputs: &FORMAT_INPUTS_MODE,
+        outputs: &FORMAT_OUTPUT,
+    },
+];
+const FORMAT_ERROR_ARG_CONFIG: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FORMAT.ARG_CONFIG",
+    identifier: None,
+    when: "Input arguments do not match supported format call forms.",
+    message: "format: invalid argument configuration",
+};
+const FORMAT_ERROR_UNKNOWN_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FORMAT.UNKNOWN_MODE",
+    identifier: None,
+    when: "Mode string is not a supported numeric display mode keyword.",
+    message: "format: unknown format mode",
+};
+const FORMAT_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [FORMAT_ERROR_ARG_CONFIG, FORMAT_ERROR_UNKNOWN_MODE];
+pub const FORMAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FORMAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FORMAT_ERRORS,
+};
+
+fn format_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("format");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "format",
     category = "io",
-    summary = "Set the numeric display format for console output (format short, format long, etc.).",
+    summary = "Set numeric display format for console output.",
     keywords = "format,display,precision,numeric,short,long,scientific",
     sink = true,
     suppress_auto_output = true,
+    descriptor(crate::builtins::io::format::FORMAT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::format"
 )]
 async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let keyword =
-        match args.as_slice() {
-            [] => {
-                set_display_format(FormatMode::Short);
-                return Ok(empty_value());
-            }
-            [Value::String(s)] => s.to_lowercase(),
-            [Value::CharArray(ca)] => ca.to_string().to_lowercase(),
-            _ => return Err(build_runtime_error(
+    let keyword = match args.as_slice() {
+        [] => {
+            set_display_format(FormatMode::Short);
+            return Ok(empty_value());
+        }
+        [Value::String(s)] => s.to_lowercase(),
+        [Value::CharArray(ca)] => ca.to_string().to_lowercase(),
+        _ => {
+            return Err(format_error_with(
+                &FORMAT_ERROR_ARG_CONFIG,
                 "format: unrecognized argument; expected a format name such as 'short' or 'long'",
-            )
-            .with_builtin("format")
-            .build()),
-        };
+            ));
+        }
+    };
     // Spacing modes: accepted for MATLAB compatibility but not yet implemented.
     // Crucially, they must NOT change the active numeric format.
     if matches!(keyword.trim(), "compact" | "loose") {
@@ -48,11 +113,12 @@ fn parse_numeric_mode(s: &str) -> BuiltinResult<FormatMode> {
         "longg" => Ok(FormatMode::LongG),
         "rat" | "rational" => Ok(FormatMode::Rational),
         "hex" => Ok(FormatMode::Hex),
-        other => Err(build_runtime_error(format!(
-            "format: unknown format '{other}'; numeric modes: short, long, shortE, longE, shortG, longG, rat, hex"
-        ))
-        .with_builtin("format")
-        .build()),
+        other => Err(format_error_with(
+            &FORMAT_ERROR_UNKNOWN_MODE,
+            format!(
+                "format: unknown format '{other}'; numeric modes: short, long, shortE, longE, shortG, longG, rat, hex"
+            ),
+        )),
     }
 }
 
@@ -76,6 +142,14 @@ mod tests {
 
     #[test]
     fn test_parse_numeric_mode_case_insensitive() {
+        let labels: Vec<&str> = FORMAT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"format()"));
+        assert!(labels.contains(&"format(mode)"));
+
         // parse_numeric_mode receives an already-lowercased string from the builtin.
         assert_eq!(parse_numeric_mode("short").unwrap(), FormatMode::Short);
         assert_eq!(parse_numeric_mode("long").unwrap(), FormatMode::Long);

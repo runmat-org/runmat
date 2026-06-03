@@ -1,14 +1,18 @@
 //! MATLAB-compatible `startsWith` builtin for RunMat.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
+use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 
@@ -46,13 +50,198 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "startsWith";
 
+const STARTSWITH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical result indicating whether each text element starts with the pattern.",
+}];
+
+const STARTSWITH_INPUTS_BASE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+];
+
+const STARTSWITH_INPUTS_IGNORE_CASE_POSITIONAL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "ignoreCase",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("false"),
+        description: "Logical flag controlling case-sensitive matching.",
+    },
+];
+
+const STARTSWITH_INPUTS_IGNORE_CASE_PAIR: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"IgnoreCase\""),
+        description: "Option name (`\"IgnoreCase\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Option value for `\"IgnoreCase\"`.",
+    },
+];
+
+const STARTSWITH_INPUTS_OPTION_PAIRS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "str",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "pat",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Pattern text (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "nameValuePairs...",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name-value option pairs (`\"IgnoreCase\"`, value).",
+    },
+];
+
+const STARTSWITH_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = startsWith(str, pat)",
+        inputs: &STARTSWITH_INPUTS_BASE,
+        outputs: &STARTSWITH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = startsWith(str, pat, ignoreCase)",
+        inputs: &STARTSWITH_INPUTS_IGNORE_CASE_POSITIONAL,
+        outputs: &STARTSWITH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = startsWith(str, pat, \"IgnoreCase\", value)",
+        inputs: &STARTSWITH_INPUTS_IGNORE_CASE_PAIR,
+        outputs: &STARTSWITH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = startsWith(str, pat, nameValuePairs...)",
+        inputs: &STARTSWITH_INPUTS_OPTION_PAIRS,
+        outputs: &STARTSWITH_OUTPUT,
+    },
+];
+
+const STARTSWITH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STARTSWITH.INVALID_INPUT",
+    identifier: Some("RunMat:startsWith:InvalidInput"),
+    when: "Text or pattern input is not a supported text container.",
+    message: "startsWith: text and pattern inputs must be text values",
+};
+
+const STARTSWITH_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STARTSWITH.INVALID_OPTION",
+    identifier: Some("RunMat:startsWith:InvalidOption"),
+    when: "IgnoreCase option arguments are invalid or malformed.",
+    message: "startsWith: invalid option arguments",
+};
+
+const STARTSWITH_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STARTSWITH.SHAPE_MISMATCH",
+    identifier: Some("RunMat:startsWith:ShapeMismatch"),
+    when: "Text and pattern inputs are not broadcast-compatible.",
+    message: "startsWith: input sizes are not broadcast-compatible",
+};
+
+const STARTSWITH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STARTSWITH.INTERNAL",
+    identifier: Some("RunMat:startsWith:InternalError"),
+    when: "Internal logical result assembly failed.",
+    message: "startsWith: internal error",
+};
+
+const STARTSWITH_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    STARTSWITH_ERROR_INVALID_INPUT,
+    STARTSWITH_ERROR_INVALID_OPTION,
+    STARTSWITH_ERROR_SHAPE_MISMATCH,
+    STARTSWITH_ERROR_INTERNAL,
+];
+
+pub const STARTSWITH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STARTSWITH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STARTSWITH_ERRORS,
+};
+
+fn startswith_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_startswith_flow(err: RuntimeError) -> RuntimeError {
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
+}
+
 #[runtime_builtin(
     name = "startsWith",
     category = "strings/search",
-    summary = "Return logical values indicating whether text inputs start with specific patterns.",
+    summary = "Test whether text inputs begin with specified prefix patterns.",
     keywords = "startswith,prefix,text,ignorecase,search",
     accel = "sink",
     type_resolver(logical_text_match_type),
+    descriptor(crate::builtins::strings::search::startswith::STARTSWITH_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::search::startswith"
 )]
 async fn startswith_builtin(
@@ -60,11 +249,21 @@ async fn startswith_builtin(
     pattern: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let text = gather_if_needed_async(&text).await?;
-    let pattern = gather_if_needed_async(&pattern).await?;
-    let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest)?;
-    let subject = TextCollection::from_subject(BUILTIN_NAME, text)?;
-    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern)?;
+    let text = gather_if_needed_async(&text)
+        .await
+        .map_err(remap_startswith_flow)?;
+    let pattern = gather_if_needed_async(&pattern)
+        .await
+        .map_err(remap_startswith_flow)?;
+    let ignore_case = parse_ignore_case(BUILTIN_NAME, &rest).map_err(|err| {
+        startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_OPTION)
+    })?;
+    let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
+        startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_INPUT)
+    })?;
+    let patterns = TextCollection::from_pattern(BUILTIN_NAME, pattern).map_err(|err| {
+        startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INVALID_INPUT)
+    })?;
     evaluate_startswith(&subject, &patterns, ignore_case)
 }
 
@@ -74,10 +273,12 @@ fn evaluate_startswith(
     ignore_case: bool,
 ) -> BuiltinResult<Value> {
     let output_shape = broadcast_shapes(BUILTIN_NAME, &subject.shape, &patterns.shape)
-        .map_err(|err| build_runtime_error(err).with_builtin(BUILTIN_NAME).build())?;
+        .map_err(|err| startswith_error_with_message(err, &STARTSWITH_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&output_shape);
     if total == 0 {
-        return logical_result(BUILTIN_NAME, Vec::new(), output_shape);
+        return logical_result(BUILTIN_NAME, Vec::new(), output_shape).map_err(|err| {
+            startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INTERNAL)
+        });
     }
 
     let subject_strides = compute_strides(&subject.shape);
@@ -123,7 +324,9 @@ fn evaluate_startswith(
         };
         data.push(if value { 1 } else { 0 });
     }
-    logical_result(BUILTIN_NAME, data, output_shape)
+    logical_result(BUILTIN_NAME, data, output_shape).map_err(|err| {
+        startswith_error_with_message(err.message().to_string(), &STARTSWITH_ERROR_INTERNAL)
+    })
 }
 
 #[cfg(test)]

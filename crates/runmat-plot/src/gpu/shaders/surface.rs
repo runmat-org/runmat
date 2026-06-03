@@ -50,6 +50,10 @@ fn sample_color(t: f32) -> vec4<f32> {
     return mix(color_table[lower], color_table[upper], frac);
 }
 
+fn sanitize_finite(v: f32, fallback: f32) -> f32 {
+    return select(v, fallback, isFinite(v));
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let lod_x_len = params.lod_x_len;
@@ -69,13 +73,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
     col = min(col, params.y_len - 1u);
-    let source_idx = col * params.x_len + row;
+    let source_idx = col + params.y_len * row;
 
     let px = buf_x[row];
     let py = buf_y[col];
-    let raw_z = buf_z[source_idx];
-    let z_extent = max(params.max_z - params.min_z, 1e-6);
-    let norm_z = (raw_z - params.min_z) / z_extent;
+    let raw_z = sanitize_finite(buf_z[source_idx], params.min_z);
+    let min_z = sanitize_finite(params.min_z, 0.0);
+    let max_z = sanitize_finite(params.max_z, min_z + 1.0);
+    let safe_max_z = max(max_z, min_z + 1e-6);
+    let z_extent = safe_max_z - min_z;
+    let norm_z = sanitize_finite((raw_z - min_z) / z_extent, 0.5);
 
     let position_z = select(raw_z, 0.0, params.flatten == 1u);
     let tex_x = f32(lod_row) / max(f32(lod_x_len - 1u), 1.0);
@@ -174,14 +181,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var col = lod_col * stride_y;
     row = min(row, params.x_len - 1u);
     col = min(col, params.y_len - 1u);
-    let source_idx = col * params.x_len + row;
+    let source_idx = col + params.y_len * row;
 
     let px = f32(buf_x[row]);
     let py = f32(buf_y[col]);
     let raw_z64 = buf_z[source_idx];
-    let raw_z = f32(raw_z64);
-    let z_extent = max(params.max_z - params.min_z, 1e-6);
-    let norm_z = (raw_z - params.min_z) / z_extent;
+    let raw_z = sanitize_finite(f32(raw_z64), params.min_z);
+    let min_z = sanitize_finite(params.min_z, 0.0);
+    let max_z = sanitize_finite(params.max_z, min_z + 1.0);
+    let safe_max_z = max(max_z, min_z + 1e-6);
+    let z_extent = safe_max_z - min_z;
+    let norm_z = sanitize_finite((raw_z - min_z) / z_extent, 0.5);
 
     let position_z = select(raw_z, 0.0, params.flatten == 1u);
     let tex_x = f32(lod_row) / max(f32(lod_x_len - 1u), 1.0);

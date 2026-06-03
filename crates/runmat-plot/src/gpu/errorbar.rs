@@ -7,6 +7,7 @@ use glam::Vec4;
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
+#[derive(Debug, Clone)]
 pub struct ErrorBarGpuInputs {
     pub x_buffer: Arc<wgpu::Buffer>,
     pub y_buffer: Arc<wgpu::Buffer>,

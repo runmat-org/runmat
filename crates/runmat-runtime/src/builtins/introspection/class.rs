@@ -5,7 +5,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::class_type;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::class")]
@@ -35,12 +38,44 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; class executes on the host and returns a string scalar.",
 };
 
+const CLASS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "name",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Class name for the input value.",
+}];
+
+const CLASS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const CLASS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "name = class(A)",
+    inputs: &CLASS_INPUTS,
+    outputs: &CLASS_OUTPUT,
+}];
+
+const CLASS_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const CLASS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CLASS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CLASS_ERRORS,
+};
+
 #[runtime_builtin(
     name = "class",
     category = "introspection",
-    summary = "Return the MATLAB class name for scalars, arrays, and objects.",
+    summary = "Return class names for values.",
     keywords = "class,type inspection,type name,gpuArray class",
     type_resolver(class_type),
+    descriptor(crate::builtins::introspection::class::CLASS_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::class"
 )]
 fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
@@ -59,7 +94,11 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function_handle".to_string(),
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
+        | Value::Closure(_) => "function_handle".to_string(),
         Value::HandleObject(handle) => {
             if handle.class_name.is_empty() {
                 "handle".to_string()
@@ -147,6 +186,7 @@ pub(crate) mod tests {
 
         let closure = Value::Closure(Closure {
             function_name: "anon".into(),
+            bound_function: None,
             captures: vec![],
         });
         assert_eq!(class_name_for_value(&closure), "function_handle");

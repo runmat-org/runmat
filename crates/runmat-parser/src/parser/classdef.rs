@@ -1,6 +1,6 @@
 use runmat_lexer::Token;
 
-use crate::{Attr, ClassMember, Stmt};
+use crate::{ast::ClassPropertyDecl, Attr, ClassMember, Stmt};
 
 use super::Parser;
 
@@ -8,12 +8,15 @@ impl Parser {
     pub(super) fn parse_classdef(&mut self) -> Result<Stmt, String> {
         let start = self.tokens[self.pos].position;
         self.consume(&Token::ClassDef);
+        let attributes = self.parse_optional_attr_list();
         let name = self.parse_qualified_name()?;
         let mut super_class = None;
         if self.consume(&Token::Less) {
             super_class = Some(self.parse_qualified_name()?);
         }
         let mut members: Vec<ClassMember> = Vec::new();
+        let previous_class_context = self.current_classdef_name.clone();
+        self.current_classdef_name = Some(name.clone());
         loop {
             if self.consume(&Token::Semicolon)
                 || self.consume(&Token::Comma)
@@ -90,7 +93,9 @@ impl Parser {
             }
         }
         let end = self.last_token_end();
+        self.current_classdef_name = previous_class_context;
         Ok(Stmt::ClassDef {
+            attributes,
             name,
             super_class,
             members,
@@ -119,7 +124,7 @@ impl Parser {
         Ok(names)
     }
 
-    fn parse_properties_names_block(&mut self) -> Result<Vec<String>, String> {
+    fn parse_properties_names_block(&mut self) -> Result<Vec<ClassPropertyDecl>, String> {
         // Accept identifiers with optional default assignment: name, name = expr.
         let mut names = Vec::new();
         while let Some(tok) = self.peek_token() {
@@ -133,11 +138,12 @@ impl Parser {
                 continue;
             }
             if let Some(Token::Ident) = self.peek_token() {
-                names.push(self.expect_ident()?);
-                // Parse and discard default initializers to preserve current permissive syntax behavior.
+                let name = self.expect_ident()?;
+                let mut default = None;
                 if self.consume(&Token::Assign) {
-                    let _ = self.parse_expr().map_err(|e| e.message)?;
+                    default = Some(self.parse_expr().map_err(|e| e.message)?);
                 }
+                names.push(ClassPropertyDecl { name, default });
             } else {
                 break;
             }
@@ -145,7 +151,7 @@ impl Parser {
         Ok(names)
     }
 
-    fn parse_optional_attr_list(&mut self) -> Vec<Attr> {
+    pub(super) fn parse_optional_attr_list(&mut self) -> Vec<Attr> {
         // Minimal parsing of attribute lists: (Attr, Attr=Value, ...)
         let mut attrs: Vec<Attr> = Vec::new();
         if !self.consume(&Token::LParen) {

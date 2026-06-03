@@ -17,12 +17,157 @@ use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, DVector};
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 const BUILTIN_NAME: &str = "eig";
 
 const REAL_EPS: f64 = 1e-12;
+
+const EIG_OUTPUT_D: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "d",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Eigenvalues as a column vector.",
+}];
+
+const EIG_OUTPUT_VD: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right eigenvectors.",
+    },
+    BuiltinParamDescriptor {
+        name: "D",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal matrix (or vector when `vector` option is used).",
+    },
+];
+
+const EIG_OUTPUT_VDW: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right eigenvectors.",
+    },
+    BuiltinParamDescriptor {
+        name: "D",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Diagonal matrix (or vector when `vector` option is used).",
+    },
+    BuiltinParamDescriptor {
+        name: "W",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left eigenvectors.",
+    },
+];
+
+const EIG_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input square matrix.",
+}];
+
+const EIG_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input square matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "options",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Optional selectors (`balance`, `nobalance`, `vector`, `matrix`).",
+    },
+];
+
+const EIG_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "d = eig(A)",
+        inputs: &EIG_INPUTS_A,
+        outputs: &EIG_OUTPUT_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "d = eig(A, options...)",
+        inputs: &EIG_INPUTS_A_OPTIONS,
+        outputs: &EIG_OUTPUT_D,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D] = eig(A)",
+        inputs: &EIG_INPUTS_A,
+        outputs: &EIG_OUTPUT_VD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D] = eig(A, options...)",
+        inputs: &EIG_INPUTS_A_OPTIONS,
+        outputs: &EIG_OUTPUT_VD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D, W] = eig(A)",
+        inputs: &EIG_INPUTS_A,
+        outputs: &EIG_OUTPUT_VDW,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[V, D, W] = eig(A, options...)",
+        inputs: &EIG_INPUTS_A_OPTIONS,
+        outputs: &EIG_OUTPUT_VDW,
+    },
+];
+
+const EIG_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIG.INVALID_ARGUMENT",
+    identifier: Some("RunMat:eig:InvalidArgument"),
+    when: "Option arguments or requested output count are invalid.",
+    message: "eig currently supports at most three outputs",
+};
+
+const EIG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIG.INVALID_INPUT",
+    identifier: Some("RunMat:eig:InvalidInput"),
+    when: "Input is unsupported or matrix shape is invalid.",
+    message: "eig: input matrix must be square",
+};
+
+const EIG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIG.INTERNAL",
+    identifier: Some("RunMat:eig:Internal"),
+    when: "Runtime cannot compute or materialize eig outputs.",
+    message: "eig: internal runtime failure",
+};
+
+const EIG_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    EIG_ERROR_INVALID_ARGUMENT,
+    EIG_ERROR_INVALID_INPUT,
+    EIG_ERROR_INTERNAL,
+];
+
+pub const EIG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EIG_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EIG_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::factor::eig")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -40,10 +185,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider `eig` hook (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for complex spectra or unsupported options.",
 };
 
-fn eig_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn eig_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    eig_error_with_message(error.message, error)
+}
+
+fn eig_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn eig_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    eig_error_with_message(message, &EIG_ERROR_INVALID_ARGUMENT)
+}
+
+fn eig_invalid_input(message: impl Into<String>) -> RuntimeError {
+    eig_error_with_message(message, &EIG_ERROR_INVALID_INPUT)
+}
+
+fn eig_internal_error(message: impl Into<String>) -> RuntimeError {
+    eig_error_with_message(message, &EIG_ERROR_INTERNAL)
 }
 
 fn with_eig_context(mut error: RuntimeError) -> RuntimeError {
@@ -72,11 +238,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "eig",
     category = "math/linalg/factor",
-    summary = "Eigenvalue decomposition with MATLAB-compatible multi-output forms.",
+    summary = "Compute eigenvalue decompositions.",
     keywords = "eig,eigenvalues,eigenvectors,linalg",
     accel = "sink",
     sink = true,
     type_resolver(eig_type),
+    descriptor(crate::builtins::math::linalg::factor::eig::EIG_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
 async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -96,7 +263,7 @@ async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             let left = eval.left()?;
             return Ok(Value::OutputList(vec![eval.right(), eval.diagonal(), left]));
         }
-        return Err(eig_error("eig currently supports at most three outputs"));
+        return Err(eig_error(&EIG_ERROR_INVALID_ARGUMENT));
     }
     let eval = evaluate(value, &rest, false).await?;
     Ok(eval.eigenvalues())
@@ -130,7 +297,7 @@ impl EigEval {
 
     pub fn left(&self) -> BuiltinResult<Value> {
         self.left.clone().ok_or_else(|| {
-            eig_error(
+            eig_internal_error(
                 "eig: left eigenvectors are not available from the active acceleration provider",
             )
         })
@@ -230,15 +397,17 @@ fn parse_options(args: &[Value]) -> BuiltinResult<EigOptions> {
                 "vector" => opts.vector_output = true,
                 "matrix" => opts.vector_output = false,
                 other => {
-                    return Err(eig_error(format!("eig: unknown option '{other}'")));
+                    return Err(eig_invalid_argument(format!(
+                        "eig: unknown option '{other}'"
+                    )));
                 }
             }
         } else if idx == 0 {
-            return Err(eig_error(
+            return Err(eig_invalid_argument(
                 "eig: generalized eigenvalue decomposition (eig(A,B)) is not implemented",
             ));
         } else {
-            return Err(eig_error(
+            return Err(eig_invalid_argument(
                 "eig: option arguments must be character vectors or string scalars",
             ));
         }
@@ -252,14 +421,14 @@ fn compute_eigen(
     require_left: bool,
 ) -> BuiltinResult<EigEval> {
     if matrix.nrows() != matrix.ncols() {
-        return Err(eig_error("eig: input matrix must be square"));
+        return Err(eig_error(&EIG_ERROR_INVALID_INPUT));
     }
     let n = matrix.nrows();
     if n == 0 {
-        let empty_vals =
-            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
-        let empty_mat =
-            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let empty_vals = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
+        let empty_mat = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         let eigenvalues_value = Value::Tensor(empty_vals.clone());
         let diagonal_matrix_value = Value::Tensor(empty_mat.clone());
         let diagonal_output = if options.vector_output {
@@ -290,7 +459,9 @@ fn compute_eigen(
     let left_value = if require_left {
         let left_matrix =
             compute_left_vectors(&balanced, &right, &eigenvalues).ok_or_else(|| {
-                eig_error("eig: unable to compute left eigenvectors for the requested matrix")
+                eig_internal_error(
+                    "eig: unable to compute left eigenvectors for the requested matrix",
+                )
             })?;
         Some(matrix_to_value(&left_matrix)?)
     } else {
@@ -438,7 +609,7 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
         Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| eig_error(format!("eig: {err}")))?;
+                .map_err(|err| eig_internal_error(format!("eig: {err}")))?;
             tensor_to_matrix(&tensor)
         }
         Value::Num(n) => Ok(DMatrix::from_element(1, 1, Complex64::new(n, 0.0))),
@@ -455,10 +626,10 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
                 .map_err(with_eig_context)?;
             tensor_to_matrix(&tensor)
         }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_error(
+        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_invalid_input(
             "eig: input must be numeric or logical; convert character data with double() first",
         )),
-        other => Err(eig_error(format!(
+        other => Err(eig_invalid_input(format!(
             "eig: unsupported input type {other:?}; expected numeric or logical values"
         ))),
     }
@@ -466,7 +637,7 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
 
 fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
     if tensor.shape.len() > 2 {
-        return Err(eig_error("eig: input must be 2-D"));
+        return Err(eig_invalid_input("eig: input must be 2-D"));
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -479,7 +650,7 @@ fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
 
 fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
     if tensor.shape.len() > 2 {
-        return Err(eig_error("eig: input must be 2-D"));
+        return Err(eig_invalid_input("eig: input must be 2-D"));
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -492,8 +663,8 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
 
 fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     if is_all_real(values.iter().copied()) {
@@ -501,8 +672,8 @@ fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
         for value in values.iter() {
             data.push(value.re);
         }
-        let tensor =
-            Tensor::new(data, vec![values.len(), 1]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor = Tensor::new(data, vec![values.len(), 1])
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         Ok(tensor::tensor_into_value(tensor))
     } else {
         let mut data = Vec::with_capacity(values.len());
@@ -510,15 +681,15 @@ fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
             data.push((value.re, value.im));
         }
         let tensor = ComplexTensor::new(data, vec![values.len(), 1])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
 
 fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
     if values.is_empty() {
-        let tensor =
-            Tensor::new(Vec::new(), vec![0, 0]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor = Tensor::new(Vec::new(), vec![0, 0])
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         return Ok(Value::Tensor(tensor));
     }
     let size = values.len();
@@ -527,8 +698,8 @@ fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
         for i in 0..size {
             data[i + i * size] = values[i].re;
         }
-        let tensor =
-            Tensor::new(data, vec![size, size]).map_err(|e| eig_error(format!("eig: {e}")))?;
+        let tensor = Tensor::new(data, vec![size, size])
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let mut data = vec![(0.0f64, 0.0f64); size * size];
@@ -536,7 +707,7 @@ fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
             data[i + i * size] = (values[i].re, values[i].im);
         }
         let tensor = ComplexTensor::new(data, vec![size, size])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -548,7 +719,7 @@ fn matrix_to_value(matrix: &DMatrix<Complex64>) -> BuiltinResult<Value> {
             data.push(value.re);
         }
         let tensor = Tensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         Ok(Value::Tensor(tensor))
     } else {
         let mut data = Vec::with_capacity(matrix.len());
@@ -556,7 +727,7 @@ fn matrix_to_value(matrix: &DMatrix<Complex64>) -> BuiltinResult<Value> {
             data.push((value.re, value.im));
         }
         let tensor = ComplexTensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-            .map_err(|e| eig_error(format!("eig: {e}")))?;
+            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
         Ok(Value::ComplexTensor(tensor))
     }
 }
@@ -602,6 +773,29 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(3), Some(1)])
             }
         );
+    }
+
+    #[test]
+    fn eig_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = EIG_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"d = eig(A)"));
+        assert!(labels.contains(&"d = eig(A, options...)"));
+        assert!(labels.contains(&"[V, D] = eig(A)"));
+        assert!(labels.contains(&"[V, D] = eig(A, options...)"));
+        assert!(labels.contains(&"[V, D, W] = eig(A)"));
+        assert!(labels.contains(&"[V, D, W] = eig(A, options...)"));
+    }
+
+    #[test]
+    fn eig_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = EIG_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.EIG.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.EIG.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.EIG.INTERNAL"));
     }
 
     fn column_vector_from_value(value: Value) -> Vec<Complex64> {
@@ -711,7 +905,9 @@ pub(crate) mod tests {
     #[test]
     fn eig_errors_on_non_square() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(eig_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
+        let err = eig_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), EIG_ERROR_INVALID_INPUT.identifier);
+        let err = error_message(err);
         assert!(err.contains("square"));
     }
 
@@ -817,13 +1013,31 @@ pub(crate) mod tests {
     #[test]
     fn eig_handles_single_numeric_argument() {
         let args = vec![Value::Int(IntValue::I32(3))];
-        let err = error_message(evaluate(Value::Num(4.0), &args, false).unwrap_err());
+        let err = evaluate(Value::Num(4.0), &args, false).unwrap_err();
+        assert_eq!(err.identifier(), EIG_ERROR_INVALID_ARGUMENT.identifier);
+        let err = error_message(err);
         assert!(
             err.contains("generalized")
                 || err.contains("option arguments must be")
                 || err.contains("unknown option"),
             "unexpected error message: {err}"
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eig_rejects_unknown_option_with_stable_identifier() {
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let err = evaluate(Value::Tensor(tensor), &[Value::from("invalid")], false).unwrap_err();
+        assert_eq!(err.identifier(), EIG_ERROR_INVALID_ARGUMENT.identifier);
+        assert!(error_message(err).contains("unknown option"));
+    }
+
+    #[test]
+    fn eig_invalid_input_identifier_is_stable_for_nd_arrays() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]).expect("tensor");
+        let err = evaluate(Value::Tensor(tensor), &[], false).unwrap_err();
+        assert_eq!(err.identifier(), EIG_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

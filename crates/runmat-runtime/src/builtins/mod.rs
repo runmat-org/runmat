@@ -4,6 +4,8 @@ pub mod common;
 pub mod acceleration;
 pub mod array;
 pub mod cells;
+pub mod close;
+pub mod comms;
 pub mod constants;
 pub mod containers;
 pub mod control;
@@ -22,17 +24,3 @@ pub mod strings;
 pub mod structs;
 pub mod timing;
 pub mod wasm_registry;
-
-// Temporary: expose legacy modules while migration is in progress.
-pub mod legacy {
-    pub use crate::arrays;
-    #[cfg(feature = "blas-lapack")]
-    pub use crate::blas;
-    pub use crate::comparison;
-    pub use crate::concatenation;
-    pub use crate::elementwise;
-    pub use crate::indexing;
-    #[cfg(feature = "blas-lapack")]
-    pub use crate::lapack;
-    pub use crate::matrix;
-}

@@ -1,4 +1,7 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::op_common::map_figure_error;
@@ -10,13 +13,135 @@ use crate::builtins::plotting::{
     state::{current_figure_handle, figure_handle_exists, set_sg_title_for_figure, FigureHandle},
 };
 
+const SGTITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created/updated super-title object.",
+}];
+
+const SGTITLE_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+}];
+
+const SGTITLE_INPUTS_FIG_TEXT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fig",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target figure handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+    },
+];
+
+const SGTITLE_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const SGTITLE_INPUTS_FIG_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fig",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target figure handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const SGTITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = sgtitle(txt)",
+        inputs: &SGTITLE_INPUTS_TEXT,
+        outputs: &SGTITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = sgtitle(fig, txt)",
+        inputs: &SGTITLE_INPUTS_FIG_TEXT,
+        outputs: &SGTITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = sgtitle(txt, Name, Value, ...)",
+        inputs: &SGTITLE_INPUTS_TEXT_PROPS,
+        outputs: &SGTITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = sgtitle(fig, txt, Name, Value, ...)",
+        inputs: &SGTITLE_INPUTS_FIG_TEXT_PROPS,
+        outputs: &SGTITLE_OUTPUT_HANDLE,
+    },
+];
+
+const SGTITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SGTITLE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:sgtitle:InvalidArgument"),
+    when: "Figure handle, text payload, or property/value arguments are invalid.",
+    message: "sgtitle: invalid argument",
+};
+
+const SGTITLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SGTITLE.INTERNAL",
+    identifier: Some("RunMat:sgtitle:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "sgtitle: internal operation failed",
+};
+
+const SGTITLE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SGTITLE_ERROR_INVALID_ARGUMENT, SGTITLE_ERROR_INTERNAL];
+
+pub const SGTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SGTITLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SGTITLE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "sgtitle",
     category = "plotting",
-    summary = "Set a title centered above the entire figure.",
+    summary = "Set a centered title above the entire figure.",
     keywords = "sgtitle,subplot,title,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::sgtitle::SGTITLE_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::sgtitle"
 )]
 pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -118,6 +243,18 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    #[test]
+    fn sgtitle_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SGTITLE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = sgtitle(txt)"));
+        assert!(labels.contains(&"h = sgtitle(fig, txt)"));
+        assert!(labels.contains(&"h = sgtitle(txt, Name, Value, ...)"));
     }
 
     #[test]

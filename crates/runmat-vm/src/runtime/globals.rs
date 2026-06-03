@@ -32,6 +32,10 @@ pub fn workspace_global_names() -> Vec<String> {
     names
 }
 
+pub fn get_global_value(name: &str) -> Option<Value> {
+    GLOBALS.with(|globals| globals.borrow().get(name).cloned())
+}
+
 pub fn collect_thread_roots() -> Vec<Value> {
     let mut thread_roots = Vec::new();
     GLOBALS.with(|g| {
@@ -206,10 +210,4 @@ pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars:
             _ => {}
         }
     }
-}
-
-pub fn clear_all_runtime_globals() {
-    GLOBALS.with(|g| g.borrow_mut().clear());
-    PERSISTENTS.with(|p| p.borrow_mut().clear());
-    PERSISTENTS_BY_NAME.with(|p| p.borrow_mut().clear());
 }

@@ -1,6 +1,10 @@
 //! MATLAB-compatible `mat2cell` builtin for RunMat.
 
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::cells::type_resolvers::mat2cell_type;
@@ -41,36 +45,130 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Partitioning into cells terminates fusion; blocks are produced on the host.",
 };
 
-const IDENT_INVALID_INPUT: &str = "RunMat:mat2cell:InvalidInput";
-const IDENT_INVALID_PARTITION: &str = "RunMat:mat2cell:InvalidPartition";
-const IDENT_SIZE_LIMIT: &str = "RunMat:mat2cell:SizeExceeded";
+const BUILTIN_NAME: &str = "mat2cell";
 
-fn mat2cell_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("mat2cell")
-        .build()
-}
+const MAT2CELL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell array of extracted blocks.",
+}];
 
-fn mat2cell_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("mat2cell")
-        .with_identifier(identifier)
-        .build()
+const MAT2CELL_SIG_SINGLE_PARTITION_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array to partition.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim1dist",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Partition sizes for the first dimension.",
+    },
+];
+
+const MAT2CELL_SIG_MULTI_PARTITION_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array to partition.",
+    },
+    BuiltinParamDescriptor {
+        name: "dimdist",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "One partition vector per dimension.",
+    },
+];
+
+const MAT2CELL_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = mat2cell(A, dim1dist)",
+        inputs: &MAT2CELL_SIG_SINGLE_PARTITION_INPUTS,
+        outputs: &MAT2CELL_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = mat2cell(A, dim1dist, dim2dist, ...)",
+        inputs: &MAT2CELL_SIG_MULTI_PARTITION_INPUTS,
+        outputs: &MAT2CELL_OUTPUT,
+    },
+];
+
+const MAT2CELL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAT2CELL.INVALID_INPUT",
+    identifier: Some("RunMat:mat2cell:InvalidInput"),
+    when: "Input array type or argument count is invalid.",
+    message: "mat2cell: invalid input arguments",
+};
+
+const MAT2CELL_ERROR_INVALID_PARTITION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAT2CELL.INVALID_PARTITION",
+    identifier: Some("RunMat:mat2cell:InvalidPartition"),
+    when: "Partition vectors are malformed or inconsistent with input dimensions.",
+    message: "mat2cell: invalid partition sizes",
+};
+
+const MAT2CELL_ERROR_SIZE_EXCEEDED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAT2CELL.SIZE_EXCEEDED",
+    identifier: Some("RunMat:mat2cell:SizeExceeded"),
+    when: "Partitioning or output shape exceeds platform limits.",
+    message: "mat2cell: size exceeds platform limits",
+};
+
+const MAT2CELL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAT2CELL.INTERNAL",
+    identifier: None,
+    when: "Internal partitioning, indexing, or allocation failed.",
+    message: "mat2cell: internal error",
+};
+
+const MAT2CELL_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    MAT2CELL_ERROR_INVALID_INPUT,
+    MAT2CELL_ERROR_INVALID_PARTITION,
+    MAT2CELL_ERROR_SIZE_EXCEEDED,
+    MAT2CELL_ERROR_INTERNAL,
+];
+
+pub const MAT2CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MAT2CELL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MAT2CELL_ERRORS,
+};
+
+fn mat2cell_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "mat2cell",
     category = "cells/core",
-    summary = "Split arrays into cell-array blocks.",
+    summary = "Split arrays into cell-array blocks by dimension partitions.",
     keywords = "mat2cell,cell array,partition,block",
     type_resolver(mat2cell_type),
+    descriptor(crate::builtins::cells::core::mat2cell::MAT2CELL_DESCRIPTOR),
     builtin_path = "crate::builtins::cells::core::mat2cell"
 )]
 async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
-        return Err(mat2cell_error_with_identifier(
+        return Err(mat2cell_error_with_message(
             "mat2cell: expected at least one size vector",
-            IDENT_INVALID_INPUT,
+            &MAT2CELL_ERROR_INVALID_INPUT,
         ));
     }
 
@@ -133,7 +231,7 @@ impl Mat2CellInput {
             }
             Value::String(s) => {
                 let array =
-                    StringArray::new(vec![s], vec![1, 1]).map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    StringArray::new(vec![s], vec![1, 1]).map_err(|e| mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL))?;
                 let base_shape = vec![1, 1];
                 let normalized_dims = normalize_dims(&base_shape);
                 Ok(Self {
@@ -166,29 +264,29 @@ impl Mat2CellInput {
             }
             Value::Complex(re, im) => {
                 let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                    .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    .map_err(|e| mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL))?;
                 Self::try_new(Value::ComplexTensor(tensor))
             }
             Value::Num(n) => {
                 let tensor = tensor::value_into_tensor_for("mat2cell", Value::Num(n))
-                    .map_err(mat2cell_error)?;
+                    .map_err(|e| mat2cell_error_with_message(e, &MAT2CELL_ERROR_INTERNAL))?;
                 Mat2CellInput::try_new(Value::Tensor(tensor))
             }
             Value::Int(i) => {
                 let tensor = tensor::value_into_tensor_for("mat2cell", Value::Int(i.clone()))
-                    .map_err(mat2cell_error)?;
+                    .map_err(|e| mat2cell_error_with_message(e, &MAT2CELL_ERROR_INTERNAL))?;
                 Mat2CellInput::try_new(Value::Tensor(tensor))
             }
             Value::Bool(b) => {
                 let tensor = tensor::value_into_tensor_for("mat2cell", Value::Bool(b))
-                    .map_err(mat2cell_error)?;
+                    .map_err(|e| mat2cell_error_with_message(e, &MAT2CELL_ERROR_INTERNAL))?;
                 Mat2CellInput::try_new(Value::Tensor(tensor))
             }
-            other => Err(mat2cell_error_with_identifier(
+            other => Err(mat2cell_error_with_message(
                 format!(
                     "mat2cell: unsupported input type {other:?}; expected numeric, logical, string, or char arrays"
                 ),
-                IDENT_INVALID_INPUT,
+                &MAT2CELL_ERROR_INVALID_INPUT,
             )),
         }
     }
@@ -202,8 +300,9 @@ impl Mat2CellInput {
             Mat2CellKind::Tensor(t) => {
                 let data = copy_block(&t.data, &self.base_shape, start, sizes)?;
                 let shape = adjust_output_shape(sizes);
-                let tensor = Tensor::new(data, shape)
-                    .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                let tensor = Tensor::new(data, shape).map_err(|e| {
+                    mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+                })?;
                 Ok(tensor::tensor_into_value(tensor))
             }
             Mat2CellKind::Complex(t) => {
@@ -213,8 +312,12 @@ impl Mat2CellInput {
                     let (re, im) = data[0];
                     Ok(Value::Complex(re, im))
                 } else {
-                    let tensor = ComplexTensor::new(data, shape)
-                        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    let tensor = ComplexTensor::new(data, shape).map_err(|e| {
+                        mat2cell_error_with_message(
+                            format!("mat2cell: {e}"),
+                            &MAT2CELL_ERROR_INTERNAL,
+                        )
+                    })?;
                     Ok(Value::ComplexTensor(tensor))
                 }
             }
@@ -224,8 +327,12 @@ impl Mat2CellInput {
                     Ok(Value::Bool(data[0] != 0))
                 } else {
                     let shape = adjust_output_shape(sizes);
-                    let logical = LogicalArray::new(data, shape)
-                        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    let logical = LogicalArray::new(data, shape).map_err(|e| {
+                        mat2cell_error_with_message(
+                            format!("mat2cell: {e}"),
+                            &MAT2CELL_ERROR_INTERNAL,
+                        )
+                    })?;
                     Ok(Value::LogicalArray(logical))
                 }
             }
@@ -235,8 +342,12 @@ impl Mat2CellInput {
                     Ok(Value::String(data.into_iter().next().unwrap()))
                 } else {
                     let shape = adjust_output_shape(sizes);
-                    let strings = StringArray::new(data, shape)
-                        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+                    let strings = StringArray::new(data, shape).map_err(|e| {
+                        mat2cell_error_with_message(
+                            format!("mat2cell: {e}"),
+                            &MAT2CELL_ERROR_INTERNAL,
+                        )
+                    })?;
                     Ok(Value::StringArray(strings))
                 }
             }
@@ -273,15 +384,16 @@ fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Built
         .iter()
         .try_fold(1usize, |acc, &v| acc.checked_mul(v))
         .ok_or_else(|| {
-            mat2cell_error_with_identifier(
+            mat2cell_error_with_message(
                 "mat2cell: resulting cell array is too large to represent on this platform",
-                IDENT_SIZE_LIMIT,
+                &MAT2CELL_ERROR_SIZE_EXCEEDED,
             )
         })?;
 
     if total_cells == 0 || partitions.iter().any(|p| p.is_empty()) {
-        return make_cell_with_shape(Vec::new(), normalized_shape)
-            .map_err(|e| mat2cell_error(format!("mat2cell: {e}")));
+        return make_cell_with_shape(Vec::new(), normalized_shape).map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        });
     }
 
     let offsets: Vec<Vec<usize>> = partitions.iter().map(|part| prefix_sums(part)).collect();
@@ -315,8 +427,9 @@ fn split_into_cells(input: &Mat2CellInput, partitions: Vec<Vec<usize>>) -> Built
         }
     }
 
-    make_cell_with_shape(cells, normalized_shape)
-        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))
+    make_cell_with_shape(cells, normalized_shape).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })
 }
 
 fn parse_partition_vector(
@@ -325,12 +438,12 @@ fn parse_partition_vector(
     dim_index: usize,
 ) -> BuiltinResult<Vec<usize>> {
     let numbers = extract_numeric_vector(value).ok_or_else(|| {
-        mat2cell_error_with_identifier(
+        mat2cell_error_with_message(
             format!(
                 "mat2cell: size arguments must be numeric for dimension {}",
                 dim_index
             ),
-            IDENT_INVALID_PARTITION,
+            &MAT2CELL_ERROR_INVALID_PARTITION,
         )
     })?;
 
@@ -338,12 +451,12 @@ fn parse_partition_vector(
         if dim_size == 0 {
             return Ok(Vec::new());
         }
-        return Err(mat2cell_error_with_identifier(
+        return Err(mat2cell_error_with_message(
             format!(
                 "mat2cell: partition sizes for dimension {} must sum to {}",
                 dim_index, dim_size
             ),
-            IDENT_INVALID_PARTITION,
+            &MAT2CELL_ERROR_INVALID_PARTITION,
         ));
     }
 
@@ -351,53 +464,53 @@ fn parse_partition_vector(
     let mut parts = Vec::with_capacity(numbers.len());
     for (idx, n) in numbers.iter().enumerate() {
         if !n.is_finite() {
-            return Err(mat2cell_error_with_identifier(
+            return Err(mat2cell_error_with_message(
                 format!(
                     "mat2cell: size entries must be finite (dimension {}, index {})",
                     dim_index,
                     idx + 1
                 ),
-                IDENT_INVALID_PARTITION,
+                &MAT2CELL_ERROR_INVALID_PARTITION,
             ));
         }
         let rounded = n.round();
         if (rounded - n).abs() > f64::EPSILON {
-            return Err(mat2cell_error_with_identifier(
+            return Err(mat2cell_error_with_message(
                 format!(
                     "mat2cell: size entries must be integers (dimension {}, index {})",
                     dim_index,
                     idx + 1
                 ),
-                IDENT_INVALID_PARTITION,
+                &MAT2CELL_ERROR_INVALID_PARTITION,
             ));
         }
         if rounded < 0.0 {
-            return Err(mat2cell_error_with_identifier(
+            return Err(mat2cell_error_with_message(
                 format!(
                     "mat2cell: size entries must be non-negative (dimension {}, index {})",
                     dim_index,
                     idx + 1
                 ),
-                IDENT_INVALID_PARTITION,
+                &MAT2CELL_ERROR_INVALID_PARTITION,
             ));
         }
         let value = rounded as usize;
         total = total.checked_add(value).ok_or_else(|| {
-            mat2cell_error_with_identifier(
+            mat2cell_error_with_message(
                 "mat2cell: partition sum exceeds platform limits",
-                IDENT_SIZE_LIMIT,
+                &MAT2CELL_ERROR_SIZE_EXCEEDED,
             )
         })?;
         parts.push(value);
     }
 
     if total != dim_size {
-        return Err(mat2cell_error_with_identifier(
+        return Err(mat2cell_error_with_message(
             format!(
                 "mat2cell: partition sizes for dimension {} must sum to {} (got {})",
                 dim_index, dim_size, total
             ),
-            IDENT_INVALID_PARTITION,
+            &MAT2CELL_ERROR_INVALID_PARTITION,
         ));
     }
     Ok(parts)
@@ -456,9 +569,9 @@ fn copy_block<T: Clone>(
 
     for dim in 0..rank {
         if start[dim] + sizes[dim] > extended_shape[dim] {
-            return Err(mat2cell_error_with_identifier(
+            return Err(mat2cell_error_with_message(
                 format!("mat2cell: partition exceeds dimension {} bounds", dim + 1),
-                IDENT_INVALID_PARTITION,
+                &MAT2CELL_ERROR_INVALID_PARTITION,
             ));
         }
     }
@@ -478,9 +591,9 @@ fn copy_block<T: Clone>(
         result.push(
             data.get(linear)
                 .ok_or_else(|| {
-                    mat2cell_error_with_identifier(
+                    mat2cell_error_with_message(
                         "mat2cell: internal indexing error",
-                        IDENT_INVALID_PARTITION,
+                        &MAT2CELL_ERROR_INVALID_PARTITION,
                     )
                 })?
                 .clone(),
@@ -507,9 +620,9 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Buil
         for (dim, &count) in sizes.iter().enumerate().skip(2) {
             let offset = start.get(dim).copied().unwrap_or(0);
             if count != 1 || offset != 0 {
-                return Err(mat2cell_error_with_identifier(
+                return Err(mat2cell_error_with_message(
                     "mat2cell: character arrays cannot be partitioned along higher dimensions",
-                    IDENT_INVALID_PARTITION,
+                    &MAT2CELL_ERROR_INVALID_PARTITION,
                 ));
             }
         }
@@ -520,15 +633,16 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Buil
     let col_count = sizes.get(1).copied().unwrap_or(1);
 
     if row_start + row_count > array.rows || col_start + col_count > array.cols {
-        return Err(mat2cell_error_with_identifier(
+        return Err(mat2cell_error_with_message(
             "mat2cell: partition exceeds character array bounds",
-            IDENT_INVALID_PARTITION,
+            &MAT2CELL_ERROR_INVALID_PARTITION,
         ));
     }
 
     if row_count == 0 || col_count == 0 {
-        let slice = CharArray::new(Vec::new(), row_count, col_count)
-            .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+        let slice = CharArray::new(Vec::new(), row_count, col_count).map_err(|e| {
+            mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+        })?;
         return Ok(Value::CharArray(slice));
     }
 
@@ -539,22 +653,23 @@ fn slice_char_array(array: &CharArray, start: &[usize], sizes: &[usize]) -> Buil
                 .checked_mul(array.cols)
                 .and_then(|v| v.checked_add(col_start + c))
                 .ok_or_else(|| {
-                    mat2cell_error_with_identifier(
+                    mat2cell_error_with_message(
                         "mat2cell: partition exceeds character array bounds",
-                        IDENT_INVALID_PARTITION,
+                        &MAT2CELL_ERROR_INVALID_PARTITION,
                     )
                 })?;
             let ch = array.data.get(idx).copied().ok_or_else(|| {
-                mat2cell_error_with_identifier(
+                mat2cell_error_with_message(
                     "mat2cell: partition exceeds character array bounds",
-                    IDENT_INVALID_PARTITION,
+                    &MAT2CELL_ERROR_INVALID_PARTITION,
                 )
             })?;
             data.push(ch);
         }
     }
-    let slice = CharArray::new(data, row_count, col_count)
-        .map_err(|e| mat2cell_error(format!("mat2cell: {e}")))?;
+    let slice = CharArray::new(data, row_count, col_count).map_err(|e| {
+        mat2cell_error_with_message(format!("mat2cell: {e}"), &MAT2CELL_ERROR_INTERNAL)
+    })?;
     Ok(Value::CharArray(slice))
 }
 
@@ -633,6 +748,18 @@ pub(crate) mod tests {
 
     fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::mat2cell_builtin(value, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn descriptor_signatures_cover_mat2cell_forms() {
+        let labels: Vec<&str> = MAT2CELL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = mat2cell(A, dim1dist)"));
+        assert!(labels.contains(&"C = mat2cell(A, dim1dist, dim2dist, ...)"));
     }
 
     fn row_vector(values: &[f64]) -> Value {

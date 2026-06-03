@@ -6,7 +6,11 @@
 //! leaves existing complex input unchanged. Binary inputs must be real numeric.
 
 use runmat_builtins::shape_rules::element_count_if_known;
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -15,18 +19,113 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "complex";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const COMPLEX_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Complex result.",
+}];
+
+const COMPLEX_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Real numeric input to lift into complex storage.",
+}];
+
+const COMPLEX_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Real part operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Imaginary part operand.",
+    },
+];
+
+const COMPLEX_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Z = complex(A)",
+        inputs: &COMPLEX_INPUTS_A,
+        outputs: &COMPLEX_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Z = complex(A, B)",
+        inputs: &COMPLEX_INPUTS_A_B,
+        outputs: &COMPLEX_OUTPUT,
+    },
+];
+
+const COMPLEX_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPLEX.INVALID_ARGUMENT",
+    identifier: Some("RunMat:complex:InvalidArgument"),
+    when: "Argument arity is invalid.",
+    message: "complex: invalid argument",
+};
+
+const COMPLEX_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPLEX.INVALID_INPUT",
+    identifier: Some("RunMat:complex:InvalidInput"),
+    when: "Input value cannot be converted into real numeric tensor inputs.",
+    message: "complex: invalid input",
+};
+
+const COMPLEX_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPLEX.SIZE_MISMATCH",
+    identifier: Some("RunMat:complex:SizeMismatch"),
+    when: "Real and imaginary parts are not compatible for scalar expansion.",
+    message: "complex: size mismatch",
+};
+
+const COMPLEX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPLEX.INTERNAL",
+    identifier: Some("RunMat:complex:Internal"),
+    when: "Internal complex tensor construction failed.",
+    message: "complex: internal error",
+};
+
+const COMPLEX_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    COMPLEX_ERROR_INVALID_ARGUMENT,
+    COMPLEX_ERROR_INVALID_INPUT,
+    COMPLEX_ERROR_SIZE_MISMATCH,
+    COMPLEX_ERROR_INTERNAL,
+];
+
+pub const COMPLEX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COMPLEX_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COMPLEX_ERRORS,
+};
+
+fn complex_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "complex",
     category = "math/elementwise",
-    summary = "Construct complex values from real and imaginary parts, or lift a real value into complex storage.",
+    summary = "Construct complex values from real and imaginary parts.",
     keywords = "complex,construct,imaginary,real,elementwise",
     type_resolver(complex_type),
+    descriptor(crate::builtins::math::elementwise::complex::COMPLEX_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::complex"
 )]
 async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -36,10 +135,10 @@ async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
             let imag = rest.into_iter().next().expect("rest has one element");
             binary_complex(real, imag)
         }
-        n => Err(builtin_error(format!(
-            "complex: expected 1 or 2 input arguments, got {}",
-            n + 1
-        ))),
+        n => Err(complex_error_with_detail(
+            &COMPLEX_ERROR_INVALID_ARGUMENT,
+            format!("expected 1 or 2 input arguments, got {}", n + 1),
+        )),
     }
 }
 
@@ -128,7 +227,7 @@ fn unary_complex(value: Value) -> BuiltinResult<Value> {
             }
             let data = tensor.data.into_iter().map(|x| (x, 0.0)).collect();
             let ct = ComplexTensor::new(data, shape)
-                .map_err(|e| builtin_error(format!("complex: {e}")))?;
+                .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
             Ok(complex_tensor_into_value(ct))
         }
     }
@@ -158,17 +257,19 @@ fn compose_complex(real: &Tensor, imag: &Tensor) -> BuiltinResult<Value> {
         let data: Vec<(f64, f64)> = real.data.iter().map(|&re| (re, im)).collect();
         (real.shape.clone(), data)
     } else {
-        return Err(builtin_error(
-            "complex: real and imaginary parts must have the same size, unless one input is scalar",
+        return Err(complex_error_with_detail(
+            &COMPLEX_ERROR_SIZE_MISMATCH,
+            "real and imaginary parts must have the same size, unless one input is scalar",
         ));
     };
 
     if data.is_empty() {
         let empty = ComplexTensor::new(Vec::new(), shape)
-            .map_err(|e| builtin_error(format!("complex: {e}")))?;
+            .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
         return Ok(complex_tensor_into_value(empty));
     }
-    let ct = ComplexTensor::new(data, shape).map_err(|e| builtin_error(format!("complex: {e}")))?;
+    let ct = ComplexTensor::new(data, shape)
+        .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INTERNAL, e))?;
     Ok(complex_tensor_into_value(ct))
 }
 
@@ -178,15 +279,20 @@ fn is_scalar_tensor(tensor: &Tensor) -> bool {
 
 fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(builtin_error("complex: inputs must be real"))
-        }
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("complex: expected numeric input, got string"))
-        }
-        Value::CharArray(_) => Err(builtin_error("complex: expected numeric input, got char")),
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(complex_error_with_detail(
+            &COMPLEX_ERROR_INVALID_INPUT,
+            "inputs must be real",
+        )),
+        Value::String(_) | Value::StringArray(_) => Err(complex_error_with_detail(
+            &COMPLEX_ERROR_INVALID_INPUT,
+            "expected numeric input, got string",
+        )),
+        Value::CharArray(_) => Err(complex_error_with_detail(
+            &COMPLEX_ERROR_INVALID_INPUT,
+            "expected numeric input, got char",
+        )),
         other => tensor::value_into_tensor_for(BUILTIN_NAME, other)
-            .map_err(|e| builtin_error(format!("complex: {e}"))),
+            .map_err(|e| complex_error_with_detail(&COMPLEX_ERROR_INVALID_INPUT, e)),
     }
 }
 
@@ -198,6 +304,17 @@ pub(crate) mod tests {
 
     fn complex_call(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::complex_builtin(real, rest))
+    }
+
+    #[test]
+    fn complex_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = COMPLEX_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Z = complex(A)"));
+        assert!(labels.contains(&"Z = complex(A, B)"));
     }
 
     #[test]
@@ -273,6 +390,13 @@ pub(crate) mod tests {
             }
             other => panic!("expected Complex result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn complex_string_input_has_stable_identifier() {
+        let err = complex_call(Value::from("bad"), vec![]).expect_err("expected error");
+        assert_eq!(err.identifier(), COMPLEX_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

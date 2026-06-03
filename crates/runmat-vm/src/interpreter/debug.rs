@@ -107,7 +107,7 @@ pub fn trace_store_var(pc: usize, var_index: usize, value: &Value) {
 pub fn trace_call_builtin(pc: usize, name: &str, arg_count: usize, stack: &[Value]) {
     if env_flag("RUNMAT_DEBUG_STACK") {
         log::debug!(
-            "[vm] CallBuiltin pc={} name={} argc={} stack_len={} top={:?}",
+            "[vm] CallBuiltinMulti pc={} name={} argc={} stack_len={} top={:?}",
             pc,
             name,
             arg_count,

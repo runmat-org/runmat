@@ -373,6 +373,7 @@ pub struct ParsedLineStyle {
     pub appearance: LineAppearance,
     pub requires_cpu_fallback: bool,
     pub line_style_explicit: bool,
+    pub color_explicit: bool,
     pub line_style_order: Option<Vec<LineStyle>>,
     pub label: Option<String>,
 }
@@ -386,6 +387,7 @@ pub fn parse_line_style_args(
             appearance: LineAppearance::default(),
             requires_cpu_fallback: false,
             line_style_explicit: false,
+            color_explicit: false,
             line_style_order: None,
             label: None,
         });
@@ -426,6 +428,7 @@ pub fn parse_line_style_args(
         requires_cpu_fallback: options.requires_cpu_fallback,
         appearance,
         line_style_explicit: options.line_style.is_some(),
+        color_explicit: options.color.is_some(),
         line_style_order: options.line_style_order.clone(),
         label: options.label.clone(),
     })

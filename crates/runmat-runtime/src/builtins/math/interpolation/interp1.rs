@@ -1,6 +1,10 @@
 //! MATLAB-compatible `interp1` builtin for dense real numeric data.
 
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -10,11 +14,292 @@ use crate::builtins::common::spec::{
 
 use super::pp::{
     build_pchip_pp, build_spline_pp, evaluate_linear_or_nearest, evaluate_pp,
-    implicit_series_from_values, interp_error, parse_extrapolation, parse_method, query_points,
+    implicit_series_from_values, parse_extrapolation, parse_method, query_points,
     series_from_values, Extrapolation, InterpMethod,
 };
+use crate::{build_runtime_error, RuntimeError};
 
 const NAME: &str = "interp1";
+
+const INTERP1_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Vq",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Interpolated values at query points.",
+}];
+
+const INTERP1_INPUTS_Y_XQ: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values at implicit X = 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query points.",
+    },
+];
+
+const INTERP1_INPUTS_X_Y_XQ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample locations.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query points.",
+    },
+];
+
+const INTERP1_INPUTS_Y_XQ_METHOD: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values at implicit X = 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query points.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+    },
+];
+
+const INTERP1_INPUTS_Y_XQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values at implicit X = 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query points.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+    },
+    BuiltinParamDescriptor {
+        name: "extrap",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("NaN"),
+        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
+    },
+];
+
+const INTERP1_INPUTS_X_Y_XQ_METHOD: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample locations.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query points.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+    },
+];
+
+const INTERP1_INPUTS_X_Y_XQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample locations.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample values.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xq",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Query points.",
+    },
+    BuiltinParamDescriptor {
+        name: "method",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"linear\""),
+        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+    },
+    BuiltinParamDescriptor {
+        name: "extrap",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("NaN"),
+        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
+    },
+];
+
+const INTERP1_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(Y, Xq)",
+        inputs: &INTERP1_INPUTS_Y_XQ,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(X, Y, Xq)",
+        inputs: &INTERP1_INPUTS_X_Y_XQ,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(Y, Xq, method)",
+        inputs: &INTERP1_INPUTS_Y_XQ_METHOD,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(X, Y, Xq, method)",
+        inputs: &INTERP1_INPUTS_X_Y_XQ_METHOD,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(Y, Xq, extrap)",
+        inputs: &INTERP1_INPUTS_Y_XQ_METHOD,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(X, Y, Xq, extrap)",
+        inputs: &INTERP1_INPUTS_X_Y_XQ_METHOD,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(Y, Xq, method, extrap)",
+        inputs: &INTERP1_INPUTS_Y_XQ_METHOD_EXTRAP,
+        outputs: &INTERP1_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Vq = interp1(X, Y, Xq, method, extrap)",
+        inputs: &INTERP1_INPUTS_X_Y_XQ_METHOD_EXTRAP,
+        outputs: &INTERP1_OUTPUT,
+    },
+];
+
+const INTERP1_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERP1.INVALID_ARGUMENT",
+    identifier: Some("RunMat:interp1:InvalidArgument"),
+    when: "Argument count, method/extrapolation options, or shape constraints are invalid.",
+    message: "interp1: invalid argument",
+};
+
+const INTERP1_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERP1.INVALID_INPUT",
+    identifier: Some("RunMat:interp1:InvalidInput"),
+    when: "Sample or query values cannot be converted to numeric interpolation domains.",
+    message: "interp1: invalid input",
+};
+
+const INTERP1_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INTERP1.INTERNAL",
+    identifier: Some("RunMat:interp1:Internal"),
+    when: "Interpolation evaluation fails due to internal tensor construction or solver paths.",
+    message: "interp1: internal interpolation failure",
+};
+
+const INTERP1_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    INTERP1_ERROR_INVALID_ARGUMENT,
+    INTERP1_ERROR_INVALID_INPUT,
+    INTERP1_ERROR_INTERNAL,
+];
+
+pub const INTERP1_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &INTERP1_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &INTERP1_ERRORS,
+};
+
+fn interp1_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn interp1_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    interp1_error_with_message(
+        format!(
+            "{}: {}",
+            INTERP1_ERROR_INVALID_ARGUMENT.message,
+            detail.as_ref()
+        ),
+        &INTERP1_ERROR_INVALID_ARGUMENT,
+    )
+}
+
+fn interp1_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        interp1_error_with_message(err.message().to_string(), fallback)
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::interpolation::interp1")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -63,15 +348,18 @@ fn interp1_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "interp1",
     category = "math/interpolation",
-    summary = "One-dimensional interpolation for sampled data.",
+    summary = "Interpolate one-dimensional sampled data.",
     keywords = "interp1,interpolation,linear,nearest,spline,pchip",
     accel = "sink",
     sink = true,
     type_resolver(interp1_type),
+    descriptor(crate::builtins::math::interpolation::interp1::INTERP1_DESCRIPTOR),
     builtin_path = "crate::builtins::math::interpolation::interp1"
 )]
 async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedInterp1::parse(args).await?;
+    let parsed = ParsedInterp1::parse(args)
+        .await
+        .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INVALID_INPUT))?;
     match parsed.method {
         InterpMethod::Linear | InterpMethod::Nearest => evaluate_linear_or_nearest(
             &parsed.series,
@@ -79,14 +367,19 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             parsed.method,
             &parsed.extrap,
             NAME,
-        ),
+        )
+        .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL)),
         InterpMethod::Spline => {
-            let pp = build_spline_pp(&parsed.series, NAME)?;
+            let pp = build_spline_pp(&parsed.series, NAME)
+                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
             evaluate_pp(&pp, &parsed.query, &parsed.extrap_for_cubic(), NAME)
+                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
         InterpMethod::Pchip => {
-            let pp = build_pchip_pp(&parsed.series, NAME)?;
+            let pp = build_pchip_pp(&parsed.series, NAME)
+                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
             evaluate_pp(&pp, &parsed.query, &parsed.extrap_for_cubic(), NAME)
+                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
     }
 }
@@ -101,9 +394,8 @@ struct ParsedInterp1 {
 impl ParsedInterp1 {
     async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
         if args.len() < 2 {
-            return Err(interp_error(
-                NAME,
-                "interp1: expected at least Y and Xq arguments",
+            return Err(interp1_invalid_argument(
+                "expected at least Y and Xq arguments",
             ));
         }
 
@@ -135,9 +427,9 @@ impl ParsedInterp1 {
                 method = parsed;
                 continue;
             }
-            return Err(interp_error(
-                NAME,
+            return Err(interp1_error_with_message(
                 "interp1: unsupported interpolation option",
+                &INTERP1_ERROR_INVALID_ARGUMENT,
             ));
         }
 
@@ -223,5 +515,35 @@ mod tests {
         ])
         .expect("interp1");
         assert_eq!(result, Value::Num(0.0));
+    }
+
+    #[test]
+    fn interp1_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = INTERP1_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"Vq = interp1(Y, Xq)"));
+        assert!(labels.contains(&"Vq = interp1(X, Y, Xq)"));
+        assert!(labels.contains(&"Vq = interp1(X, Y, Xq, method, extrap)"));
+    }
+
+    #[test]
+    fn interp1_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = INTERP1_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.INTERP1.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.INTERP1.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.INTERP1.INTERNAL"));
+    }
+
+    #[test]
+    fn interp1_too_few_args_uses_stable_identifier() {
+        let err = run(vec![row(&[1.0, 2.0])]).expect_err("expected interp1 argument error");
+        assert_eq!(err.identifier(), INTERP1_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

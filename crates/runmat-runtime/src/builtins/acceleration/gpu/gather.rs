@@ -6,7 +6,10 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::{build_runtime_error, make_cell, RuntimeError};
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::gather")]
@@ -36,17 +39,127 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a residency sink for fusion planning; always materialises host data and clears gpuArray residency tracking.",
 };
 
-fn gather_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("gather").build()
+const BUILTIN_NAME: &str = "gather";
+
+const GATHER_OUTPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Host-resident value gathered from input.",
+}];
+
+const GATHER_OUTPUT_VARIADIC: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Host-resident outputs matching each gathered input.",
+}];
+
+const GATHER_INPUT_SINGLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to gather from GPU to host.",
+}];
+
+const GATHER_INPUT_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input value to gather.",
+    },
+    BuiltinParamDescriptor {
+        name: "Xn",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input values to gather.",
+    },
+];
+
+const GATHER_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "X = gather(X)",
+        inputs: &GATHER_INPUT_SINGLE,
+        outputs: &GATHER_OUTPUT_SINGLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X1, X2, ...] = gather(X1, X2, ...)",
+        inputs: &GATHER_INPUT_VARIADIC,
+        outputs: &GATHER_OUTPUT_VARIADIC,
+    },
+];
+
+const GATHER_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GATHER.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:gather:NotEnoughInputs"),
+    when: "No input arguments were provided.",
+    message: "gather: not enough input arguments",
+};
+
+const GATHER_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GATHER.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:gather:TooManyOutputs"),
+    when: "Requested outputs exceed one for single-input gather.",
+    message: "gather: too many output arguments",
+};
+
+const GATHER_ERROR_OUTPUT_COUNT_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GATHER.OUTPUT_COUNT_MISMATCH",
+    identifier: Some("RunMat:gather:OutputCountMismatch"),
+    when: "Requested output count does not match number of input arguments.",
+    message: "gather: number of outputs must match number of inputs",
+};
+
+const GATHER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GATHER.INTERNAL",
+    identifier: Some("RunMat:gather:InternalError"),
+    when: "Internal output container construction failed.",
+    message: "gather: internal error",
+};
+
+const GATHER_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    GATHER_ERROR_NOT_ENOUGH_INPUTS,
+    GATHER_ERROR_TOO_MANY_OUTPUTS,
+    GATHER_ERROR_OUTPUT_COUNT_MISMATCH,
+    GATHER_ERROR_INTERNAL,
+];
+
+pub const GATHER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GATHER_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GATHER_ERRORS,
+};
+
+fn gather_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    gather_error_with_message(error.message, error)
+}
+
+fn gather_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "gather",
     category = "acceleration/gpu",
-    summary = "Bring gpuArray data back to host memory.",
+    summary = "Gather gpuArray data back to host memory.",
     keywords = "gather,gpuArray,accelerate,download",
     accel = "sink",
     type_resolver(gather_type),
+    descriptor(crate::builtins::acceleration::gpu::gather::GATHER_DESCRIPTOR),
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
 async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -58,14 +171,12 @@ async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         }
         if len == 1 {
             if out_count > 1 {
-                return Err(gather_error("gather: too many output arguments").into());
+                return Err(gather_error(&GATHER_ERROR_TOO_MANY_OUTPUTS).into());
             }
             return Ok(Value::OutputList(vec![eval.into_first()]));
         }
         if out_count != len {
-            return Err(
-                gather_error("gather: number of outputs must match number of inputs").into(),
-            );
+            return Err(gather_error(&GATHER_ERROR_OUTPUT_COUNT_MISMATCH).into());
         }
         return Ok(Value::OutputList(eval.into_outputs()));
     }
@@ -73,7 +184,9 @@ async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         Ok(eval.into_first())
     } else {
         let outputs = eval.into_outputs();
-        make_cell(outputs, 1, len).map_err(|err| gather_error(err).into())
+        make_cell(outputs, 1, len).map_err(|err| {
+            gather_error_with_message(format!("gather: {err}"), &GATHER_ERROR_INTERNAL).into()
+        })
     }
 }
 
@@ -119,7 +232,7 @@ impl GatherResult {
 /// Evaluate `gather` for arbitrary argument lists and return all outputs.
 pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<GatherResult> {
     if args.is_empty() {
-        return Err(gather_error("gather: not enough input arguments").into());
+        return Err(gather_error(&GATHER_ERROR_NOT_ENOUGH_INPUTS).into());
     }
     let mut outputs = Vec::with_capacity(args.len());
     for value in args {
@@ -284,7 +397,8 @@ pub(crate) mod tests {
     #[test]
     fn gather_requires_at_least_one_argument() {
         let err = block_on(gather_builtin(Vec::new())).expect_err("expected error");
-        assert_eq!(err.to_string(), "gather: not enough input arguments");
+        assert_eq!(err.to_string(), GATHER_ERROR_NOT_ENOUGH_INPUTS.message);
+        assert_eq!(err.identifier(), GATHER_ERROR_NOT_ENOUGH_INPUTS.identifier);
     }
 
     #[test]

@@ -1,7 +1,11 @@
 //! MATLAB-compatible `minus` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::BroadcastPlan;
@@ -61,10 +65,141 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "minus";
 
+const MINUS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise difference result.",
+}];
+
+const MINUS_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical operand.",
+    },
+];
+
+const MINUS_INPUTS_A_B_LIKE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right numeric/logical operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const MINUS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = minus(A, B)",
+        inputs: &MINUS_INPUTS_A_B,
+        outputs: &MINUS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = minus(A, B, \"like\", prototype)",
+        inputs: &MINUS_INPUTS_A_B_LIKE,
+        outputs: &MINUS_OUTPUT,
+    },
+];
+
+const MINUS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:minus:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "minus: invalid argument",
+};
+
+const MINUS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.INVALID_INPUT",
+    identifier: Some("RunMat:minus:InvalidInput"),
+    when: "Operands or prototypes cannot be converted into supported numeric/logical forms.",
+    message: "minus: invalid input",
+};
+
+const MINUS_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.SIZE_MISMATCH",
+    identifier: Some("RunMat:minus:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "minus: array sizes are not compatible for broadcasting",
+};
+
+const MINUS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.INTERNAL",
+    identifier: Some("RunMat:minus:Internal"),
+    when: "Provider interaction, gather/upload, or internal tensor construction failed.",
+    message: "minus: internal error",
+};
+
+const MINUS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    MINUS_ERROR_INVALID_ARGUMENT,
+    MINUS_ERROR_INVALID_INPUT,
+    MINUS_ERROR_SIZE_MISMATCH,
+    MINUS_ERROR_INTERNAL,
+];
+
+pub const MINUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MINUS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MINUS_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
+}
+
+fn minus_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn minus_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -74,6 +209,7 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     keywords = "minus,element-wise subtraction,gpu,-",
     accel = "elementwise",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::elementwise::minus::MINUS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::minus"
 )]
 async fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -99,21 +235,29 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
     }
     if args.len() == 1 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-            return Err(builtin_error("minus: expected prototype after 'like'"));
+            return Err(minus_error_with_detail(
+                &MINUS_ERROR_INVALID_ARGUMENT,
+                "expected prototype after 'like'",
+            ));
         }
-        return Err(builtin_error(
-            "minus: unsupported option; only 'like' is accepted",
+        return Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
     if args.len() == 2 {
         if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
             return Ok(OutputTemplate::Like(args[1].clone()));
         }
-        return Err(builtin_error(
-            "minus: unsupported option; only 'like' is accepted",
+        return Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_ARGUMENT,
+            "unsupported option; only 'like' is accepted",
         ));
     }
-    Err(builtin_error("minus: too many input arguments"))
+    Err(minus_error_with_detail(
+        &MINUS_ERROR_INVALID_ARGUMENT,
+        "too many input arguments",
+    ))
 }
 
 async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
@@ -171,8 +315,9 @@ async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
 
 fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(builtin_error(
-            "minus: GPU output requested via 'like' but no acceleration provider is active",
+        return Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_ARGUMENT,
+            "GPU output requested via 'like' but no acceleration provider is active",
         ));
     };
     match value {
@@ -203,21 +348,29 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             let tensor = char_array_to_tensor(&chars)?;
             convert_to_gpu(Value::Tensor(tensor))
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
-            "minus: GPU prototypes for 'like' only support real numeric outputs",
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_ARGUMENT,
+            "GPU prototypes for 'like' only support real numeric outputs",
         )),
-        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => Err(
-            builtin_error("minus: unsupported prototype conversion to GPU output"),
-        ),
+        Value::String(_) | Value::StringArray(_) | Value::Cell(_) | Value::Struct(_) => {
+            Err(minus_error_with_detail(
+                &MINUS_ERROR_INVALID_ARGUMENT,
+                "unsupported prototype conversion to GPU output",
+            ))
+        }
         Value::Object(_)
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(builtin_error(
-            "minus: unsupported prototype conversion to GPU output",
+        | Value::OutputList(_) => Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_ARGUMENT,
+            "unsupported prototype conversion to GPU output",
         )),
     }
 }
@@ -260,9 +413,10 @@ async fn gather_like_prototype(value: &Value) -> BuiltinResult<Value> {
         | Value::CharArray(_)
         | Value::Complex(_, _)
         | Value::ComplexTensor(_) => Ok(value.clone()),
-        _ => Err(builtin_error(format!(
-            "minus: unsupported prototype for 'like' ({value:?})"
-        ))),
+        _ => Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_ARGUMENT,
+            format!("unsupported prototype for 'like' ({value:?})"),
+        )),
     }
 }
 
@@ -291,9 +445,10 @@ async fn real_to_complex(value: Value) -> BuiltinResult<Value> {
                 gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
             real_to_complex(gathered).await
         }
-        other => Err(builtin_error(format!(
-            "minus: cannot convert value {other:?} to complex output"
-        ))),
+        other => Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_INPUT,
+            format!("cannot convert value {other:?} to complex output"),
+        )),
     }
 }
 
@@ -488,17 +643,20 @@ fn classify_operand(value: Value) -> BuiltinResult<MinusOperand> {
                 .map_err(|e| builtin_error(format!("minus: {e}")))?,
         )),
         Value::ComplexTensor(ct) => Ok(MinusOperand::Complex(ct)),
-        Value::GpuTensor(_) => Err(builtin_error("minus: internal error converting GPU value")),
-        other => Err(builtin_error(format!(
-            "minus: unsupported operand type {:?}; expected numeric or logical data",
-            other
-        ))),
+        Value::GpuTensor(_) => Err(minus_error(&MINUS_ERROR_INTERNAL)),
+        other => Err(minus_error_with_detail(
+            &MINUS_ERROR_INVALID_INPUT,
+            format!(
+                "unsupported operand type {:?}; expected numeric or logical data",
+                other
+            ),
+        )),
     }
 }
 
 fn minus_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("minus: {err}")))?;
+        .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = Tensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("minus: {e}")))?;
@@ -515,7 +673,7 @@ fn minus_real_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<Value> {
 
 fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("minus: {err}")))?;
+        .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("minus: {e}")))?;
@@ -534,7 +692,7 @@ fn minus_complex_complex(lhs: &ComplexTensor, rhs: &ComplexTensor) -> BuiltinRes
 
 fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("minus: {err}")))?;
+        .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("minus: {e}")))?;
@@ -553,7 +711,7 @@ fn minus_complex_real(lhs: &ComplexTensor, rhs: &Tensor) -> BuiltinResult<Value>
 
 fn minus_real_complex(lhs: &Tensor, rhs: &ComplexTensor) -> BuiltinResult<Value> {
     let plan = BroadcastPlan::new(&lhs.shape, &rhs.shape)
-        .map_err(|err| builtin_error(format!("minus: {err}")))?;
+        .map_err(|err| minus_error_with_detail(&MINUS_ERROR_SIZE_MISMATCH, &err))?;
     if plan.is_empty() {
         let tensor = ComplexTensor::new(Vec::new(), plan.output_shape().to_vec())
             .map_err(|e| builtin_error(format!("minus: {e}")))?;
@@ -625,6 +783,24 @@ pub(crate) mod tests {
 
     fn minus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::minus_builtin(lhs, rhs, rest))
+    }
+
+    #[test]
+    fn minus_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = MINUS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"C = minus(A, B)"));
+        assert!(labels.contains(&"C = minus(A, B, \"like\", prototype)"));
+    }
+
+    #[test]
+    fn minus_parser_error_has_stable_identifier() {
+        let err = minus_builtin(Value::Num(1.0), Value::Num(2.0), vec![Value::from("like")])
+            .expect_err("expected parser error");
+        assert_eq!(err.identifier(), MINUS_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

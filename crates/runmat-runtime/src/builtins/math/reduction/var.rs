@@ -2,7 +2,11 @@
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderNanMode, ProviderStdNormalization,
 };
-use runmat_builtins::{Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::arg_tokens::tokens_from_values;
@@ -25,6 +29,157 @@ const NAME: &str = "var";
 fn var_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_numeric_type(args, ctx)
 }
+
+const VAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "V",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Variance reduction result.",
+}];
+
+const VAR_PARAM_A: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+};
+
+const VAR_PARAM_W: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "w",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("0"),
+    description: "Normalization flag (0 sample, 1 population) or [] placeholder.",
+};
+
+const VAR_PARAM_AXES: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "axes",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Optional,
+    default: Some("[]"),
+    description: "Dimension selector, vector of dimensions, or \"all\".",
+};
+
+const VAR_PARAM_NANFLAG: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "nanflag",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Optional,
+    default: Some("\"includenan\""),
+    description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+};
+
+const VAR_INPUTS_A: [BuiltinParamDescriptor; 1] = [VAR_PARAM_A];
+const VAR_INPUTS_A_W: [BuiltinParamDescriptor; 2] = [VAR_PARAM_A, VAR_PARAM_W];
+const VAR_INPUTS_A_W_AXES: [BuiltinParamDescriptor; 3] = [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_AXES];
+const VAR_INPUTS_A_NANFLAG: [BuiltinParamDescriptor; 2] = [VAR_PARAM_A, VAR_PARAM_NANFLAG];
+const VAR_INPUTS_A_W_NANFLAG: [BuiltinParamDescriptor; 3] =
+    [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_NANFLAG];
+const VAR_INPUTS_A_W_AXES_NANFLAG: [BuiltinParamDescriptor; 4] =
+    [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_AXES, VAR_PARAM_NANFLAG];
+const VAR_INPUTS_A_W_NANFLAG_AXES: [BuiltinParamDescriptor; 4] =
+    [VAR_PARAM_A, VAR_PARAM_W, VAR_PARAM_NANFLAG, VAR_PARAM_AXES];
+
+const VAR_SIGNATURES: [BuiltinSignatureDescriptor; 11] = [
+    BuiltinSignatureDescriptor {
+        label: "V = var(A)",
+        inputs: &VAR_INPUTS_A,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w)",
+        inputs: &VAR_INPUTS_A_W,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, dim)",
+        inputs: &VAR_INPUTS_A_W_AXES,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, vecdim)",
+        inputs: &VAR_INPUTS_A_W_AXES,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, \"all\")",
+        inputs: &VAR_INPUTS_A_W_AXES,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, nanflag)",
+        inputs: &VAR_INPUTS_A_NANFLAG,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, nanflag)",
+        inputs: &VAR_INPUTS_A_W_NANFLAG,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, dim, nanflag)",
+        inputs: &VAR_INPUTS_A_W_AXES_NANFLAG,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, nanflag, dim)",
+        inputs: &VAR_INPUTS_A_W_NANFLAG_AXES,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, [], nanflag)",
+        inputs: &VAR_INPUTS_A_W_AXES_NANFLAG,
+        outputs: &VAR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "V = var(A, w, nanflag, \"all\")",
+        inputs: &VAR_INPUTS_A_W_NANFLAG_AXES,
+        outputs: &VAR_OUTPUT,
+    },
+];
+
+const VAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VAR.INVALID_ARGUMENT",
+    identifier: Some("RunMat:var:InvalidArgument"),
+    when: "Argument grammar, dimensions, normalization flags, or nanflags are invalid.",
+    message: "var: invalid argument",
+};
+
+const VAR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VAR.INVALID_INPUT",
+    identifier: Some("RunMat:var:InvalidInput"),
+    when: "Input values cannot be converted to supported var reduction domains.",
+    message: "var: invalid input",
+};
+
+const VAR_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VAR.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:var:ComplexUnsupported"),
+    when: "Input value is complex for a path that currently supports only real reductions.",
+    message: "var: complex inputs are not supported yet",
+};
+
+const VAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VAR.INTERNAL",
+    identifier: Some("RunMat:var:Internal"),
+    when: "Execution fails due to provider, conversion, gather, or tensor allocation internals.",
+    message: "var: internal reduction failure",
+};
+
+const VAR_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    VAR_ERROR_INVALID_ARGUMENT,
+    VAR_ERROR_INVALID_INPUT,
+    VAR_ERROR_COMPLEX_UNSUPPORTED,
+    VAR_ERROR_INTERNAL,
+];
+
+pub const VAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &VAR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &VAR_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::var")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -49,8 +204,34 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers compute variance via standard-deviation reductions followed by an in-device squaring pass.",
 };
 
-fn var_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn var_error_with_descriptor(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn var_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    var_error_with_descriptor(message, &VAR_ERROR_INVALID_ARGUMENT)
+}
+
+fn var_invalid_input(message: impl Into<String>) -> RuntimeError {
+    var_error_with_descriptor(message, &VAR_ERROR_INVALID_INPUT)
+}
+
+fn var_complex_unsupported_default() -> RuntimeError {
+    var_error_with_descriptor(
+        VAR_ERROR_COMPLEX_UNSUPPORTED.message,
+        &VAR_ERROR_COMPLEX_UNSUPPORTED,
+    )
+}
+
+fn var_internal_error(message: impl Into<String>) -> RuntimeError {
+    var_error_with_descriptor(message, &VAR_ERROR_INTERNAL)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::var")]
@@ -95,19 +276,18 @@ enum NormParse {
 #[runtime_builtin(
     name = "var",
     category = "math/reduction",
-    summary = "Variance of scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute sample or population variance across array data.",
     keywords = "var,variance,statistics,gpu,omitnan,all",
     accel = "reduction",
     type_resolver(var_type),
+    descriptor(crate::builtins::math::reduction::var::VAR_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::var"
 )]
 async fn var_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
     match value {
         Value::GpuTensor(handle) => var_gpu(handle, &parsed).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(var_error("var: complex inputs are not supported yet"))
-        }
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(var_complex_unsupported_default()),
         other => var_host(other, &parsed),
     }
 }
@@ -138,7 +318,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, VarAxes::Default) {
-                        return Err(var_error(
+                        return Err(var_invalid_argument(
                             "var: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -165,7 +345,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 }
                 "all" => {
                     if axes_set && !matches!(axes, VarAxes::Default) {
-                        return Err(var_error(
+                        return Err(var_invalid_argument(
                             "var: 'all' cannot be combined with an explicit dimension",
                         ));
                     }
@@ -175,7 +355,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     continue;
                 }
                 _ => {
-                    return Err(var_error(format!("var: unrecognised option '{keyword}'")));
+                    return Err(var_invalid_argument(format!(
+                        "var: unrecognised option '{keyword}'"
+                    )));
                 }
             }
         }
@@ -194,7 +376,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     continue;
                 }
                 NormParse::Weighted => {
-                    return Err(var_error("var: weighted variance is not implemented yet"));
+                    return Err(var_invalid_argument(
+                        "var: weighted variance is not implemented yet",
+                    ));
                 }
                 NormParse::NotMatched => {}
             }
@@ -203,13 +387,15 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         if !axes_set || matches!(axes, VarAxes::Default) {
             if let Some(selection) = parse_axes(arg).await? {
                 if axes_set && !matches!(axes, VarAxes::Default) {
-                    return Err(var_error("var: multiple dimension specifications provided"));
+                    return Err(var_invalid_argument(
+                        "var: multiple dimension specifications provided",
+                    ));
                 }
                 if matches!(selection, VarAxes::All)
                     && axes_set
                     && !matches!(axes, VarAxes::Default)
                 {
-                    return Err(var_error(
+                    return Err(var_invalid_argument(
                         "var: 'all' cannot be combined with an explicit dimension",
                     ));
                 }
@@ -219,10 +405,14 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 continue;
             }
         } else if parse_axes(arg).await?.is_some() {
-            return Err(var_error("var: multiple dimension specifications provided"));
+            return Err(var_invalid_argument(
+                "var: multiple dimension specifications provided",
+            ));
         }
 
-        return Err(var_error(format!("var: unrecognised argument {arg:?}")));
+        return Err(var_invalid_argument(format!(
+            "var: unrecognised argument {arg:?}"
+        )));
     }
 
     Ok(ParsedArguments {
@@ -261,17 +451,23 @@ fn parse_normalization(value: &Value) -> BuiltinResult<NormParse> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(NormParse::Value(VarNormalization::Sample)),
             1 => Ok(NormParse::Value(VarNormalization::Population)),
-            _ => Err(var_error("var: normalisation flag must be 0, 1, or []")),
+            _ => Err(var_invalid_argument(
+                "var: normalisation flag must be 0, 1, or []",
+            )),
         },
         Value::Num(n) => parse_normalization_scalar(*n),
-        Value::GpuTensor(_) => Err(var_error("var: normalisation flag must reside on the host")),
+        Value::GpuTensor(_) => Err(var_invalid_argument(
+            "var: normalisation flag must reside on the host",
+        )),
         _ => Ok(NormParse::NotMatched),
     }
 }
 
 fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     if !value.is_finite() {
-        return Err(var_error("var: normalisation flag must be finite"));
+        return Err(var_invalid_argument(
+            "var: normalisation flag must be finite",
+        ));
     }
     if (value - 0.0).abs() < f64::EPSILON {
         return Ok(NormParse::Value(VarNormalization::Sample));
@@ -279,7 +475,9 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
     if (value - 1.0).abs() < f64::EPSILON {
         return Ok(NormParse::Value(VarNormalization::Population));
     }
-    Err(var_error("var: normalisation flag must be 0, 1, or []"))
+    Err(var_invalid_argument(
+        "var: normalisation flag must be 0, 1, or []",
+    ))
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
@@ -290,16 +488,21 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
         return Ok(None);
     }
 
-    let Some(dims) = extract_dims(value, "var").await.map_err(var_error)? else {
+    let Some(dims) = extract_dims(value, "var")
+        .await
+        .map_err(var_invalid_argument)?
+    else {
         return Ok(None);
     };
     if dims.is_empty() {
-        return Err(var_error("var: dimension vector must not be empty"));
+        return Err(var_invalid_argument(
+            "var: dimension vector must not be empty",
+        ));
     }
     let mut cleaned = Vec::with_capacity(dims.len());
     for dim in dims {
         if dim == 0 {
-            return Err(var_error("var: dimensions must be >= 1"));
+            return Err(var_invalid_argument("var: dimensions must be >= 1"));
         }
         cleaned.push(dim);
     }
@@ -311,7 +514,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
 }
 
 fn var_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for("var", value).map_err(var_error)?;
+    let tensor = tensor::value_into_tensor_for("var", value).map_err(var_invalid_input)?;
     let reduced = var_tensor(tensor, &args.axes, args.normalization, args.nan_mode)?;
     Ok(tensor::tensor_into_value(reduced))
 }
@@ -341,7 +544,7 @@ fn var_scalar_tensor(tensor: &Tensor, nan_mode: ReductionNaN) -> BuiltinResult<T
             ReductionNaN::Include | ReductionNaN::Omit => 0.0,
         }
     };
-    Tensor::new(vec![result], vec![1, 1]).map_err(|e| var_error(format!("var: {e}")))
+    Tensor::new(vec![result], vec![1, 1]).map_err(|e| var_internal_error(format!("var: {e}")))
 }
 
 fn var_tensor_reduce(
@@ -361,7 +564,8 @@ fn var_tensor_reduce(
     let out_len = tensor::element_count(&output_shape);
     if tensor.data.is_empty() {
         let fill = vec![f64::NAN; out_len];
-        return Tensor::new(fill, output_shape).map_err(|e| var_error(format!("var: {e}")));
+        return Tensor::new(fill, output_shape)
+            .map_err(|e| var_internal_error(format!("var: {e}")));
     }
 
     let mut counts = vec![0usize; out_len];
@@ -420,7 +624,7 @@ fn var_tensor_reduce(
             };
     }
 
-    Tensor::new(output, output_shape).map_err(|e| var_error(format!("var: {e}")))
+    Tensor::new(output, output_shape).map_err(|e| var_internal_error(format!("var: {e}")))
 }
 
 fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, bool)> {
@@ -440,7 +644,7 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, b
         }
         VarAxes::Dim(dim) => {
             if *dim == 0 {
-                return Err(var_error("var: dimension must be >= 1"));
+                return Err(var_invalid_argument("var: dimension must be >= 1"));
             }
             let zero = dim - 1;
             if zero < shape.len() {
@@ -456,7 +660,7 @@ fn resolve_axes(shape: &[usize], axes: &VarAxes) -> BuiltinResult<(Vec<usize>, b
             let mut out = Vec::with_capacity(dims.len());
             for &dim in dims {
                 if dim == 0 {
-                    return Err(var_error("var: dimension must be >= 1"));
+                    return Err(var_invalid_argument("var: dimension must be >= 1"));
                 }
                 let zero = dim - 1;
                 if zero < shape.len() {
@@ -655,6 +859,33 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn var_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = VAR_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"V = var(A)"));
+        assert!(labels.contains(&"V = var(A, w)"));
+        assert!(labels.contains(&"V = var(A, w, dim)"));
+        assert!(labels.contains(&"V = var(A, w, vecdim)"));
+        assert!(labels.contains(&"V = var(A, w, \"all\")"));
+        assert!(labels.contains(&"V = var(A, nanflag)"));
+        assert!(labels.contains(&"V = var(A, w, nanflag)"));
+        assert!(labels.contains(&"V = var(A, w, dim, nanflag)"));
+        assert!(labels.contains(&"V = var(A, w, nanflag, dim)"));
+    }
+
+    #[test]
+    fn var_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = VAR_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.VAR.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.VAR.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.VAR.COMPLEX_UNSUPPORTED"));
+        assert!(codes.contains(&"RM.VAR.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn var_scalar_num() {
@@ -752,7 +983,22 @@ pub(crate) mod tests {
         let weights = Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap();
         let err = var_builtin(Value::Tensor(tensor), vec![Value::Tensor(weights)])
             .expect_err("var should reject weighted inputs");
+        assert_eq!(err.identifier(), VAR_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("weighted variance"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn var_complex_identifier_is_stable() {
+        let err = var_builtin(Value::Complex(1.0, 2.0), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), VAR_ERROR_COMPLEX_UNSUPPORTED.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn var_invalid_input_identifier_is_stable() {
+        let err = var_builtin(Value::String("abc".to_string()), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

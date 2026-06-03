@@ -2,7 +2,10 @@
 
 use std::io::Write;
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::format::{
@@ -16,10 +19,117 @@ use crate::builtins::io::filetext::registry::{self, FileInfo, SharedFileHandle};
 use crate::console::{record_console_output, ConsoleStream};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INVALID_IDENTIFIER_MESSAGE: &str =
-    "fprintf: Invalid file identifier. Use fopen to generate a valid file ID.";
-const MISSING_FORMAT_MESSAGE: &str = "fprintf: missing format string";
 const BUILTIN_NAME: &str = "fprintf";
+
+const FPRINTF_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "count",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of bytes written.",
+}];
+const FPRINTF_INPUTS_FORMAT_VARIADIC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format string or character row vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Values consumed by conversion specifiers.",
+    },
+];
+const FPRINTF_INPUTS_FID_FORMAT_VARIADIC: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fid_or_stream",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: Some("1"),
+        description: "Numeric file identifier, or stream label ('stdout'|'stderr').",
+    },
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Format string or character row vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Values consumed by conversion specifiers.",
+    },
+];
+const FPRINTF_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "count = fprintf(formatSpec, A...)",
+        inputs: &FPRINTF_INPUTS_FORMAT_VARIADIC,
+        outputs: &FPRINTF_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = fprintf(fid_or_stream, formatSpec, A...)",
+        inputs: &FPRINTF_INPUTS_FID_FORMAT_VARIADIC,
+        outputs: &FPRINTF_OUTPUT_COUNT,
+    },
+];
+
+const FPRINTF_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FPRINTF.INVALID_INPUT",
+    identifier: Some("RunMat:fprintf:InvalidInput"),
+    when: "Argument count/type does not satisfy fprintf requirements.",
+    message: "fprintf: invalid input arguments",
+};
+const FPRINTF_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FPRINTF.INVALID_IDENTIFIER",
+    identifier: Some("RunMat:fprintf:InvalidIdentifier"),
+    when: "File identifier is invalid or not writable.",
+    message: "fprintf: invalid file identifier. Use fopen to generate a valid file ID.",
+};
+const FPRINTF_ERROR_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FPRINTF.FORMAT",
+    identifier: Some("RunMat:fprintf:InvalidFormat"),
+    when: "Format string parsing or placeholder consumption fails.",
+    message: "fprintf: invalid format specification",
+};
+const FPRINTF_ERROR_ENCODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FPRINTF.ENCODE",
+    identifier: Some("RunMat:fprintf:EncodeFailed"),
+    when: "Rendered text cannot be encoded for destination stream/file encoding.",
+    message: "fprintf: failed to encode output",
+};
+const FPRINTF_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FPRINTF.IO",
+    identifier: Some("RunMat:fprintf:IoFailure"),
+    when: "Write to target stream/file fails.",
+    message: "fprintf: write failed",
+};
+const FPRINTF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FPRINTF.INTERNAL",
+    identifier: None,
+    when: "Internal runtime control-flow or conversion fails.",
+    message: "fprintf: internal error",
+};
+const FPRINTF_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    FPRINTF_ERROR_INVALID_INPUT,
+    FPRINTF_ERROR_INVALID_IDENTIFIER,
+    FPRINTF_ERROR_FORMAT,
+    FPRINTF_ERROR_ENCODE,
+    FPRINTF_ERROR_IO,
+    FPRINTF_ERROR_INTERNAL,
+];
+pub const FPRINTF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FPRINTF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FPRINTF_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,26 +147,39 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host-only text I/O. Arguments residing on the GPU are gathered before formatting.",
 };
 
-fn fprintf_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn fprintf_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    fprintf_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let message = err.message().to_string();
-    let identifier = err.identifier().map(|value| value.to_string());
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
+fn fprintf_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
-fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
-    result.map_err(fprintf_error)
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = FPRINTF_ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_string_result<T>(
+    result: Result<T, String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<T> {
+    result.map_err(|message| fprintf_error_with_detail(error, message))
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::filetext::fprintf")]
@@ -86,7 +209,10 @@ impl FprintfEval {
 /// Evaluate the `fprintf` builtin without going through the dispatcher.
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
     if args.is_empty() {
-        return Err(fprintf_error("fprintf: not enough input arguments"));
+        return Err(fprintf_error_with_detail(
+            &FPRINTF_ERROR_INVALID_INPUT,
+            "not enough input arguments",
+        ));
     }
 
     // Gather all arguments to host first
@@ -103,13 +229,17 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
         if match_stream_label(value).is_some() {
             continue;
         }
-        if let Some(Value::String(s)) = map_string_result(coerce_to_format_string(value))? {
+        if let Some(Value::String(s)) =
+            map_string_result(coerce_to_format_string(value), &FPRINTF_ERROR_INVALID_INPUT)?
+        {
             fmt_idx = Some(i);
             format_string_val = Some(s);
             break;
         }
     }
-    let fmt_idx = fmt_idx.ok_or_else(|| fprintf_error(MISSING_FORMAT_MESSAGE))?;
+    let fmt_idx = fmt_idx.ok_or_else(|| {
+        fprintf_error_with_detail(&FPRINTF_ERROR_INVALID_INPUT, "missing format string")
+    })?;
     let raw_format = format_string_val.unwrap();
 
     // Determine output target by scanning only arguments BEFORE the format
@@ -135,7 +265,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
             if matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_)) {
                 if let Ok(fid) = parse_fid(value) {
                     target_idx = Some(i);
-                    target = map_string_result(target_from_fid(fid))?;
+                    target = target_from_fid(fid)?;
                     break;
                 }
             }
@@ -162,8 +292,11 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FprintfEval> {
         .await
         .map_err(map_control_flow)?;
     let rendered = format_with_repetition(&format_string, &flattened_args)?;
-    let bytes = map_string_result(encode_output(&rendered, target.encoding_label()))?;
-    map_string_result(target.write(&bytes))?;
+    let bytes = map_string_result(
+        encode_output(&rendered, target.encoding_label()),
+        &FPRINTF_ERROR_ENCODE,
+    )?;
+    target.write(&bytes)?;
     Ok(FprintfEval {
         bytes_written: bytes.len(),
     })
@@ -238,6 +371,7 @@ fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     sink = true,
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::fprintf_type),
+    descriptor(crate::builtins::io::filetext::fprintf::FPRINTF_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::fprintf"
 )]
 async fn fprintf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -271,7 +405,7 @@ impl OutputTarget {
         }
     }
 
-    fn write(&self, bytes: &[u8]) -> Result<(), String> {
+    fn write(&self, bytes: &[u8]) -> BuiltinResult<()> {
         match self {
             OutputTarget::Stdout => {
                 record_console_chunk(ConsoleStream::Stdout, bytes);
@@ -283,13 +417,23 @@ impl OutputTarget {
             }
             OutputTarget::File { handle, .. } => {
                 let mut guard = handle.lock().map_err(|_| {
-                    "fprintf: failed to lock file handle (poisoned mutex)".to_string()
+                    fprintf_error_with_detail(
+                        &FPRINTF_ERROR_INTERNAL,
+                        "failed to lock file handle (poisoned mutex)",
+                    )
                 })?;
-                let file = guard
-                    .as_mut()
-                    .ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
-                file.write_all(bytes)
-                    .map_err(|err| format!("fprintf: failed to write to file ({err})"))
+                let file = guard.as_mut().ok_or_else(|| {
+                    fprintf_error_with_message(
+                        FPRINTF_ERROR_INVALID_IDENTIFIER.message,
+                        &FPRINTF_ERROR_INVALID_IDENTIFIER,
+                    )
+                })?;
+                file.write_all(bytes).map_err(|err| {
+                    fprintf_error_with_detail(
+                        &FPRINTF_ERROR_IO,
+                        format!("failed to write to file ({err})"),
+                    )
+                })
             }
         }
     }
@@ -309,20 +453,34 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
         .map_err(map_control_flow)
 }
 
-fn target_from_fid(fid: i32) -> Result<OutputTarget, String> {
+fn target_from_fid(fid: i32) -> BuiltinResult<OutputTarget> {
     if fid < 0 {
-        return Err("fprintf: file identifier must be non-negative".to_string());
+        return Err(fprintf_error_with_detail(
+            &FPRINTF_ERROR_INVALID_INPUT,
+            "file identifier must be non-negative",
+        ));
     }
     match fid {
-        0 => Err("fprintf: file identifier 0 (stdin) is not writable".to_string()),
+        0 => Err(fprintf_error_with_detail(
+            &FPRINTF_ERROR_INVALID_IDENTIFIER,
+            "file identifier 0 (stdin) is not writable",
+        )),
         1 => Ok(OutputTarget::Stdout),
         2 => Ok(OutputTarget::Stderr),
         _ => {
-            let info =
-                registry::info_for(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+            let info = registry::info_for(fid).ok_or_else(|| {
+                fprintf_error_with_message(
+                    FPRINTF_ERROR_INVALID_IDENTIFIER.message,
+                    &FPRINTF_ERROR_INVALID_IDENTIFIER,
+                )
+            })?;
             ensure_writable(&info)?;
-            let handle =
-                registry::take_handle(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
+            let handle = registry::take_handle(fid).ok_or_else(|| {
+                fprintf_error_with_message(
+                    FPRINTF_ERROR_INVALID_IDENTIFIER.message,
+                    &FPRINTF_ERROR_INVALID_IDENTIFIER,
+                )
+            })?;
             Ok(OutputTarget::File {
                 handle,
                 encoding: info.encoding.clone(),
@@ -353,12 +511,15 @@ fn parse_fid(value: &Value) -> Result<i32, String> {
     Ok(scalar as i32)
 }
 
-fn ensure_writable(info: &FileInfo) -> Result<(), String> {
+fn ensure_writable(info: &FileInfo) -> BuiltinResult<()> {
     let permission = info.permission.to_ascii_lowercase();
     if permission.contains('w') || permission.contains('a') || permission.contains('+') {
         Ok(())
     } else {
-        Err("fprintf: file is not open for writing".to_string())
+        Err(fprintf_error_with_detail(
+            &FPRINTF_ERROR_INVALID_IDENTIFIER,
+            "file is not open for writing",
+        ))
     }
 }
 
@@ -386,8 +547,9 @@ fn format_with_repetition(format: &str, args: &[Value]) -> BuiltinResult<String>
         out.push_str(&step.output);
         if step.consumed == 0 {
             if cursor.remaining() > 0 {
-                return Err(fprintf_error(
-                    "fprintf: formatSpec contains no conversion specifiers but additional arguments were supplied",
+                return Err(fprintf_error_with_detail(
+                    &FPRINTF_ERROR_FORMAT,
+                    "formatSpec contains no conversion specifiers but additional arguments were supplied",
                 ));
             }
             break;
@@ -401,11 +563,10 @@ fn format_with_repetition(format: &str, args: &[Value]) -> BuiltinResult<String>
 
 fn remap_format_error(err: RuntimeError) -> RuntimeError {
     let message = err.message().replace("sprintf", "fprintf");
-    let identifier = err.identifier().map(|value| value.to_string());
     let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .with_source(err);
-    if let Some(identifier) = identifier {
+    if let Some(identifier) = FPRINTF_ERROR_FORMAT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -559,6 +720,18 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fprintf_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FPRINTF_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"count = fprintf(formatSpec, A...)"));
+        assert!(labels.contains(&"count = fprintf(fid_or_stream, formatSpec, A...)"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fprintf_matrix_column_major() {
         let _guard = registry_guard();
         registry::reset_for_tests();
@@ -679,7 +852,7 @@ pub(crate) mod tests {
         let err = unwrap_error_message(
             run_evaluate(&[Value::Num(99.0), Value::String("value".to_string())]).unwrap_err(),
         );
-        assert!(err.contains("Invalid file identifier"), "{err}");
+        assert_eq!(err, FPRINTF_ERROR_INVALID_IDENTIFIER.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

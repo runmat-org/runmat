@@ -3,8 +3,7 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use futures::executor::block_on;
-use runmat_core::RunMatSession;
+use runmat_core::{RunError, RunMatSession};
 use runmat_gc::{gc_test_context, GcConfig};
 
 #[test]
@@ -43,7 +42,7 @@ fn test_repl_engine_with_jit_disabled() {
 fn test_simple_arithmetic_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("x = 1 + 2"));
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = 1 + 2");
         assert!(result.is_ok());
 
         let execution_result = result.unwrap();
@@ -61,12 +60,12 @@ fn test_matrix_operations() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Test vector creation
-        let result = block_on(engine.execute("y = [1, 2, 3]"));
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "y = [1, 2, 3]");
         assert!(result.is_ok());
         assert!(result.unwrap().error.is_none());
 
         // Test matrix creation
-        let result = block_on(engine.execute("z = [1, 2; 3, 4]"));
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "z = [1, 2; 3, 4]");
         assert!(result.is_ok());
         assert!(result.unwrap().error.is_none());
 
@@ -83,7 +82,7 @@ fn test_execution_statistics_tracking() {
         // Execute multiple statements (testing individual execution)
         let inputs = ["x = 1", "y = 2", "z = 3"];
         for input in &inputs {
-            let result = block_on(engine.execute(input));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, input);
             assert!(result.is_ok(), "Failed to execute: {input}");
         }
 
@@ -98,7 +97,7 @@ fn test_execution_statistics_tracking() {
 fn test_verbose_mode() {
     gc_test_context(|| {
         let mut engine = RunMatSession::with_options(true, true).unwrap();
-        let result = block_on(engine.execute("x = 42"));
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = 42");
         assert!(result.is_ok());
 
         let execution_result = result.unwrap();
@@ -110,8 +109,11 @@ fn test_verbose_mode() {
 fn test_parse_error_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("x = [1, 2,")); // Incomplete matrix
-        assert!(result.is_err()); // Should fail at parse stage
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = [1, 2,"); // Incomplete matrix
+        match result {
+            Err(RunError::Syntax(_)) => {}
+            other => panic!("expected syntax error for incomplete matrix literal, got {other:?}"),
+        }
     });
 }
 
@@ -119,8 +121,11 @@ fn test_parse_error_handling() {
 fn test_invalid_syntax_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("x = $invalid$"));
-        assert!(result.is_err()); // Should fail due to invalid tokens
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = $invalid$");
+        match result {
+            Err(RunError::Syntax(_)) => {}
+            other => panic!("expected syntax error for invalid tokens, got {other:?}"),
+        }
     });
 }
 
@@ -129,23 +134,28 @@ fn test_execution_with_control_flow() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
 
-        // Test if statement - control flow may not be fully implemented yet
-        let result = block_on(engine.execute("if 1 > 0; x = 5; end"));
-        if result.is_ok() {
-            assert!(result.unwrap().error.is_none());
-        } else {
-            // Control flow might not be implemented yet - that's OK
-            assert!(!result.unwrap_err().to_string().is_empty());
-        }
+        let result =
+            runmat_core::execute_text_request_for_testing(&mut engine, "if 1 > 0; x = 5; end")
+                .expect("if-statement execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "if-statement should not report runtime errors"
+        );
 
-        // Test for loop - may not be implemented yet
-        let result = block_on(engine.execute("for i = 1:3; y = i; end"));
-        if result.is_ok() {
-            assert!(result.unwrap().error.is_none());
-        } else {
-            // Control flow might not be implemented yet - that's OK
-            assert!(!result.unwrap_err().to_string().is_empty());
-        }
+        let result =
+            runmat_core::execute_text_request_for_testing(&mut engine, "for i = 1:3; y = i; end")
+                .expect("for-loop execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "for-loop should not report runtime errors"
+        );
+
+        let x = runmat_core::execute_text_request_for_testing(&mut engine, "x")
+            .expect("x readback should succeed");
+        assert_eq!(x.value, Some(runmat_builtins::Value::Num(5.0)));
+        let y = runmat_core::execute_text_request_for_testing(&mut engine, "y")
+            .expect("y readback should succeed");
+        assert_eq!(y.value, Some(runmat_builtins::Value::Num(3.0)));
     });
 }
 
@@ -186,7 +196,7 @@ fn test_stats_reset() {
         let mut engine = RunMatSession::new().unwrap();
 
         // Execute something to generate stats
-        let _ = block_on(engine.execute("x = 1"));
+        let _ = runmat_core::execute_text_request_for_testing(&mut engine, "x = 1");
         assert!(engine.stats().total_executions > 0);
 
         // Reset stats
@@ -205,7 +215,7 @@ fn test_multiple_executions_performance_tracking() {
         // Execute the same operation multiple times to potentially trigger JIT
         for i in 1..=20 {
             let input = format!("x{i} = {i} + {i}");
-            let result = block_on(engine.execute(&input));
+            let result = runmat_core::execute_text_request_for_testing(&mut engine, &input);
             assert!(result.is_ok());
         }
 
@@ -220,13 +230,12 @@ fn test_multiple_executions_performance_tracking() {
 fn test_empty_input_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute(""));
-        // Empty input behavior may vary - just ensure it doesn't crash
-        // Some parsers accept empty input, others don't
-        if let Err(e) = result {
-            // If it errors, that's also valid behavior
-            assert!(!e.to_string().is_empty(), "Error should have a message");
-        }
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "")
+            .expect("empty input should execute");
+        assert!(
+            result.error.is_none(),
+            "empty input should not produce runtime diagnostics"
+        );
     });
 }
 
@@ -234,12 +243,12 @@ fn test_empty_input_handling() {
 fn test_whitespace_only_input() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("   \t\n  "));
-        // Whitespace-only input behavior may vary - just ensure it doesn't crash
-        if let Err(e) = result {
-            // If it errors, that's also valid behavior
-            assert!(!e.to_string().is_empty(), "Error should have a message");
-        }
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "   \t\n  ")
+            .expect("whitespace-only input should execute");
+        assert!(
+            result.error.is_none(),
+            "whitespace-only input should not produce runtime diagnostics"
+        );
     });
 }
 
@@ -247,7 +256,10 @@ fn test_whitespace_only_input() {
 fn test_complex_expression_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("result = (1 + 2) * 3 - 4 / 2"));
+        let result = runmat_core::execute_text_request_for_testing(
+            &mut engine,
+            "result = (1 + 2) * 3 - 4 / 2",
+        );
         assert!(result.is_ok());
 
         let execution_result = result.unwrap();
@@ -271,7 +283,7 @@ fn test_concurrent_safety() {
             let handle = thread::spawn(move || {
                 let input = format!("x{i} = {i} * 2");
                 let mut eng = engine_clone.lock().unwrap();
-                futures::executor::block_on(eng.execute(&input))
+                runmat_core::execute_text_request_for_testing(&mut eng, &input)
             });
             handles.push(handle);
         }
@@ -288,7 +300,7 @@ fn test_concurrent_safety() {
 fn test_execution_result_structure() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("x = 42")).unwrap();
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = 42").unwrap();
 
         // Check ExecutionResult structure
         // Execution time can be 0 for very fast operations
@@ -300,31 +312,34 @@ fn test_execution_result_structure() {
 }
 
 #[test]
-fn test_format_tokens_compatibility() {
-    // Test the legacy format_tokens function for backward compatibility
-    let result = runmat_core::format_tokens("x = 1 + 2");
-    assert!(!result.is_empty());
-    assert!(result.contains("Ident"));
-    assert!(result.contains("Assign"));
-    assert!(result.contains("Integer"));
-    assert!(result.contains("Plus"));
+fn test_tokenize_detailed_compatibility() {
+    let tokens = runmat_lexer::tokenize_detailed("x = 1 + 2");
+    assert!(!tokens.is_empty());
+    let labels = tokens
+        .into_iter()
+        .map(|token| format!("{:?}", token.token))
+        .collect::<Vec<_>>();
+    assert!(labels.contains(&"Ident".to_string()));
+    assert!(labels.contains(&"Assign".to_string()));
+    assert!(labels.contains(&"Integer".to_string()));
+    assert!(labels.contains(&"Plus".to_string()));
 }
 
 #[test]
-fn test_execute_and_format_function() {
+fn test_direct_execute_request_function() {
     gc_test_context(|| {
-        let result = block_on(runmat_core::execute_and_format("x = 1 + 2"));
-        // Should not be an error string
-        assert!(!result.starts_with("Error:"));
-        assert!(!result.starts_with("Engine Error:"));
+        let mut engine = RunMatSession::new().unwrap();
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "x = 1 + 2")
+            .expect("execution should succeed");
+        assert!(result.error.is_none());
     });
 }
 
 #[test]
-fn test_execute_and_format_error_handling() {
+fn test_direct_execute_request_error_handling() {
     gc_test_context(|| {
-        let result = block_on(runmat_core::execute_and_format("invalid syntax $"));
-        // Should return an error string
-        assert!(result.starts_with("Error:") || result.starts_with("Engine Error:"));
+        let mut engine = RunMatSession::new().unwrap();
+        let result = runmat_core::execute_text_request_for_testing(&mut engine, "invalid syntax $");
+        assert!(result.is_err());
     });
 }

@@ -6,7 +6,11 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
@@ -64,19 +68,127 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "gamma";
 
+const GAMMA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Gamma-function result.",
+}];
+
+const GAMMA_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Real or complex numeric input.",
+}];
+
+const GAMMA_INPUTS_X_LIKE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Real or complex numeric input.",
+    },
+    BuiltinParamDescriptor {
+        name: "like",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Literal string \"like\".",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Output class/device prototype.",
+    },
+];
+
+const GAMMA_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = gamma(X)",
+        inputs: &GAMMA_INPUTS_X,
+        outputs: &GAMMA_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = gamma(X, \"like\", prototype)",
+        inputs: &GAMMA_INPUTS_X_LIKE,
+        outputs: &GAMMA_OUTPUT,
+    },
+];
+
+const GAMMA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMA.INVALID_ARGUMENT",
+    identifier: Some("RunMat:gamma:InvalidArgument"),
+    when: "Optional arguments are malformed or unsupported.",
+    message: "gamma: invalid argument",
+};
+
+const GAMMA_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMA.INVALID_INPUT",
+    identifier: Some("RunMat:gamma:InvalidInput"),
+    when: "Input value or prototype cannot be converted to supported numeric forms.",
+    message: "gamma: invalid input",
+};
+
+const GAMMA_ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMA.GPU_UNSUPPORTED",
+    identifier: Some("RunMat:gamma:GpuUnsupported"),
+    when: "GPU output via \"like\" is requested but no compatible provider is active.",
+    message: "gamma: gpu output not supported",
+};
+
+const GAMMA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GAMMA.INTERNAL",
+    identifier: Some("RunMat:gamma:Internal"),
+    when: "Internal gather/provider/tensor construction failed.",
+    message: "gamma: internal error",
+};
+
+const GAMMA_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    GAMMA_ERROR_INVALID_ARGUMENT,
+    GAMMA_ERROR_INVALID_INPUT,
+    GAMMA_ERROR_GPU_UNSUPPORTED,
+    GAMMA_ERROR_INTERNAL,
+];
+
+pub const GAMMA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GAMMA_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GAMMA_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
 }
 
+fn gamma_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "gamma",
     category = "math/elementwise",
-    summary = "Element-wise gamma function for scalars, vectors, matrices, or N-D tensors.",
+    summary = "Compute gamma function values element-wise.",
     keywords = "gamma,factorial,special,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::gamma::GAMMA_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::gamma"
 )]
 async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -92,17 +204,23 @@ async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             gamma_tensor(tensor).map(tensor::tensor_into_value)?
         }
         Value::String(_) | Value::StringArray(_) => {
-            return Err(builtin_error("gamma: expected numeric input"))
+            return Err(gamma_error_with_detail(
+                &GAMMA_ERROR_INVALID_INPUT,
+                "expected numeric input",
+            ))
         }
         Value::Tensor(tensor) => gamma_tensor(tensor).map(tensor::tensor_into_value)?,
         Value::Num(n) => Value::Num(gamma_real_scalar(n)),
         Value::Int(i) => Value::Num(gamma_real_scalar(i.to_f64())),
         Value::Bool(b) => Value::Num(gamma_real_scalar(if b { 1.0 } else { 0.0 })),
         other => {
-            return Err(builtin_error(format!(
-                "gamma: unsupported input type {:?}; expected numeric or gpuArray input",
-                other
-            )))
+            return Err(gamma_error_with_detail(
+                &GAMMA_ERROR_INVALID_INPUT,
+                format!(
+                    "unsupported input type {:?}; expected numeric or gpuArray input",
+                    other
+                ),
+            ))
         }
     };
     apply_output_template(base, &output).await
@@ -247,21 +365,31 @@ fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
         0 => Ok(OutputTemplate::Default),
         1 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err(builtin_error("gamma: expected prototype after 'like'"))
+                Err(gamma_error_with_detail(
+                    &GAMMA_ERROR_INVALID_ARGUMENT,
+                    "expected prototype after 'like'",
+                ))
             } else {
-                Err(builtin_error("gamma: unrecognised argument for gamma"))
+                Err(gamma_error_with_detail(
+                    &GAMMA_ERROR_INVALID_ARGUMENT,
+                    "unrecognised argument for gamma",
+                ))
             }
         }
         2 => {
             if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
-                Err(builtin_error(
-                    "gamma: unsupported option; only 'like' is accepted",
+                Err(gamma_error_with_detail(
+                    &GAMMA_ERROR_INVALID_ARGUMENT,
+                    "unsupported option; only 'like' is accepted",
                 ))
             }
         }
-        _ => Err(builtin_error("gamma: too many input arguments")),
+        _ => Err(gamma_error_with_detail(
+            &GAMMA_ERROR_INVALID_ARGUMENT,
+            "too many input arguments",
+        )),
     }
 }
 
@@ -290,8 +418,9 @@ async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<V
 
 fn convert_to_gpu_real(value: Value) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        builtin_error(
-            "gamma: GPU output requested via 'like' but no acceleration provider is active",
+        gamma_error_with_detail(
+            &GAMMA_ERROR_GPU_UNSUPPORTED,
+            "GPU output requested via 'like' but no acceleration provider is active",
         )
     })?;
     match value {
@@ -428,6 +557,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn gamma_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = GAMMA_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = gamma(X)"));
+        assert!(labels.contains(&"Y = gamma(X, \"like\", prototype)"));
+    }
+
+    #[test]
     fn gamma_type_preserves_tensor_shape() {
         let out = numeric_unary_type(
             &[Type::Tensor {
@@ -557,6 +697,7 @@ pub(crate) mod tests {
     #[test]
     fn gamma_string_input_errors() {
         let err = gamma_builtin(Value::from("hello"), Vec::new()).expect_err("expected error");
+        assert_eq!(err.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("expected numeric input"));
     }
 

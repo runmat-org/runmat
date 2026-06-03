@@ -1,7 +1,10 @@
 //! MATLAB-compatible `contourf` builtin (filled contour plot).
 
 use log::warn;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 
@@ -11,22 +14,280 @@ use super::contour::{
     build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
+use crate::build_runtime_error;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "contourf";
 
+const CONTOURF_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to filled contour plot.",
+}];
+
+const CONTOURF_INPUTS_Z: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Contour height grid.",
+}];
+
+const CONTOURF_INPUTS_Z_LEVEL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+];
+
+const CONTOURF_INPUTS_Z_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOURF_INPUTS_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOURF_INPUTS_X_Y_Z: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+];
+
+const CONTOURF_INPUTS_X_Y_Z_LEVEL: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+];
+
+const CONTOURF_INPUTS_X_Y_Z_LEVEL_PROPS: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X axis vector/meshgrid matrix matching Z rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y axis vector/meshgrid matrix matching Z columns.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour height grid.",
+    },
+    BuiltinParamDescriptor {
+        name: "V",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Contour level count/value vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value contour options.",
+    },
+];
+
+const CONTOURF_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(Z)",
+        inputs: &CONTOURF_INPUTS_Z,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(Z, V)",
+        inputs: &CONTOURF_INPUTS_Z_LEVEL,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(Z, Name, Value, ...)",
+        inputs: &CONTOURF_INPUTS_Z_PROPS,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(Z, V, Name, Value, ...)",
+        inputs: &CONTOURF_INPUTS_Z_LEVEL_PROPS,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(X, Y, Z)",
+        inputs: &CONTOURF_INPUTS_X_Y_Z,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(X, Y, Z, V)",
+        inputs: &CONTOURF_INPUTS_X_Y_Z_LEVEL,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = contourf(X, Y, Z, V, Name, Value, ...)",
+        inputs: &CONTOURF_INPUTS_X_Y_Z_LEVEL_PROPS,
+        outputs: &CONTOURF_OUTPUT_HANDLE,
+    },
+];
+
+pub const CONTOURF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTOURF.INVALID_ARGUMENT",
+    identifier: Some("RunMat:contourf:InvalidArgument"),
+    when: "Contour input arrays, level arguments, or name/value options are invalid.",
+    message: "contourf: invalid argument",
+};
+
+pub const CONTOURF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONTOURF.INTERNAL",
+    identifier: Some("RunMat:contourf:Internal"),
+    when: "Internal filled-contour render preparation fails unexpectedly.",
+    message: "contourf: internal operation failed",
+};
+
+const CONTOURF_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [CONTOURF_ERROR_INVALID_ARGUMENT, CONTOURF_ERROR_INTERNAL];
+
+pub const CONTOURF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONTOURF_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONTOURF_ERRORS,
+};
+
+fn contourf_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_contourf_invalid_argument(err: crate::RuntimeError) -> crate::RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    contourf_error_with_detail(&CONTOURF_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_contourf_internal(err: crate::RuntimeError) -> crate::RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    contourf_error_with_detail(&CONTOURF_ERROR_INTERNAL, err.message)
+}
+
 #[runtime_builtin(
     name = "contourf",
     category = "plotting",
-    summary = "Render MATLAB-compatible filled contour plots.",
+    summary = "Create filled contour plots.",
     keywords = "contourf,plotting,filled,contour",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::contourf::CONTOURF_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::contourf"
 )]
 pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let mut args = Some(parse_contour_args("contourf", first, rest)?);
+    let mut args =
+        Some(parse_contour_args("contourf", first, rest).map_err(map_contourf_invalid_argument)?);
     let opts = PlotRenderOptions {
         title: "Filled Contour Plot",
         x_label: "X",
@@ -91,8 +352,15 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             }
         }
 
-        let grid =
-            tensor_to_surface_grid(z_input.into_tensor(name)?, x_axis.len(), y_axis.len(), name)?;
+        let grid = tensor_to_surface_grid(
+            z_input
+                .into_tensor(name)
+                .map_err(map_contourf_invalid_argument)?,
+            x_axis.len(),
+            y_axis.len(),
+            name,
+        )
+        .map_err(map_contourf_invalid_argument)?;
         let fill_plot = build_contour_fill_plot(
             name,
             &x_axis,
@@ -101,7 +369,8 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             color_map,
             base_z,
             &level_spec,
-        )?;
+        )
+        .map_err(map_contourf_invalid_argument)?;
         figure.add_contour_fill_plot_on_axes(fill_plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, before));
         if !matches!(line_color, ContourLineColor::None) {
@@ -138,7 +407,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_contourf_internal(err));
     }
     Ok(handle)
 }
@@ -198,6 +467,26 @@ pub(crate) mod tests {
             handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
             Type::Num
         );
+    }
+
+    #[test]
+    fn contourf_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CONTOURF_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = contourf(Z)"));
+        assert!(labels.contains(&"h = contourf(Z, V)"));
+        assert!(labels.contains(&"h = contourf(X, Y, Z)"));
+        assert!(labels.contains(&"h = contourf(X, Y, Z, V, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn contourf_invalid_grid_uses_stable_identifier() {
+        setup_plot_tests();
+        let err = contourf_builtin(Value::Num(0.0), Vec::new()).expect_err("invalid z");
+        assert_eq!(err.identifier(), CONTOURF_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

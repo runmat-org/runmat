@@ -1,15 +1,11 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
-use test_helpers::execute;
-use test_helpers::lower;
+use test_helpers::execute_source;
 
 #[test]
 fn closure_simple_no_capture() {
-    let ast = parse("f = @(x) x + 1; y = feval(f, 2);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("f = @(x) x + 1; y = feval(f, 2);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -17,9 +13,7 @@ fn closure_simple_no_capture() {
 
 #[test]
 fn closure_captures_free_variables() {
-    let ast = parse("a=1; b=2; f=@(x) x + a + b; y = feval(f, 3);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("a=1; b=2; f=@(x) x + a + b; y = feval(f, 3);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
@@ -27,9 +21,8 @@ fn closure_captures_free_variables() {
 
 #[test]
 fn nested_closures_capture_outer() {
-    let ast = parse("a=10; f=@(x) @(y) (x + y + a); g = feval(f, 2); r = feval(g, 3);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars =
+        execute_source("a=10; f=@(x) @(y) (x + y + a); g = feval(f, 2); r = feval(g, 3);").unwrap();
     // Expect 2 + 3 + 10 = 15
     assert!(vars
         .iter()
@@ -38,19 +31,350 @@ fn nested_closures_capture_outer() {
 
 #[test]
 fn feval_with_string_handle() {
-    let ast = parse("r = feval('@max', 2, 5);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("r = feval('@max', 2, 5);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
 
 #[test]
+fn feval_with_string_handle_resolves_local_semantic_function() {
+    let vars =
+        execute_source("function y = inc(x); y = x + 1; end; r = feval('@inc', 2);").unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_errors() {
+    let err = execute_source("r = feval('@definitely_missing_callback', 1);")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_zero_output_errors() {
+    let err = execute_source("feval('@definitely_missing_callback', 1);")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_multi_output_errors() {
+    let err = execute_source("[a,b] = feval('@definitely_missing_callback', 1);")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_expand_errors() {
+    let err = execute_source("C = deal(1,2); y = feval('@definitely_missing_callback', C{:});")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_expand_zero_output_errors() {
+    let err = execute_source("C = deal(1,2); feval('@definitely_missing_callback', C{:});")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_expand_multi_output_errors() {
+    let err = execute_source("C = deal(1,2); [a,b] = feval('@definitely_missing_callback', C{:});")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_qualified_string_handle_errors() {
+    let err = execute_source("r = feval('@pkg.remote_inc', 1);")
+        .expect_err("unresolved qualified @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_qualified_string_handle_zero_output_errors() {
+    let err = execute_source("feval('@pkg.remote_inc', 1);")
+        .expect_err("unresolved qualified @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_qualified_string_handle_multi_output_errors() {
+    let err = execute_source("[a,b] = feval('@pkg.remote_inc', 1);")
+        .expect_err("unresolved qualified @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_qualified_string_handle_expand_errors() {
+    let err = execute_source("C = deal(1,2); y = feval('@pkg.remote_inc', C{:});")
+        .expect_err("unresolved qualified @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_qualified_string_handle_expand_zero_output_errors() {
+    let err = execute_source("C = deal(1,2); feval('@pkg.remote_inc', C{:});")
+        .expect_err("unresolved qualified @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_with_unresolved_qualified_string_handle_expand_multi_output_errors() {
+    let err = execute_source("C = deal(1,2); [a,b] = feval('@pkg.remote_inc', C{:});")
+        .expect_err("unresolved qualified @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn feval_string_without_at_resolves_named_callable() {
+    let vars = execute_source("r = feval('sin', 0);").expect("string name feval should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+}
+
+#[test]
+fn feval_nonrow_char_handle_errors_with_identifier_contract() {
+    let err =
+        execute_source("r = feval(['@'; 's'], 0);").expect_err("non-row char handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:FevalHandleShapeInvalid"));
+}
+
+#[test]
+fn str2func_and_func2str_round_trip_for_builtin_handle() {
+    let vars = execute_source("f = str2func('sin'); name = func2str(f); y = feval(f, 0);").unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "sin")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if n.abs() < 1e-9)));
+}
+
+#[test]
+fn func2str_non_handle_errors_with_identifier_contract() {
+    let err =
+        execute_source("name = func2str(1);").expect_err("func2str non-handle input should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Func2StrHandleTypeInvalid"));
+}
+
+#[test]
+fn str2func_resolves_local_semantic_function_handle() {
+    let vars = execute_source(
+        "function y = inc(x); y = x + 1; end; f = str2func('inc'); r = feval(f, 2);",
+    )
+    .unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn str2func_unresolved_external_callback_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); y = feval(f, 1);")
+        .expect_err("unresolved str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_callback_zero_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); feval(f, 1);")
+        .expect_err("unresolved str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_callback_multi_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); [a,b] = feval(f, 1);")
+        .expect_err("unresolved str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_callback_errors_without_legacy_fallback() {
+    let err = execute_source(
+        "f = str2func('definitely_missing_callback'); C = deal(1,2); y = feval(f, C{:});",
+    )
+    .expect_err("unresolved str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_direct_call_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); y = f(1);")
+        .expect_err("unresolved str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_direct_call_zero_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); f(1);")
+        .expect_err("unresolved str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_direct_call_multi_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); [a,b] = f(1);")
+        .expect_err("unresolved str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_direct_call_errors_without_legacy_fallback() {
+    let err =
+        execute_source("f = str2func('definitely_missing_callback'); C = {1,2}; y = f(C{:});")
+            .expect_err("unresolved str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_direct_call_zero_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('definitely_missing_callback'); C = {1,2}; f(C{:});")
+        .expect_err("unresolved str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_direct_call_multi_output_errors_without_legacy_fallback() {
+    let err =
+        execute_source("f = str2func('definitely_missing_callback'); C = {1,2}; [a,b] = f(C{:});")
+            .expect_err("unresolved str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_zero_output_callback_errors_without_legacy_fallback() {
+    let err = execute_source(
+        "f = str2func('definitely_missing_callback'); C = deal(1,2); feval(f, C{:});",
+    )
+    .expect_err("unresolved str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_unresolved_external_expand_multi_output_callback_errors_without_legacy_fallback() {
+    let err = execute_source(
+        "f = str2func('definitely_missing_callback'); C = deal(1,2); [a,b] = feval(f, C{:});",
+    )
+    .expect_err("unresolved str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_callback_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); y = feval(f, 1);")
+        .expect_err("unresolved qualified str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_callback_zero_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); feval(f, 1);")
+        .expect_err("unresolved qualified str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_callback_multi_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); [a,b] = feval(f, 1);")
+        .expect_err("unresolved qualified str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_callback_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = deal(1,2); y = feval(f, C{:});")
+        .expect_err("unresolved qualified str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_zero_output_callback_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = deal(1,2); feval(f, C{:});")
+        .expect_err("unresolved qualified str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_multi_output_callback_errors_without_legacy_fallback() {
+    let err =
+        execute_source("f = str2func('pkg.remote_inc'); C = deal(1,2); [a,b] = feval(f, C{:});")
+            .expect_err("unresolved qualified str2func expanded callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_direct_call_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); y = f(1);")
+        .expect_err("unresolved qualified str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_direct_call_zero_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); f(1);")
+        .expect_err("unresolved qualified str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_direct_call_multi_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); [a,b] = f(1);")
+        .expect_err("unresolved qualified str2func direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_direct_call_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = {1,2}; y = f(C{:});")
+        .expect_err("unresolved qualified str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_direct_call_zero_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = {1,2}; f(C{:});")
+        .expect_err("unresolved qualified str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_qualified_external_expand_direct_call_multi_output_errors_without_legacy_fallback() {
+    let err = execute_source("f = str2func('pkg.remote_inc'); C = {1,2}; [a,b] = f(C{:});")
+        .expect_err("unresolved qualified str2func expanded direct call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
+fn str2func_empty_name_errors_with_identifier_contract() {
+    let err =
+        execute_source("f = str2func('');").expect_err("empty str2func function name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameInvalid"));
+}
+
+#[test]
+fn str2func_nontext_name_type_errors_with_identifier_contract() {
+    let err = execute_source("f = str2func(1);")
+        .expect_err("non-text str2func function name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameTypeInvalid"));
+}
+
+#[test]
+fn str2func_nonrow_char_name_errors_with_identifier_contract() {
+    let err = execute_source("f = str2func(['a'; 'b']);")
+        .expect_err("non-row char-array str2func function name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:Str2FuncNameShapeInvalid"));
+}
+
+#[test]
 fn fzero_accepts_anonymous_function() {
-    let ast = parse("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.7390851332).abs() < 1e-6)));
@@ -58,11 +382,10 @@ fn fzero_accepts_anonymous_function() {
 
 #[test]
 fn fzero_accepts_optimset_options() {
-    let ast =
-        parse("opts = optimset('TolX', 1e-10, 'Display', 'off'); r = fzero(@sin, [3 4], opts);")
-            .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(
+        "opts = optimset('TolX', 1e-10, 'Display', 'off'); r = fzero(@sin, [3 4], opts);",
+    )
+    .unwrap();
     assert!(vars.iter().any(
         |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI).abs() < 1e-8)
     ));
@@ -70,9 +393,7 @@ fn fzero_accepts_optimset_options() {
 
 #[test]
 fn integral_accepts_anonymous_function() {
-    let ast = parse("q = integral(@(x) x.^2, 0, 1);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("q = integral(@(x) x.^2, 0, 1);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - (1.0 / 3.0)).abs() < 1e-8)));
@@ -80,9 +401,7 @@ fn integral_accepts_anonymous_function() {
 
 #[test]
 fn integral_accepts_named_function_handle() {
-    let ast = parse("q = integral(@sin, 0, pi);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("q = integral(@sin, 0, pi);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-7)));
@@ -90,9 +409,7 @@ fn integral_accepts_named_function_handle() {
 
 #[test]
 fn fminbnd_accepts_anonymous_function() {
-    let ast = parse("x = fminbnd(@(x) (x-2).^2, 0, 5);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("x = fminbnd(@(x) (x-2).^2, 0, 5);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-3)));
@@ -100,9 +417,7 @@ fn fminbnd_accepts_anonymous_function() {
 
 #[test]
 fn fminbnd_returns_optional_function_value() {
-    let ast = parse("[x, fval] = fminbnd(@(x) (x-3).^2 + 1, 0, 5);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("[x, fval] = fminbnd(@(x) (x-3).^2 + 1, 0, 5);").unwrap();
     let x_ok = vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-3));
@@ -115,11 +430,10 @@ fn fminbnd_returns_optional_function_value() {
 
 #[test]
 fn fminbnd_accepts_optimset_options() {
-    let ast =
-        parse("opts = optimset('TolX', 1e-10, 'Display', 'off'); x = fminbnd(@cos, 0, pi, opts);")
-            .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source(
+        "opts = optimset('TolX', 1e-10, 'Display', 'off'); x = fminbnd(@cos, 0, pi, opts);",
+    )
+    .unwrap();
     assert!(vars.iter().any(
         |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI).abs() < 1e-3)
     ));
@@ -127,10 +441,9 @@ fn fminbnd_accepts_optimset_options() {
 
 #[test]
 fn fsolve_accepts_anonymous_vector_function() {
-    let ast =
-        parse("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars =
+        execute_source("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);")
+            .unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
             t.data.len() == 2
@@ -144,9 +457,7 @@ fn fsolve_accepts_anonymous_vector_function() {
 
 #[test]
 fn ode45_accepts_anonymous_rhs_function() {
-    let ast = parse("y = ode45(@(t, y) -y, [0 1], 1);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("y = ode45(@(t, y) -y, [0 1], 1);").unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
             t.cols() == 1 && (t.data[t.rows() - 1] - (-1.0_f64).exp()).abs() < 1e-2
@@ -158,9 +469,7 @@ fn ode45_accepts_anonymous_rhs_function() {
 
 #[test]
 fn ode23_accepts_two_output_assignment() {
-    let ast = parse("[t, y] = ode23(@(t, y) -2*y, [0 0.25 0.5 1.0], 1);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_source("[t, y] = ode23(@(t, y) -2*y, [0 0.25 0.5 1.0], 1);").unwrap();
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(tensor) = v {
             tensor.cols() == 1

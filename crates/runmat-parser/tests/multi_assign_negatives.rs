@@ -2,10 +2,9 @@ mod parse;
 use parse::parse;
 
 #[test]
-fn mixed_lvalue_in_multi_assign_is_rejected() {
-    // '[a, x(1)] = f(x)' should not parse as a valid multi-assign
-    // Parser should fail rather than accept mixed lvalues
-    assert!(parse("[a, x(1)] = f(x)").is_err());
+fn non_lvalue_in_multi_assign_is_rejected() {
+    // Indexed lvalues are valid multi-assign targets; arbitrary expressions are not.
+    assert!(parse("[a, x + 1] = f(x)").is_err());
 }
 
 #[test]

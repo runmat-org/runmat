@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::structs::type_resolvers::isfield_type;
-use runmat_builtins::{CellArray, LogicalArray, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, LogicalArray, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
@@ -38,8 +42,127 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion barrier because it inspects struct metadata on the host.",
 };
 
-fn isfield_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("isfield").build()
+const BUILTIN_NAME: &str = "isfield";
+
+const ISFIELD_OUTPUT_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when the field exists.",
+}];
+
+const ISFIELD_OUTPUT_ARRAY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical array matching the shape of the queried field-name collection.",
+}];
+
+const ISFIELD_INPUTS_NAME: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct or struct array to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Single field name to test.",
+    },
+];
+
+const ISFIELD_INPUTS_NAMES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Struct or struct array to inspect.",
+    },
+    BuiltinParamDescriptor {
+        name: "names",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String array or cell array of field names.",
+    },
+];
+
+const ISFIELD_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "tf = isfield(S, name)",
+        inputs: &ISFIELD_INPUTS_NAME,
+        outputs: &ISFIELD_OUTPUT_SCALAR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "tf = isfield(S, names)",
+        inputs: &ISFIELD_INPUTS_NAMES,
+        outputs: &ISFIELD_OUTPUT_ARRAY,
+    },
+];
+
+const ISFIELD_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFIELD.FIELD_NAME_TYPE",
+    identifier: Some("RunMat:isfield:FieldNameType"),
+    when: "Field-name input is not a string scalar, string array, or cell array of strings/chars.",
+    message:
+        "isfield: field names must be strings, string arrays, or cell arrays of character vectors",
+};
+
+const ISFIELD_ERROR_CELL_ELEMENT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFIELD.CELL_ELEMENT_TYPE",
+    identifier: Some("RunMat:isfield:CellElementType"),
+    when: "At least one element in a field-name cell array is not a supported scalar string/char value.",
+    message: "isfield: cell array elements must be character vectors or strings",
+};
+
+const ISFIELD_ERROR_STRUCT_ARRAY_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFIELD.STRUCT_ARRAY_CONTENTS",
+    identifier: Some("RunMat:isfield:StructArrayContents"),
+    when: "Struct-array input contains non-struct elements.",
+    message: "isfield: struct array elements must be structs",
+};
+
+const ISFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFIELD.INTERNAL",
+    identifier: Some("RunMat:isfield:InternalError"),
+    when: "Internal logical-array assembly failed.",
+    message: "isfield: internal error",
+};
+
+const ISFIELD_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ISFIELD_ERROR_FIELD_NAME_TYPE,
+    ISFIELD_ERROR_CELL_ELEMENT_TYPE,
+    ISFIELD_ERROR_STRUCT_ARRAY_CONTENTS,
+    ISFIELD_ERROR_INTERNAL,
+];
+
+pub const ISFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISFIELD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISFIELD_ERRORS,
+};
+
+fn isfield_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    isfield_error_with_message(error.message, error)
+}
+
+fn isfield_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
@@ -48,6 +171,7 @@ fn isfield_flow(message: impl Into<String>) -> RuntimeError {
     summary = "Test whether a struct or struct array defines specific field names.",
     keywords = "isfield,struct,field existence",
     type_resolver(isfield_type),
+    descriptor(crate::builtins::structs::core::isfield::ISFIELD_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
 async fn isfield_builtin(target: Value, names: Value) -> BuiltinResult<Value> {
@@ -158,8 +282,9 @@ fn evaluate_scalar(struct_value: &StructValue, names: ParsedNames) -> BuiltinRes
                     0
                 });
             }
-            let logical = LogicalArray::new(bits, shape)
-                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
+            let logical = LogicalArray::new(bits, shape).map_err(|e| {
+                isfield_error_with_message(format!("isfield: {e}"), &ISFIELD_ERROR_INTERNAL)
+            })?;
             Ok(Value::LogicalArray(logical))
         }
     }
@@ -174,8 +299,9 @@ fn evaluate_struct_array(cell: &CellArray, names: ParsedNames) -> BuiltinResult<
             for name in names {
                 bits.push(if fields.contains(&name) { 1 } else { 0 });
             }
-            let logical = LogicalArray::new(bits, shape)
-                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
+            let logical = LogicalArray::new(bits, shape).map_err(|e| {
+                isfield_error_with_message(format!("isfield: {e}"), &ISFIELD_ERROR_INTERNAL)
+            })?;
             Ok(Value::LogicalArray(logical))
         }
     }
@@ -185,8 +311,9 @@ fn evaluate_non_struct(names: ParsedNames) -> BuiltinResult<Value> {
     match names {
         ParsedNames::Scalar(_) => Ok(Value::Bool(false)),
         ParsedNames::Array { names, shape } => {
-            let logical = LogicalArray::new(vec![0; names.len()], shape)
-                .map_err(|e| isfield_flow(format!("isfield: {e}")))?;
+            let logical = LogicalArray::new(vec![0; names.len()], shape).map_err(|e| {
+                isfield_error_with_message(format!("isfield: {e}"), &ISFIELD_ERROR_INTERNAL)
+            })?;
             Ok(Value::LogicalArray(logical))
         }
     }
@@ -200,18 +327,14 @@ fn struct_array_field_intersection(cell: &CellArray) -> BuiltinResult<HashSet<St
     let mut iter = cell.data.iter();
     let first = unsafe { &*iter.next().unwrap().as_raw() };
     let Value::Struct(first_struct) = first else {
-        return Err(isfield_flow(
-            "isfield: struct array elements must be structs",
-        ));
+        return Err(isfield_error(&ISFIELD_ERROR_STRUCT_ARRAY_CONTENTS));
     };
     let mut fields: HashSet<String> = first_struct.fields.keys().cloned().collect();
 
     for handle in iter {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(struct_value) = value else {
-            return Err(isfield_flow(
-                "isfield: struct array elements must be structs",
-            ));
+            return Err(isfield_error(&ISFIELD_ERROR_STRUCT_ARRAY_CONTENTS));
         };
         fields.retain(|name| struct_value.fields.contains_key(name));
         if fields.is_empty() {
@@ -294,16 +417,18 @@ fn value_to_field_name(value: &Value) -> BuiltinResult<String> {
                 Err(field_name_type_error())
             }
         }
-        other => Err(isfield_flow(format!(
-            "isfield: cell array elements must be character vectors or strings (got {other:?})"
-        ))),
+        other => Err(isfield_error_with_message(
+            format!(
+                "{} (got {other:?})",
+                ISFIELD_ERROR_CELL_ELEMENT_TYPE.message
+            ),
+            &ISFIELD_ERROR_CELL_ELEMENT_TYPE,
+        )),
     }
 }
 
 fn field_name_type_error() -> RuntimeError {
-    isfield_flow(
-        "isfield: field names must be strings, string arrays, or cell arrays of character vectors",
-    )
+    isfield_error(&ISFIELD_ERROR_FIELD_NAME_TYPE)
 }
 
 #[cfg(test)]

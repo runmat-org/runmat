@@ -1,7 +1,11 @@
 //! MATLAB-compatible `rand` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
@@ -52,6 +56,161 @@ fn rand_type(args: &[Type], ctx: &ResolveContext) -> Type {
     tensor_type_from_rank(args, ctx)
 }
 
+const RAND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Uniform random array in (0,1).",
+}];
+
+const RAND_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const RAND_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const RAND_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const RAND_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const RAND_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class override ('double'|'single'|'gpuArray').",
+    },
+];
+
+const RAND_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const RAND_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::LikePrototype,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value when no numeric dimension arguments are provided.",
+}];
+
+const RAND_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "A = rand()",
+        inputs: &RAND_SIG_EMPTY_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = rand(n)",
+        inputs: &RAND_SIG_N_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = rand(size_vector)",
+        inputs: &RAND_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = rand(m, n, ...)",
+        inputs: &RAND_SIG_DIMS_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = rand(prototype)",
+        inputs: &RAND_SIG_PROTOTYPE_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = rand(..., typename)",
+        inputs: &RAND_SIG_CLASS_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = rand(..., \"like\", prototype)",
+        inputs: &RAND_SIG_LIKE_INPUTS,
+        outputs: &RAND_OUTPUT,
+    },
+];
+
+const RAND_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    BuiltinErrorDescriptor {
+        code: "RM.RAND.LIKE_EXPECTED_PROTOTYPE",
+        identifier: None,
+        when: "The 'like' keyword is provided without a prototype argument.",
+        message: "rand: expected prototype after 'like'",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RAND.UNRECOGNIZED_OPTION",
+        identifier: None,
+        when: "A trailing option string is not supported.",
+        message: "rand: unrecognised option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RAND.UNSUPPORTED_PROTOTYPE",
+        identifier: None,
+        when: "A prototype type cannot be used for rand(..., 'like', prototype).",
+        message: "rand: unsupported prototype",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.RAND.INVALID_DIMS",
+        identifier: None,
+        when: "Dimension arguments fail numeric/shape parsing.",
+        message: "rand: dimension arguments must be numeric and nonnegative",
+    },
+];
+
+pub const RAND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RAND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RAND_ERRORS,
+};
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::rand")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "rand",
@@ -66,10 +225,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rand",
     category = "array/creation",
-    summary = "Uniform random numbers on (0, 1).",
+    summary = "Generate uniformly distributed pseudorandom numbers on the open interval (0, 1).",
     keywords = "rand,random,uniform,gpu,like",
     accel = "array_construct",
     type_resolver(rand_type),
+    descriptor(crate::builtins::array::creation::rand::RAND_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::rand"
 )]
 async fn rand_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {

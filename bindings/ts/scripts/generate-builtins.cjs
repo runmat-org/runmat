@@ -6,7 +6,7 @@ const path = require("path");
 const bindingsRoot = path.resolve(__dirname, "..");
 const builtinsDir = path.resolve(
   bindingsRoot,
-  "../../crates/runmat-runtime/src/builtins/builtins-json"
+  "../../docs/builtins/reference"
 );
 const generatedRoot = path.resolve(bindingsRoot, "src/generated");
 const generatedBuiltinsDir = path.resolve(generatedRoot, "builtins");

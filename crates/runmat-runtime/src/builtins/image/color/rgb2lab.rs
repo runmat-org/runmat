@@ -1,6 +1,10 @@
 //! MATLAB-compatible default-D65 `rgb2lab` conversion.
 
-use runmat_builtins::{NumericDType, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -9,7 +13,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::type_resolvers::same_shape_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rgb2lab";
 const XN: f64 = 0.95047;
@@ -17,6 +21,85 @@ const YN: f64 = 1.0;
 const ZN: f64 = 1.08883;
 const EPSILON: f64 = 216.0 / 24389.0;
 const KAPPA: f64 = 24389.0 / 27.0;
+
+const RGB2LAB_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "LAB",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "CIE L*a*b* image or colormap converted from RGB input.",
+}];
+
+const RGB2LAB_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "RGB",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "RGB image or Nx3 RGB colormap values.",
+}];
+
+const RGB2LAB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "LAB = rgb2lab(RGB)",
+    inputs: &RGB2LAB_INPUTS,
+    outputs: &RGB2LAB_OUTPUT,
+}];
+
+const RGB2LAB_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RGB2LAB.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:rgb2lab:TooManyInputs"),
+    when: "More than one input argument is supplied.",
+    message: "rgb2lab: too many input arguments",
+};
+
+const RGB2LAB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RGB2LAB.INVALID_INPUT",
+    identifier: Some("RunMat:rgb2lab:InvalidInput"),
+    when: "Input cannot be interpreted as an MxNx3 RGB image or Nx3 RGB colormap.",
+    message: "rgb2lab: invalid input",
+};
+
+const RGB2LAB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RGB2LAB.INTERNAL",
+    identifier: Some("RunMat:rgb2lab:Internal"),
+    when: "L*a*b* output tensor construction fails internally.",
+    message: "rgb2lab: internal conversion failure",
+};
+
+const RGB2LAB_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    RGB2LAB_ERROR_TOO_MANY_INPUTS,
+    RGB2LAB_ERROR_INVALID_INPUT,
+    RGB2LAB_ERROR_INTERNAL,
+];
+
+pub const RGB2LAB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RGB2LAB_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RGB2LAB_ERRORS,
+};
+
+fn rgb2lab_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    rgb2lab_error_with_message(error.message, error)
+}
+
+fn rgb2lab_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn rgb2lab_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        rgb2lab_error_with_message(err.message().to_string(), fallback)
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::color::rgb2lab")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -48,21 +131,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "rgb2lab",
     category = "image/color",
-    summary = "Convert sRGB image or colormap values to CIE L*a*b* using D65 white.",
+    summary = "Convert sRGB image or colormap values to CIE L*a*b* (D65).",
     keywords = "rgb2lab,rgb,lab,cielab,color,image,colormap",
     accel = "sink",
     type_resolver(same_shape_type),
+    descriptor(crate::builtins::image::color::rgb2lab::RGB2LAB_DESCRIPTOR),
     builtin_path = "crate::builtins::image::color::rgb2lab"
 )]
 async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(common::builtin_error(
-            NAME,
-            "rgb2lab: too many input arguments",
-        ));
+        return Err(rgb2lab_error(&RGB2LAB_ERROR_TOO_MANY_INPUTS));
     }
-    let tensor = common::gather_tensor(NAME, rgb).await?;
-    let layout = common::color_layout(&tensor, NAME)?;
+    let tensor = common::gather_tensor(NAME, rgb)
+        .await
+        .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
+    let layout = common::color_layout(&tensor, NAME)
+        .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
     let dtype = common::image_output_dtype(tensor.dtype);
     let mut data = vec![0.0; tensor.data.len()];
     for pixel in 0..layout.pixels() {
@@ -83,12 +167,9 @@ async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         data[layout.index(pixel, 1)] = cast_float(a, dtype);
         data[layout.index(pixel, 2)] = cast_float(bstar, dtype);
     }
-    Ok(common::image_value_from_tensor(common::tensor_with_dtype(
-        data,
-        layout.output_shape(),
-        dtype,
-        NAME,
-    )?))
+    let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
+        .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INTERNAL))?;
+    Ok(common::image_value_from_tensor(out))
 }
 
 pub(crate) fn rgb_to_lab_unit(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
@@ -186,5 +267,34 @@ mod tests {
         assert_close(out.data[0], 53.2408, 1e-3);
         assert_close(out.data[1], 80.0925, 1e-3);
         assert_close(out.data[2], 67.2032, 1e-3);
+    }
+
+    #[test]
+    fn rgb2lab_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = RGB2LAB_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(labels, vec!["LAB = rgb2lab(RGB)"]);
+    }
+
+    #[test]
+    fn rgb2lab_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = RGB2LAB_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.RGB2LAB.TOO_MANY_INPUTS"));
+        assert!(codes.contains(&"RM.RGB2LAB.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.RGB2LAB.INTERNAL"));
+    }
+
+    #[test]
+    fn rgb2lab_too_many_args_uses_stable_identifier() {
+        let err = block_on(rgb2lab_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
+            .expect_err("expected argument error");
+        assert_eq!(err.identifier(), RGB2LAB_ERROR_TOO_MANY_INPUTS.identifier);
     }
 }

@@ -9,7 +9,11 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_filesystem::OpenOptions;
 use runmat_macros::runtime_builtin;
 
@@ -22,6 +26,129 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "csvwrite";
+
+const CSVWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "bytesWritten",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of bytes written to the output file.",
+}];
+const CSVWRITE_INPUTS_FILENAME_DATA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "CSV output path.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical matrix data to write.",
+    },
+];
+const CSVWRITE_INPUTS_FILENAME_DATA_ROW_COL: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "CSV output path.",
+    },
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical matrix data to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "row",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based row offset before writing values.",
+    },
+    BuiltinParamDescriptor {
+        name: "col",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-based column offset before writing values.",
+    },
+];
+const CSVWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "bytesWritten = csvwrite(filename, M)",
+        inputs: &CSVWRITE_INPUTS_FILENAME_DATA,
+        outputs: &CSVWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "bytesWritten = csvwrite(filename, M, row, col)",
+        inputs: &CSVWRITE_INPUTS_FILENAME_DATA_ROW_COL,
+        outputs: &CSVWRITE_OUTPUT,
+    },
+];
+const CSVWRITE_ERROR_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.FILENAME",
+    identifier: None,
+    when: "Filename argument is not a scalar string/char vector.",
+    message: "csvwrite: invalid filename input",
+};
+const CSVWRITE_ERROR_FILENAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.FILENAME_EMPTY",
+    identifier: None,
+    when: "Filename resolves to an empty string.",
+    message: "csvwrite: filename must not be empty",
+};
+const CSVWRITE_ERROR_OFFSETS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.OFFSETS",
+    identifier: None,
+    when: "Offset arguments are missing, malformed, or out of bounds.",
+    message: "csvwrite: invalid row/column offsets",
+};
+const CSVWRITE_ERROR_DATA_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.DATA_SHAPE",
+    identifier: None,
+    when: "Input data is not a 2-D matrix.",
+    message: "csvwrite: input must be 2-D",
+};
+const CSVWRITE_ERROR_DATA_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.DATA_INPUT",
+    identifier: None,
+    when: "Input data cannot be converted to a numeric/logical tensor.",
+    message: "csvwrite: input must be numeric or logical",
+};
+const CSVWRITE_ERROR_IO_OPEN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.IO_OPEN",
+    identifier: None,
+    when: "Output file cannot be opened.",
+    message: "csvwrite: unable to open file for writing",
+};
+const CSVWRITE_ERROR_IO_WRITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CSVWRITE.IO_WRITE",
+    identifier: None,
+    when: "Output file write/flush fails.",
+    message: "csvwrite: write failed",
+};
+const CSVWRITE_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    CSVWRITE_ERROR_FILENAME,
+    CSVWRITE_ERROR_FILENAME_EMPTY,
+    CSVWRITE_ERROR_OFFSETS,
+    CSVWRITE_ERROR_DATA_INPUT,
+    CSVWRITE_ERROR_DATA_SHAPE,
+    CSVWRITE_ERROR_IO_OPEN,
+    CSVWRITE_ERROR_IO_WRITE,
+];
+pub const CSVWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CSVWRITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CSVWRITE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::tabular::csvwrite")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,20 +177,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion; performs host-side file I/O.",
 };
 
-fn csvwrite_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn csvwrite_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn csvwrite_error_with_source<E>(message: impl Into<String>, source: E) -> RuntimeError
+fn csvwrite_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    build_runtime_error(message)
+    let mut builder = build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
-        .with_source(source)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -81,10 +220,11 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "csvwrite",
     category = "io/tabular",
-    summary = "Write numeric matrices to comma-separated text files using MATLAB-compatible offsets.",
+    summary = "Write numeric matrices to CSV files.",
     keywords = "csvwrite,csv,write,row offset,column offset",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::num_type),
+    descriptor(crate::builtins::io::tabular::csvwrite::CSVWRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::tabular::csvwrite"
 )]
 async fn csvwrite_builtin(
@@ -110,11 +250,12 @@ async fn csvwrite_builtin(
     let gathered_data = gather_if_needed_async(&data)
         .await
         .map_err(map_control_flow)?;
-    let tensor =
-        tensor::value_into_tensor_for("csvwrite", gathered_data).map_err(csvwrite_error)?;
+    let tensor = tensor::value_into_tensor_for("csvwrite", gathered_data).map_err(|msg| {
+        csvwrite_error_with(&CSVWRITE_ERROR_DATA_INPUT, format!("csvwrite: {msg}"))
+    })?;
     ensure_matrix_shape(&tensor)?;
 
-    let bytes = write_csv(&path, &tensor, row_offset, col_offset)?;
+    let bytes = write_csv(&path, &tensor, row_offset, col_offset).await?;
     Ok(Value::Num(bytes as f64))
 }
 
@@ -123,18 +264,21 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
         Value::String(s) => s.clone(),
         Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
-        _ => {
-            return Err(csvwrite_error(
-                "csvwrite: filename must be a string scalar or character vector",
-            ))
-        }
+        _ => Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_FILENAME,
+            "csvwrite: filename must be a string scalar or character vector",
+        ))?,
     };
 
     if raw.trim().is_empty() {
-        return Err(csvwrite_error("csvwrite: filename must not be empty"));
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_FILENAME_EMPTY,
+            CSVWRITE_ERROR_FILENAME_EMPTY.message,
+        ));
     }
 
-    let expanded = expand_user_path(&raw, BUILTIN_NAME).map_err(csvwrite_error)?;
+    let expanded = expand_user_path(&raw, BUILTIN_NAME)
+        .map_err(|msg| csvwrite_error_with(&CSVWRITE_ERROR_FILENAME, msg))?;
     Ok(Path::new(&expanded).to_path_buf())
 }
 
@@ -146,7 +290,8 @@ fn parse_offsets(args: &[Value]) -> BuiltinResult<(usize, usize)> {
             let col = parse_offset(&args[1], "column offset")?;
             Ok((row, col))
         }
-        _ => Err(csvwrite_error(
+        _ => Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
             "csvwrite: offsets must be provided as two numeric arguments (row, column)",
         )),
     }
@@ -157,7 +302,10 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(csvwrite_error(format!("csvwrite: {context} must be >= 0")));
+                return Err(csvwrite_error_with(
+                    &CSVWRITE_ERROR_OFFSETS,
+                    format!("csvwrite: {context} must be >= 0"),
+                ));
             }
             Ok(raw as usize)
         }
@@ -165,43 +313,54 @@ fn parse_offset(value: &Value, context: &str) -> BuiltinResult<usize> {
         Value::Bool(b) => Ok(if *b { 1 } else { 0 }),
         Value::Tensor(t) => {
             if t.data.len() != 1 {
-                return Err(csvwrite_error(format!(
-                    "csvwrite: {context} must be a scalar, got {} elements",
-                    t.data.len()
-                )));
+                return Err(csvwrite_error_with(
+                    &CSVWRITE_ERROR_OFFSETS,
+                    format!(
+                        "csvwrite: {context} must be a scalar, got {} elements",
+                        t.data.len()
+                    ),
+                ));
             }
             coerce_offset_from_float(t.data[0], context)
         }
         Value::LogicalArray(logical) => {
             if logical.data.len() != 1 {
-                return Err(csvwrite_error(format!(
-                    "csvwrite: {context} must be a scalar, got {} elements",
-                    logical.data.len()
-                )));
+                return Err(csvwrite_error_with(
+                    &CSVWRITE_ERROR_OFFSETS,
+                    format!(
+                        "csvwrite: {context} must be a scalar, got {} elements",
+                        logical.data.len()
+                    ),
+                ));
             }
             Ok(if logical.data[0] != 0 { 1 } else { 0 })
         }
-        other => Err(csvwrite_error(format!(
-            "csvwrite: {context} must be numeric, got {:?}",
-            other
-        ))),
+        other => Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
+            format!("csvwrite: {context} must be numeric, got {:?}", other),
+        )),
     }
 }
 
 fn coerce_offset_from_float(value: f64, context: &str) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(csvwrite_error(format!(
-            "csvwrite: {context} must be finite"
-        )));
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
+            format!("csvwrite: {context} must be finite"),
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > 1e-9 {
-        return Err(csvwrite_error(format!(
-            "csvwrite: {context} must be an integer"
-        )));
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
+            format!("csvwrite: {context} must be an integer"),
+        ));
     }
     if rounded < 0.0 {
-        return Err(csvwrite_error(format!("csvwrite: {context} must be >= 0")));
+        return Err(csvwrite_error_with(
+            &CSVWRITE_ERROR_OFFSETS,
+            format!("csvwrite: {context} must be >= 0"),
+        ));
     }
     Ok(rounded as usize)
 }
@@ -213,12 +372,13 @@ fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
     if tensor.shape[2..].iter().all(|&dim| dim == 1) {
         return Ok(());
     }
-    Err(csvwrite_error(
+    Err(csvwrite_error_with(
+        &CSVWRITE_ERROR_DATA_SHAPE,
         "csvwrite: input must be 2-D; reshape before writing",
     ))
 }
 
-fn write_csv(
+async fn write_csv(
     path: &Path,
     tensor: &Tensor,
     row_offset: usize,
@@ -226,8 +386,9 @@ fn write_csv(
 ) -> BuiltinResult<usize> {
     let mut options = OpenOptions::new();
     options.create(true).write(true).truncate(true);
-    let mut file = options.open(path).map_err(|err| {
+    let mut file = options.open_async(path).await.map_err(|err| {
         csvwrite_error_with_source(
+            &CSVWRITE_ERROR_IO_OPEN,
             format!(
                 "csvwrite: unable to open \"{}\" for writing ({err})",
                 path.display()
@@ -245,6 +406,7 @@ fn write_csv(
     for _ in 0..row_offset {
         file.write_all(line_ending.as_bytes()).map_err(|err| {
             csvwrite_error_with_source(
+                &CSVWRITE_ERROR_IO_WRITE,
                 format!("csvwrite: failed to write line ending ({err})"),
                 err,
             )
@@ -253,8 +415,12 @@ fn write_csv(
     }
 
     if rows == 0 || cols == 0 {
-        file.flush().map_err(|err| {
-            csvwrite_error_with_source(format!("csvwrite: failed to flush output ({err})"), err)
+        file.flush_async().await.map_err(|err| {
+            csvwrite_error_with_source(
+                &CSVWRITE_ERROR_IO_WRITE,
+                format!("csvwrite: failed to flush output ({err})"),
+                err,
+            )
         })?;
         return Ok(bytes_written);
     }
@@ -272,12 +438,17 @@ fn write_csv(
         let line = fields.join(",");
         if !line.is_empty() {
             file.write_all(line.as_bytes()).map_err(|err| {
-                csvwrite_error_with_source(format!("csvwrite: failed to write value ({err})"), err)
+                csvwrite_error_with_source(
+                    &CSVWRITE_ERROR_IO_WRITE,
+                    format!("csvwrite: failed to write value ({err})"),
+                    err,
+                )
             })?;
             bytes_written += line.len();
         }
         file.write_all(line_ending.as_bytes()).map_err(|err| {
             csvwrite_error_with_source(
+                &CSVWRITE_ERROR_IO_WRITE,
                 format!("csvwrite: failed to write line ending ({err})"),
                 err,
             )
@@ -285,8 +456,12 @@ fn write_csv(
         bytes_written += line_ending.len();
     }
 
-    file.flush().map_err(|err| {
-        csvwrite_error_with_source(format!("csvwrite: failed to flush output ({err})"), err)
+    file.flush_async().await.map_err(|err| {
+        csvwrite_error_with_source(
+            &CSVWRITE_ERROR_IO_WRITE,
+            format!("csvwrite: failed to flush output ({err})"),
+            err,
+        )
     })?;
 
     Ok(bytes_written)
@@ -391,6 +566,18 @@ pub(crate) mod tests {
 
     fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::csvwrite_builtin(filename, data, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvwrite_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CSVWRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"bytesWritten = csvwrite(filename, M)"));
+        assert!(labels.contains(&"bytesWritten = csvwrite(filename, M, row, col)"));
     }
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);

@@ -1,13 +1,5 @@
-pub mod classes;
-pub mod core;
-pub mod end_expr;
+pub(crate) mod core;
 pub mod error;
-pub mod expressions;
-pub mod functions;
-pub mod idioms;
-pub mod imports;
-pub mod lvalues;
-pub mod statements;
 
-pub use core::{Compiler, LoopLabels};
+pub(crate) use core::Compiler;
 pub use error::CompileError;

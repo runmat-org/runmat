@@ -503,6 +503,33 @@ pub enum ProviderPrecision {
     F64,
 }
 
+/// Declares how provider-owned GPU handles may cross async spawn boundaries.
+///
+/// This is a runtime/provider policy surface (not a semantic type fact) used by
+/// VM/runtime spawn handling to prevent unsynchronized device-handle races.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpawnHandleConcurrency {
+    /// Provider supports immutable sharing of handle-backed values across spawned tasks.
+    ImmutableShare,
+    /// Provider supports copy-on-write semantics when spawned and parent tasks diverge.
+    CopyOnWrite,
+    /// Provider supports synchronized mutation for shared handles.
+    SynchronizedMutation,
+    /// Provider rejects spawned sharing of raw handles.
+    Reject,
+}
+
+impl SpawnHandleConcurrency {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpawnHandleConcurrency::ImmutableShare => "immutable_share",
+            SpawnHandleConcurrency::CopyOnWrite => "copy_on_write",
+            SpawnHandleConcurrency::SynchronizedMutation => "synchronized_mutation",
+            SpawnHandleConcurrency::Reject => "reject",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReductionTwoPassMode {
     Auto,
@@ -952,6 +979,15 @@ pub trait AccelProvider: Send + Sync {
     fn device_info(&self) -> String;
     fn device_id(&self) -> u32 {
         0
+    }
+
+    /// Declares provider policy for sharing `GpuTensorHandle` values across
+    /// spawned async boundaries.
+    ///
+    /// Default is conservative rejection. Providers that can safely support
+    /// cross-task sharing should override this.
+    fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+        SpawnHandleConcurrency::Reject
     }
 
     /// Export a shared GPU context handle, allowing downstream systems (plotting, visualization)
@@ -2581,15 +2617,32 @@ pub fn clear_provider() {
 }
 
 pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
-    PROVIDER_REGISTRY
+    if let Some(registered) = PROVIDER_REGISTRY
         .read()
         .ok()
         .and_then(|guard| guard.get(&device_id).copied())
-        .or_else(|| provider())
+    {
+        return Some(registered);
+    }
+    if let Some(thread_provider) = current_thread_provider() {
+        if thread_provider.device_id() == device_id {
+            return Some(thread_provider);
+        }
+    }
+    // Preserve legacy behavior: when no explicit per-device registration exists,
+    // fall back to the globally active provider regardless of handle device id.
+    GLOBAL_PROVIDER
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().copied())
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
     provider_for_device(handle.device_id)
+}
+
+pub fn spawn_handle_concurrency_for(handle: &GpuTensorHandle) -> Option<SpawnHandleConcurrency> {
+    provider_for_handle(handle).map(AccelProvider::spawn_handle_concurrency)
 }
 
 pub fn next_device_id() -> u32 {
@@ -2783,4 +2836,151 @@ pub struct ImageNormalizeDescriptor {
     pub bias: Option<f64>,
     #[serde(default)]
     pub gamma: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestProvider {
+        device_id: u32,
+        name: &'static str,
+        spawn_concurrency: SpawnHandleConcurrency,
+    }
+
+    impl AccelProvider for TestProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow!("test provider upload should not be called"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            unsupported_future("test provider download should not be called")
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Err(anyhow!("test provider free should not be called"))
+        }
+
+        fn device_info(&self) -> String {
+            self.name.to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            self.device_id
+        }
+
+        fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+            self.spawn_concurrency
+        }
+    }
+
+    static PROVIDER_TEST_LOCK: Lazy<std::sync::Mutex<()>> = Lazy::new(|| std::sync::Mutex::new(()));
+    static PROVIDER_A: TestProvider = TestProvider {
+        device_id: 101,
+        name: "provider-a",
+        spawn_concurrency: SpawnHandleConcurrency::ImmutableShare,
+    };
+    static PROVIDER_B: TestProvider = TestProvider {
+        device_id: 202,
+        name: "provider-b",
+        spawn_concurrency: SpawnHandleConcurrency::Reject,
+    };
+    static PROVIDER_C: TestProvider = TestProvider {
+        device_id: 303,
+        name: "provider-c",
+        spawn_concurrency: SpawnHandleConcurrency::CopyOnWrite,
+    };
+
+    fn register_test_providers() {
+        clear_provider();
+        unsafe {
+            register_provider(&PROVIDER_A);
+            register_provider(&PROVIDER_B);
+        }
+    }
+
+    fn test_handle(device_id: u32) -> GpuTensorHandle {
+        GpuTensorHandle {
+            shape: vec![1],
+            device_id,
+            buffer_id: 42,
+        }
+    }
+
+    #[test]
+    fn provider_for_device_prefers_registered_device_over_thread_provider() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_B));
+
+        let provider = provider_for_device(PROVIDER_A.device_id()).expect("provider for device");
+
+        assert_eq!(provider.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn provider_for_handle_uses_handle_device_owner() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_B));
+
+        let provider =
+            provider_for_handle(&test_handle(PROVIDER_A.device_id())).expect("provider for handle");
+
+        assert_eq!(provider.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn spawn_handle_concurrency_for_uses_registered_owner() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_B));
+
+        let concurrency = spawn_handle_concurrency_for(&test_handle(PROVIDER_A.device_id()))
+            .expect("spawn concurrency");
+
+        assert_eq!(concurrency, PROVIDER_A.spawn_concurrency);
+        clear_provider();
+    }
+
+    #[test]
+    fn provider_keeps_thread_local_active_provider_semantics() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        register_test_providers();
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_A));
+
+        let active = provider().expect("active provider");
+
+        assert_eq!(active.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
+
+    #[test]
+    fn unregistered_thread_provider_only_matches_own_device_before_global_fallback() {
+        let _lock = PROVIDER_TEST_LOCK
+            .lock()
+            .expect("provider test lock poisoned");
+        clear_provider();
+        unsafe {
+            register_provider(&PROVIDER_A);
+        }
+        let _thread_provider = ThreadProviderGuard::set(Some(&PROVIDER_C));
+
+        let own_device = provider_for_device(PROVIDER_C.device_id()).expect("own provider");
+        let fallback = provider_for_device(404).expect("global fallback provider");
+
+        assert_eq!(own_device.device_info(), PROVIDER_C.name);
+        assert_eq!(fallback.device_info(), PROVIDER_A.name);
+        clear_provider();
+    }
 }

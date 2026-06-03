@@ -1,11 +1,11 @@
 use anyhow::Result;
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{accel, benchmark, config, gc, kernel, repl, script, snapshot, version};
+use crate::commands::{accel, benchmark, config, gc, repl, script, snapshot, version};
 use crate::remote;
 
-pub async fn dispatch(cli: &Cli, config: &RunMatConfig) -> Result<()> {
+pub async fn dispatch(cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     let command = cli.command.clone();
     let mut script_path = cli.script.clone();
     let mut emit_bytecode = cli.emit_bytecode.clone();
@@ -36,42 +36,12 @@ pub async fn dispatch(cli: &Cli, config: &RunMatConfig) -> Result<()> {
     }
 }
 
-async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) -> Result<()> {
+async fn execute_command(command: Commands, cli: &Cli, config: &RunMatRuntimeConfig) -> Result<()> {
     match command {
         Commands::Repl { verbose } => {
             let mut repl_config = config.clone();
             repl_config.runtime.verbose = verbose || config.runtime.verbose;
             repl::execute_repl(&repl_config).await
-        }
-        Commands::Kernel {
-            ip,
-            key,
-            transport,
-            signature_scheme,
-            shell_port,
-            iopub_port,
-            stdin_port,
-            control_port,
-            hb_port,
-            connection_file,
-        } => {
-            kernel::execute_kernel(
-                ip,
-                key,
-                transport,
-                signature_scheme,
-                shell_port,
-                iopub_port,
-                stdin_port,
-                control_port,
-                hb_port,
-                connection_file,
-                config.runtime.timeout,
-            )
-            .await
-        }
-        Commands::KernelConnection { connection_file } => {
-            kernel::execute_kernel_with_connection(connection_file, config.runtime.timeout).await
         }
         Commands::Run { file, args } => {
             script::execute_script_with_args(file, args, cli.emit_bytecode.clone(), cli, config)

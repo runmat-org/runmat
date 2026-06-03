@@ -3,7 +3,11 @@
 use nalgebra::{DMatrix, LU};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -15,6 +19,51 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "det";
+
+const DET_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "d",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Determinant of A.",
+}];
+
+const DET_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const DET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "d = det(A)",
+    inputs: &DET_INPUTS,
+    outputs: &DET_OUTPUT,
+}];
+
+const DET_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DET.INVALID_INPUT",
+    identifier: Some("RunMat:det:InvalidInput"),
+    when: "Input shape/type or numeric domain is unsupported for determinant evaluation.",
+    message: "det: invalid input",
+};
+
+const DET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.DET.INTERNAL",
+    identifier: Some("RunMat:det:Internal"),
+    when: "Runtime fails while evaluating determinant or device fallback paths.",
+    message: "det: internal runtime failure",
+};
+
+const DET_ERRORS: [BuiltinErrorDescriptor; 2] = [DET_ERROR_INVALID_INPUT, DET_ERROR_INTERNAL];
+
+pub const DET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &DET_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &DET_ERRORS,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum Determinant {
@@ -54,8 +103,19 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Real inputs re-upload their determinant to preserve residency; complex inputs currently return host scalars when LU hooks are available.",
 };
 
-fn builtin_error(message: String) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+fn det_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn builtin_error(message: impl Into<String>) -> RuntimeError {
+    det_error_with_message(message, &DET_ERROR_INVALID_INPUT)
 }
 
 fn interaction_pending_error() -> RuntimeError {
@@ -78,10 +138,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "det",
     category = "math/linalg/solve",
-    summary = "Compute the determinant of a square matrix.",
+    summary = "Compute determinants of square matrices.",
     keywords = "det,determinant,linear algebra,matrix,gpu",
     accel = "det",
     type_resolver(numeric_scalar_type),
+    descriptor(crate::builtins::math::linalg::solve::det::DET_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::det"
 )]
 async fn det_builtin(value: Value) -> BuiltinResult<Value> {
@@ -518,6 +579,23 @@ pub(crate) mod tests {
         assert_eq!(out, Type::Num);
     }
 
+    #[test]
+    fn det_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = DET_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"d = det(A)"));
+    }
+
+    #[test]
+    fn det_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = DET_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.DET.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.DET.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn det_non_square_errors() {
@@ -526,6 +604,7 @@ pub(crate) mod tests {
         assert!(err
             .message()
             .contains("det: input must be a square matrix."));
+        assert_eq!(err.identifier(), DET_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

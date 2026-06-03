@@ -6,14 +6,21 @@ use runmat_runtime::RuntimeError;
 pub async fn dispatch_object(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
+    current_function_name: &str,
 ) -> Result<bool, RuntimeError> {
+    let caller_function_name = if current_function_name.is_empty() {
+        None
+    } else {
+        Some(current_function_name)
+    };
     match instr {
         crate::bytecode::Instr::LoadMember(field) => {
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value = obj_resolve::load_member(base, field.clone(), false).await?;
+            let value =
+                obj_resolve::load_member(base, field.clone(), false, caller_function_name).await?;
             stack.push(value);
             Ok(true)
         }
@@ -22,7 +29,8 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value = obj_resolve::load_member(base, field.clone(), true).await?;
+            let value =
+                obj_resolve::load_member(base, field.clone(), true, caller_function_name).await?;
             stack.push(value);
             Ok(true)
         }
@@ -36,7 +44,8 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::load_member_dynamic(base, name, false).await?;
+            let value =
+                obj_resolve::load_member_dynamic(base, name, false, caller_function_name).await?;
             stack.push(value);
             Ok(true)
         }
@@ -50,7 +59,8 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::load_member_dynamic(base, name, true).await?;
+            let value =
+                obj_resolve::load_member_dynamic(base, name, true, caller_function_name).await?;
             stack.push(value);
             Ok(true)
         }
@@ -63,9 +73,16 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value = obj_resolve::store_member(base, field.clone(), rhs, false, |oldv, newv| {
-                gc_record_write(oldv, newv);
-            })
+            let value = obj_resolve::store_member(
+                base,
+                field.clone(),
+                rhs,
+                false,
+                caller_function_name,
+                |oldv, newv| {
+                    gc_record_write(oldv, newv);
+                },
+            )
             .await?;
             stack.push(value);
             Ok(true)
@@ -79,9 +96,16 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let value = obj_resolve::store_member(base, field.clone(), rhs, true, |oldv, newv| {
-                gc_record_write(oldv, newv);
-            })
+            let value = obj_resolve::store_member(
+                base,
+                field.clone(),
+                rhs,
+                true,
+                caller_function_name,
+                |oldv, newv| {
+                    gc_record_write(oldv, newv);
+                },
+            )
             .await?;
             stack.push(value);
             Ok(true)
@@ -100,9 +124,16 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic(base, name, rhs, false, |oldv, newv| {
-                gc_record_write(oldv, newv);
-            })
+            let value = obj_resolve::store_member_dynamic(
+                base,
+                name,
+                rhs,
+                false,
+                caller_function_name,
+                |oldv, newv| {
+                    gc_record_write(oldv, newv);
+                },
+            )
             .await?;
             stack.push(value);
             Ok(true)
@@ -121,9 +152,16 @@ pub async fn dispatch_object(
                 "stack underflow",
             ))?;
             let name: String = (&name_val).try_into()?;
-            let value = obj_resolve::store_member_dynamic(base, name, rhs, true, |oldv, newv| {
-                gc_record_write(oldv, newv);
-            })
+            let value = obj_resolve::store_member_dynamic(
+                base,
+                name,
+                rhs,
+                true,
+                caller_function_name,
+                |oldv, newv| {
+                    gc_record_write(oldv, newv);
+                },
+            )
             .await?;
             stack.push(value);
             Ok(true)

@@ -1,5 +1,5 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -47,23 +47,66 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
     let total_elements = rows * cols;
     let mut row_major = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
-        let val: f64 = (&stack
-            .pop()
-            .ok_or(mex("StackUnderflow", "stack underflow"))?)
-            .try_into()?;
-        row_major.push(val);
+        row_major.push(
+            stack
+                .pop()
+                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+        );
     }
     row_major.reverse();
-    let mut data = vec![0.0; total_elements];
-    for r in 0..rows {
-        for c in 0..cols {
-            data[r + c * rows] = row_major[r * cols + c];
+    if total_elements == 0 {
+        let matrix = Tensor::new_2d(Vec::new(), rows, cols)
+            .map_err(|e| format!("Matrix creation error: {e}"))?;
+        stack.push(Value::Tensor(matrix));
+    } else if row_major.iter().all(|v| matches!(v, Value::Bool(_))) {
+        let mut data = vec![0u8; total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                let Value::Bool(value) = row_major[r * cols + c] else {
+                    unreachable!()
+                };
+                data[r + c * rows] = if value { 1 } else { 0 };
+            }
         }
+        let matrix = LogicalArray::new(data, vec![rows, cols])
+            .map_err(|e| format!("Logical matrix creation error: {e}"))?;
+        stack.push(Value::LogicalArray(matrix));
+    } else if row_major.iter().any(|v| matches!(v, Value::Complex(_, _))) {
+        let mut data = vec![(0.0, 0.0); total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                data[r + c * rows] = scalar_to_complex(&row_major[r * cols + c])?;
+            }
+        }
+        let matrix = ComplexTensor::new_2d(data, rows, cols)
+            .map_err(|e| format!("Complex matrix creation error: {e}"))?;
+        stack.push(Value::ComplexTensor(matrix));
+    } else {
+        let mut data = vec![0.0; total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                data[r + c * rows] = scalar_to_real(&row_major[r * cols + c])?;
+            }
+        }
+        let matrix =
+            Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
+        stack.push(Value::Tensor(matrix));
     }
-    let matrix =
-        Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
-    stack.push(Value::Tensor(matrix));
     Ok(())
+}
+
+fn scalar_to_complex(value: &Value) -> Result<(f64, f64), RuntimeError> {
+    match value {
+        Value::Complex(re, im) => Ok((*re, *im)),
+        _ => Ok((scalar_to_real(value)?, 0.0)),
+    }
+}
+
+fn scalar_to_real(value: &Value) -> Result<f64, RuntimeError> {
+    match value {
+        Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        _ => Ok(value.try_into()?),
+    }
 }
 
 pub async fn create_matrix_dynamic<F, Fut>(
@@ -141,19 +184,25 @@ pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeErr
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
     match value {
         Value::OutputList(values) => {
-            for i in 0..out_count {
-                if let Some(v) = values.get(i) {
-                    stack.push(v.clone());
-                } else {
-                    stack.push(Value::Num(0.0));
-                }
+            if values.len() < out_count {
+                let message = format!(
+                    "Requested {out_count} outputs but call produced {} output value(s)",
+                    values.len()
+                );
+                return Err(mex("TooManyOutputs", &message));
+            }
+            for v in values.into_iter().take(out_count) {
+                stack.push(v);
             }
         }
         other => {
-            stack.push(other);
-            for _ in 1..out_count {
-                stack.push(Value::Num(0.0));
+            if out_count > 1 {
+                let message = format!(
+                    "Requested {out_count} outputs but call produced a single output value"
+                );
+                return Err(mex("TooManyOutputs", &message));
             }
+            stack.push(other);
         }
     }
     Ok(())

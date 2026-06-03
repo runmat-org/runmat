@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_builtins::{self, Type, Value};
+use runmat_builtins::{self, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use tracing::{debug, info, info_span, warn};
 
@@ -27,20 +27,20 @@ use std::sync::{
 use uuid::Uuid;
 
 use crate::execution::{
-    ExecutionResult, ExecutionStats, ExecutionStreamEntry, ExecutionStreamKind, InputRequest,
-    InputRequestKind, InputResponse, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
+    ExecutionStats, ExecutionStreamEntry, ExecutionStreamKind, InputRequest, InputRequestKind,
+    InputResponse, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
 };
 use crate::fusion::{build_fusion_snapshot, FusionPlanSnapshot};
 use crate::profiling::{gather_profiling, reset_provider_telemetry};
 use crate::source_pool::{line_col_from_offset, SourcePool};
 use crate::telemetry::{TelemetryPlatformInfo, TelemetrySink};
 use crate::workspace::{
-    determine_display_label_from_context, format_type_info, gather_gpu_preview_values,
-    gpu_dtype_label, gpu_size_bytes, last_displayable_statement_emit_disposition,
-    last_emit_var_index, last_expr_emits_value, last_unsuppressed_assign_var,
-    slice_value_for_preview, workspace_entry, FinalStmtEmitDisposition, MaterializedVariable,
-    WorkspaceEntry, WorkspaceExportMode, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget,
-    WorkspacePreview, WorkspaceResidency, WorkspaceSnapshot, MATERIALIZE_DEFAULT_LIMIT,
+    determine_display_label_from_context, execution_display_context, format_type_info,
+    gather_gpu_preview_values, gpu_dtype_label, gpu_size_bytes, last_emit_var_index,
+    last_store_var_index, slice_value_for_preview, workspace_entry, FinalStmtEmitDisposition,
+    MaterializedVariable, WorkspaceEntry, WorkspaceExportMode, WorkspaceMaterializeOptions,
+    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSnapshot,
+    MATERIALIZE_DEFAULT_LIMIT,
 };
 use crate::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
@@ -62,20 +62,21 @@ pub struct RunMatSession {
     verbose: bool,
     /// Execution statistics
     stats: ExecutionStats,
-    /// Persistent variable context for session state
-    variables: HashMap<String, Value>,
     /// Current variable array for bytecode execution
     variable_array: Vec<Value>,
-    /// Mapping from variable names to VarId indices
-    variable_names: HashMap<String, usize>,
+    /// Current workspace bindings with stable ABI identity and current VM slot.
+    workspace_bindings: HashMap<String, SessionWorkspaceBinding>,
     /// Persistent workspace values keyed by variable name
     workspace_values: HashMap<String, Value>,
-    /// User-defined functions context for session state
-    function_definitions: HashMap<String, runmat_hir::HirStmt>,
+    /// Stable ABI identity for this interactive workspace.
+    abi_workspace_handle: crate::abi::WorkspaceHandle,
+    /// Source identity for the active execution request (if source-scoped).
+    active_source_identity: Option<crate::abi::SourceIdentity>,
+    /// Semantic function registry persisted across interactive inputs.
+    function_registry: runmat_vm::FunctionRegistry,
+    next_semantic_function_id: usize,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
-    /// Source IDs for user-defined functions keyed by name
-    function_source_ids: HashMap<String, SourceId>,
     /// Loaded snapshot for standard library preloading
     snapshot: Option<Arc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.
@@ -89,10 +90,8 @@ pub struct RunMatSession {
     callstack_limit: usize,
     /// Namespace prefix for runtime/semantic error identifiers.
     error_namespace: String,
-    /// Default source name used for diagnostics.
-    default_source_name: String,
-    /// Override source name for the current execution.
-    source_name_override: Option<String>,
+    /// Active source name for diagnostics (set from execution requests).
+    active_source_name: String,
     pub(crate) telemetry_consent: bool,
     pub(crate) telemetry_client_id: Option<String>,
     pub(crate) telemetry_platform: TelemetryPlatformInfo,
@@ -101,14 +100,39 @@ pub struct RunMatSession {
     workspace_version: u64,
     emit_fusion_plan: bool,
     compat_mode: CompatMode,
+    top_level_await_enabled: bool,
+    dynamic_eval_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
     format_mode: runmat_builtins::FormatMode,
+    /// Preloaded companion statements discovered asynchronously by the request path.
+    pending_companion_source_discovery: Option<compile::CompanionSourceDiscovery>,
 }
 
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
-    bytecode: runmat_vm::Bytecode,
+    analysis: runmat_mir::analysis::AnalysisStore,
+    pub(crate) bytecode: runmat_vm::Bytecode,
+    function_registry_after_success: runmat_vm::FunctionRegistry,
+    next_semantic_function_id_after_success: usize,
+}
+
+impl PreparedExecution {
+    #[cfg(test)]
+    pub(crate) fn lowering(&self) -> &LoweringResult {
+        &self.lowering
+    }
+
+    #[cfg(test)]
+    pub(crate) fn analysis(&self) -> &runmat_mir::analysis::AnalysisStore {
+        &self.analysis
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionWorkspaceBinding {
+    pub(crate) key: crate::abi::WorkspaceBindingKey,
+    pub(crate) slot: usize,
 }
 
 #[derive(Debug, Clone)]

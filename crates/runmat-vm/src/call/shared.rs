@@ -1,355 +1,884 @@
-use crate::bytecode::{ArgSpec, UserFunction};
-use crate::compiler::CompileError;
-use runmat_builtins::{Type, Value};
-use runmat_hir::{remapping, HirProgram, VarId};
-use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
+use crate::bytecode::ArgSpec;
+use crate::bytecode::EndExpr;
+use runmat_builtins::Value;
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 
-pub struct PreparedUserCall {
-    pub func: UserFunction,
-    pub var_map: HashMap<VarId, VarId>,
-    pub func_program: HirProgram,
-    pub func_vars: Vec<Value>,
-}
-
-pub fn lookup_user_function(
-    name: &str,
-    functions: &HashMap<String, UserFunction>,
-) -> Result<UserFunction, RuntimeError> {
-    functions.get(name).cloned().ok_or_else(|| {
-        crate::interpreter::errors::mex("UndefinedFunction", &format!("Undefined function: {name}"))
-    })
-}
-
-pub fn validate_user_function_arity(
-    name: &str,
-    func: &UserFunction,
-    arg_count: usize,
-) -> Result<(), RuntimeError> {
-    if !func.has_varargin {
-        if arg_count < func.params.len() {
-            return Err(crate::interpreter::errors::mex(
-                "NotEnoughInputs",
-                &format!(
-                    "Function '{name}' expects {} inputs, got {arg_count}",
-                    func.params.len()
-                ),
-            ));
-        }
-        if arg_count > func.params.len() {
-            return Err(crate::interpreter::errors::mex(
-                "TooManyInputs",
-                &format!(
-                    "Function '{name}' expects {} inputs, got {arg_count}",
-                    func.params.len()
-                ),
-            ));
-        }
-    } else {
-        let min_args = func.params.len().saturating_sub(1);
-        if arg_count < min_args {
-            return Err(crate::interpreter::errors::mex(
-                "NotEnoughInputs",
-                &format!("Function '{name}' expects at least {min_args} inputs, got {arg_count}"),
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn prepare_user_call(
-    func: UserFunction,
-    args: &[Value],
-    vars: &[Value],
-) -> Result<PreparedUserCall, CompileError> {
-    let var_map =
-        remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
-    let local_var_count = var_map.len();
-    let remapped_body = remapping::remap_function_body(&func.body, &var_map);
-    let func_vars_count = local_var_count.max(func.params.len());
-    let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-
-    if func.has_varargin {
-        let fixed = func.params.len().saturating_sub(1);
-        for i in 0..fixed {
-            if i < args.len() && i < func_vars.len() {
-                func_vars[i] = args[i].clone();
-            }
-        }
-        let mut rest: Vec<Value> = if args.len() > fixed {
-            args[fixed..].to_vec()
-        } else {
-            Vec::new()
-        };
-        let cell = runmat_builtins::CellArray::new(
-            std::mem::take(&mut rest),
-            1,
-            if args.len() > fixed {
-                args.len() - fixed
-            } else {
-                0
-            },
-        )
-        .map_err(|e| CompileError::new(format!("varargin: {e}")))?;
-        if fixed < func_vars.len() {
-            func_vars[fixed] = Value::Cell(cell);
-        }
-    } else {
-        for (i, _param_id) in func.params.iter().enumerate() {
-            if i < args.len() && i < func_vars.len() {
-                func_vars[i] = args[i].clone();
-            }
-        }
-    }
-
-    for (original_var_id, local_var_id) in &var_map {
-        let local_index = local_var_id.0;
-        let global_index = original_var_id.0;
-        if local_index < func_vars.len() && global_index < vars.len() {
-            let is_parameter = func
-                .params
-                .iter()
-                .any(|param_id| param_id == original_var_id);
-            if !is_parameter {
-                func_vars[local_index] = vars[global_index].clone();
-            }
-        }
-    }
-
-    if func.has_varargout {
-        if let Some(varargout_oid) = func.outputs.last() {
-            if let Some(local_id) = var_map.get(varargout_oid) {
-                if local_id.0 < func_vars.len() {
-                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                        .map_err(|e| CompileError::new(format!("varargout init: {e}")))?;
-                    func_vars[local_id.0] = Value::Cell(empty);
-                }
-            }
-        }
-    }
-
-    let mut func_var_types = func.var_types.clone();
-    if func_var_types.len() < local_var_count {
-        func_var_types.resize(local_var_count, Type::Unknown);
-    }
-    let func_program = HirProgram {
-        body: remapped_body,
-        var_types: func_var_types,
-    };
-
-    Ok(PreparedUserCall {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    })
-}
-
-pub fn first_output_value(
-    func: &UserFunction,
-    var_map: &HashMap<VarId, VarId>,
-    func_result_vars: &[Value],
-) -> Value {
-    if func.outputs.is_empty() {
-        return Value::Num(0.0);
-    }
-    if func.has_varargout {
-        let total_named = func.outputs.len().saturating_sub(1);
-        if total_named > 0 {
-            if let Some(oid) = func.outputs.first() {
-                if let Some(local_id) = var_map.get(oid) {
-                    if let Some(value) = func_result_vars.get(local_id.0) {
-                        return value.clone();
-                    }
-                }
-            }
-        }
-        if let Some(varargout_oid) = func.outputs.last() {
-            if let Some(local_id) = var_map.get(varargout_oid) {
-                if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                    if let Some(first) = ca.data.first() {
-                        return (**first).clone();
-                    }
-                }
-            }
-        }
-        return Value::Num(0.0);
-    }
-    let Some(output_id) = func.outputs.first() else {
-        return Value::Num(0.0);
-    };
-    let Some(local_id) = var_map.get(output_id) else {
-        return Value::Num(0.0);
-    };
-    func_result_vars
-        .get(local_id.0)
-        .cloned()
-        .unwrap_or(Value::Num(0.0))
-}
-
-pub fn collect_multi_outputs(
-    name: &str,
-    func: &UserFunction,
-    var_map: &HashMap<VarId, VarId>,
-    func_result_vars: &[Value],
-    out_count: usize,
-) -> Result<Vec<Value>, RuntimeError> {
-    let mut outputs = Vec::with_capacity(out_count);
-    if func.has_varargout {
-        let total_named = func.outputs.len().saturating_sub(1);
-        let mut pushed = 0usize;
-        for i in 0..total_named.min(out_count) {
-            if let Some(oid) = func.outputs.get(i) {
-                if let Some(local_id) = var_map.get(oid) {
-                    let idx = local_id.0;
-                    let v = func_result_vars
-                        .get(idx)
-                        .cloned()
-                        .unwrap_or(Value::Num(0.0));
-                    outputs.push(v);
-                    pushed += 1;
-                }
-            }
-        }
-        if pushed < out_count {
-            if let Some(varargout_oid) = func.outputs.last() {
-                if let Some(local_id) = var_map.get(varargout_oid) {
-                    if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                        let available = ca.data.len();
-                        let need = out_count - pushed;
-                        if need > available {
-                            return Err(crate::interpreter::errors::mex(
-                                "VarargoutMismatch",
-                                &format!(
-                                    "Function '{name}' returned {available} varargout values, {need} requested"
-                                ),
-                            ));
-                        }
-                        for vi in 0..need {
-                            outputs.push((*ca.data[vi]).clone());
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        let defined = func.outputs.len();
-        if out_count > defined {
-            return Err(crate::interpreter::errors::mex(
-                "TooManyOutputs",
-                &format!("Function '{name}' defines {defined} outputs, {out_count} requested"),
-            ));
-        }
-        for i in 0..out_count {
-            let v = func
-                .outputs
-                .get(i)
-                .and_then(|oid| var_map.get(oid))
-                .map(|lid| lid.0)
-                .and_then(|idx| func_result_vars.get(idx))
-                .cloned()
-                .unwrap_or(Value::Num(0.0));
-            outputs.push(v);
-        }
-    }
-    Ok(outputs)
-}
+const OBJECT_PROTOCOL_SUBSREF: &str = runmat_runtime::OBJECT_SUBSREF_METHOD;
+const OBJECT_PROTOCOL_SUBSASGN: &str = runmat_runtime::OBJECT_SUBSASGN_METHOD;
+const OBJECT_PROTOCOL_KIND_PAREN: &str = runmat_runtime::OBJECT_INDEX_PAREN;
+const OBJECT_PROTOCOL_KIND_BRACE: &str = runmat_runtime::OBJECT_INDEX_BRACE;
+const OBJECT_PROTOCOL_KIND_MEMBER: &str = runmat_runtime::OBJECT_INDEX_MEMBER;
+const OBJECT_SELECTOR_COLON: &str = ":";
+const OBJECT_SELECTOR_END: &str = "end";
+const OBJECT_END_RANGE_TAG: &str = "end_expr";
 
 pub fn expand_cell_indices(
     cell: &runmat_builtins::CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
-    match indices.len() {
-        1 => match &indices[0] {
-            Value::Num(n) => {
-                let idx = *n as usize;
-                if idx == 0 || idx > cell.data.len() {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
-                }
-                Ok(vec![(*cell.data[idx - 1]).clone()])
-            }
-            Value::Int(i) => {
-                let idx = i.to_i64() as usize;
-                if idx == 0 || idx > cell.data.len() {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
-                }
-                Ok(vec![(*cell.data[idx - 1]).clone()])
-            }
-            Value::Tensor(t) => {
-                let mut out = Vec::with_capacity(t.data.len());
-                for &val in &t.data {
-                    let idx = val as usize;
-                    if idx == 0 || idx > cell.data.len() {
-                        return Err(crate::interpreter::errors::mex(
-                            "CellIndexOutOfBounds",
-                            "Cell index out of bounds",
-                        ));
-                    }
-                    out.push((*cell.data[idx - 1]).clone());
-                }
-                Ok(out)
-            }
-            _ => Err(crate::interpreter::errors::mex(
-                "CellIndexType",
-                "Unsupported cell index type",
-            )),
-        },
-        2 => {
-            let r: f64 = (&indices[0]).try_into()?;
-            let c: f64 = (&indices[1]).try_into()?;
-            let (ir, ic) = (r as usize, c as usize);
-            if ir == 0 || ir > cell.rows || ic == 0 || ic > cell.cols {
-                return Err(crate::interpreter::errors::mex(
-                    "CellSubscriptOutOfBounds",
-                    "Cell subscript out of bounds",
-                ));
-            }
-            Ok(vec![(*cell.data[(ir - 1) * cell.cols + (ic - 1)]).clone()])
+    crate::ops::cells::expand_cell_indices(cell, indices)
+}
+
+pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {
+    crate::ops::cells::expand_all_cell_values(cell)
+}
+
+pub(crate) fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
+    let base_segments = {
+        let split = base.split('.').collect::<Vec<_>>();
+        if !split.is_empty() && split.iter().all(|segment| !segment.is_empty()) {
+            split
+                .into_iter()
+                .map(|segment| SymbolName(segment.to_string()))
+                .collect::<Vec<_>>()
+        } else {
+            vec![SymbolName(base.to_string())]
         }
+    };
+    let mut segments = base_segments;
+    segments.push(SymbolName(member.to_string()));
+    CallableIdentity::ExternalName(QualifiedName(segments))
+}
+
+pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> String {
+    strict_callable_display_name(&external_qualified_identity(base, member))
+        .expect("external qualified identity should always have a display name")
+}
+
+pub(crate) fn strict_callable_display_name(identity: &CallableIdentity) -> Option<String> {
+    match identity {
+        CallableIdentity::BoundFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+        CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
+        CallableIdentity::Imported(path) => path.module.display_name(),
+        CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
+        CallableIdentity::DynamicName(name) => (!name.0.is_empty()).then_some(name.0.clone()),
+        CallableIdentity::ExternalName(QualifiedName(segments)) => {
+            if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
+                return None;
+            }
+
+            Some(
+                segments
+                    .iter()
+                    .map(|segment| segment.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            )
+        }
+    }
+}
+
+pub(crate) fn object_property_getter_name(field: &str) -> String {
+    runmat_runtime::object_property_getter_name(field)
+}
+
+pub(crate) fn object_property_setter_name(field: &str) -> String {
+    runmat_runtime::object_property_setter_name(field)
+}
+
+pub(crate) async fn expand_brace_values(
+    base: Value,
+    raw_indices: &[Value],
+    pad_to_outputs: Option<usize>,
+) -> Result<Vec<Value>, RuntimeError> {
+    async fn expand_object_brace_values(
+        base: Value,
+        raw_indices: &[Value],
+        pad_to_outputs: Option<usize>,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let value = call_object_index_descriptor_method_with_outputs(
+            ObjectIndexDescriptor::subsref_brace(
+                base,
+                ObjectIndexSelector::IndexValues {
+                    values: raw_indices.to_vec(),
+                },
+            ),
+            pad_to_outputs.unwrap_or(1),
+        )
+        .await?;
+        Ok(match value {
+            Value::OutputList(values) => values,
+            other => vec![other],
+        })
+    }
+
+    let mut values = match base {
+        Value::Cell(ca) => {
+            if raw_indices.is_empty() {
+                if let Some(out_count) = pad_to_outputs {
+                    crate::ops::cells::expand_cell_values(&ca, &[], out_count)?
+                } else {
+                    expand_all_cell(&ca)?
+                }
+            } else {
+                expand_cell_indices(&ca, raw_indices)?
+            }
+        }
+        Value::Object(obj) => {
+            expand_object_brace_values(Value::Object(obj), raw_indices, pad_to_outputs).await?
+        }
+        Value::HandleObject(handle) => {
+            expand_object_brace_values(Value::HandleObject(handle), raw_indices, pad_to_outputs)
+                .await?
+        }
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "CellExpansionOnNonCell",
+                "Cell expansion on non-cell",
+            ))
+        }
+    };
+    if let Some(out_count) = pad_to_outputs {
+        if values.len() > out_count {
+            values.truncate(out_count);
+        } else {
+            values.resize(out_count, Value::Num(0.0));
+        }
+    }
+    Ok(values)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ObjectIndexOp {
+    Subsref,
+    Subsasgn,
+}
+
+impl ObjectIndexOp {
+    pub(crate) fn protocol_name(self) -> &'static str {
+        match self {
+            Self::Subsref => OBJECT_PROTOCOL_SUBSREF,
+            Self::Subsasgn => OBJECT_PROTOCOL_SUBSASGN,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ObjectIndexKind {
+    Paren,
+    Brace,
+    Member,
+}
+
+impl ObjectIndexKind {
+    pub(crate) fn protocol_name(self) -> &'static str {
+        match self {
+            Self::Paren => OBJECT_PROTOCOL_KIND_PAREN,
+            Self::Brace => OBJECT_PROTOCOL_KIND_BRACE,
+            Self::Member => OBJECT_PROTOCOL_KIND_MEMBER,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum ObjectIndexSelector {
+    ScalarIndices { indices: Vec<usize> },
+    IndexValues { values: Vec<Value> },
+    Member(String),
+}
+
+#[derive(Clone)]
+pub(crate) struct ObjectIndexDescriptor {
+    base: Value,
+    op: ObjectIndexOp,
+    kind: ObjectIndexKind,
+    selector: ObjectIndexSelector,
+    rhs: Option<Value>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ObjectParenExprSelectorSpec<'a> {
+    pub dims: usize,
+    pub colon_mask: u32,
+    pub end_mask: u32,
+    pub range_dims: &'a [usize],
+    pub range_params: &'a [(f64, f64)],
+    pub range_start_exprs: &'a [Option<EndExpr>],
+    pub range_step_exprs: &'a [Option<EndExpr>],
+    pub range_end_exprs: &'a [EndExpr],
+    pub end_numeric_exprs: &'a [(usize, EndExpr)],
+    pub numeric: &'a [Value],
+}
+
+impl ObjectIndexDescriptor {
+    pub(crate) fn subsref_paren(base: Value, selector: ObjectIndexSelector) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsref,
+            kind: ObjectIndexKind::Paren,
+            selector,
+            rhs: None,
+        }
+    }
+
+    pub(crate) fn subsref_brace(base: Value, selector: ObjectIndexSelector) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsref,
+            kind: ObjectIndexKind::Brace,
+            selector,
+            rhs: None,
+        }
+    }
+
+    pub(crate) fn subsasgn_paren(base: Value, selector: ObjectIndexSelector, rhs: Value) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsasgn,
+            kind: ObjectIndexKind::Paren,
+            selector,
+            rhs: Some(rhs),
+        }
+    }
+
+    pub(crate) fn subsasgn_brace(base: Value, selector: ObjectIndexSelector, rhs: Value) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsasgn,
+            kind: ObjectIndexKind::Brace,
+            selector,
+            rhs: Some(rhs),
+        }
+    }
+
+    pub(crate) fn subsref_paren_from_slice(
+        base: Value,
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        numeric: &[Value],
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_selector_values(dims, colon_mask, end_mask, numeric)?;
+        Ok(Self::subsref_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+        ))
+    }
+
+    pub(crate) fn subsasgn_paren_from_slice(
+        base: Value,
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        numeric: &[Value],
+        rhs: Value,
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_selector_values(dims, colon_mask, end_mask, numeric)?;
+        Ok(Self::subsasgn_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+            rhs,
+        ))
+    }
+
+    pub(crate) fn subsasgn_paren_from_expr_slice(
+        base: Value,
+        spec: ObjectParenExprSelectorSpec<'_>,
+        rhs: Value,
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_expr_selector_values(spec)?;
+        Ok(Self::subsasgn_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+            rhs,
+        ))
+    }
+
+    pub(crate) fn subsref_paren_from_expr_slice(
+        base: Value,
+        spec: ObjectParenExprSelectorSpec<'_>,
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_expr_selector_values(spec)?;
+        Ok(Self::subsref_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+        ))
+    }
+
+    pub(crate) fn member(
+        base: Value,
+        op: ObjectIndexOp,
+        field: String,
+        rhs: Option<Value>,
+    ) -> Self {
+        Self {
+            base,
+            op,
+            kind: ObjectIndexKind::Member,
+            selector: ObjectIndexSelector::Member(field),
+            rhs,
+        }
+    }
+
+    fn into_method_invocation(self) -> Result<(Value, String, Vec<Value>), RuntimeError> {
+        let selector = match self.selector {
+            ObjectIndexSelector::ScalarIndices { indices } => {
+                let values = indices
+                    .into_iter()
+                    .map(|index| Value::Num(index as f64))
+                    .collect();
+                build_protocol_index_cell(values)?
+            }
+            ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values)?,
+            ObjectIndexSelector::Member(field) => Value::String(field),
+        };
+        let mut args = vec![
+            Value::String(self.kind.protocol_name().to_string()),
+            selector,
+        ];
+        if let Some(rhs) = self.rhs {
+            args.push(rhs);
+        }
+        Ok((self.base, self.op.protocol_name().to_string(), args))
+    }
+}
+
+fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> {
+    let cols = values.len();
+    let cell = build_cell_array_with_shape(values, 1, cols, "object index descriptor build")?;
+    Ok(Value::Cell(cell))
+}
+
+fn matlab_index_type(kind: ObjectIndexKind) -> &'static str {
+    match kind {
+        ObjectIndexKind::Paren => "()",
+        ObjectIndexKind::Brace => "{}",
+        ObjectIndexKind::Member => ".",
+    }
+}
+
+fn class_name_from_base(base: &Value) -> Option<&str> {
+    match base {
+        Value::Object(obj) => Some(obj.class_name.as_str()),
+        Value::HandleObject(handle) => Some(handle.class_name.as_str()),
+        _ => None,
+    }
+}
+
+fn build_matlab_substruct_arg(descriptor: &ObjectIndexDescriptor) -> Result<Value, RuntimeError> {
+    let subs_value = match &descriptor.selector {
+        ObjectIndexSelector::ScalarIndices { indices } => {
+            let values = indices
+                .iter()
+                .map(|index| Value::Num(*index as f64))
+                .collect();
+            build_protocol_index_cell(values)?
+        }
+        ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values.clone())?,
+        ObjectIndexSelector::Member(field) => Value::String(field.clone()),
+    };
+    let mut value = runmat_builtins::StructValue::new();
+    value.fields.insert(
+        "type".to_string(),
+        Value::String(matlab_index_type(descriptor.kind).to_string()),
+    );
+    value.fields.insert("subs".to_string(), subs_value);
+    Ok(Value::Struct(value))
+}
+
+pub(crate) async fn call_getfield_with_indices(
+    base: Value,
+    field: String,
+    indices: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    let mut getfield_args = Vec::with_capacity(3);
+    getfield_args.push(base);
+    getfield_args.push(Value::String(field));
+    if !indices.is_empty() {
+        let idx_count = indices.len();
+        let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
+        getfield_args.push(Value::Cell(idx_cell));
+    }
+    runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, requested_outputs)
+        .await
+}
+
+pub(crate) async fn call_object_operator_method(
+    base: Value,
+    method: &str,
+    arg: Value,
+) -> Result<Value, RuntimeError> {
+    crate::call::closures::call_method_or_member_index_with_outputs(
+        base,
+        CallableIdentity::Method(MethodId(method.to_string())),
+        vec![arg],
+        1,
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
+}
+
+pub(crate) async fn call_object_named_method_with_outputs(
+    base: Value,
+    method: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    crate::call::closures::call_method_or_member_index_with_outputs(
+        base,
+        CallableIdentity::Method(MethodId(method.clone())),
+        args,
+        requested_outputs,
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
+}
+
+pub(crate) async fn call_object_property_getter_with_outputs(
+    base: Value,
+    field: &str,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    call_object_named_method_with_outputs(
+        base,
+        object_property_getter_name(field),
+        vec![],
+        requested_outputs,
+    )
+    .await
+}
+
+pub(crate) async fn call_object_property_setter_with_outputs(
+    base: Value,
+    field: &str,
+    value: Value,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    call_object_named_method_with_outputs(
+        base,
+        object_property_setter_name(field),
+        vec![value],
+        requested_outputs,
+    )
+    .await
+}
+
+async fn call_object_member_method(
+    base: Value,
+    op: ObjectIndexOp,
+    field: String,
+    rhs: Option<Value>,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::member(base, op, field, rhs)).await
+}
+
+pub(crate) async fn call_object_member_subsref(
+    base: Value,
+    field: String,
+) -> Result<Value, RuntimeError> {
+    call_object_member_method(base, ObjectIndexOp::Subsref, field, None).await
+}
+
+pub(crate) async fn call_object_member_subsasgn(
+    base: Value,
+    field: String,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_member_method(base, ObjectIndexOp::Subsasgn, field, Some(rhs)).await
+}
+
+pub(crate) fn class_defines_member_subsref(class: &runmat_builtins::ClassDef) -> bool {
+    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsref.protocol_name()).is_some()
+}
+
+pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -> bool {
+    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsasgn.protocol_name()).is_some()
+}
+
+pub(crate) async fn call_object_index_descriptor_method(
+    descriptor: ObjectIndexDescriptor,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method_with_outputs(descriptor, 1).await
+}
+
+pub(crate) async fn call_object_index_descriptor_method_with_outputs(
+    descriptor: ObjectIndexDescriptor,
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    if let Some(class_name) = class_name_from_base(&descriptor.base) {
+        if let Some((method, owner)) =
+            runmat_builtins::lookup_method(class_name, descriptor.op.protocol_name())
+        {
+            let mut semantic_args = vec![
+                descriptor.base.clone(),
+                build_matlab_substruct_arg(&descriptor)?,
+            ];
+            if let Some(rhs) = descriptor.rhs.clone() {
+                semantic_args.push(rhs);
+            }
+            if let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_function_by_name(
+                    &method.function_name,
+                    &semantic_args,
+                    requested_outputs,
+                )
+                .await
+            {
+                return result;
+            }
+            let owner_qualified = format!("{}.{}", owner, descriptor.op.protocol_name());
+            if owner_qualified != method.function_name {
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_function_by_name(
+                        &owner_qualified,
+                        &semantic_args,
+                        requested_outputs,
+                    )
+                    .await
+                {
+                    return result;
+                }
+            }
+        }
+    }
+    let (base, method, args) = descriptor.into_method_invocation()?;
+    crate::call::closures::call_method_or_member_index_with_outputs(
+        base,
+        CallableIdentity::Method(MethodId(method.clone())),
+        args,
+        requested_outputs,
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
+}
+
+fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
+    fn mk_cell(items: Vec<Value>) -> Result<Value, RuntimeError> {
+        let cols = items.len();
+        let cell = build_cell_array_with_shape(items, 1, cols, "end expression encoding")?;
+        Ok(Value::Cell(cell))
+    }
+
+    match expr {
+        EndExpr::End => Ok(Value::String("end".to_string())),
+        EndExpr::Const(v) => Ok(Value::Num(*v)),
+        EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
+        EndExpr::ResolvedCall { identity, args, .. } => {
+            let name = strict_callable_display_name(identity).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "UndefinedFunction",
+                    "end expression call missing callable name",
+                )
+            })?;
+            let mut items = vec![Value::String("call".to_string()), Value::String(name)];
+            for a in args {
+                items.push(encode_end_expr_value(a)?);
+            }
+            mk_cell(items)
+        }
+        EndExpr::Add(a, b) => mk_cell(vec![
+            Value::String("+".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Sub(a, b) => mk_cell(vec![
+            Value::String("-".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Mul(a, b) => mk_cell(vec![
+            Value::String("*".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Div(a, b) => mk_cell(vec![
+            Value::String("/".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::LeftDiv(a, b) => mk_cell(vec![
+            Value::String("\\".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Pow(a, b) => mk_cell(vec![
+            Value::String("^".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Neg(a) => mk_cell(vec![
+            Value::String("neg".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Pos(a) => mk_cell(vec![
+            Value::String("pos".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Floor(a) => mk_cell(vec![
+            Value::String("floor".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Ceil(a) => mk_cell(vec![
+            Value::String("ceil".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Round(a) => mk_cell(vec![
+            Value::String("round".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Fix(a) => mk_cell(vec![
+            Value::String("fix".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+    }
+}
+
+fn build_end_range_descriptor(
+    start: Value,
+    step: Value,
+    end_expr: &EndExpr,
+) -> Result<Value, RuntimeError> {
+    let encoded_end = encode_end_expr_value(end_expr)?;
+    let cell = build_cell_array_with_shape(
+        vec![
+            start,
+            step,
+            Value::String(OBJECT_END_RANGE_TAG.to_string()),
+            encoded_end,
+        ],
+        1,
+        4,
+        "obj range",
+    )?;
+    Ok(Value::Cell(cell))
+}
+
+fn normalize_object_numeric_selector(selector: &Value) -> Result<Value, RuntimeError> {
+    match selector {
+        Value::Num(n) => Ok(Value::Num(*n)),
+        Value::Int(i) => Ok(Value::Num(i.to_f64())),
+        Value::Tensor(t) => Ok(Value::Tensor(t.clone())),
+        Value::Bool(value) => Ok(Value::Bool(*value)),
+        Value::LogicalArray(array) => Ok(Value::LogicalArray(array.clone())),
+        Value::String(value) => Ok(Value::String(value.clone())),
+        Value::StringArray(array) => Ok(Value::StringArray(array.clone())),
+        Value::CharArray(array) => Ok(Value::CharArray(array.clone())),
+        Value::Cell(cell) => Ok(Value::Cell(cell.clone())),
         _ => Err(crate::interpreter::errors::mex(
-            "CellIndexType",
-            "Unsupported cell index type",
+            "ObjectSelectorTypeUnsupported",
+            "unsupported index type for object selector",
         )),
     }
 }
 
-pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Vec<Value> {
-    cell.data.iter().map(|p| (*(*p)).clone()).collect()
+fn validate_object_range_selector_plan(
+    dims: usize,
+    range_dims: &[usize],
+    range_params: &[(f64, f64)],
+    range_start_exprs: &[Option<EndExpr>],
+    range_step_exprs: &[Option<EndExpr>],
+    range_end_exprs: &[EndExpr],
+) -> Result<Vec<Option<usize>>, RuntimeError> {
+    let count = range_dims.len();
+    if range_params.len() != count
+        || range_start_exprs.len() != count
+        || range_step_exprs.len() != count
+        || range_end_exprs.len() != count
+    {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidRangeSelectorPlan",
+            "inconsistent object range selector metadata",
+        ));
+    }
+
+    let mut range_pos_by_dim = vec![None; dims];
+    for (pos, &dim) in range_dims.iter().enumerate() {
+        if dim >= dims {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorDim",
+                "object range selector dimension is out of bounds",
+            ));
+        }
+        if range_pos_by_dim[dim].replace(pos).is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorPlan",
+                "object range selector dimension appears more than once",
+            ));
+        }
+    }
+    Ok(range_pos_by_dim)
 }
 
-pub fn subsref_paren_index_cell(indices: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(Value::Cell(
-        runmat_builtins::CellArray::new(indices.to_vec(), 1, indices.len())
-            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
-    ))
+fn validate_object_end_numeric_selector_plan(
+    slot_count: usize,
+    end_numeric_exprs: &[(usize, EndExpr)],
+) -> Result<Vec<Option<&EndExpr>>, RuntimeError> {
+    let mut end_expr_by_slot = vec![None; slot_count];
+    for (position, expr) in end_numeric_exprs {
+        if *position >= slot_count {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "object end-selector position is out of bounds",
+            ));
+        }
+        if end_expr_by_slot[*position].is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "object end-selector position appears more than once",
+            ));
+        }
+        end_expr_by_slot[*position] = Some(expr);
+    }
+    Ok(end_expr_by_slot)
 }
 
-pub fn subsref_brace_index_cell_raw(indices: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(Value::Cell(
-        runmat_builtins::CellArray::new(indices.to_vec(), 1, indices.len())
-            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
-    ))
+fn validate_object_selector_masks(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+) -> Result<(), RuntimeError> {
+    if (colon_mask & end_mask) != 0 {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidSelectorMaskPlan",
+            "object selector masks overlap on the same dimension",
+        ));
+    }
+
+    if dims < u32::BITS as usize {
+        let allowed_mask = if dims == 0 { 0 } else { (1u32 << dims) - 1 };
+        if ((colon_mask | end_mask) & !allowed_mask) != 0 {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidSelectorMaskPlan",
+                "object selector mask dimension is out of bounds",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
-pub fn subsref_brace_numeric_index_values(indices: &[Value]) -> Vec<Value> {
-    indices
-        .iter()
-        .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
-        .collect()
+fn object_selector_mask_has_dim(mask: u32, dim: usize) -> bool {
+    dim < u32::BITS as usize && (mask & (1u32 << dim)) != 0
 }
 
-pub fn subsref_empty_brace_cell() -> Result<Value, RuntimeError> {
-    Ok(Value::Cell(
-        runmat_builtins::CellArray::new(vec![], 1, 0)
-            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
-    ))
+pub(crate) fn build_object_paren_selector_values(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Vec<Value>, RuntimeError> {
+    validate_object_selector_masks(dims, colon_mask, end_mask)?;
+    let mut values = Vec::with_capacity(dims);
+    let mut numeric_iter = 0usize;
+    for d in 0..dims {
+        let is_colon = object_selector_mask_has_dim(colon_mask, d);
+        let is_end = object_selector_mask_has_dim(end_mask, d);
+        if is_colon {
+            values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
+            continue;
+        }
+        if is_end {
+            values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
+            continue;
+        }
+        let selector = numeric
+            .get(numeric_iter)
+            .ok_or(crate::interpreter::errors::mex(
+                "MissingNumericIndex",
+                "missing numeric index",
+            ))?;
+        values.push(normalize_object_numeric_selector(selector)?);
+        numeric_iter += 1;
+    }
+    if numeric_iter != numeric.len() {
+        return Err(crate::interpreter::errors::mex(
+            "UnexpectedNumericIndex",
+            "unexpected extra numeric index values",
+        ));
+    }
+    Ok(values)
+}
+
+pub(crate) fn build_object_paren_expr_selector_values(
+    spec: ObjectParenExprSelectorSpec<'_>,
+) -> Result<Vec<Value>, RuntimeError> {
+    validate_object_selector_masks(spec.dims, spec.colon_mask, spec.end_mask)?;
+    let range_pos_by_dim = validate_object_range_selector_plan(
+        spec.dims,
+        spec.range_dims,
+        spec.range_params,
+        spec.range_start_exprs,
+        spec.range_step_exprs,
+        spec.range_end_exprs,
+    )?;
+    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
+        if range_pos.is_some() {
+            let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
+            let is_end = object_selector_mask_has_dim(spec.end_mask, d);
+            if is_colon || is_end {
+                return Err(crate::interpreter::errors::mex(
+                    "InvalidRangeSelectorPlan",
+                    "object range selector conflicts with colon/end selector masks",
+                ));
+            }
+        }
+    }
+    let slot_count = (0..spec.dims)
+        .filter(|&d| {
+            let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
+            let is_end = object_selector_mask_has_dim(spec.end_mask, d);
+            !is_colon && !is_end && range_pos_by_dim[d].is_none()
+        })
+        .count();
+    let end_expr_by_slot =
+        validate_object_end_numeric_selector_plan(slot_count, spec.end_numeric_exprs)?;
+    let mut values = Vec::with_capacity(spec.dims);
+    let mut num_iter = 0usize;
+    for (d, range_pos) in range_pos_by_dim.iter().enumerate().take(spec.dims) {
+        let is_colon = object_selector_mask_has_dim(spec.colon_mask, d);
+        let is_end = object_selector_mask_has_dim(spec.end_mask, d);
+        if is_colon {
+            values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
+            continue;
+        }
+        if is_end {
+            values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
+            continue;
+        }
+        if let Some(pos) = *range_pos {
+            let (raw_st, raw_sp) = spec.range_params[pos];
+            let st = if let Some(expr) = &spec.range_start_exprs[pos] {
+                encode_end_expr_value(expr)?
+            } else {
+                Value::Num(raw_st)
+            };
+            let sp = if let Some(expr) = &spec.range_step_exprs[pos] {
+                encode_end_expr_value(expr)?
+            } else {
+                Value::Num(raw_sp)
+            };
+            let off = &spec.range_end_exprs[pos];
+            values.push(build_end_range_descriptor(st, sp, off)?);
+            continue;
+        }
+        if let Some(expr) = end_expr_by_slot[num_iter] {
+            values.push(encode_end_expr_value(expr)?);
+            num_iter += 1;
+            continue;
+        }
+        let selector = spec
+            .numeric
+            .get(num_iter)
+            .ok_or(crate::interpreter::errors::mex(
+                "MissingNumericIndex",
+                "missing numeric index",
+            ))?;
+        num_iter += 1;
+        values.push(normalize_object_numeric_selector(selector)?);
+    }
+    if num_iter != spec.numeric.len() {
+        return Err(crate::interpreter::errors::mex(
+            "UnexpectedNumericIndex",
+            "unexpected extra numeric index values",
+        ));
+    }
+    Ok(values)
 }
 
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
@@ -382,8 +911,11 @@ where
 
             let expanded = if spec.expand_all {
                 match base {
-                    Value::Cell(ca) => expand_all_cell(&ca),
-                    other @ Value::Object(_) => expand_object_all(other).await?,
+                    Value::OutputList(outputs) => outputs,
+                    Value::Cell(ca) => expand_all_cell(&ca)?,
+                    other @ Value::Object(_) | other @ Value::HandleObject(_) => {
+                        expand_object_all(other).await?
+                    }
                     _ => {
                         return Err(crate::interpreter::errors::mex(
                             "InvalidExpandAllTarget",
@@ -396,16 +928,24 @@ where
                     (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
                         expand_cell_indices(&ca, &indices)?
                     }
-                    (other @ Value::Object(_), _) => expand_object_indices(other, indices).await?,
+                    (Value::OutputList(outputs), 1) | (Value::OutputList(outputs), 2) => {
+                        let cols = outputs.len();
+                        let cell =
+                            build_cell_array_with_shape(outputs, 1, cols, "output-list expansion")?;
+                        expand_cell_indices(&cell, &indices)?
+                    }
+                    (other @ Value::Object(_), _) | (other @ Value::HandleObject(_), _) => {
+                        expand_object_indices(other, indices).await?
+                    }
                     _ => {
                         return Err(crate::interpreter::errors::mex(
-                            "ExpandError",
+                            "InvalidExpandTarget",
                             invalid_expand_msg,
                         ))
                     }
                 }
             };
-            temp.extend(expanded);
+            temp.extend(expanded.into_iter().rev());
         } else {
             temp.push(stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
@@ -414,4 +954,770 @@ where
     }
     temp.reverse();
     Ok(temp)
+}
+
+fn build_cell_array_with_shape(
+    values: Vec<Value>,
+    rows: usize,
+    cols: usize,
+    context: &str,
+) -> Result<runmat_builtins::CellArray, RuntimeError> {
+    runmat_builtins::CellArray::new(values, rows, cols).map_err(|e| {
+        build_runtime_error(format!("{context}: {e}"))
+            .with_identifier("RunMat:ShapeMismatch")
+            .build()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_expanded_args_from_specs, build_object_paren_expr_selector_values,
+        build_object_paren_selector_values, ObjectIndexDescriptor, ObjectIndexOp,
+        ObjectIndexSelector, ObjectParenExprSelectorSpec, OBJECT_END_RANGE_TAG,
+        OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN,
+        OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
+    };
+    use crate::bytecode::ArgSpec;
+    use crate::bytecode::EndExpr;
+    use futures::executor::block_on;
+    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, MethodDef, Value};
+    use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
+    use runmat_hir::{QualifiedName, SymbolName};
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    macro_rules! build_object_paren_expr_selector_values_from_parts {
+        (
+            $dims:expr,
+            $colon_mask:expr,
+            $end_mask:expr,
+            $range_dims:expr,
+            $range_params:expr,
+            $range_start_exprs:expr,
+            $range_step_exprs:expr,
+            $range_end_exprs:expr,
+            $end_numeric_exprs:expr,
+            $numeric:expr
+            $(,)?
+        ) => {
+            build_object_paren_expr_selector_values(ObjectParenExprSelectorSpec {
+                dims: $dims,
+                colon_mask: $colon_mask,
+                end_mask: $end_mask,
+                range_dims: $range_dims,
+                range_params: $range_params,
+                range_start_exprs: $range_start_exprs,
+                range_step_exprs: $range_step_exprs,
+                range_end_exprs: $range_end_exprs,
+                end_numeric_exprs: $end_numeric_exprs,
+                numeric: $numeric,
+            })
+        };
+    }
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn object_index_descriptor_serializes_protocol_args_once() {
+        let descriptor = ObjectIndexDescriptor::subsref_brace(
+            Value::Num(1.0),
+            ObjectIndexSelector::IndexValues {
+                values: vec![Value::Num(2.0)],
+            },
+        );
+
+        let (base, method, args) = descriptor
+            .into_method_invocation()
+            .expect("descriptor args");
+        assert_eq!(base, Value::Num(1.0));
+        assert_eq!(method, OBJECT_PROTOCOL_SUBSREF.to_string());
+        assert_eq!(
+            args[0],
+            Value::String(OBJECT_PROTOCOL_KIND_BRACE.to_string())
+        );
+        match &args[1] {
+            Value::Cell(cell) => assert_eq!((*cell.data[0]).clone(), Value::Num(2.0)),
+            other => panic!("expected selector cell, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn object_member_descriptor_carries_rhs() {
+        let descriptor = ObjectIndexDescriptor::member(
+            Value::Num(1.0),
+            ObjectIndexOp::Subsasgn,
+            "field".to_string(),
+            Some(Value::Num(9.0)),
+        );
+
+        let (base, method, args) = descriptor
+            .into_method_invocation()
+            .expect("descriptor args");
+        assert_eq!(base, Value::Num(1.0));
+        assert_eq!(method, OBJECT_PROTOCOL_SUBSASGN.to_string());
+        assert_eq!(
+            args[0],
+            Value::String(OBJECT_PROTOCOL_KIND_MEMBER.to_string())
+        );
+        assert_eq!(args[1], Value::String("field".to_string()));
+        assert_eq!(args[2], Value::Num(9.0));
+    }
+
+    #[test]
+    fn external_qualified_identity_preserves_malformed_base_segment() {
+        let identity = super::external_qualified_identity("pkg..Point", "origin");
+        let CallableIdentity::ExternalName(QualifiedName(segments)) = identity else {
+            panic!("expected external qualified identity");
+        };
+        assert_eq!(
+            segments,
+            vec![
+                SymbolName("pkg..Point".to_string()),
+                SymbolName("origin".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn external_qualified_identity_splits_well_formed_base_segments() {
+        let identity = super::external_qualified_identity("pkg.Point", "origin");
+        let CallableIdentity::ExternalName(QualifiedName(segments)) = identity else {
+            panic!("expected external qualified identity");
+        };
+        assert_eq!(
+            segments,
+            vec![
+                SymbolName("pkg".to_string()),
+                SymbolName("Point".to_string()),
+                SymbolName("origin".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn cell_builder_maps_shape_errors_to_identifier() {
+        let err = super::build_cell_array_with_shape(vec![Value::Num(1.0)], 2, 2, "test")
+            .expect_err("expected shape mismatch");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn external_qualified_display_name_preserves_malformed_base_shape() {
+        assert_eq!(
+            super::external_qualified_display_name("pkg..Point", "origin"),
+            "pkg..Point.origin"
+        );
+    }
+
+    #[test]
+    fn external_qualified_display_name_renders_well_formed_qualified_name() {
+        assert_eq!(
+            super::external_qualified_display_name("pkg.Point", "origin"),
+            "pkg.Point.origin"
+        );
+    }
+
+    #[test]
+    fn class_defines_member_subsref_includes_inherited_method_metadata() {
+        let parent_name = unique_class_name("vm_subsref_parent");
+        let child_name = unique_class_name("vm_subsref_child");
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            OBJECT_PROTOCOL_SUBSREF.to_string(),
+            MethodDef {
+                name: OBJECT_PROTOCOL_SUBSREF.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "subsref_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let child = ClassDef {
+            name: child_name,
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        assert!(super::class_defines_member_subsref(&child));
+    }
+
+    #[test]
+    fn class_defines_member_subsasgn_includes_inherited_method_metadata() {
+        let parent_name = unique_class_name("vm_subsasgn_parent");
+        let child_name = unique_class_name("vm_subsasgn_child");
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            OBJECT_PROTOCOL_SUBSASGN.to_string(),
+            MethodDef {
+                name: OBJECT_PROTOCOL_SUBSASGN.to_string(),
+                is_static: false,
+                is_abstract: false,
+                is_sealed: false,
+                access: Access::Public,
+                function_name: "subsasgn_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let child = ClassDef {
+            name: child_name,
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        assert!(super::class_defines_member_subsasgn(&child));
+    }
+
+    #[test]
+    fn object_paren_selector_values_preserve_colon_end_and_numeric_order() {
+        let selectors = build_object_paren_selector_values(3, 0b001, 0b010, &[Value::Num(9.0)])
+            .expect("selector values");
+        assert_eq!(selectors.len(), 3);
+        assert_eq!(
+            selectors[0],
+            Value::String(OBJECT_SELECTOR_COLON.to_string())
+        );
+        assert_eq!(selectors[1], Value::String(OBJECT_SELECTOR_END.to_string()));
+        assert_eq!(selectors[2], Value::Num(9.0));
+    }
+
+    #[test]
+    fn object_paren_selector_values_validate_numeric_arity() {
+        let missing = build_object_paren_selector_values(2, 0, 0, &[Value::Num(1.0)])
+            .expect_err("missing selector should fail");
+        assert_eq!(missing.identifier(), Some("RunMat:MissingNumericIndex"));
+
+        let extra =
+            build_object_paren_selector_values(2, 0b01, 0, &[Value::Num(2.0), Value::Num(3.0)])
+                .expect_err("extra selector should fail");
+        assert_eq!(extra.identifier(), Some("RunMat:UnexpectedNumericIndex"));
+    }
+
+    #[test]
+    fn object_paren_selector_values_accept_string_selector() {
+        let selectors =
+            build_object_paren_selector_values(1, 0, 0, &[Value::String("key".to_string())])
+                .expect("string selector should serialize");
+        assert_eq!(selectors, vec![Value::String("key".to_string())]);
+    }
+
+    #[test]
+    fn object_paren_selector_values_reject_unsupported_selector_type() {
+        let err = build_object_paren_selector_values(
+            1,
+            0,
+            0,
+            &[Value::Struct(runmat_builtins::StructValue::new())],
+        )
+        .expect_err("unsupported selector should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:ObjectSelectorTypeUnsupported")
+        );
+    }
+
+    #[test]
+    fn object_paren_selector_values_reject_out_of_bounds_mask_bits() {
+        let err = build_object_paren_selector_values(1, 0b10, 0, &[Value::Num(1.0)])
+            .expect_err("out-of-bounds selector mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_selector_values_reject_overlapping_colon_end_mask_bits() {
+        let err = build_object_paren_selector_values(1, 0b1, 0b1, &[])
+            .expect_err("overlapping selector mask bits should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_selector_values_support_dims_beyond_mask_width() {
+        let numeric: Vec<Value> = (0..31).map(|v| Value::Num((v + 1) as f64)).collect();
+        let selectors = build_object_paren_selector_values(33, 0b1, 0b10, &numeric)
+            .expect("selector values for dims beyond mask width");
+        assert_eq!(selectors.len(), 33);
+        assert_eq!(
+            selectors[0],
+            Value::String(OBJECT_SELECTOR_COLON.to_string())
+        );
+        assert_eq!(selectors[1], Value::String(OBJECT_SELECTOR_END.to_string()));
+        assert_eq!(selectors[32], Value::Num(31.0));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_encode_end_expression_range_descriptors() {
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 2.0)],
+            &[Some(EndExpr::Sub(
+                Box::new(EndExpr::End),
+                Box::new(EndExpr::Const(1.0)),
+            ))],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect("expr selector values");
+
+        assert_eq!(selectors.len(), 2);
+        match &selectors[0] {
+            Value::Cell(cell) => {
+                assert_eq!(
+                    (*cell.data[2]).clone(),
+                    Value::String(OBJECT_END_RANGE_TAG.to_string())
+                );
+                assert_eq!((*cell.data[1]).clone(), Value::Num(2.0));
+                assert_eq!(
+                    (*cell.data[3]).clone(),
+                    Value::String(OBJECT_SELECTOR_END.to_string())
+                );
+            }
+            other => panic!("expected range descriptor cell, got {other:?}"),
+        }
+        assert_eq!(selectors[1], Value::Num(4.0));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_end_call_without_callable_name() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::ResolvedCall {
+                identity: CallableIdentity::BoundFunction(FunctionId(7)),
+                fallback_policy: CallableFallbackPolicy::None,
+                args: vec![],
+            }],
+            &[],
+            &[],
+        )
+        .expect_err("missing callable name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_malformed_external_end_call_name() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::ResolvedCall {
+                identity: CallableIdentity::ExternalName(QualifiedName(vec![
+                    SymbolName("pkg".to_string()),
+                    SymbolName("".to_string()),
+                    SymbolName("remote".to_string()),
+                ])),
+                fallback_policy: CallableFallbackPolicy::ExternalBoundary,
+                args: vec![],
+            }],
+            &[],
+            &[],
+        )
+        .expect_err("malformed external callable name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_invalid_range_plan_metadata() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 2.0)],
+            &[None],
+            &[None],
+            &[],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect_err("inconsistent range metadata should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_range_dim_conflicting_with_colon_mask() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0b01,
+            0,
+            &[0],
+            &[(1.0, 2.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect_err("range dimension conflicting with colon mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_range_dim_conflicting_with_end_mask() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0,
+            0b01,
+            &[0],
+            &[(1.0, 2.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect_err("range dimension conflicting with end mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_out_of_bounds_mask_bits() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0b10,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[Value::Num(1.0)],
+        )
+        .expect_err("out-of-bounds selector mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_overlapping_colon_end_mask_bits() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0b1,
+            0b1,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[]
+        )
+        .expect_err("overlapping selector mask bits should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSelectorMaskPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_support_dims_beyond_mask_width() {
+        let numeric: Vec<Value> = (0..32).map(|v| Value::Num((v + 1) as f64)).collect();
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
+            33,
+            0,
+            0,
+            &[32],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &numeric,
+        )
+        .expect("expr selector values for dims beyond mask width");
+
+        assert_eq!(selectors.len(), 33);
+        assert_eq!(selectors[31], Value::Num(32.0));
+        match &selectors[32] {
+            Value::Cell(cell) => {
+                assert_eq!(cell.rows, 1);
+                assert_eq!(cell.cols, 4);
+            }
+            other => panic!("expected range descriptor cell, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_duplicate_range_dims() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0,
+            0,
+            &[0, 0],
+            &[(1.0, 1.0), (2.0, 1.0)],
+            &[None, None],
+            &[None, None],
+            &[EndExpr::End, EndExpr::End],
+            &[],
+            &[],
+        )
+        .expect_err("duplicate range dimensions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_out_of_bounds_range_dim() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[1],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[],
+        )
+        .expect_err("out-of-bounds range dimension should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_unsupported_numeric_selector_type() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[Value::Struct(runmat_builtins::StructValue::new())],
+        )
+        .expect_err("unsupported object selector type should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:ObjectSelectorTypeUnsupported")
+        );
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_accept_string_selector_in_mixed_plan() {
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::String("key".to_string())],
+        )
+        .expect("mixed string selector should serialize");
+        assert_eq!(selectors.len(), 2);
+        assert_eq!(selectors[1], Value::String("key".to_string()));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan() {
+        let key_cell = runmat_builtins::CellArray::new(vec![Value::String("k".to_string())], 1, 1)
+            .expect("key cell");
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::Cell(key_cell.clone())],
+        )
+        .expect("mixed cell selector should serialize");
+        assert_eq!(selectors.len(), 2);
+        assert_eq!(selectors[1], Value::Cell(key_cell));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_encode_numeric_end_expressions() {
+        let selectors = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[(
+                0,
+                EndExpr::Div(Box::new(EndExpr::End), Box::new(EndExpr::Const(2.0))),
+            )],
+            &[Value::Num(0.0)],
+        )
+        .expect("numeric end expression selector should serialize");
+        assert_eq!(selectors.len(), 1);
+        match &selectors[0] {
+            Value::Cell(cell) => {
+                assert_eq!((*cell.data[0]).clone(), Value::String("/".to_string()));
+            }
+            other => panic!("expected encoded end expression cell, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_duplicate_numeric_end_expr_positions() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[
+                (
+                    0,
+                    EndExpr::Div(Box::new(EndExpr::End), Box::new(EndExpr::Const(2.0))),
+                ),
+                (
+                    0,
+                    EndExpr::Sub(Box::new(EndExpr::End), Box::new(EndExpr::Const(1.0))),
+                ),
+            ],
+            &[Value::Num(0.0)],
+        )
+        .expect_err("duplicate numeric end-expression positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_out_of_bounds_numeric_end_expr_positions() {
+        let err = build_object_paren_expr_selector_values_from_parts!(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[(
+                1,
+                EndExpr::Div(Box::new(EndExpr::End), Box::new(EndExpr::Const(2.0))),
+            )],
+            &[Value::Num(0.0)],
+        )
+        .expect_err("out-of-bounds numeric end-expression position should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn build_expanded_args_from_specs_accepts_handle_object_expansion() {
+        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("handle target");
+        let handle = HandleRef {
+            class_name: "HandleThing".to_string(),
+            target,
+            valid: true,
+        };
+        let mut stack = vec![Value::HandleObject(handle)];
+        let specs = vec![ArgSpec {
+            is_expand: true,
+            num_indices: 0,
+            expand_all: true,
+        }];
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            "expand-all failed",
+            "expand-indices failed",
+            |base| async move {
+                match base {
+                    Value::HandleObject(_) => Ok(vec![Value::Num(42.0)]),
+                    other => panic!("expected handle object expansion path, got {other:?}"),
+                }
+            },
+            |_base, _indices| async move { Ok(vec![]) },
+        ))
+        .expect("expanded args");
+        assert_eq!(expanded, vec![Value::Num(42.0)]);
+    }
+
+    #[test]
+    fn build_expanded_args_from_specs_supports_output_list_index_expansion() {
+        let mut stack = vec![
+            Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
+            Value::Num(1.0),
+        ];
+        let specs = vec![ArgSpec {
+            is_expand: true,
+            num_indices: 1,
+            expand_all: false,
+        }];
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            "expand-all failed",
+            "expand-indices failed",
+            |_base| async move { panic!("unexpected object expand-all path") },
+            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
+        ))
+        .expect("expanded args");
+        assert_eq!(expanded, vec![Value::Num(9.0)]);
+
+        let mut stack = vec![
+            Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
+            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        ];
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            "expand-all failed",
+            "expand-indices failed",
+            |_base| async move { panic!("unexpected object expand-all path") },
+            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
+        ))
+        .expect("expanded args");
+        assert_eq!(expanded, vec![Value::Num(9.0), Value::Num(2.0)]);
+    }
 }

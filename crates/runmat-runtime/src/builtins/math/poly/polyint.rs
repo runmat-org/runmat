@@ -3,7 +3,11 @@
 use log::{trace, warn};
 use num_complex::Complex64;
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -17,6 +21,86 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const EPS: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyint";
+
+const POLYINT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "q",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Integrated polynomial coefficient vector.",
+}];
+
+const POLYINT_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Polynomial coefficient vector.",
+}];
+
+const POLYINT_INPUTS_WITH_K: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial coefficient vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "k",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Constant of integration.",
+    },
+];
+
+const POLYINT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "q = polyint(p)",
+        inputs: &POLYINT_INPUTS,
+        outputs: &POLYINT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "q = polyint(p, k)",
+        inputs: &POLYINT_INPUTS_WITH_K,
+        outputs: &POLYINT_OUTPUT,
+    },
+];
+
+const POLYINT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYINT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:polyint:InvalidArgument"),
+    when: "Input arity or integration-constant argument is malformed.",
+    message: "polyint: invalid argument",
+};
+
+const POLYINT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYINT.INVALID_INPUT",
+    identifier: Some("RunMat:polyint:InvalidInput"),
+    when: "Input polynomial cannot be interpreted as a numeric coefficient vector.",
+    message: "polyint: invalid input",
+};
+
+const POLYINT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYINT.INTERNAL",
+    identifier: Some("RunMat:polyint:Internal"),
+    when: "Runtime fails while building output tensors or provider fallback paths.",
+    message: "polyint: internal runtime failure",
+};
+
+const POLYINT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    POLYINT_ERROR_INVALID_ARGUMENT,
+    POLYINT_ERROR_INVALID_INPUT,
+    POLYINT_ERROR_INTERNAL,
+];
+
+pub const POLYINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &POLYINT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &POLYINT_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyint")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -35,9 +119,22 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn polyint_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    polyint_error_with(message, &POLYINT_ERROR_INVALID_INPUT)
+}
+
+fn polyint_argument_error(message: impl Into<String>) -> RuntimeError {
+    polyint_error_with(message, &POLYINT_ERROR_INVALID_ARGUMENT)
+}
+
+fn polyint_error_with(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyint")]
@@ -57,11 +154,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     summary = "Integrate polynomial coefficient vectors and append a constant of integration.",
     keywords = "polyint,polynomial,integral,antiderivative",
     type_resolver(polyint_type),
+    descriptor(crate::builtins::math::poly::polyint::POLYINT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
 async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(polyint_error("polyint: too many input arguments"));
+        return Err(polyint_argument_error("polyint: too many input arguments"));
     }
 
     let constant = match rest.into_iter().next() {
@@ -334,6 +432,29 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn polyint_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = POLYINT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"q = polyint(p)"));
+        assert!(labels.contains(&"q = polyint(p, k)"));
+    }
+
+    #[test]
+    fn polyint_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = POLYINT_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.POLYINT.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.POLYINT.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.POLYINT.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn integrates_polynomial_without_constant() {
@@ -476,6 +597,7 @@ pub(crate) mod tests {
             vec![Value::Num(1.0), Value::Num(2.0)],
         )
         .expect_err("expected error");
+        assert_eq!(err.identifier(), POLYINT_ERROR_INVALID_ARGUMENT.identifier);
         assert_error_contains(err, "too many input arguments");
     }
 

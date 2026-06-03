@@ -4,7 +4,11 @@ use std::any::Any;
 use std::env;
 use std::panic;
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -12,11 +16,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
-
-const ERR_TOO_FEW_INPUTS: &str = "setenv: not enough input arguments";
-const ERR_TOO_MANY_INPUTS: &str = "setenv: too many input arguments";
-const ERR_NAME_TYPE: &str = "setenv: NAME must be a string scalar or character vector";
-const ERR_VALUE_TYPE: &str = "setenv: VALUE must be a string scalar or character vector";
 
 const MESSAGE_EMPTY_NAME: &str = "Environment variable name must not be empty.";
 const MESSAGE_NAME_HAS_EQUAL: &str = "Environment variable names must not contain '='.";
@@ -55,10 +54,100 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "setenv";
 
-fn setenv_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const SETENV_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "0 on success, 1 on failure.",
+}];
+const SETENV_OUTPUT_STATUS_MESSAGE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "0 on success, 1 on failure.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Failure message text, or empty on success.",
+    },
+];
+const SETENV_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "NAME",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Environment variable name.",
+    },
+    BuiltinParamDescriptor {
+        name: "VALUE",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Environment variable value (empty clears variable).",
+    },
+];
+const SETENV_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "status = setenv(NAME, VALUE)",
+        inputs: &SETENV_INPUTS_NAME_VALUE,
+        outputs: &SETENV_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, message] = setenv(NAME, VALUE)",
+        inputs: &SETENV_INPUTS_NAME_VALUE,
+        outputs: &SETENV_OUTPUT_STATUS_MESSAGE,
+    },
+];
+const SETENV_ERROR_TOO_FEW_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETENV.TOO_FEW_INPUTS",
+    identifier: None,
+    when: "Fewer than two positional inputs are supplied.",
+    message: "setenv: not enough input arguments",
+};
+const SETENV_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETENV.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than two positional inputs are supplied.",
+    message: "setenv: too many input arguments",
+};
+const SETENV_ERROR_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETENV.NAME_TYPE",
+    identifier: None,
+    when: "NAME input is not a string scalar, char row, or string-array scalar.",
+    message: "setenv: NAME must be a string scalar or character vector",
+};
+const SETENV_ERROR_VALUE_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETENV.VALUE_TYPE",
+    identifier: None,
+    when: "VALUE input is not a string scalar, char row, or string-array scalar.",
+    message: "setenv: VALUE must be a string scalar or character vector",
+};
+const SETENV_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    SETENV_ERROR_TOO_FEW_INPUTS,
+    SETENV_ERROR_TOO_MANY_INPUTS,
+    SETENV_ERROR_NAME_TYPE,
+    SETENV_ERROR_VALUE_TYPE,
+];
+pub const SETENV_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SETENV_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SETENV_ERRORS,
+};
+
+fn setenv_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -75,11 +164,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "setenv",
     category = "io/repl_fs",
-    summary = "Set or clear environment variables with MATLAB-compatible status outputs.",
+    summary = "Set or clear environment variables with status outputs.",
     keywords = "setenv,environment variable,status,message,unset",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::setenv_type),
+    descriptor(crate::builtins::io::repl_fs::setenv::SETENV_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::setenv"
 )]
 async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -100,9 +190,9 @@ async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 | 1 => Err(setenv_error(ERR_TOO_FEW_INPUTS)),
+        0 | 1 => Err(setenv_error(&SETENV_ERROR_TOO_FEW_INPUTS)),
         2 => apply(&gathered[0], &gathered[1]),
-        _ => Err(setenv_error(ERR_TOO_MANY_INPUTS)),
+        _ => Err(setenv_error(&SETENV_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
@@ -147,8 +237,8 @@ impl SetenvResult {
 }
 
 fn apply(name_value: &Value, value_value: &Value) -> BuiltinResult<SetenvResult> {
-    let name = extract_scalar_text(name_value, ERR_NAME_TYPE)?;
-    let value = extract_scalar_text(value_value, ERR_VALUE_TYPE)?;
+    let name = extract_scalar_text(name_value, &SETENV_ERROR_NAME_TYPE)?;
+    let value = extract_scalar_text(value_value, &SETENV_ERROR_VALUE_TYPE)?;
 
     if name.is_empty() {
         return Ok(SetenvResult::failure(MESSAGE_EMPTY_NAME.to_string()));
@@ -200,7 +290,10 @@ async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(out)
 }
 
-fn extract_scalar_text(value: &Value, error_message: &str) -> BuiltinResult<String> {
+fn extract_scalar_text(
+    value: &Value,
+    error_message: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(array) => {
@@ -260,6 +353,18 @@ pub(crate) mod tests {
 
     fn evaluate(args: &[Value]) -> BuiltinResult<SetenvResult> {
         futures::executor::block_on(super::evaluate(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setenv_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SETENV_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = setenv(NAME, VALUE)"));
+        assert!(labels.contains(&"[status, message] = setenv(NAME, VALUE)"));
     }
 
     fn unique_name(suffix: &str) -> String {
@@ -364,7 +469,7 @@ pub(crate) mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let err =
             setenv_builtin(vec![Value::Num(5.0), Value::String("value".to_string())]).unwrap_err();
-        assert_eq!(err.message(), ERR_NAME_TYPE);
+        assert_eq!(err.message(), SETENV_ERROR_NAME_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -376,7 +481,7 @@ pub(crate) mod tests {
             Value::Num(1.0),
         ])
         .unwrap_err();
-        assert_eq!(err.message(), ERR_VALUE_TYPE);
+        assert_eq!(err.message(), SETENV_ERROR_VALUE_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -413,7 +518,7 @@ pub(crate) mod tests {
             Value::String("value".to_string()),
         ])
         .unwrap_err();
-        assert_eq!(err.message(), ERR_NAME_TYPE);
+        assert_eq!(err.message(), SETENV_ERROR_NAME_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -426,7 +531,7 @@ pub(crate) mod tests {
             Value::String("value".to_string()),
         ])
         .unwrap_err();
-        assert_eq!(err.message(), ERR_NAME_TYPE);
+        assert_eq!(err.message(), SETENV_ERROR_NAME_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -435,7 +540,8 @@ pub(crate) mod tests {
         let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
         let chars = vec!['F', 'O', 'O', ' '];
         let array = CharArray::new(chars, 1, 4).unwrap();
-        let result = extract_scalar_text(&Value::CharArray(array), ERR_NAME_TYPE).unwrap();
+        let result =
+            extract_scalar_text(&Value::CharArray(array), &SETENV_ERROR_NAME_TYPE).unwrap();
         assert_eq!(result, "FOO");
     }
 

@@ -1,9 +1,194 @@
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use super::op_common::current_axes_target;
-use super::state::set_view_for_axes;
+use super::state::{set_view_for_axes, FigureError};
 use crate::builtins::plotting::type_resolvers::get_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "view";
+
+const VIEW_OUTPUT_ANGLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "angles",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Current or assigned view angles as [az el].",
+}];
+
+const VIEW_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+
+const VIEW_INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ax",
+    ty: BuiltinParamType::AxesHandle,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Axes handle to query.",
+}];
+
+const VIEW_INPUTS_VECTOR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "angles",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Two-element [az el] vector or preset value 2/3.",
+}];
+
+const VIEW_INPUTS_AZ_EL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "az",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Azimuth in degrees.",
+    },
+    BuiltinParamDescriptor {
+        name: "el",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Elevation in degrees.",
+    },
+];
+
+const VIEW_INPUTS_AX_VECTOR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Axes handle to set.",
+    },
+    BuiltinParamDescriptor {
+        name: "angles",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element [az el] vector or preset value 2/3.",
+    },
+];
+
+const VIEW_INPUTS_AX_AZ_EL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Axes handle to set.",
+    },
+    BuiltinParamDescriptor {
+        name: "az",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Azimuth in degrees.",
+    },
+    BuiltinParamDescriptor {
+        name: "el",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Elevation in degrees.",
+    },
+];
+
+const VIEW_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "angles = view()",
+        inputs: &VIEW_INPUTS_NONE,
+        outputs: &VIEW_OUTPUT_ANGLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "angles = view(ax)",
+        inputs: &VIEW_INPUTS_AX,
+        outputs: &VIEW_OUTPUT_ANGLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "angles = view([az el] | preset)",
+        inputs: &VIEW_INPUTS_VECTOR,
+        outputs: &VIEW_OUTPUT_ANGLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "angles = view(az, el)",
+        inputs: &VIEW_INPUTS_AZ_EL,
+        outputs: &VIEW_OUTPUT_ANGLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "angles = view(ax, [az el] | preset)",
+        inputs: &VIEW_INPUTS_AX_VECTOR,
+        outputs: &VIEW_OUTPUT_ANGLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "angles = view(ax, az, el)",
+        inputs: &VIEW_INPUTS_AX_AZ_EL,
+        outputs: &VIEW_OUTPUT_ANGLES,
+    },
+];
+
+const VIEW_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VIEW.INVALID_ARGUMENT",
+    identifier: Some("RunMat:view:InvalidArgument"),
+    when: "Arguments are malformed, wrong arity, wrong shape, or unsupported preset.",
+    message: "view: invalid argument",
+};
+
+const VIEW_ERROR_INVALID_AXES: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VIEW.INVALID_AXES",
+    identifier: Some("RunMat:view:InvalidAxes"),
+    when: "Axes target is invalid or no longer exists.",
+    message: "view: invalid axes target",
+};
+
+const VIEW_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.VIEW.INTERNAL",
+    identifier: Some("RunMat:view:Internal"),
+    when: "Internal plotting state operation fails.",
+    message: "view: internal operation failed",
+};
+
+const VIEW_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    VIEW_ERROR_INVALID_ARGUMENT,
+    VIEW_ERROR_INVALID_AXES,
+    VIEW_ERROR_INTERNAL,
+];
+
+pub const VIEW_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &VIEW_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &VIEW_ERRORS,
+};
+
+fn view_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    view_error_with_message(error.message, error)
+}
+
+fn view_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_view_figure_error(err: FigureError) -> RuntimeError {
+    match err {
+        FigureError::InvalidSubplotIndex { .. }
+        | FigureError::InvalidAxesHandle
+        | FigureError::InvalidHandle(_) => view_error(&VIEW_ERROR_INVALID_AXES),
+        other => view_error_with_message(
+            format!("{}: {}", VIEW_ERROR_INTERNAL.message, other),
+            &VIEW_ERROR_INTERNAL,
+        ),
+    }
+}
 
 fn parse_view_target(
     args: &[Value],
@@ -29,35 +214,23 @@ fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
                 match tensor.data[0] as i32 {
                     2 => Ok((0.0, 90.0)),
                     3 => Ok((-37.5, 30.0)),
-                    _ => Err(crate::builtins::plotting::plotting_error(
-                        "view",
-                        "view: expected [az el], view(2), or view(3)",
-                    )),
+                    _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
                 }
             } else if tensor.data.len() == 2 {
                 Ok((tensor.data[0] as f32, tensor.data[1] as f32))
             } else {
-                Err(crate::builtins::plotting::plotting_error(
-                    "view",
-                    "view: expected [az el], view(2), or view(3)",
-                ))
+                Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT))
             }
         }
         2 => {
             let az = scalar_or_tensor(&args[0])?;
             let el = scalar_or_tensor(&args[1])?;
             if az.data.len() != 1 || el.data.len() != 1 {
-                return Err(crate::builtins::plotting::plotting_error(
-                    "view",
-                    "view: azimuth and elevation must be scalars",
-                ));
+                return Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT));
             }
             Ok((az.data[0] as f32, el.data[0] as f32))
         }
-        _ => Err(crate::builtins::plotting::plotting_error(
-            "view",
-            "view: expected (az, el) or a 2-element vector",
-        )),
+        _ => Err(view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
 }
 
@@ -77,31 +250,25 @@ fn scalar_or_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
             data: vec![i.to_f64()],
             dtype: runmat_builtins::NumericDType::F64,
         }),
-        other => Tensor::try_from(other)
-            .map_err(|e| crate::builtins::plotting::plotting_error("view", format!("view: {e}"))),
+        other => Tensor::try_from(other).map_err(|_| view_error(&VIEW_ERROR_INVALID_ARGUMENT)),
     }
 }
 
 #[runtime_builtin(
     name = "view",
     category = "plotting",
-    summary = "Set or query the current 3-D view angles.",
+    summary = "Set or query azimuth/elevation camera view angles.",
     keywords = "view,plotting,3d,camera",
     suppress_auto_output = true,
     type_resolver(get_type),
+    descriptor(crate::builtins::plotting::view::VIEW_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::view"
 )]
 pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (target, rest) = parse_view_target(&args)?;
     if rest.is_empty() {
         let meta = crate::builtins::plotting::state::axes_metadata_snapshot(target.0, target.1)
-            .map_err(|err| {
-                crate::builtins::plotting::plotting_error_with_source(
-                    "view",
-                    format!("view: {err}"),
-                    err,
-                )
-            })?;
+            .map_err(map_view_figure_error)?;
         let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
         let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
         return Ok(Value::Tensor(Tensor {
@@ -113,9 +280,7 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         }));
     }
     let (az, el) = parse_view_angles(rest)?;
-    set_view_for_axes(target.0, target.1, az, el).map_err(|err| {
-        crate::builtins::plotting::plotting_error_with_source("view", format!("view: {err}"), err)
-    })?;
+    set_view_for_axes(target.0, target.1, az, el).map_err(map_view_figure_error)?;
     Ok(Value::Tensor(Tensor {
         rows: 1,
         cols: 2,
@@ -220,5 +385,20 @@ mod tests {
             fig.axes_metadata(0).unwrap().view_elevation_deg,
             Some(-30.0)
         );
+    }
+
+    #[test]
+    fn view_descriptor_signatures_cover_query_and_set_forms() {
+        let labels: Vec<&str> = VIEW_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"angles = view()"));
+        assert!(labels.contains(&"angles = view(ax)"));
+        assert!(labels.contains(&"angles = view([az el] | preset)"));
+        assert!(labels.contains(&"angles = view(az, el)"));
+        assert!(labels.contains(&"angles = view(ax, [az el] | preset)"));
+        assert!(labels.contains(&"angles = view(ax, az, el)"));
     }
 }

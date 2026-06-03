@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(
@@ -46,6 +50,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isvector,vector detection,metadata query,gpu,logical",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::array::introspection::isvector::ISVECTOR_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::isvector"
 )]
 async fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -55,6 +60,37 @@ async fn isvector_builtin(value: Value) -> crate::BuiltinResult<Value> {
 fn bool_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
+
+const ISVECTOR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input is vector-shaped (1-by-N or N-by-1, including scalars).",
+}];
+
+const ISVECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const ISVECTOR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isvector(A)",
+    inputs: &ISVECTOR_INPUTS,
+    outputs: &ISVECTOR_OUTPUT,
+}];
+
+const ISVECTOR_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const ISVECTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISVECTOR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISVECTOR_ERRORS,
+};
 
 async fn value_is_vector(value: &Value) -> crate::BuiltinResult<bool> {
     let dims = value_dimensions(value).await?;

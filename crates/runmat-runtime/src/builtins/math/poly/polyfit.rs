@@ -3,7 +3,11 @@
 use log::{trace, warn};
 use num_complex::Complex64;
 use runmat_accelerate_api::ProviderPolyfitResult;
-use runmat_builtins::{ComplexTensor, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
@@ -19,6 +23,177 @@ use crate::builtins::math::poly::type_resolvers::polyfit_type;
 const EPS: f64 = 1.0e-12;
 const EPS_NAN: f64 = 1.0e-12;
 const BUILTIN_NAME: &str = "polyfit";
+
+const POLYFIT_OUTPUT_P: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "p",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Polynomial coefficient vector ordered from highest power to constant term.",
+}];
+
+const POLYFIT_OUTPUT_PS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial coefficient vector ordered from highest power to constant term.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Fit statistics structure with fields R, df, and normr.",
+    },
+];
+
+const POLYFIT_OUTPUT_PSMU: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial coefficient vector ordered from highest power to constant term.",
+    },
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Fit statistics structure with fields R, df, and normr.",
+    },
+    BuiltinParamDescriptor {
+        name: "mu",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Centering and scaling vector [mean(x), std(x)].",
+    },
+];
+
+const POLYFIT_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample x-values as a numeric vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample y-values as a numeric vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial degree.",
+    },
+];
+
+const POLYFIT_INPUTS_WEIGHTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample x-values as a numeric vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sample y-values as a numeric vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Polynomial degree.",
+    },
+    BuiltinParamDescriptor {
+        name: "weights",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Optional nonnegative weight vector matching X and Y length.",
+    },
+];
+
+const POLYFIT_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "p = polyfit(X, Y, n)",
+        inputs: &POLYFIT_INPUTS,
+        outputs: &POLYFIT_OUTPUT_P,
+    },
+    BuiltinSignatureDescriptor {
+        label: "p = polyfit(X, Y, n, weights)",
+        inputs: &POLYFIT_INPUTS_WEIGHTS,
+        outputs: &POLYFIT_OUTPUT_P,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[p, S] = polyfit(X, Y, n)",
+        inputs: &POLYFIT_INPUTS,
+        outputs: &POLYFIT_OUTPUT_PS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[p, S] = polyfit(X, Y, n, weights)",
+        inputs: &POLYFIT_INPUTS_WEIGHTS,
+        outputs: &POLYFIT_OUTPUT_PS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[p, S, mu] = polyfit(X, Y, n)",
+        inputs: &POLYFIT_INPUTS,
+        outputs: &POLYFIT_OUTPUT_PSMU,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[p, S, mu] = polyfit(X, Y, n, weights)",
+        inputs: &POLYFIT_INPUTS_WEIGHTS,
+        outputs: &POLYFIT_OUTPUT_PSMU,
+    },
+];
+
+const POLYFIT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYFIT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:polyfit:InvalidArgument"),
+    when: "Degree/weight arguments are malformed or unsupported.",
+    message: "polyfit: invalid argument",
+};
+
+const POLYFIT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYFIT.INVALID_INPUT",
+    identifier: Some("RunMat:polyfit:InvalidInput"),
+    when: "Input vectors or values cannot be processed for polynomial fitting.",
+    message: "polyfit: invalid input",
+};
+
+const POLYFIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POLYFIT.INTERNAL",
+    identifier: Some("RunMat:polyfit:Internal"),
+    when: "Runtime fails while constructing fit outputs or provider payloads.",
+    message: "polyfit: internal runtime failure",
+};
+
+const POLYFIT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    POLYFIT_ERROR_INVALID_ARGUMENT,
+    POLYFIT_ERROR_INVALID_INPUT,
+    POLYFIT_ERROR_INTERNAL,
+];
+
+pub const POLYFIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &POLYFIT_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &POLYFIT_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -37,10 +212,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
 
+fn polyfit_error_with(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn polyfit_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    polyfit_error_with(message, &POLYFIT_ERROR_INVALID_INPUT)
+}
+
+fn polyfit_argument_error(message: impl Into<String>) -> RuntimeError {
+    polyfit_error_with(message, &POLYFIT_ERROR_INVALID_ARGUMENT)
+}
+
+fn polyfit_internal_error(message: impl Into<String>) -> RuntimeError {
+    polyfit_error_with(message, &POLYFIT_ERROR_INTERNAL)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::poly::polyfit")]
@@ -57,11 +249,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "polyfit",
     category = "math/poly",
-    summary = "Fit an n-th degree polynomial to data points with MATLAB-compatible outputs.",
+    summary = "Fit polynomials to data using least squares.",
     keywords = "polyfit,polynomial,least-squares,gpu",
     accel = "sink",
     sink = true,
     type_resolver(polyfit_type),
+    descriptor(crate::builtins::math::poly::polyfit::POLYFIT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::poly::polyfit"
 )]
 async fn polyfit_builtin(
@@ -196,12 +389,12 @@ impl PolyfitSolution {
     fn from_provider(result: ProviderPolyfitResult) -> BuiltinResult<Self> {
         let cols = result.coefficients.len();
         if cols == 0 {
-            return Err(polyfit_error(
+            return Err(polyfit_internal_error(
                 "polyfit: provider returned empty coefficient vector",
             ));
         }
         if result.r_matrix.len() != cols * cols {
-            return Err(polyfit_error(
+            return Err(polyfit_internal_error(
                 "polyfit: provider returned malformed R matrix",
             ));
         }
@@ -276,7 +469,7 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
         Value::Int(i) => {
             let raw = i.to_i64();
             if raw < 0 {
-                return Err(polyfit_error(
+                return Err(polyfit_argument_error(
                     "polyfit: degree must be a non-negative integer",
                 ));
             }
@@ -284,14 +477,14 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(polyfit_error("polyfit: degree must be finite"));
+                return Err(polyfit_argument_error("polyfit: degree must be finite"));
             }
             let rounded = n.round();
             if (rounded - n).abs() > EPS {
-                return Err(polyfit_error("polyfit: degree must be an integer"));
+                return Err(polyfit_argument_error("polyfit: degree must be an integer"));
             }
             if rounded < 0.0 {
-                return Err(polyfit_error(
+                return Err(polyfit_argument_error(
                     "polyfit: degree must be a non-negative integer",
                 ));
             }
@@ -301,7 +494,7 @@ fn parse_degree(value: &Value) -> BuiltinResult<usize> {
         Value::LogicalArray(l) if l.len() == 1 => {
             parse_degree(&Value::Num(if l.data[0] != 0 { 1.0 } else { 0.0 }))
         }
-        other => Err(polyfit_error(format!(
+        other => Err(polyfit_argument_error(format!(
             "polyfit: degree must be a scalar numeric value, got {other:?}"
         ))),
     }
@@ -397,27 +590,29 @@ async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f
             let gathered = dispatcher::gather_if_needed_async(&rest[0]).await?;
             let data = real_vector("polyfit", "weights", gathered).await?;
             if data.len() != len {
-                return Err(polyfit_error(
+                return Err(polyfit_argument_error(
                     "polyfit: weight vector must match the size of X",
                 ));
             }
             validate_weights(&data)?;
             Ok(Some(data))
         }
-        _ => Err(polyfit_error("polyfit: too many input arguments")),
+        _ => Err(polyfit_argument_error("polyfit: too many input arguments")),
     }
 }
 
 fn validate_weights(weights: &[f64]) -> BuiltinResult<()> {
     for (idx, w) in weights.iter().enumerate() {
         if !w.is_finite() {
-            return Err(polyfit_error(format!(
+            return Err(polyfit_argument_error(format!(
                 "polyfit: weight at position {} must be finite",
                 idx + 1
             )));
         }
         if *w < 0.0 {
-            return Err(polyfit_error("polyfit: weights must be non-negative"));
+            return Err(polyfit_argument_error(
+                "polyfit: weights must be non-negative",
+            ));
         }
     }
     Ok(())
@@ -441,7 +636,7 @@ fn solve_polyfit(
     }
     if let Some(w) = weights {
         if w.len() != x_data.len() {
-            return Err(polyfit_error(
+            return Err(polyfit_argument_error(
                 "polyfit: weight vector must match the size of X",
             ));
         }
@@ -842,6 +1037,31 @@ pub(crate) mod tests {
         block_on(super::evaluate(x, y, degree, rest))
     }
 
+    #[test]
+    fn polyfit_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = POLYFIT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"p = polyfit(X, Y, n)"));
+        assert!(labels.contains(&"p = polyfit(X, Y, n, weights)"));
+        assert!(labels.contains(&"[p, S] = polyfit(X, Y, n)"));
+        assert!(labels.contains(&"[p, S, mu] = polyfit(X, Y, n, weights)"));
+    }
+
+    #[test]
+    fn polyfit_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = POLYFIT_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.POLYFIT.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.POLYFIT.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.POLYFIT.INTERNAL"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fits_linear_data() {
@@ -944,6 +1164,7 @@ pub(crate) mod tests {
         let y = Tensor::new(vec![1.0, 3.0, 7.0], vec![3, 1]).unwrap();
         let err = evaluate(Value::Tensor(x), Value::Tensor(y), Value::Num(1.5), &[])
             .expect_err("polyfit should reject non-integer degree");
+        assert_eq!(err.identifier(), POLYFIT_ERROR_INVALID_ARGUMENT.identifier);
         assert_error_contains(err, "integer");
     }
 

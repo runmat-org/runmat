@@ -13,12 +13,198 @@ use crate::builtins::common::{
 use crate::builtins::math::reduction::type_resolvers::reduce_logical_type;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
 use runmat_builtins::ResolveContext;
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, LogicalArray, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "any";
+
+const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical reduction result.",
+}];
+
+const ANY_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input array.",
+}];
+
+const ANY_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const ANY_INPUTS_ALL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "all",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"all\""),
+        description: "Reduce across all dimensions.",
+    },
+];
+
+const ANY_INPUTS_NANFLAG: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const ANY_INPUTS_DIM_NANFLAG: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+];
+
+const ANY_INPUTS_NANFLAG_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "nanflag",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"includenan\""),
+        description: "NaN handling mode: \"includenan\" or \"omitnan\".",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Dimension selector or vector of dimensions.",
+    },
+];
+
+const ANY_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "B = any(A)",
+        inputs: &ANY_INPUTS_CORE,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = any(A, dim)",
+        inputs: &ANY_INPUTS_DIM,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = any(A, \"all\")",
+        inputs: &ANY_INPUTS_ALL,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = any(A, nanflag)",
+        inputs: &ANY_INPUTS_NANFLAG,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = any(A, dim, nanflag)",
+        inputs: &ANY_INPUTS_DIM_NANFLAG,
+        outputs: &ANY_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = any(A, nanflag, dim)",
+        inputs: &ANY_INPUTS_NANFLAG_DIM,
+        outputs: &ANY_OUTPUT,
+    },
+];
+
+const ANY_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ANY.INVALID_ARGUMENT",
+    identifier: Some("RunMat:any:InvalidArgument"),
+    when: "Dimension/all/nanflag argument grammar is invalid.",
+    message: "any: invalid reduction argument specification",
+};
+
+const ANY_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ANY.INVALID_INPUT",
+    identifier: Some("RunMat:any:InvalidInput"),
+    when: "Input type is unsupported for any reduction.",
+    message: "any: unsupported input type",
+};
+
+const ANY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ANY.INTERNAL",
+    identifier: Some("RunMat:any:Internal"),
+    when: "Reduction execution fails due to internal conversion, provider, or shape operations.",
+    message: "any: internal reduction failure",
+};
+
+const ANY_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    ANY_ERROR_INVALID_ARGUMENT,
+    ANY_ERROR_INVALID_INPUT,
+    ANY_ERROR_INTERNAL,
+];
+
+pub const ANY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ANY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ANY_ERRORS,
+};
 
 fn any_type(args: &[Type], ctx: &ResolveContext) -> Type {
     reduce_logical_type(args, ctx)
@@ -51,6 +237,24 @@ fn any_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
 }
 
+fn any_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    any_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn any_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::reduction::any")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "any",
@@ -73,10 +277,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "any",
     category = "math/reduction",
-    summary = "Test whether any element of an array is nonzero with MATLAB-compatible options.",
+    summary = "Test whether any elements are nonzero along a dimension.",
     keywords = "any,logical,reduction,omitnan,all,gpu",
     accel = "reduction",
     type_resolver(any_type),
+    descriptor(crate::builtins::math::reduction::any::ANY_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::any"
 )]
 async fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -364,8 +569,7 @@ impl TruthTensor {
             Value::Tensor(t) => Ok(Self::from_tensor(t)),
             Value::LogicalArray(logical) => Ok(Self::from_logical(logical)),
             Value::Num(n) => Ok(Self::from_tensor(
-                Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| any_error(format!("{NAME}: {e}")))?,
+                Tensor::new(vec![n], vec![1, 1]).map_err(|e| any_error(format!("{NAME}: {e}")))?,
             )),
             Value::Int(i) => Ok(Self::from_tensor(
                 Tensor::new(vec![i.to_f64()], vec![1, 1])
@@ -395,10 +599,13 @@ impl TruthTensor {
                 let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
                 Ok(Self::from_tensor(tensor))
             }
-            other => Err(any_error(format!(
-                "{NAME}: unsupported input type {:?}; expected numeric, logical, complex, or char data",
-                other
-            ))),
+            other => Err(any_descriptor_error_with_detail(
+                &ANY_ERROR_INVALID_INPUT,
+                format!(
+                    "unsupported input type {:?}; expected numeric, logical, complex, or char data",
+                    other
+                ),
+            )),
         }
     }
 
@@ -476,7 +683,10 @@ impl TruthTensor {
 
     fn reduce_dim(&self, dim: usize, nan_mode: ReductionNaN) -> BuiltinResult<Self> {
         if dim == 0 {
-            return Err(any_error("any: dimension must be >= 1"));
+            return Err(any_descriptor_error_with_detail(
+                &ANY_ERROR_INVALID_ARGUMENT,
+                "dimension must be >= 1",
+            ));
         }
         if is_scalar_shape(&self.shape) {
             let truth = self.data.first().copied().unwrap_or(TruthValue {
@@ -609,8 +819,9 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
     for (arg, token) in args.iter().zip(tokens.iter()) {
         if is_all_token_token(token) {
             if !matches!(spec, ReductionSpec::Default) {
-                return Err(any_error(
-                    "any: 'all' cannot be combined with dimension arguments",
+                return Err(any_descriptor_error_with_detail(
+                    &ANY_ERROR_INVALID_ARGUMENT,
+                    "'all' cannot be combined with dimension arguments",
                 ));
             }
             spec = ReductionSpec::All;
@@ -618,7 +829,10 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
         }
         if let Some(mode) = parse_nan_mode_token(token)? {
             if !matches!(nan_mode, ReductionNaN::Include) {
-                return Err(any_error("any: multiple NaN handling options specified"));
+                return Err(any_descriptor_error_with_detail(
+                    &ANY_ERROR_INVALID_ARGUMENT,
+                    "multiple NaN handling options specified",
+                ));
             }
             nan_mode = mode;
             continue;
@@ -631,15 +845,17 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(ReductionSpec, Reduct
             if matches!(spec, ReductionSpec::Default) {
                 spec = ReductionSpec::Dim(dims[0]);
             } else {
-                return Err(any_error(
-                    "any: multiple dimension specifications are not supported",
+                return Err(any_descriptor_error_with_detail(
+                    &ANY_ERROR_INVALID_ARGUMENT,
+                    "multiple dimension specifications are not supported",
                 ));
             }
         } else if matches!(spec, ReductionSpec::Default) {
             spec = ReductionSpec::VecDim(dims);
         } else {
-            return Err(any_error(
-                "any: multiple dimension specifications are not supported",
+            return Err(any_descriptor_error_with_detail(
+                &ANY_ERROR_INVALID_ARGUMENT,
+                "multiple dimension specifications are not supported",
             ));
         }
     }
@@ -654,7 +870,10 @@ fn parse_nan_mode_token(
         crate::builtins::common::arg_tokens::ArgToken::String(text) => match text.as_str() {
             "omitnan" => Ok(Some(ReductionNaN::Omit)),
             "includenan" => Ok(Some(ReductionNaN::Include)),
-            _ => Err(any_error(format!("any: unknown option '{}'", text))),
+            _ => Err(any_descriptor_error_with_detail(
+                &ANY_ERROR_INVALID_ARGUMENT,
+                format!("unknown option '{text}'"),
+            )),
         },
         _ => Ok(None),
     }
@@ -684,7 +903,10 @@ async fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
     let mut out = Vec::new();
     for dim in dims {
         if dim < 1 {
-            return Err(any_error("any: dimension values must be >= 1"));
+            return Err(any_descriptor_error_with_detail(
+                &ANY_ERROR_INVALID_ARGUMENT,
+                "dimension values must be >= 1",
+            ));
         }
         if !out.contains(&dim) {
             out.push(dim);
@@ -695,15 +917,24 @@ async fn parse_dimensions(value: &Value) -> BuiltinResult<Vec<usize>> {
 
 fn map_dims_error(message: String) -> RuntimeError {
     if message.contains("finite") {
-        return any_error("any: dimension values must be finite");
+        return any_descriptor_error_with_detail(
+            &ANY_ERROR_INVALID_ARGUMENT,
+            "dimension values must be finite",
+        );
     }
     if message.contains("integer") {
-        return any_error("any: dimension values must be integers");
+        return any_descriptor_error_with_detail(
+            &ANY_ERROR_INVALID_ARGUMENT,
+            "dimension values must be integers",
+        );
     }
     if message.contains("non-negative") {
-        return any_error("any: dimension values must be >= 1");
+        return any_descriptor_error_with_detail(
+            &ANY_ERROR_INVALID_ARGUMENT,
+            "dimension values must be >= 1",
+        );
     }
-    any_error(message)
+    any_descriptor_error_with_detail(&ANY_ERROR_INVALID_ARGUMENT, message)
 }
 
 fn product(dims: &[usize]) -> usize {
@@ -724,6 +955,10 @@ pub(crate) mod tests {
         block_on(super::any_builtin(value, rest))
     }
 
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
+    }
+
     #[test]
     fn any_type_returns_logical() {
         let out = any_type(
@@ -738,6 +973,25 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(1), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn any_descriptor_signatures_and_errors() {
+        let labels: Vec<&str> = ANY_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"B = any(A)"));
+        assert!(labels.contains(&"B = any(A, dim)"));
+        assert!(labels.contains(&"B = any(A, \"all\")"));
+        assert!(labels.contains(&"B = any(A, nanflag)"));
+        assert!(labels.contains(&"B = any(A, dim, nanflag)"));
+        assert!(labels.contains(&"B = any(A, nanflag, dim)"));
+        assert!(ANY_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|err| err.code == ANY_ERROR_INVALID_ARGUMENT.code));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -930,8 +1184,12 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("all"), Value::Int(IntValue::I32(1))];
         let err = any_builtin(Value::Tensor(tensor), args).unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            ANY_ERROR_INVALID_ARGUMENT.identifier
+        );
         assert!(
-            err.message().contains("dimension"),
+            err.message().contains(ANY_ERROR_INVALID_ARGUMENT.message),
             "unexpected error message: {err}"
         );
     }

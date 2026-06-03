@@ -1,22 +1,83 @@
 use runmat_accelerate::fusion::FusionGroup;
-use runmat_accelerate::graph::{AccelGraph, ShapeInfo};
+use runmat_accelerate::graph::ShapeInfo;
 
 use super::{
     FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot,
+    FusionPlannerMetadata,
 };
 
 pub(crate) fn build_fusion_snapshot(
-    graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
+    candidate_groups: &[runmat_vm::FusionCandidateGroup],
+    instruction_windows: &[runmat_vm::FusionInstructionWindow],
+    planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
-    graph?;
+    let planner = planner.unwrap_or_default();
+    let accel_graph_state = if planner.accel_graph_state.is_empty() {
+        "unknown"
+    } else {
+        planner.accel_graph_state.as_str()
+    };
     if groups.is_empty() {
-        return None;
+        if planner.mir_fusion_signal_count == 0 && planner.mir_fusion_candidate_group_count == 0 {
+            return None;
+        }
+        if !candidate_groups.is_empty() {
+            let mut nodes = Vec::new();
+            let mut edges = Vec::new();
+            let mut shaders = Vec::new();
+            let mut decisions = Vec::new();
+            append_semantic_candidate_artifacts(
+                candidate_groups,
+                "bytecode-groups=0",
+                accel_graph_state,
+                &mut nodes,
+                &mut edges,
+                &mut shaders,
+                &mut decisions,
+            );
+            append_semantic_window_artifacts(
+                instruction_windows,
+                "bytecode-groups=0",
+                accel_graph_state,
+                &mut nodes,
+                &mut edges,
+                &mut shaders,
+                &mut decisions,
+            );
+
+            return Some(FusionPlanSnapshot {
+                nodes,
+                edges,
+                shaders,
+                decisions,
+                planner,
+            });
+        }
+        return Some(FusionPlanSnapshot {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            shaders: Vec::new(),
+            decisions: vec![FusionPlanDecision {
+                node_id: "fusion-candidate-summary".to_string(),
+                fused: false,
+                reason: Some(format!(
+                    "mir-signals={} mir-candidate-groups={} semantic-windows={} bytecode-groups=0 accel-graph={}",
+                    planner.mir_fusion_signal_count,
+                    planner.mir_fusion_candidate_group_count,
+                    planner.mir_semantic_instruction_window_count,
+                    accel_graph_state
+                )),
+                thresholds: None,
+            }],
+            planner,
+        });
     }
     let mut nodes = Vec::with_capacity(groups.len());
     let mut edges = Vec::new();
     let mut shaders = Vec::with_capacity(groups.len());
     let mut decisions = Vec::with_capacity(groups.len());
+    let gate_open = planner.mir_fusion_candidate_group_count > 0;
 
     for (index, group) in groups.iter().enumerate() {
         let node_id = format!("group-{}", group.id);
@@ -41,11 +102,18 @@ pub(crate) fn build_fusion_snapshot(
         });
         decisions.push(FusionPlanDecision {
             node_id: node_id.clone(),
-            fused: true,
-            reason: Some(format!(
-                "kernel={:?} span=[{}..{}]",
-                group.kind, group.span.start, group.span.end
-            )),
+            fused: gate_open,
+            reason: Some(if gate_open {
+                format!(
+                    "kernel={:?} span=[{}..{}]",
+                    group.kind, group.span.start, group.span.end
+                )
+            } else {
+                format!(
+                    "kernel={:?} span=[{}..{}] fusion-candidate-groups=0 (bytecode compatibility artifact)",
+                    group.kind, group.span.start, group.span.end
+                )
+            }),
             thresholds: None,
         });
         if let Some(next) = groups.get(index + 1) {
@@ -57,11 +125,31 @@ pub(crate) fn build_fusion_snapshot(
         }
     }
 
+    append_semantic_candidate_artifacts(
+        candidate_groups,
+        &format!("bytecode-groups={}", groups.len()),
+        accel_graph_state,
+        &mut nodes,
+        &mut edges,
+        &mut shaders,
+        &mut decisions,
+    );
+    append_semantic_window_artifacts(
+        instruction_windows,
+        &format!("bytecode-groups={}", groups.len()),
+        accel_graph_state,
+        &mut nodes,
+        &mut edges,
+        &mut shaders,
+        &mut decisions,
+    );
+
     Some(FusionPlanSnapshot {
         nodes,
         edges,
         shaders,
         decisions,
+        planner,
     })
 }
 
@@ -70,5 +158,311 @@ fn shape_info(shape: &ShapeInfo) -> Vec<usize> {
         ShapeInfo::Unknown => Vec::new(),
         ShapeInfo::Scalar => vec![1, 1],
         ShapeInfo::Tensor(dims) => dims.iter().map(|d| d.unwrap_or(0)).collect::<Vec<usize>>(),
+    }
+}
+
+fn append_semantic_candidate_artifacts(
+    candidate_groups: &[runmat_vm::FusionCandidateGroup],
+    bytecode_group_state: &str,
+    accel_graph_state: &str,
+    nodes: &mut Vec<FusionPlanNode>,
+    edges: &mut Vec<FusionPlanEdge>,
+    shaders: &mut Vec<FusionPlanShader>,
+    decisions: &mut Vec<FusionPlanDecision>,
+) {
+    for (index, group) in candidate_groups.iter().enumerate() {
+        let node_id = format!("fusion-candidate-{}", group.id);
+        nodes.push(FusionPlanNode {
+            id: node_id.clone(),
+            kind: "FusionCandidate".to_string(),
+            label: format!(
+                "semantic-run f={:?} b={:?} stmts=[{}..{}] span=[{}..{}] signals={}",
+                group.function,
+                group.block,
+                group.stmt_start,
+                group.stmt_end,
+                group.source_span.start,
+                group.source_span.end,
+                group.signal_count
+            ),
+            shape: Vec::new(),
+            residency: None,
+        });
+        shaders.push(FusionPlanShader {
+            name: node_id.clone(),
+            stage: "semantic-candidate".to_string(),
+            workgroup_size: None,
+            source_hash: None,
+        });
+        decisions.push(FusionPlanDecision {
+            node_id: node_id.clone(),
+            fused: false,
+            reason: Some(format!(
+                "semantic-candidate signals={} span=[{}..{}] {} accel-graph={}",
+                group.signal_count,
+                group.source_span.start,
+                group.source_span.end,
+                bytecode_group_state,
+                accel_graph_state
+            )),
+            thresholds: None,
+        });
+        if let Some(next) = candidate_groups.get(index + 1) {
+            edges.push(FusionPlanEdge {
+                from: node_id,
+                to: format!("fusion-candidate-{}", next.id),
+                reason: Some("semantic-program-order".to_string()),
+            });
+        }
+    }
+}
+
+fn append_semantic_window_artifacts(
+    instruction_windows: &[runmat_vm::FusionInstructionWindow],
+    bytecode_group_state: &str,
+    accel_graph_state: &str,
+    nodes: &mut Vec<FusionPlanNode>,
+    edges: &mut Vec<FusionPlanEdge>,
+    shaders: &mut Vec<FusionPlanShader>,
+    decisions: &mut Vec<FusionPlanDecision>,
+) {
+    for (index, window) in instruction_windows.iter().enumerate() {
+        let node_id = format!("semantic-window-{index}");
+        nodes.push(FusionPlanNode {
+            id: node_id.clone(),
+            kind: "FusionWindow".to_string(),
+            label: format!(
+                "semantic-window kind={:?} span=[{}..{}]",
+                window.kind, window.span.start, window.span.end
+            ),
+            shape: Vec::new(),
+            residency: None,
+        });
+        shaders.push(FusionPlanShader {
+            name: node_id.clone(),
+            stage: "semantic-window".to_string(),
+            workgroup_size: None,
+            source_hash: None,
+        });
+        decisions.push(FusionPlanDecision {
+            node_id: node_id.clone(),
+            fused: false,
+            reason: Some(format!(
+                "semantic-window kind={:?} span=[{}..{}] {} accel-graph={}",
+                window.kind,
+                window.span.start,
+                window.span.end,
+                bytecode_group_state,
+                accel_graph_state
+            )),
+            thresholds: None,
+        });
+        if index + 1 < instruction_windows.len() {
+            edges.push(FusionPlanEdge {
+                from: node_id,
+                to: format!("semantic-window-{}", index + 1),
+                reason: Some("semantic-window-order".to_string()),
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_fusion_snapshot;
+    use crate::fusion::FusionPlannerMetadata;
+    use runmat_accelerate::fusion::{FusionGroup, FusionKind};
+    use runmat_accelerate::graph::{InstrSpan, ShapeInfo};
+
+    #[test]
+    fn candidate_summary_emits_without_accel_graph() {
+        let snapshot = build_fusion_snapshot(
+            &[],
+            &[],
+            &[],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 2,
+                mir_fusion_candidate_group_count: 1,
+                mir_semantic_instruction_window_count: 1,
+            }),
+        )
+        .expect("semantic candidate summary snapshot");
+
+        assert!(snapshot.nodes.is_empty(), "expected no bytecode nodes");
+        assert!(
+            snapshot
+                .decisions
+                .iter()
+                .any(|decision| decision.node_id == "fusion-candidate-summary"),
+            "expected semantic candidate summary decision"
+        );
+        assert_eq!(
+            snapshot.planner.accel_graph_state, "missing",
+            "expected missing accel graph planner metadata"
+        );
+    }
+
+    #[test]
+    fn candidate_groups_emit_nodes_without_bytecode_groups() {
+        let snapshot = build_fusion_snapshot(
+            &[],
+            &[runmat_vm::FusionCandidateGroup {
+                id: 0,
+                signal_count: 3,
+                function: runmat_hir::FunctionId(0),
+                block: runmat_mir::BasicBlockId(0),
+                stmt_start: 1,
+                stmt_end: 4,
+                source_span: runmat_hir::Span { start: 10, end: 18 },
+            }],
+            &[runmat_vm::FusionInstructionWindow {
+                span: InstrSpan { start: 1, end: 3 },
+                kind: runmat_vm::FusionInstructionKind::Elementwise,
+            }],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 3,
+                mir_fusion_candidate_group_count: 1,
+                mir_semantic_instruction_window_count: 1,
+            }),
+        )
+        .expect("semantic candidate snapshot");
+
+        assert_eq!(
+            snapshot.nodes.len(),
+            2,
+            "expected semantic candidate and semantic window nodes"
+        );
+        assert_eq!(snapshot.nodes[0].kind, "FusionCandidate");
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| node.kind == "FusionWindow"),
+            "expected semantic window node"
+        );
+        assert!(
+            snapshot
+                .decisions
+                .iter()
+                .any(|decision| decision.node_id == "fusion-candidate-0" && !decision.fused),
+            "expected semantic candidate decision for fusion-candidate-0"
+        );
+    }
+
+    #[test]
+    fn candidate_groups_emit_nodes_with_bytecode_groups() {
+        let snapshot = build_fusion_snapshot(
+            &[FusionGroup {
+                id: 7,
+                kind: FusionKind::ElementwiseChain,
+                nodes: vec![0, 1],
+                shape: ShapeInfo::Scalar,
+                span: InstrSpan { start: 3, end: 9 },
+                pattern: None,
+                stack_layout: None,
+            }],
+            &[runmat_vm::FusionCandidateGroup {
+                id: 1,
+                signal_count: 2,
+                function: runmat_hir::FunctionId(1),
+                block: runmat_mir::BasicBlockId(2),
+                stmt_start: 0,
+                stmt_end: 2,
+                source_span: runmat_hir::Span { start: 20, end: 30 },
+            }],
+            &[runmat_vm::FusionInstructionWindow {
+                span: InstrSpan { start: 3, end: 9 },
+                kind: runmat_vm::FusionInstructionKind::Elementwise,
+            }],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 2,
+                mir_fusion_candidate_group_count: 1,
+                mir_semantic_instruction_window_count: 1,
+            }),
+        )
+        .expect("fusion snapshot");
+
+        assert!(
+            snapshot.nodes.iter().any(|node| node.id == "group-7"),
+            "expected bytecode fusion node"
+        );
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| node.id == "fusion-candidate-1"),
+            "expected semantic candidate node"
+        );
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| node.kind == "FusionWindow"),
+            "expected semantic window node"
+        );
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| node.id == "fusion-candidate-1" && node.kind == "FusionCandidate"),
+            "expected semantic candidate node kind for fusion-candidate-1"
+        );
+    }
+
+    #[test]
+    fn bytecode_groups_without_semantic_candidates_are_marked_non_fused() {
+        let snapshot = build_fusion_snapshot(
+            &[FusionGroup {
+                id: 3,
+                kind: FusionKind::ElementwiseChain,
+                nodes: vec![0, 1],
+                shape: ShapeInfo::Scalar,
+                span: InstrSpan { start: 10, end: 12 },
+                pattern: None,
+                stack_layout: None,
+            }],
+            &[],
+            &[],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 2,
+                mir_fusion_candidate_group_count: 0,
+                mir_semantic_instruction_window_count: 0,
+            }),
+        )
+        .expect("snapshot");
+
+        let decision = snapshot
+            .decisions
+            .iter()
+            .find(|decision| decision.node_id == "group-3")
+            .expect("bytecode group decision");
+        assert!(
+            !decision.fused,
+            "expected bytecode-only group to be marked non-fused when semantic candidates are absent"
+        );
+        assert_eq!(
+            snapshot.planner.mir_fusion_candidate_group_count, 0,
+            "expected fusion-candidate-group metadata to reflect semantic gating"
+        );
     }
 }

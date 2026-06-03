@@ -1,7 +1,11 @@
 //! MATLAB-compatible `sign` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -52,19 +56,71 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "sign";
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const SIGN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise sign result.",
+}];
+
+const SIGN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Real or complex numeric input.",
+}];
+
+const SIGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = sign(X)",
+    inputs: &SIGN_INPUTS,
+    outputs: &SIGN_OUTPUT,
+}];
+
+const SIGN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIGN.INVALID_INPUT",
+    identifier: Some("RunMat:sign:InvalidInput"),
+    when: "Input is not a supported numeric/logical/character value.",
+    message: "sign: invalid input",
+};
+
+const SIGN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SIGN.INTERNAL",
+    identifier: Some("RunMat:sign:Internal"),
+    when: "Internal gather/provider/tensor construction failed.",
+    message: "sign: internal error",
+};
+
+const SIGN_ERRORS: [BuiltinErrorDescriptor; 2] = [SIGN_ERROR_INVALID_INPUT, SIGN_ERROR_INTERNAL];
+
+pub const SIGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SIGN_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SIGN_ERRORS,
+};
+
+fn sign_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "sign",
     category = "math/elementwise",
-    summary = "Sign of scalars, vectors, matrices, or N-D tensors with real or complex values.",
+    summary = "Compute element-wise sign values for real or complex inputs.",
     keywords = "sign,signum,elementwise,complex,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::sign::SIGN_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::sign"
 )]
 async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
@@ -76,8 +132,9 @@ async fn sign_builtin(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(ct) => sign_complex_tensor(ct),
         Value::CharArray(ca) => sign_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => Err(builtin_error(
-            "sign: expected numeric, logical, or character input",
+        Value::String(_) | Value::StringArray(_) => Err(sign_error_with_detail(
+            &SIGN_ERROR_INVALID_INPUT,
+            "expected numeric, logical, or character input",
         )),
         other => sign_real(other),
     }
@@ -97,13 +154,14 @@ async fn sign_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 
 fn sign_real(value: Value) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("sign", value)
-        .map_err(|e| builtin_error(format!("sign: {e}")))?;
+        .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INVALID_INPUT, e))?;
     Ok(tensor::tensor_into_value(sign_tensor(tensor)?))
 }
 
 fn sign_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
     let data = tensor.data.iter().map(|&x| sign_real_scalar(x)).collect();
-    Tensor::new(data, tensor.shape.clone()).map_err(|e| builtin_error(format!("sign: {e}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))
 }
 
 fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
@@ -113,7 +171,7 @@ fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
         .map(|&ch| sign_real_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
-        .map_err(|e| builtin_error(format!("sign: {e}")))?;
+        .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
@@ -124,7 +182,7 @@ fn sign_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| sign_complex(re, im))
         .collect::<Vec<_>>();
     let tensor = ComplexTensor::new(mapped, ct.shape.clone())
-        .map_err(|e| builtin_error(format!("sign: {e}")))?;
+        .map_err(|e| sign_error_with_detail(&SIGN_ERROR_INTERNAL, e))?;
     Ok(Value::ComplexTensor(tensor))
 }
 
@@ -182,6 +240,16 @@ pub(crate) mod tests {
 
     fn sign_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::sign_builtin(value))
+    }
+
+    #[test]
+    fn sign_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SIGN_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = sign(X)"));
     }
 
     #[test]
@@ -429,5 +497,12 @@ pub(crate) mod tests {
             }
             _ => panic!("unexpected shapes"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn sign_rejects_string_with_stable_identifier() {
+        let err = sign_builtin(Value::from("bad")).expect_err("expected error");
+        assert_eq!(err.identifier(), SIGN_ERROR_INVALID_INPUT.identifier);
     }
 }

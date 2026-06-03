@@ -1,4 +1,8 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ReferenceLine, ReferenceLineOrientation};
 
@@ -13,14 +17,138 @@ use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "xline";
 
+const XLINE_OUTPUT_HANDLES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Reference line handle scalar or row vector when multiple coordinates are provided.",
+}];
+
+const XLINE_INPUTS_COORD: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "X-coordinate scalar or numeric vector of vertical line positions.",
+}];
+
+const XLINE_INPUTS_COORD_STYLE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X-coordinate scalar or numeric vector of vertical line positions.",
+    },
+    BuiltinParamDescriptor {
+        name: "style_or_label",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "LineSpec token (for example '--r') or label text.",
+    },
+];
+
+const XLINE_INPUTS_COORD_STYLE_LABEL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X-coordinate scalar or numeric vector of vertical line positions.",
+    },
+    BuiltinParamDescriptor {
+        name: "linespec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line style token (for example '--r').",
+    },
+    BuiltinParamDescriptor {
+        name: "label",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Reference line label text.",
+    },
+];
+
+const XLINE_INPUTS_COORD_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "x",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X-coordinate scalar or numeric vector of vertical line positions.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Style arguments and Name/Value pairs (Color, LineWidth, LineStyle, LabelOrientation, Visible).",
+    },
+];
+
+const XLINE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = xline(x)",
+        inputs: &XLINE_INPUTS_COORD,
+        outputs: &XLINE_OUTPUT_HANDLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = xline(x, styleOrLabel)",
+        inputs: &XLINE_INPUTS_COORD_STYLE,
+        outputs: &XLINE_OUTPUT_HANDLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = xline(x, LineSpec, label)",
+        inputs: &XLINE_INPUTS_COORD_STYLE_LABEL,
+        outputs: &XLINE_OUTPUT_HANDLES,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = xline(x, Name, Value, ...)",
+        inputs: &XLINE_INPUTS_COORD_PROPS,
+        outputs: &XLINE_OUTPUT_HANDLES,
+    },
+];
+
+const XLINE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.XLINE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:xline:InvalidArgument"),
+    when: "Coordinate input, style arguments, or Name/Value pairs are invalid.",
+    message: "xline: invalid argument",
+};
+
+const XLINE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.XLINE.INTERNAL",
+    identifier: Some("RunMat:xline:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "xline: internal operation failed",
+};
+
+const XLINE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [XLINE_ERROR_INVALID_ARGUMENT, XLINE_ERROR_INTERNAL];
+
+pub const XLINE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &XLINE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &XLINE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "xline",
     category = "plotting",
-    summary = "Draw vertical reference lines on the current axes.",
+    summary = "Draw vertical reference lines on current or specified axes.",
     keywords = "xline,reference,line,plotting",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::xline::XLINE_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::xline"
 )]
 pub fn xline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -287,6 +415,18 @@ mod tests {
 
     fn tensor(data: &[f64]) -> Tensor {
         Tensor::new_2d(data.to_vec(), 1, data.len()).unwrap()
+    }
+
+    #[test]
+    fn xline_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = XLINE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = xline(x)"));
+        assert!(labels.contains(&"h = xline(x, styleOrLabel)"));
+        assert!(labels.contains(&"h = xline(x, Name, Value, ...)"));
     }
 
     #[test]

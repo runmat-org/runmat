@@ -5,7 +5,11 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
 use base64::Engine;
-use runmat_builtins::{CellArray, CharArray, StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use url::Url;
 
@@ -22,6 +26,187 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 const DEFAULT_TIMEOUT_SECONDS: f64 = 60.0;
 const DEFAULT_USER_AGENT: &str = "RunMat webwrite/0.0";
+const BUILTIN_NAME: &str = "webwrite";
+
+const WEBWRITE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "response",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Decoded response payload from the remote endpoint.",
+}];
+const WEBWRITE_INPUTS_URL_DATA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL target.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Request payload value.",
+    },
+];
+const WEBWRITE_INPUTS_URL_DATA_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL target.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Request payload value.",
+    },
+    BuiltinParamDescriptor {
+        name: "optionsStruct",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "weboptions struct or option struct literal.",
+    },
+];
+const WEBWRITE_INPUTS_URL_DATA_NAME_VALUE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "url",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "HTTP/HTTPS URL target.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Request payload value.",
+    },
+    BuiltinParamDescriptor {
+        name: "name",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option or query parameter name.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option or query parameter value.",
+    },
+];
+const WEBWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "response = webwrite(url, data)",
+        inputs: &WEBWRITE_INPUTS_URL_DATA,
+        outputs: &WEBWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "response = webwrite(url, data, optionsStruct)",
+        inputs: &WEBWRITE_INPUTS_URL_DATA_OPTIONS,
+        outputs: &WEBWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "response = webwrite(url, data, name, value, ...)",
+        inputs: &WEBWRITE_INPUTS_URL_DATA_NAME_VALUE,
+        outputs: &WEBWRITE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "response = webwrite(url, data, optionsStruct, name, value, ...)",
+        inputs: &WEBWRITE_INPUTS_URL_DATA_NAME_VALUE,
+        outputs: &WEBWRITE_OUTPUT,
+    },
+];
+
+const WEBWRITE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:webwrite:InvalidArgument"),
+    when: "Argument type/shape does not match webwrite call contract.",
+    message: "webwrite: invalid argument",
+};
+const WEBWRITE_ERROR_INVALID_URL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.INVALID_URL",
+    identifier: Some("RunMat:webwrite:InvalidUrl"),
+    when: "URL is empty or malformed.",
+    message: "webwrite: invalid URL",
+};
+const WEBWRITE_ERROR_MISSING_DATA: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.MISSING_DATA",
+    identifier: Some("RunMat:webwrite:MissingData"),
+    when: "Required data argument is missing.",
+    message: "webwrite: missing data argument",
+};
+const WEBWRITE_ERROR_MISSING_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.MISSING_OPTION_VALUE",
+    identifier: Some("RunMat:webwrite:MissingOptionValue"),
+    when: "A name-value option key has no value.",
+    message: "webwrite: missing option value",
+};
+const WEBWRITE_ERROR_INVALID_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.INVALID_OPTION_VALUE",
+    identifier: Some("RunMat:webwrite:InvalidOptionValue"),
+    when: "An option value fails validation.",
+    message: "webwrite: invalid option value",
+};
+const WEBWRITE_ERROR_INVALID_CREDENTIALS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.INVALID_CREDENTIALS",
+    identifier: Some("RunMat:webwrite:InvalidCredentials"),
+    when: "Password is provided without username.",
+    message: "webwrite: invalid credentials",
+};
+const WEBWRITE_ERROR_TRANSPORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.TRANSPORT",
+    identifier: Some("RunMat:webwrite:Transport"),
+    when: "HTTP transport fails.",
+    message: "webwrite: transport failure",
+};
+const WEBWRITE_ERROR_RESPONSE_JSON: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.RESPONSE_JSON",
+    identifier: Some("RunMat:webwrite:ResponseJson"),
+    when: "Response body cannot be decoded as JSON.",
+    message: "webwrite: failed to parse JSON response",
+};
+const WEBWRITE_ERROR_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.OUTPUT",
+    identifier: Some("RunMat:webwrite:Output"),
+    when: "Output payload cannot be materialized.",
+    message: "webwrite: output materialization failure",
+};
+const WEBWRITE_ERROR_FLOW: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.WEBWRITE.FLOW",
+    identifier: Some("RunMat:webwrite:Flow"),
+    when: "Nested flow fails while gathering inputs or nested builtin calls.",
+    message: "webwrite: flow failure",
+};
+
+const WEBWRITE_ERRORS: [BuiltinErrorDescriptor; 10] = [
+    WEBWRITE_ERROR_INVALID_ARGUMENT,
+    WEBWRITE_ERROR_INVALID_URL,
+    WEBWRITE_ERROR_MISSING_DATA,
+    WEBWRITE_ERROR_MISSING_OPTION_VALUE,
+    WEBWRITE_ERROR_INVALID_OPTION_VALUE,
+    WEBWRITE_ERROR_INVALID_CREDENTIALS,
+    WEBWRITE_ERROR_TRANSPORT,
+    WEBWRITE_ERROR_RESPONSE_JSON,
+    WEBWRITE_ERROR_OUTPUT,
+    WEBWRITE_ERROR_FLOW,
+];
+
+pub const WEBWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &WEBWRITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &WEBWRITE_ERRORS,
+};
 
 #[allow(clippy::too_many_lines)]
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::http::webwrite")]
@@ -41,23 +226,58 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 fn webwrite_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin("webwrite")
-        .build()
+    webwrite_error_with(&WEBWRITE_ERROR_INVALID_ARGUMENT, message)
 }
 
-fn remap_webwrite_flow<F>(err: RuntimeError, message: F) -> RuntimeError
+fn webwrite_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn webwrite_error_with_source<E>(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+    source: E,
+) -> RuntimeError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let mut builder = build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn remap_webwrite_flow<F>(
+    error: &'static BuiltinErrorDescriptor,
+    err: RuntimeError,
+    message: F,
+) -> RuntimeError
 where
     F: FnOnce(&RuntimeError) -> String,
 {
-    build_runtime_error(message(&err))
-        .with_builtin("webwrite")
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(message(&err))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn webwrite_flow_with_context(err: RuntimeError) -> RuntimeError {
-    remap_webwrite_flow(err, |err| format!("webwrite: {}", err.message()))
+    remap_webwrite_flow(&WEBWRITE_ERROR_FLOW, err, |err| {
+        format!("webwrite: {}", err.message())
+    })
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::http::webwrite")]
@@ -74,10 +294,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "webwrite",
     category = "io/http",
-    summary = "Send data to web services using HTTP POST/PUT requests and return the response.",
+    summary = "Write data to web services via HTTP and return decoded responses.",
     keywords = "webwrite,http post,rest client,json upload,form post",
     accel = "sink",
     type_resolver(crate::builtins::io::type_resolvers::webwrite_type),
+    descriptor(crate::builtins::io::http::webwrite::WEBWRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::http::webwrite"
 )]
 async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -89,10 +310,16 @@ async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         "webwrite: URL must be a character vector or string scalar",
     )?;
     if url_text.trim().is_empty() {
-        return Err(webwrite_error("webwrite: URL must not be empty"));
+        return Err(webwrite_error_with(
+            &WEBWRITE_ERROR_INVALID_URL,
+            "webwrite: URL must not be empty",
+        ));
     }
     if rest.is_empty() {
-        return Err(webwrite_error("webwrite: missing data argument"));
+        return Err(webwrite_error_with(
+            &WEBWRITE_ERROR_MISSING_DATA,
+            WEBWRITE_ERROR_MISSING_DATA.message,
+        ));
     }
 
     let mut gathered = Vec::with_capacity(rest.len());
@@ -104,9 +331,12 @@ async fn webwrite_builtin(url: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         );
     }
     let mut queue: VecDeque<Value> = VecDeque::from(gathered);
-    let data_value = queue
-        .pop_front()
-        .ok_or_else(|| webwrite_error("webwrite: missing data argument"))?;
+    let data_value = queue.pop_front().ok_or_else(|| {
+        webwrite_error_with(
+            &WEBWRITE_ERROR_MISSING_DATA,
+            WEBWRITE_ERROR_MISSING_DATA.message,
+        )
+    })?;
 
     let (options, query_params) = parse_arguments(queue)?;
     let body = prepare_request_body(data_value, &options).await?;
@@ -134,9 +364,12 @@ fn parse_arguments(
             &name_value,
             "webwrite: parameter names must be character vectors or strings",
         )?;
-        let value = queue
-            .pop_front()
-            .ok_or_else(|| webwrite_error("webwrite: missing value for name-value argument"))?;
+        let value = queue.pop_front().ok_or_else(|| {
+            webwrite_error_with(
+                &WEBWRITE_ERROR_MISSING_OPTION_VALUE,
+                "webwrite: missing value for name-value argument",
+            )
+        })?;
         process_name_value_pair(&name, &value, &mut options, &mut query_params)?;
     }
 
@@ -244,16 +477,18 @@ fn execute_request(
         .map(|s| !s.is_empty())
         .unwrap_or(false);
     if password_present && !username_present {
-        return Err(webwrite_error(
+        return Err(webwrite_error_with(
+            &WEBWRITE_ERROR_INVALID_CREDENTIALS,
             "webwrite: Password requires a Username option",
         ));
     }
 
     let mut url = Url::parse(url_text).map_err(|err| {
-        build_runtime_error(format!("webwrite: invalid URL '{url_text}': {err}"))
-            .with_builtin("webwrite")
-            .with_source(err)
-            .build()
+        webwrite_error_with_source(
+            &WEBWRITE_ERROR_INVALID_URL,
+            format!("webwrite: invalid URL '{url_text}': {err}"),
+            err,
+        )
     })?;
     if !query_params.is_empty() {
         {
@@ -301,10 +536,11 @@ fn execute_request(
     };
 
     let response = transport::send_request(&request).map_err(|err| {
-        build_runtime_error(err.message_with_prefix("webwrite"))
-            .with_builtin("webwrite")
-            .with_source(err)
-            .build()
+        webwrite_error_with_source(
+            &WEBWRITE_ERROR_TRANSPORT,
+            err.message_with_prefix("webwrite"),
+            err,
+        )
     })?;
 
     let header_content_type =
@@ -324,8 +560,9 @@ fn execute_request(
         ResolvedContentType::Binary => {
             let data: Vec<f64> = response.body.iter().map(|b| f64::from(*b)).collect();
             let cols = data.len();
-            let tensor = Tensor::new(data, vec![1, cols])
-                .map_err(|err| webwrite_error(format!("webwrite: {err}")))?;
+            let tensor = Tensor::new(data, vec![1, cols]).map_err(|err| {
+                webwrite_error_with(&WEBWRITE_ERROR_OUTPUT, format!("webwrite: {err}"))
+            })?;
             Ok(Value::Tensor(tensor))
         }
     }
@@ -430,7 +667,11 @@ fn hex_digit(nibble: u8) -> char {
 async fn encode_json_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
     let encoded = call_builtin_async("jsonencode", std::slice::from_ref(value))
         .await
-        .map_err(|flow| remap_webwrite_flow(flow, |err| format!("webwrite: {}", err.message())))?;
+        .map_err(|flow| {
+            remap_webwrite_flow(&WEBWRITE_ERROR_FLOW, flow, |err| {
+                format!("webwrite: {}", err.message())
+            })
+        })?;
     let text = expect_string_scalar(
         &encoded,
         "webwrite: jsonencode returned unexpected value; expected text scalar",
@@ -663,10 +904,7 @@ fn map_json_error(err: RuntimeError) -> RuntimeError {
             err.message()
         )
     };
-    build_runtime_error(message)
-        .with_builtin("webwrite")
-        .with_source(err)
-        .build()
+    webwrite_error_with_source(&WEBWRITE_ERROR_RESPONSE_JSON, message, err)
 }
 
 fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64> {
@@ -984,6 +1222,19 @@ pub(crate) mod tests {
 
     fn run_webwrite(url: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(webwrite_builtin(url, rest))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn webwrite_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = WEBWRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"response = webwrite(url, data)"));
+        assert!(labels.contains(&"response = webwrite(url, data, optionsStruct)"));
+        assert!(labels.contains(&"response = webwrite(url, data, name, value, ...)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

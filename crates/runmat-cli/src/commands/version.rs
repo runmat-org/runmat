@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_gc::gc_stats;
 
 pub fn show_version(detailed: bool) {
@@ -25,7 +25,7 @@ pub fn show_version(detailed: bool) {
     }
 }
 
-pub async fn show_system_info(config: &RunMatConfig) -> Result<()> {
+pub async fn show_system_info(config: &RunMatRuntimeConfig) -> Result<()> {
     println!("RunMat System Information");
     println!("==========================");
     println!();
@@ -71,22 +71,15 @@ pub async fn show_system_info(config: &RunMatConfig) -> Result<()> {
     println!();
 
     println!("Environment:");
-    println!("  RUNMAT_DEBUG: {:?}", std::env::var("RUNMAT_DEBUG").ok());
+    println!("  RUNMAT_CONFIG: {:?}", std::env::var("RUNMAT_CONFIG").ok());
     println!(
-        "  RUNMAT_LOG_LEVEL: {:?}",
-        std::env::var("RUNMAT_LOG_LEVEL").ok()
+        "  RUNMAT_SERVER_URL: {:?}",
+        std::env::var("RUNMAT_SERVER_URL").ok()
     );
+    println!("  RUNMAT_ORG_ID: {:?}", std::env::var("RUNMAT_ORG_ID").ok());
     println!(
-        "  RUNMAT_TIMEOUT: {:?}",
-        std::env::var("RUNMAT_TIMEOUT").ok()
-    );
-    println!(
-        "  RUNMAT_JIT_ENABLE: {:?}",
-        std::env::var("RUNMAT_JIT_ENABLE").ok()
-    );
-    println!(
-        "  RUNMAT_GC_PRESET: {:?}",
-        std::env::var("RUNMAT_GC_PRESET").ok()
+        "  RUNMAT_PROJECT_ID: {:?}",
+        std::env::var("RUNMAT_PROJECT_ID").ok()
     );
     println!();
 

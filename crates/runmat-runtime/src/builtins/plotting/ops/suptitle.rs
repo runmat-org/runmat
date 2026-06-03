@@ -1,15 +1,140 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
+const SUPTITLE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created/updated super-title object.",
+}];
+
+const SUPTITLE_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+}];
+
+const SUPTITLE_INPUTS_FIG_TEXT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fig",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target figure handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+    },
+];
+
+const SUPTITLE_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const SUPTITLE_INPUTS_FIG_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fig",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target figure handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Super-title text (string/char/cellstr-like multiline forms; numeric scalars also accepted).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const SUPTITLE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = suptitle(txt)",
+        inputs: &SUPTITLE_INPUTS_TEXT,
+        outputs: &SUPTITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = suptitle(fig, txt)",
+        inputs: &SUPTITLE_INPUTS_FIG_TEXT,
+        outputs: &SUPTITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = suptitle(txt, Name, Value, ...)",
+        inputs: &SUPTITLE_INPUTS_TEXT_PROPS,
+        outputs: &SUPTITLE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = suptitle(fig, txt, Name, Value, ...)",
+        inputs: &SUPTITLE_INPUTS_FIG_TEXT_PROPS,
+        outputs: &SUPTITLE_OUTPUT_HANDLE,
+    },
+];
+
+const SUPTITLE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUPTITLE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:suptitle:InvalidArgument"),
+    when: "Figure handle, text payload, or property/value arguments are invalid.",
+    message: "suptitle: invalid argument",
+};
+
+const SUPTITLE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUPTITLE.INTERNAL",
+    identifier: Some("RunMat:suptitle:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "suptitle: internal operation failed",
+};
+
+const SUPTITLE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SUPTITLE_ERROR_INVALID_ARGUMENT, SUPTITLE_ERROR_INTERNAL];
+
+pub const SUPTITLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SUPTITLE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SUPTITLE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "suptitle",
     category = "plotting",
-    summary = "Set a title centered above the entire figure.",
+    summary = "Set a centered figure-level title (legacy alias of `sgtitle`).",
     keywords = "suptitle,sgtitle,subplot,title,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::suptitle::SUPTITLE_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::suptitle"
 )]
 pub fn suptitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -34,6 +159,18 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    #[test]
+    fn suptitle_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SUPTITLE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = suptitle(txt)"));
+        assert!(labels.contains(&"h = suptitle(fig, txt)"));
+        assert!(labels.contains(&"h = suptitle(txt, Name, Value, ...)"));
     }
 
     #[test]

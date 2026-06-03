@@ -1,7 +1,11 @@
 //! MATLAB-compatible `fwrite` builtin for RunMat.
 use std::io::{Seek, SeekFrom, Write};
 
-use runmat_builtins::{CharArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -41,35 +45,266 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fwrite";
 
-fn fwrite_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const FWRITE_OUTPUT_COUNT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "count",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Number of elements successfully written.",
+}];
+const FWRITE_INPUTS_FID_DATA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical/text payload to write.",
+    },
+];
+const FWRITE_INPUTS_FID_DATA_PRECISION: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical/text payload to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"uint8\""),
+        description: "Write precision label (for example \"uint8\", \"double\").",
+    },
+];
+const FWRITE_INPUTS_FID_DATA_PRECISION_SKIP: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical/text payload to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"uint8\""),
+        description: "Write precision label (for example \"uint8\", \"double\").",
+    },
+    BuiltinParamDescriptor {
+        name: "skip",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Bytes skipped after each element written.",
+    },
+];
+const FWRITE_INPUTS_FID_DATA_PRECISION_MACHINEFMT: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical/text payload to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"uint8\""),
+        description: "Write precision label (for example \"uint8\", \"double\").",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine format label (native/little-endian/big-endian aliases).",
+    },
+];
+const FWRITE_INPUTS_FID_DATA_PRECISION_SKIP_MACHINEFMT: [BuiltinParamDescriptor; 5] = [
+    BuiltinParamDescriptor {
+        name: "fid",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "File identifier opened by fopen.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric/logical/text payload to write.",
+    },
+    BuiltinParamDescriptor {
+        name: "precision",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"uint8\""),
+        description: "Write precision label (for example \"uint8\", \"double\").",
+    },
+    BuiltinParamDescriptor {
+        name: "skip",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("0"),
+        description: "Bytes skipped after each element written.",
+    },
+    BuiltinParamDescriptor {
+        name: "machinefmt",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"native\""),
+        description: "Machine format label (native/little-endian/big-endian aliases).",
+    },
+];
+const FWRITE_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
+    BuiltinSignatureDescriptor {
+        label: "count = fwrite(fid, data)",
+        inputs: &FWRITE_INPUTS_FID_DATA,
+        outputs: &FWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = fwrite(fid, data, precision)",
+        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION,
+        outputs: &FWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = fwrite(fid, data, precision, skip)",
+        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION_SKIP,
+        outputs: &FWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = fwrite(fid, data, precision, machinefmt)",
+        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION_MACHINEFMT,
+        outputs: &FWRITE_OUTPUT_COUNT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "count = fwrite(fid, data, precision, skip, machinefmt)",
+        inputs: &FWRITE_INPUTS_FID_DATA_PRECISION_SKIP_MACHINEFMT,
+        outputs: &FWRITE_OUTPUT_COUNT,
+    },
+];
+
+const FWRITE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FWRITE.INVALID_INPUT",
+    identifier: Some("RunMat:fwrite:InvalidInput"),
+    when: "Identifier, payload, or argument cardinality/type constraints are violated.",
+    message: "fwrite: invalid input arguments",
+};
+const FWRITE_ERROR_INVALID_IDENTIFIER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FWRITE.INVALID_IDENTIFIER",
+    identifier: Some("RunMat:fwrite:InvalidIdentifier"),
+    when: "Identifier does not refer to a writable open file.",
+    message: "fwrite: invalid file identifier. Use fopen to generate a valid file ID.",
+};
+const FWRITE_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FWRITE.INVALID_OPTION",
+    identifier: Some("RunMat:fwrite:InvalidOption"),
+    when: "Precision, skip, or machine format options are invalid.",
+    message: "fwrite: invalid option configuration",
+};
+const FWRITE_ERROR_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FWRITE.IO",
+    identifier: Some("RunMat:fwrite:IoFailure"),
+    when: "Write/seek operation fails.",
+    message: "fwrite: file write failed",
+};
+const FWRITE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FWRITE.INTERNAL",
+    identifier: None,
+    when: "Internal runtime control-flow conversion fails.",
+    message: "fwrite: internal error",
+};
+const FWRITE_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    FWRITE_ERROR_INVALID_INPUT,
+    FWRITE_ERROR_INVALID_IDENTIFIER,
+    FWRITE_ERROR_INVALID_OPTION,
+    FWRITE_ERROR_IO,
+    FWRITE_ERROR_INTERNAL,
+];
+pub const FWRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FWRITE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FWRITE_ERRORS,
+};
+
+fn fwrite_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("fwrite: ").unwrap_or(detail);
+    fwrite_error_with_message(format!("{}: {}", error.message, detail), error)
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let message = err.message().to_string();
-    let identifier = err.identifier().map(|value| value.to_string());
-    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {message}"))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
+fn fwrite_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
 }
 
-fn map_string_result<T>(result: Result<T, String>) -> BuiltinResult<T> {
-    result.map_err(fwrite_error)
+fn map_control_flow(err: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{BUILTIN_NAME}: {}", err.message()))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = FWRITE_ERROR_INTERNAL.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_string_result<T>(
+    result: Result<T, String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<T> {
+    result.map_err(|detail| fwrite_error_with_detail(error, detail))
 }
 
 #[runtime_builtin(
     name = "fwrite",
     category = "io/filetext",
-    summary = "Write binary data to a file identifier.",
+    summary = "Write binary data to file identifiers.",
     keywords = "fwrite,file,io,binary,precision",
     accel = "cpu",
     type_resolver(crate::builtins::io::type_resolvers::fwrite_type),
+    descriptor(crate::builtins::io::filetext::fwrite::FWRITE_DESCRIPTOR),
     builtin_path = "crate::builtins::io::filetext::fwrite"
 )]
 async fn fwrite_builtin(fid: Value, data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -101,46 +336,64 @@ pub async fn evaluate(
     rest: &[Value],
 ) -> BuiltinResult<FwriteEval> {
     let fid_host = gather_value(fid_value).await?;
-    let fid = map_string_result(parse_fid(&fid_host))?;
+    let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
     if fid < 0 {
-        return Err(fwrite_error("fwrite: file identifier must be non-negative"));
+        return Err(fwrite_error_with_detail(
+            &FWRITE_ERROR_INVALID_INPUT,
+            "file identifier must be non-negative",
+        ));
     }
     if fid < 3 {
-        return Err(fwrite_error(
-            "fwrite: standard input/output identifiers are not supported yet",
+        return Err(fwrite_error_with_detail(
+            &FWRITE_ERROR_INVALID_INPUT,
+            "standard input/output identifiers are not supported yet",
         ));
     }
 
     let info = registry::info_for(fid).ok_or_else(|| {
-        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
+        fwrite_error_with_message(
+            FWRITE_ERROR_INVALID_IDENTIFIER.message,
+            &FWRITE_ERROR_INVALID_IDENTIFIER,
+        )
     })?;
     let handle = registry::take_handle(fid).ok_or_else(|| {
-        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
+        fwrite_error_with_message(
+            FWRITE_ERROR_INVALID_IDENTIFIER.message,
+            &FWRITE_ERROR_INVALID_IDENTIFIER,
+        )
     })?;
 
     let data_host = gather_value(data_value).await?;
     let rest_host = gather_args(rest).await?;
-    let (precision_arg, skip_arg, machine_arg) = map_string_result(classify_arguments(&rest_host))?;
+    let (precision_arg, skip_arg, machine_arg) =
+        map_string_result(classify_arguments(&rest_host), &FWRITE_ERROR_INVALID_INPUT)?;
 
-    let precision_spec = map_string_result(parse_precision(precision_arg))?;
-    let skip_bytes = map_string_result(parse_skip(skip_arg))?;
-    let machine_format = map_string_result(parse_machine_format(machine_arg, &info.machinefmt))?;
+    let precision_spec =
+        map_string_result(parse_precision(precision_arg), &FWRITE_ERROR_INVALID_OPTION)?;
+    let skip_bytes = map_string_result(parse_skip(skip_arg), &FWRITE_ERROR_INVALID_OPTION)?;
+    let machine_format = map_string_result(
+        parse_machine_format(machine_arg, &info.machinefmt),
+        &FWRITE_ERROR_INVALID_OPTION,
+    )?;
 
-    let mut guard = handle
-        .lock()
-        .map_err(|_| fwrite_error("fwrite: failed to lock file handle (poisoned mutex)"))?;
+    let mut guard = handle.lock().map_err(|_| {
+        fwrite_error_with_detail(
+            &FWRITE_ERROR_INTERNAL,
+            "failed to lock file handle (poisoned mutex)",
+        )
+    })?;
     let file = guard.as_mut().ok_or_else(|| {
-        fwrite_error("fwrite: Invalid file identifier. Use fopen to generate a valid file ID.")
+        fwrite_error_with_message(
+            FWRITE_ERROR_INVALID_IDENTIFIER.message,
+            &FWRITE_ERROR_INVALID_IDENTIFIER,
+        )
     })?;
 
-    let elements = map_string_result(flatten_elements(&data_host))?;
-    let count = map_string_result(write_elements(
-        file,
-        &elements,
-        precision_spec,
-        skip_bytes,
-        machine_format,
-    ))?;
+    let elements = map_string_result(flatten_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
+    let count = map_string_result(
+        write_elements(file, &elements, precision_spec, skip_bytes, machine_format),
+        &FWRITE_ERROR_IO,
+    )?;
     Ok(FwriteEval::new(count))
 }
 
@@ -706,6 +959,20 @@ pub(crate) mod tests {
 
     fn registry_guard() -> std::sync::MutexGuard<'static, ()> {
         registry::test_guard()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fwrite_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = FWRITE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"count = fwrite(fid, data)"));
+        assert!(labels.contains(&"count = fwrite(fid, data, precision, skip)"));
+        assert!(labels.contains(&"count = fwrite(fid, data, precision, machinefmt)"));
+        assert!(labels.contains(&"count = fwrite(fid, data, precision, skip, machinefmt)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

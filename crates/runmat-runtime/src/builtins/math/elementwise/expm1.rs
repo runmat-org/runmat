@@ -5,7 +5,11 @@
 //! and falls back to host computation otherwise, matching MATLAB behaviour.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -61,19 +65,71 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "expm1";
 
+const EXPM1_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elementwise exp(x)-1 result.",
+}];
+const EXPM1_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric, logical, char, or complex input.",
+}];
+const EXPM1_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = expm1(X)",
+    inputs: &EXPM1_INPUTS,
+    outputs: &EXPM1_OUTPUT,
+}];
+const EXPM1_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXPM1.INVALID_INPUT",
+    identifier: Some("RunMat:expm1:InvalidInput"),
+    when: "Input cannot be interpreted as numeric, logical, char, or complex data.",
+    message: "expm1: invalid input",
+};
+const EXPM1_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EXPM1.INTERNAL",
+    identifier: Some("RunMat:expm1:Internal"),
+    when: "Internal tensor construction or provider interaction failed.",
+    message: "expm1: internal error",
+};
+const EXPM1_ERRORS: [BuiltinErrorDescriptor; 2] = [EXPM1_ERROR_INVALID_INPUT, EXPM1_ERROR_INTERNAL];
+pub const EXPM1_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &EXPM1_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &EXPM1_ERRORS,
+};
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
 }
 
+fn expm1_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "expm1",
     category = "math/elementwise",
-    summary = "Accurate element-wise computation of exp(x) - 1.",
+    summary = "Compute exp(x)-1 element-wise with near-zero accuracy.",
     keywords = "expm1,exp(x)-1,exponential,elementwise,gpu,precision",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::elementwise::expm1::EXPM1_DESCRIPTOR),
     builtin_path = "crate::builtins::math::elementwise::expm1"
 )]
 async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
@@ -85,9 +141,10 @@ async fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
         }
         Value::ComplexTensor(ct) => expm1_complex_tensor(ct),
         Value::CharArray(ca) => expm1_char_array(ca),
-        Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("expm1: expected numeric input"))
-        }
+        Value::String(_) | Value::StringArray(_) => Err(expm1_error_with_detail(
+            &EXPM1_ERROR_INVALID_INPUT,
+            "expected numeric input",
+        )),
         other => expm1_real(other),
     }
 }
@@ -159,6 +216,22 @@ pub(crate) mod tests {
 
     fn expm1_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::expm1_builtin(value))
+    }
+
+    #[test]
+    fn expm1_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = EXPM1_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = expm1(X)"));
+    }
+
+    #[test]
+    fn expm1_string_rejected_with_stable_identifier() {
+        let err = expm1_builtin(Value::from("bad")).expect_err("expected input error");
+        assert_eq!(err.identifier(), EXPM1_ERROR_INVALID_INPUT.identifier);
     }
 
     #[test]

@@ -219,6 +219,10 @@ impl Parser {
                 let span = self.span_from(start, end);
                 expr = Expr::Index(Box::new(expr), indices, span);
             } else if self.consume(&Token::LBrace) {
+                if let Some(aggregate_expr) = self.try_parse_brace_aggregate_literal(&expr)? {
+                    expr = aggregate_expr;
+                    continue;
+                }
                 let start = expr.span().start;
                 let mut indices = Vec::new();
                 indices.push(self.parse_expr()?);
@@ -245,6 +249,19 @@ impl Parser {
                     break;
                 }
                 self.pos += 1;
+                if self.consume(&Token::LParen) {
+                    let name_expr = self.parse_expr()?;
+                    if !self.consume(&Token::RParen) {
+                        return Err(self.error_with_expected(
+                            "expected ')' after dynamic member expression",
+                            "')'",
+                        ));
+                    }
+                    let end = self.last_token_end();
+                    let span = self.span_from(expr.span().start, end);
+                    expr = Expr::MemberDynamic(Box::new(expr), Box::new(name_expr), span);
+                    continue;
+                }
                 let name_token = match self.peek().cloned() {
                     Some(TokenInfo {
                         token: Token::Ident,
@@ -261,11 +278,11 @@ impl Parser {
                             position: token.position,
                             found_token: Some(token.lexeme),
                             expected: Some("identifier".to_string()),
-                        })
+                        });
                     }
                     _ => {
                         return Err(self
-                            .error_with_expected("expected member name after '.'", "identifier"))
+                            .error_with_expected("expected member name after '.'", "identifier"));
                     }
                 };
                 if self.consume(&Token::LParen) {
@@ -391,7 +408,54 @@ impl Parser {
                 }
                 Token::Ident => {
                     let span = self.span_from(info.position, info.end);
-                    Ok(Expr::Ident(info.lexeme, span))
+                    if self.peek_token() == Some(&Token::At) {
+                        let method_name = info.lexeme;
+                        self.pos += 1; // consume '@'
+                        let mut super_parts = Vec::new();
+                        super_parts.push(self.expect_ident_syntax()?);
+                        while self.consume(&Token::Dot) {
+                            super_parts.push(self.expect_ident_syntax()?);
+                        }
+                        let super_name = super_parts.join(".");
+                        if !self.consume(&Token::LParen) {
+                            return Err(self.error_with_expected(
+                                "expected '(' after superclass method name",
+                                "'('",
+                            ));
+                        }
+                        let mut args = Vec::new();
+                        if !self.consume(&Token::RParen) {
+                            loop {
+                                args.push(self.parse_expr()?);
+                                if self.consume(&Token::Comma) {
+                                    continue;
+                                }
+                                if self.consume(&Token::RParen) {
+                                    break;
+                                }
+                                return Err(self.error_with_expected(
+                                    "expected ',' or ')' in argument list",
+                                    "',' or ')'",
+                                ));
+                            }
+                        }
+                        let end = self.last_token_end();
+                        let span = self.span_from(info.position, end);
+                        let class_name = self.current_classdef_name.clone().ok_or_else(|| {
+                            self.error(
+                                "superclass method syntax is only valid inside classdef methods",
+                            )
+                        })?;
+                        Ok(Expr::SuperMethodCall {
+                            current_class: class_name,
+                            super_class: super_name,
+                            method: method_name,
+                            args,
+                            span,
+                        })
+                    } else {
+                        Ok(Expr::Ident(info.lexeme, span))
+                    }
                 }
                 // Treat 'end' as EndKeyword in expression contexts; in command-form we allow
                 // 'end' to be consumed as an identifier via command-args path.
@@ -423,7 +487,14 @@ impl Parser {
                             span,
                         })
                     } else {
-                        let name = self.expect_ident_syntax()?;
+                        let mut name = self.expect_ident_syntax()?;
+                        while self.peek_token() == Some(&Token::Dot)
+                            && matches!(self.peek_token_at(1), Some(Token::Ident))
+                        {
+                            self.consume(&Token::Dot);
+                            name.push('.');
+                            name.push_str(&self.expect_ident_syntax()?);
+                        }
                         let end = self.last_token_end();
                         let span = self.span_from(start, end);
                         Ok(Expr::FuncHandle(name, span))
@@ -576,5 +647,72 @@ impl Parser {
         }
         self.skip_newlines();
         Ok(Expr::Cell(rows, Span::default()))
+    }
+
+    fn try_parse_brace_aggregate_literal(&mut self, base: &Expr) -> Result<Option<Expr>, String> {
+        enum AggregateBase {
+            Struct,
+            Object(String),
+        }
+
+        let aggregate_base = match base {
+            Expr::Ident(name, _) if name == "struct" => AggregateBase::Struct,
+            Expr::MetaClass(class_name, _) => AggregateBase::Object(class_name.clone()),
+            _ => return Ok(None),
+        };
+
+        let checkpoint = self.pos;
+        let mut fields: Vec<(String, Expr)> = Vec::new();
+
+        self.skip_newlines();
+        if self.consume(&Token::RBrace) {
+            let span = self.span_from(base.span().start, self.last_token_end());
+            return Ok(Some(match aggregate_base {
+                AggregateBase::Struct => Expr::StructLiteral(fields, span),
+                AggregateBase::Object(class_name) => Expr::ObjectLiteral(class_name, fields, span),
+            }));
+        }
+
+        loop {
+            self.skip_newlines();
+            let Some(token) = self.next() else {
+                self.pos = checkpoint;
+                return Ok(None);
+            };
+            let field_name = if token.token == Token::Ident {
+                token.lexeme
+            } else {
+                self.pos = checkpoint;
+                return Ok(None);
+            };
+            if !self.consume(&Token::Assign) {
+                self.pos = checkpoint;
+                return Ok(None);
+            }
+            let value = match self.parse_expr() {
+                Ok(value) => value,
+                Err(_) => {
+                    self.pos = checkpoint;
+                    return Ok(None);
+                }
+            };
+            fields.push((field_name, value));
+            if self.consume(&Token::Comma) || self.consume(&Token::Semicolon) {
+                continue;
+            }
+            break;
+        }
+
+        self.skip_newlines();
+        if !self.consume(&Token::RBrace) {
+            self.pos = checkpoint;
+            return Ok(None);
+        }
+
+        let span = self.span_from(base.span().start, self.last_token_end());
+        Ok(Some(match aggregate_base {
+            AggregateBase::Struct => Expr::StructLiteral(fields, span),
+            AggregateBase::Object(class_name) => Expr::ObjectLiteral(class_name, fields, span),
+        }))
     }
 }

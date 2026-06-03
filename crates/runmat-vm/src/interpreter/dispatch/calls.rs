@@ -1,38 +1,17 @@
+use crate::bytecode::instr::PropertyDefaultLiteral;
 use crate::bytecode::ArgSpec;
-use crate::bytecode::Instr;
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
-use crate::call::feval::FevalDispatch;
-use crate::call::shared::{
-    build_expanded_args_from_specs, collect_multi_outputs, expand_cell_indices,
-    lookup_user_function, prepare_user_call, subsref_brace_numeric_index_values,
-    subsref_empty_brace_cell, validate_user_function_arity, PreparedUserCall,
-};
-use crate::functions::UserFunction;
+use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+use crate::call::shared::{build_expanded_args_from_specs, expand_brace_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
-use runmat_builtins::{MException, Value};
+use runmat_builtins::{Access, MException, Value};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::RuntimeError;
-use std::future::Future;
-
-pub enum FevalHandling {
-    Completed,
-    InvokeUser {
-        name: String,
-        args: Vec<Value>,
-        functions: std::collections::HashMap<String, crate::functions::UserFunction>,
-    },
-}
-
-pub struct PreparedUserDispatch {
-    pub func: UserFunction,
-    pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    pub func_program: runmat_hir::HirProgram,
-    pub func_vars: Vec<Value>,
-}
 
 pub enum BuiltinHandling {
     Completed,
@@ -50,6 +29,53 @@ pub enum UserCallHandling {
     Uncaught(Box<RuntimeError>),
 }
 
+fn current_class_context_from_function_name(current_function_name: &str) -> Option<String> {
+    if current_function_name.is_empty() {
+        return None;
+    }
+    if let Some((class_name, method_name)) = current_function_name.rsplit_once('.') {
+        if !class_name.is_empty()
+            && !method_name.is_empty()
+            && runmat_builtins::get_class(class_name).is_some()
+        {
+            return Some(class_name.to_string());
+        }
+    }
+    runmat_builtins::class_names()
+        .into_iter()
+        .find(|class_name| {
+            runmat_builtins::get_class(class_name).is_some_and(|class_def| {
+                class_def.methods.values().any(|method| {
+                    method.function_name == current_function_name
+                        || method
+                            .function_name
+                            .strip_prefix(class_name)
+                            .is_some_and(|suffix| {
+                                suffix
+                                    .strip_prefix('.')
+                                    .is_some_and(|name| name == current_function_name)
+                            })
+                        || method
+                            .function_name
+                            .rsplit_once('.')
+                            .is_some_and(|(_, name)| name == current_function_name)
+                })
+            })
+        })
+}
+
+pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
+    // Preserve values for non-singleton requests (including zero). Statement-level
+    // display/public-result policy is decided later by core/session plumbing.
+    if requested_outputs != 1 {
+        return value;
+    }
+    match value {
+        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+        other => other,
+    }
+}
+
 pub struct ExceptionRouteContext<'a> {
     pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
     pub vars: &'a mut Vec<Value>,
@@ -61,241 +87,67 @@ pub struct BuiltinCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub arg_count: usize,
-    pub next_instr: Option<&'a Instr>,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub imports: &'a [(Vec<String>, bool)],
     pub call_counts: &'a [(usize, usize)],
+    pub function_registry: &'a crate::bytecode::FunctionRegistry,
+    pub current_function_name: &'a str,
     pub exception: ExceptionRouteContext<'a>,
 }
 
 pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
-    pub name: &'a str,
+    pub identity: CallableIdentity,
+    pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
-    pub bytecode_functions: &'a std::collections::HashMap<String, UserFunction>,
-    pub caller_functions: &'a mut std::collections::HashMap<String, UserFunction>,
+    pub source_id: Option<runmat_hir::SourceId>,
+    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub current_function_name: &'a str,
+    pub imports: &'a [(Vec<String>, bool)],
     pub exception: ExceptionRouteContext<'a>,
 }
 
-#[cfg(feature = "native-accel")]
-async fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(runmat_accelerate::prepare_builtin_args(name, args)
-        .await
-        .map_err(|e| e.to_string())?)
-}
-
-#[cfg(not(feature = "native-accel"))]
-async fn accel_prepare_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(args.to_vec())
-}
-
-async fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    let prepared = accel_prepare_args(name, args).await?;
-    runmat_runtime::call_builtin_async(name, &prepared).await
-}
-
-fn output_hint_for_next(next_instr: Option<&Instr>) -> usize {
-    match next_instr {
-        Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
-        _ => 1,
-    }
-}
-
-fn requested_output_count_from_next(next_instr: Option<&Instr>) -> Option<usize> {
-    match next_instr {
-        Some(Instr::Unpack(count)) => Some(*count),
-        _ => None,
-    }
-}
-
-pub fn handle_feval_dispatch(
-    dispatch: Result<FevalDispatch, RuntimeError>,
-    stack: &mut Vec<Value>,
-) -> Result<FevalHandling, RuntimeError> {
-    match dispatch? {
-        FevalDispatch::Completed(result) => {
-            stack.push(result);
-            Ok(FevalHandling::Completed)
-        }
-        FevalDispatch::InvokeUser {
-            name,
-            args,
-            functions,
-        } => Ok(FevalHandling::InvokeUser {
-            name,
-            args,
-            functions,
-        }),
-    }
-}
-
-pub fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDispatch {
-    let PreparedUserCall {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    } = prepared;
-    PreparedUserDispatch {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    }
-}
-
-pub fn prepare_named_user_dispatch(
-    name: &str,
-    functions: &std::collections::HashMap<String, UserFunction>,
-    args: &[Value],
-    vars: &[Value],
-) -> Result<PreparedUserDispatch, RuntimeError> {
-    let func = lookup_user_function(name, functions)?;
-    validate_user_function_arity(name, &func, args.len())?;
-    let prepared = prepare_user_call(func, args, vars)?;
-    Ok(unpack_prepared_user_call(prepared))
-}
-
-pub fn push_user_call_outputs(
-    stack: &mut Vec<Value>,
-    name: &str,
-    func: &UserFunction,
-    var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    func_result_vars: &[Value],
-    out_count: usize,
-) -> Result<(), RuntimeError> {
-    let outputs = collect_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
-    for value in outputs {
-        stack.push(value);
-    }
-    Ok(())
-}
-
-pub fn output_list_for_user_call(
-    name: &str,
-    func: &UserFunction,
-    var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    func_result_vars: &[Value],
-    out_count: usize,
-) -> Result<Value, RuntimeError> {
-    let outputs = collect_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
-    Ok(Value::OutputList(outputs))
-}
-
-pub fn push_single_result(stack: &mut Vec<Value>, result: Value) {
-    stack.push(result);
-}
-
-pub async fn build_builtin_expand_last_args<F, Fut>(
-    stack: &mut Vec<Value>,
-    fixed_argc: usize,
-    num_indices: usize,
-    invalid_expand_msg: &'static str,
-    mut expand_object_indices: F,
-) -> Result<Vec<Value>, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let mut indices = Vec::with_capacity(num_indices);
-    for _ in 0..num_indices {
-        indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    indices.reverse();
-    let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-        "StackUnderflow",
-        "stack underflow",
-    ))?;
-    let mut fixed = Vec::with_capacity(fixed_argc);
-    for _ in 0..fixed_argc {
-        fixed.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    fixed.reverse();
-
-    let expanded = match (base, indices.len()) {
-        (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices)?,
-        (other, _) => match other {
-            Value::Object(obj) => expand_object_indices(Value::Object(obj), indices).await?,
-            _ => {
-                return Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    invalid_expand_msg,
-                ))
+fn imported_static_method_owner(
+    imports: &[(Vec<String>, bool)],
+    method_name: &str,
+) -> Result<Option<String>, RuntimeError> {
+    let mut owners = Vec::new();
+    for (path, wildcard) in imports {
+        if *wildcard {
+            if path.is_empty() {
+                continue;
             }
-        },
-    };
-
-    let mut args = fixed;
-    args.extend(expanded);
-    Ok(args)
-}
-
-pub async fn build_builtin_expand_at_args<F, Fut>(
-    stack: &mut Vec<Value>,
-    before_count: usize,
-    num_indices: usize,
-    after_count: usize,
-    invalid_expand_msg: &'static str,
-    mut expand_object_indices: F,
-) -> Result<Vec<Value>, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let mut after = Vec::with_capacity(after_count);
-    for _ in 0..after_count {
-        after.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    after.reverse();
-
-    let mut indices = Vec::with_capacity(num_indices);
-    for _ in 0..num_indices {
-        indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    indices.reverse();
-
-    let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-        "StackUnderflow",
-        "stack underflow",
-    ))?;
-
-    let mut before = Vec::with_capacity(before_count);
-    for _ in 0..before_count {
-        before.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    before.reverse();
-
-    let expanded = match (base, indices.len()) {
-        (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices)?,
-        (Value::Object(obj), _) => expand_object_indices(Value::Object(obj), indices).await?,
-        _ => {
-            return Err(crate::interpreter::errors::mex(
-                "ExpandError",
-                invalid_expand_msg,
-            ))
+            let class_name = path.join(".");
+            if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, method_name)
+            {
+                if method.is_static && !owners.iter().any(|existing| existing == &owner) {
+                    owners.push(owner);
+                }
+            }
+            continue;
         }
-    };
-
-    let mut args = before;
-    args.extend(expanded);
-    args.extend(after);
-    Ok(args)
+        if path.len() < 2 || path[path.len() - 1] != method_name {
+            continue;
+        }
+        let class_name = path[..path.len() - 1].join(".");
+        if let Some((method, owner)) = runmat_builtins::lookup_method(&class_name, method_name) {
+            if method.is_static && !owners.iter().any(|existing| existing == &owner) {
+                owners.push(owner);
+            }
+        }
+    }
+    if owners.len() > 1 {
+        return Err(crate::interpreter::errors::mex(
+            "AmbiguousImport",
+            &format!(
+                "ambiguous static method '{}' via imports: {}",
+                method_name,
+                owners.join(", ")
+            ),
+        ));
+    }
+    Ok(owners.into_iter().next())
 }
 
 pub async fn build_builtin_expand_multi_args(
@@ -307,48 +159,8 @@ pub async fn build_builtin_expand_multi_args(
         specs,
         "CallBuiltinExpandMulti requires cell or object for expand_all",
         "CallBuiltinExpandMulti requires cell or object cell access",
-        |base| async move {
-            match base {
-                Value::Object(obj) => {
-                    let empty = subsref_empty_brace_cell()?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        empty,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(match v {
-                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => vec![other],
-                    })
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallBuiltinExpandMulti requires cell or object for expand_all",
-                )),
-            }
-        },
-        |base, indices| async move {
-            match base {
-                Value::Object(obj) => {
-                    let idx_vals = subsref_brace_numeric_index_values(&indices);
-                    let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(vec![v])
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallBuiltinExpandMulti requires cell or object cell access",
-                )),
-            }
-        },
+        |base| async move { expand_brace_values(base, &[], None).await },
+        |base, indices| async move { expand_brace_values(base, &indices, None).await },
     )
     .await
 }
@@ -362,47 +174,8 @@ pub async fn build_feval_expand_multi_args(
         specs,
         "CallFevalExpandMulti requires cell or object for expand_all",
         "CallFevalExpandMulti requires cell or object cell access",
-        |base| async move {
-            match base {
-                Value::Object(obj) => {
-                    let empty = subsref_empty_brace_cell()?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        empty,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(match v {
-                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => vec![other],
-                    })
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "InvalidExpandAllTarget",
-                    "CallFevalExpandMulti requires cell or object for expand_all",
-                )),
-            }
-        },
-        |base, indices| async move {
-            match base {
-                Value::Object(obj) => {
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(vec![v])
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallFevalExpandMulti requires cell or object cell access",
-                )),
-            }
-        },
+        |base| async move { expand_brace_values(base, &[], None).await },
+        |base, indices| async move { expand_brace_values(base, &indices, None).await },
     )
     .await
 }
@@ -414,51 +187,10 @@ pub async fn build_user_function_expand_multi_args(
     build_expanded_args_from_specs(
         stack,
         specs,
-        "CallFunctionExpandMulti requires cell or object for expand_all",
-        "CallFunctionExpandMulti requires cell or object cell access",
-        |base| async move {
-            match base {
-                Value::Cell(ca) => Ok(crate::call::shared::expand_all_cell(&ca)),
-                Value::Object(obj) => {
-                    let empty = subsref_empty_brace_cell()?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        empty,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(match v {
-                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => vec![other],
-                    })
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "InvalidExpandAllTarget",
-                    "CallFunctionExpandMulti requires cell or object for expand_all",
-                )),
-            }
-        },
-        |base, indices| async move {
-            match (base, indices.len()) {
-                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
-                (Value::Object(obj), _) => {
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(vec![v])
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallFunctionExpandMulti requires cell or object cell access",
-                )),
-            }
-        },
+        "CallFunctionExpandMultiOutput requires cell or object for expand_all",
+        "CallFunctionExpandMultiOutput requires cell or object cell access",
+        |base| async move { expand_brace_values(base, &[], None).await },
+        |base, indices| async move { expand_brace_values(base, &indices, None).await },
     )
     .await
 }
@@ -466,6 +198,7 @@ pub async fn build_user_function_expand_multi_args(
 pub fn handle_builtin_outcome(
     result: Result<Value, RuntimeError>,
     imported: ImportedBuiltinResolution,
+    output_hint: usize,
     stack: &mut Vec<Value>,
     ctx: ExceptionRouteContext<'_>,
     refresh_vars: impl Fn(&[Value]),
@@ -478,15 +211,15 @@ pub fn handle_builtin_outcome(
     } = ctx;
     match result {
         Ok(result) => {
-            stack.push(result);
+            stack.push(normalize_requested_outputs(result, output_hint));
             Ok(BuiltinHandling::Completed)
         }
         Err(err) => match imported {
             ImportedBuiltinResolution::Resolved(value) => {
-                stack.push(value);
+                stack.push(normalize_requested_outputs(value, output_hint));
                 Ok(BuiltinHandling::Completed)
             }
-            ImportedBuiltinResolution::Ambiguous(message) => Err(message.into()),
+            ImportedBuiltinResolution::Ambiguous(err) => Err(err),
             ImportedBuiltinResolution::NotFound => Ok(
                 match redirect_exception_to_catch(
                     err,
@@ -504,19 +237,29 @@ pub fn handle_builtin_outcome(
     }
 }
 
-pub async fn handle_builtin_call(
+pub async fn handle_builtin_call_multi(
+    ctx: BuiltinCallContext<'_>,
+    out_count: usize,
+    refresh_vars: impl Fn(&[Value]),
+) -> Result<BuiltinHandling, RuntimeError> {
+    handle_builtin_call_inner(ctx, refresh_vars, out_count).await
+}
+
+async fn handle_builtin_call_inner(
     ctx: BuiltinCallContext<'_>,
     refresh_vars: impl Fn(&[Value]),
+    requested_outputs: usize,
 ) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
         stack,
         name,
         arg_count,
-        next_instr,
         source_id,
         call_arg_spans,
         imports,
         call_counts,
+        function_registry,
+        current_function_name,
         exception,
     } = ctx;
     let ExceptionRouteContext {
@@ -526,24 +269,48 @@ pub async fn handle_builtin_call(
         pc,
     } = &exception;
     debug::trace_call_builtin(**pc, name, arg_count, stack);
-    if let Some(value) = call_builtins::special_counter_builtin(name, arg_count, call_counts)? {
-        stack.push(value);
-        return Ok(BuiltinHandling::Completed);
+    if call_builtins::is_vm_intrinsic_builtin(name) {
+        let result = call_builtins::vm_intrinsic_builtin(stack, name, arg_count, call_counts);
+        return handle_builtin_outcome(
+            result,
+            ImportedBuiltinResolution::NotFound,
+            requested_outputs,
+            stack,
+            exception,
+            refresh_vars,
+        );
     }
-    let requested_outputs = requested_output_count_from_next(next_instr);
+    if call_builtins::is_vm_dynamic_workspace_builtin(name) {
+        let result = call_builtins::vm_dynamic_workspace_builtin(
+            stack,
+            name,
+            arg_count,
+            requested_outputs,
+            function_registry,
+            source_id,
+        )
+        .await;
+        return handle_builtin_outcome(
+            result,
+            ImportedBuiltinResolution::NotFound,
+            requested_outputs,
+            stack,
+            exception,
+            refresh_vars,
+        );
+    }
     let args = call_builtins::collect_call_args(stack, arg_count)?;
 
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
+    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let _access_guard = current_class_context
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
     let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
-    let result = match requested_outputs {
-        Some(count) => {
-            runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, count).await
-        }
-        None => runmat_runtime::call_builtin_async(name, &prepared_primary).await,
-    };
+    let result =
+        runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, requested_outputs)
+            .await;
     let imported = call_builtins::resolve_imported_builtin(
         name,
         imports,
@@ -561,249 +328,352 @@ pub async fn handle_builtin_call(
             return Err(err);
         }
     }
-    handle_builtin_outcome(result, imported, stack, exception, refresh_vars)
+    handle_builtin_outcome(
+        result,
+        imported,
+        requested_outputs,
+        stack,
+        exception,
+        refresh_vars,
+    )
 }
 
-pub async fn handle_method_call(
-    stack: &mut Vec<Value>,
-    name: &str,
-    arg_count: usize,
-) -> Result<MethodHandling, RuntimeError> {
-    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
-    let value = call_closures::call_method(base, name, args).await?;
-    stack.push(value);
-    Ok(MethodHandling::Completed)
-}
-
-pub async fn handle_prepared_user_function_call<BF, BFFut, IF, IFFut>(
+pub async fn handle_prepared_user_function_call(
     ctx: UserCallContext<'_>,
     args: Vec<Value>,
     refresh_vars: impl Fn(&[Value]),
-    builtin_fallback: BF,
-    interpret_counts: IF,
-) -> Result<UserCallHandling, RuntimeError>
-where
-    BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
-    BFFut: Future<Output = Result<Option<Value>, RuntimeError>>,
-    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
-    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
+) -> Result<UserCallHandling, RuntimeError> {
     let UserCallContext {
         stack,
-        name,
+        identity,
+        fallback_policy,
         out_count,
-        bytecode_functions,
-        caller_functions,
+        source_id,
+        call_arg_spans,
+        current_function_name,
+        imports,
         exception,
     } = ctx;
+    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let _function_input_callsite_guard =
+        runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
     let ExceptionRouteContext {
         try_stack,
         vars,
         last_exception,
         pc,
     } = exception;
-    let arg_count = args.len();
-    if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {
-        stack.push(result);
-        return Ok(UserCallHandling::Completed);
-    }
-
-    let prepared = prepare_named_user_dispatch(name, bytecode_functions, &args, vars)?;
-    let PreparedUserDispatch {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    } = prepared;
-    let mut func_bytecode = crate::compile(&func_program, bytecode_functions)?;
-    func_bytecode.source_id = func.source_id;
-    for (k, v) in func_bytecode.functions.iter() {
-        caller_functions.insert(k.clone(), v.clone());
-    }
-
-    let func_result_vars = match interpret_counts(
-        func_bytecode,
-        func_vars,
-        name.to_string(),
-        out_count,
-        arg_count,
-    )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return Ok(
-                match redirect_exception_to_catch(
-                    e,
-                    try_stack,
-                    vars,
-                    last_exception,
-                    pc,
-                    refresh_vars,
-                ) {
-                    ExceptionHandling::Caught => UserCallHandling::Caught,
-                    ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
-                },
-            )
+    let static_candidate = match &identity {
+        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+            if segments.len() >= 2 =>
+        {
+            let class_name = segments[..segments.len() - 1]
+                .iter()
+                .map(|segment| segment.0.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            Some((class_name, segments[segments.len() - 1].0.clone()))
         }
+        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            if name.contains('.') =>
+        {
+            name.rsplit_once('.')
+                .map(|(class_name, method_name)| (class_name.to_string(), method_name.to_string()))
+        }
+        _ => None,
     };
-
-    if out_count == 1 {
-        push_user_call_outputs(stack, name, &func, &var_map, &func_result_vars, 1)?;
-    } else {
-        let output_list =
-            output_list_for_user_call(name, &func, &var_map, &func_result_vars, out_count)?;
-        push_single_result(stack, output_list);
-    }
-    Ok(UserCallHandling::Completed)
-}
-
-pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
-    ctx: UserCallContext<'_>,
-    arg_count: usize,
-    refresh_vars: impl Fn(&[Value]),
-    builtin_fallback: BF,
-    interpret_counts: IF,
-) -> Result<UserCallHandling, RuntimeError>
-where
-    BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
-    BFFut: Future<Output = Result<Option<Value>, RuntimeError>>,
-    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
-    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
-    handle_prepared_user_function_call(ctx, args, refresh_vars, builtin_fallback, interpret_counts)
-        .await
-}
-
-pub async fn handle_builtin_expand_last_call<F, Fut>(
-    stack: &mut Vec<Value>,
-    name: &str,
-    fixed_argc: usize,
-    num_indices: usize,
-    next_instr: Option<&Instr>,
-    expand_object_indices: F,
-) -> Result<BuiltinHandling, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let args = build_builtin_expand_last_args(
-        stack,
-        fixed_argc,
-        num_indices,
-        "CallBuiltinExpandLast requires cell or object cell access",
-        expand_object_indices,
-    )
-    .await?;
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    push_single_result(stack, call_builtin_auto(name, &args).await?);
-    Ok(BuiltinHandling::Completed)
-}
-
-pub async fn handle_builtin_expand_at_call<F, Fut>(
-    stack: &mut Vec<Value>,
-    name: &str,
-    before_count: usize,
-    num_indices: usize,
-    after_count: usize,
-    next_instr: Option<&Instr>,
-    expand_object_indices: F,
-) -> Result<BuiltinHandling, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let args = build_builtin_expand_at_args(
-        stack,
-        before_count,
-        num_indices,
-        after_count,
-        "CallBuiltinExpandAt requires cell or object cell access",
-        expand_object_indices,
-    )
-    .await?;
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    push_single_result(stack, call_builtin_auto(name, &args).await?);
-    Ok(BuiltinHandling::Completed)
-}
-
-pub async fn handle_builtin_expand_multi_call(
-    stack: &mut Vec<Value>,
-    name: &str,
-    specs: &[ArgSpec],
-    next_instr: Option<&Instr>,
-) -> Result<BuiltinHandling, RuntimeError> {
-    let args = build_builtin_expand_multi_args(stack, specs).await?;
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    push_single_result(stack, call_builtin_auto(name, &args).await?);
-    Ok(BuiltinHandling::Completed)
-}
-
-pub async fn handle_method_or_member_index_call(
-    stack: &mut Vec<Value>,
-    name: String,
-    arg_count: usize,
-) -> Result<MethodHandling, RuntimeError> {
-    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
-    let value = call_closures::call_method_or_member_index(base, name, args).await?;
-    stack.push(value);
-    Ok(MethodHandling::Completed)
-}
-
-pub async fn handle_static_method_call(
-    stack: &mut Vec<Value>,
-    class_name: &str,
-    method: &str,
-    arg_count: usize,
-) -> Result<MethodHandling, RuntimeError> {
-    let mut args = crate::call::builtins::collect_call_args(stack, arg_count)?;
-    match call_closures::call_static_method(class_name, method, args.clone()).await {
-        Ok(v) => {
-            stack.push(v);
-            Ok(MethodHandling::Completed)
-        }
-        Err(_) => {
-            let is_type_class = matches!(
-                class_name,
-                "gpuArray"
-                    | "logical"
-                    | "double"
-                    | "single"
-                    | "int8"
-                    | "int16"
-                    | "int32"
-                    | "int64"
-                    | "uint8"
-                    | "uint16"
-                    | "uint32"
-                    | "uint64"
-                    | "char"
-                    | "string"
-                    | "cell"
-                    | "struct"
-            );
-            if is_type_class {
-                args.push(Value::from(class_name));
-                let v = runmat_runtime::call_builtin_async(method, &args).await?;
-                stack.push(v);
-                Ok(MethodHandling::Completed)
-            } else {
-                Err(format!("Unknown static method '{}' on class {}", method, class_name).into())
+    if current_class_context.is_some() {
+        if let Some((class_name, method_name)) = static_candidate {
+            if runmat_builtins::get_class(&class_name).is_some() {
+                if let Some((method, owner)) =
+                    runmat_builtins::lookup_method(&class_name, &method_name)
+                {
+                    if method.is_static {
+                        let allowed = match method.access {
+                            Access::Public => true,
+                            Access::Private => {
+                                current_class_context.as_deref() == Some(owner.as_str())
+                            }
+                            Access::Protected => {
+                                current_class_context.as_ref().is_some_and(|caller_class| {
+                                    runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                                })
+                            }
+                        };
+                        if !allowed {
+                            return Err(crate::interpreter::errors::mex(
+                                "MethodPrivate",
+                                &format!("Method '{}' is private", method_name),
+                            ));
+                        }
+                        let method_identity = if method.function_name.contains('.') {
+                            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
+                                method
+                                    .function_name
+                                    .split('.')
+                                    .map(|segment| {
+                                        runmat_hir::SymbolName(segment.trim().to_string())
+                                    })
+                                    .collect(),
+                            ))
+                        } else {
+                            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+                                method.function_name.clone(),
+                            ))
+                        };
+                        let static_descriptor = CallableDescriptor::resolved(
+                            method_identity,
+                            args,
+                            out_count,
+                            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                            CallableCallKind::Direct,
+                        );
+                        let result = execute_callable_descriptor(static_descriptor).await?;
+                        stack.push(normalize_requested_outputs(result, out_count));
+                        return Ok(UserCallHandling::Completed);
+                    }
+                }
             }
         }
     }
+
+    let local_method_candidate = match &identity {
+        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+            if !name.contains('.') && !name.trim().is_empty() =>
+        {
+            Some(name.trim().to_string())
+        }
+        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+            if segments.len() == 1 && !segments[0].0.trim().is_empty() =>
+        {
+            Some(segments[0].0.trim().to_string())
+        }
+        _ => None,
+    };
+    if let (Some(class_name), Some(method_name)) = (
+        current_class_context.as_ref(),
+        local_method_candidate.as_ref(),
+    ) {
+        if let Some((method, owner)) = runmat_builtins::lookup_method(class_name, method_name) {
+            if method.is_static {
+                let allowed = match method.access {
+                    Access::Public => true,
+                    Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
+                    Access::Protected => {
+                        current_class_context.as_ref().is_some_and(|caller_class| {
+                            runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                        })
+                    }
+                };
+                if !allowed {
+                    return Err(crate::interpreter::errors::mex(
+                        "MethodPrivate",
+                        &format!("Method '{}' is private", method_name),
+                    ));
+                }
+                let method_identity = if method.function_name.contains('.') {
+                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
+                        method
+                            .function_name
+                            .split('.')
+                            .map(|segment| runmat_hir::SymbolName(segment.trim().to_string()))
+                            .collect(),
+                    ))
+                } else {
+                    runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+                        method.function_name.clone(),
+                    ))
+                };
+                let static_descriptor = CallableDescriptor::resolved(
+                    method_identity,
+                    args,
+                    out_count,
+                    runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    CallableCallKind::Direct,
+                );
+                let result = execute_callable_descriptor(static_descriptor).await?;
+                stack.push(normalize_requested_outputs(result, out_count));
+                return Ok(UserCallHandling::Completed);
+            }
+        }
+    }
+    if let Some(method_name) = local_method_candidate.as_ref() {
+        if let Some(owner_class) = imported_static_method_owner(imports, method_name)? {
+            if let Some((method, owner)) = runmat_builtins::lookup_method(&owner_class, method_name)
+            {
+                if method.is_static {
+                    let allowed = match method.access {
+                        Access::Public => true,
+                        Access::Private => current_class_context.as_deref() == Some(owner.as_str()),
+                        Access::Protected => {
+                            current_class_context.as_ref().is_some_and(|caller_class| {
+                                runmat_builtins::is_class_or_subclass(caller_class, &owner)
+                            })
+                        }
+                    };
+                    if !allowed {
+                        return Err(crate::interpreter::errors::mex(
+                            "MethodPrivate",
+                            &format!("Method '{}' is private", method_name),
+                        ));
+                    }
+                    let method_identity = if method.function_name.contains('.') {
+                        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(
+                            method
+                                .function_name
+                                .split('.')
+                                .map(|segment| runmat_hir::SymbolName(segment.trim().to_string()))
+                                .collect(),
+                        ))
+                    } else {
+                        runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+                            method.function_name.clone(),
+                        ))
+                    };
+                    let static_descriptor = CallableDescriptor::resolved(
+                        method_identity,
+                        args,
+                        out_count,
+                        runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                        CallableCallKind::Direct,
+                    );
+                    let result = execute_callable_descriptor(static_descriptor).await?;
+                    stack.push(normalize_requested_outputs(result, out_count));
+                    return Ok(UserCallHandling::Completed);
+                }
+            }
+        }
+    }
+
+    let descriptor = CallableDescriptor::resolved(
+        identity,
+        args,
+        out_count,
+        fallback_policy,
+        CallableCallKind::Direct,
+    );
+    let _access_guard = current_class_context
+        .clone()
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+    match execute_callable_descriptor(descriptor).await {
+        Ok(result) => {
+            stack.push(normalize_requested_outputs(result, out_count));
+            Ok(UserCallHandling::Completed)
+        }
+        Err(err) => Ok(
+            match redirect_exception_to_catch(
+                err,
+                try_stack,
+                vars,
+                last_exception,
+                pc,
+                refresh_vars,
+            ) {
+                ExceptionHandling::Caught => UserCallHandling::Caught,
+                ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+            },
+        ),
+    }
+}
+
+pub async fn handle_user_function_call(
+    ctx: UserCallContext<'_>,
+    arg_count: usize,
+    refresh_vars: impl Fn(&[Value]),
+) -> Result<UserCallHandling, RuntimeError> {
+    let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
+    handle_prepared_user_function_call(ctx, args, refresh_vars).await
+}
+
+pub async fn handle_method_or_member_index_multi_call(
+    stack: &mut Vec<Value>,
+    identity: CallableIdentity,
+    fallback_policy: CallableFallbackPolicy,
+    arg_count: usize,
+    out_count: usize,
+    current_function_name: &str,
+) -> Result<MethodHandling, RuntimeError> {
+    handle_method_or_member_index_call_inner(
+        stack,
+        identity,
+        fallback_policy,
+        arg_count,
+        out_count,
+        current_function_name,
+    )
+    .await
+}
+
+async fn handle_method_or_member_index_call_inner(
+    stack: &mut Vec<Value>,
+    identity: CallableIdentity,
+    fallback_policy: CallableFallbackPolicy,
+    arg_count: usize,
+    requested_outputs: usize,
+    current_function_name: &str,
+) -> Result<MethodHandling, RuntimeError> {
+    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
+    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
+    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let _access_guard = current_class_context
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+    let value = call_closures::call_method_or_member_index_with_outputs(
+        base,
+        identity,
+        args,
+        requested_outputs,
+        (!current_function_name.is_empty()).then_some(current_function_name),
+        fallback_policy,
+    )
+    .await?;
+    stack.push(normalize_requested_outputs(value, requested_outputs));
+    Ok(MethodHandling::Completed)
+}
+
+pub async fn handle_method_or_member_index_expand_multi_call(
+    stack: &mut Vec<Value>,
+    identity: CallableIdentity,
+    fallback_policy: CallableFallbackPolicy,
+    specs: &[ArgSpec],
+    requested_outputs: usize,
+    current_function_name: &str,
+) -> Result<MethodHandling, RuntimeError> {
+    let mut args = build_user_function_expand_multi_args(stack, specs).await?;
+    if args.is_empty() {
+        return Err(crate::interpreter::errors::mex(
+            "MethodCallMissingReceiver",
+            "method/member-index call requires a base receiver",
+        ));
+    }
+    let base = args.remove(0);
+    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
+    let current_class_context = current_class_context_from_function_name(current_function_name);
+    let _access_guard = current_class_context
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+    let value = call_closures::call_method_or_member_index_with_outputs(
+        base,
+        identity,
+        args,
+        requested_outputs,
+        (!current_function_name.is_empty()).then_some(current_function_name),
+        fallback_policy,
+    )
+    .await?;
+    stack.push(normalize_requested_outputs(value, requested_outputs));
+    Ok(MethodHandling::Completed)
 }
 
 pub fn handle_load_method(
     stack: &mut Vec<Value>,
     name: String,
+    current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
     let base = crate::interpreter::stack::pop_value(stack)?;
-    let value = call_closures::load_method_closure(base, name)?;
+    let value = call_closures::load_method_closure(
+        base,
+        name,
+        (!current_function_name.is_empty()).then_some(current_function_name),
+    )?;
     stack.push(value);
     Ok(MethodHandling::Completed)
 }
@@ -817,12 +687,22 @@ pub fn handle_create_closure(
     Ok(MethodHandling::Completed)
 }
 
+pub fn handle_create_semantic_closure(
+    stack: &mut Vec<Value>,
+    function: runmat_hir::FunctionId,
+    display_name: String,
+    capture_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    call_closures::create_semantic_closure(stack, function, display_name, capture_count)?;
+    Ok(MethodHandling::Completed)
+}
+
 pub fn handle_load_static_property(
     stack: &mut Vec<Value>,
     class_name: &str,
     prop: &str,
 ) -> Result<MethodHandling, RuntimeError> {
-    let value = obj_resolve::load_static_member(class_name, prop)?;
+    let value = obj_resolve::load_static_member(class_name, prop, None)?;
     stack.push(value);
     Ok(MethodHandling::Completed)
 }
@@ -830,9 +710,99 @@ pub fn handle_load_static_property(
 pub fn handle_register_class(
     name: String,
     super_class: Option<String>,
-    properties: Vec<(String, bool, String, String)>,
-    methods: Vec<(String, String, bool, String)>,
+    is_sealed: bool,
+    is_abstract: bool,
+    properties: Vec<(
+        String,
+        bool,
+        bool,
+        Option<PropertyDefaultLiteral>,
+        String,
+        String,
+    )>,
+    methods: Vec<(String, String, bool, bool, bool, String)>,
+    enumerations: Vec<String>,
 ) -> Result<MethodHandling, RuntimeError> {
-    obj_class_def::register_class(name, super_class, properties, methods)?;
+    let properties = properties
+        .into_iter()
+        .map(
+            |(name, is_static, is_constant, default_literal, get_access, set_access)| {
+                let default_value = default_literal.map(|literal| match literal {
+                    PropertyDefaultLiteral::Num(value) => Value::Num(value),
+                    PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
+                    PropertyDefaultLiteral::String(value) => Value::String(value),
+                });
+                (
+                    name,
+                    is_static,
+                    is_constant,
+                    default_value,
+                    get_access,
+                    set_access,
+                )
+            },
+        )
+        .collect();
+    obj_class_def::register_class(
+        name,
+        super_class,
+        is_sealed,
+        is_abstract,
+        properties,
+        methods,
+        enumerations,
+    )?;
     Ok(MethodHandling::Completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{handle_builtin_outcome, normalize_requested_outputs, ExceptionRouteContext};
+    use crate::call::builtins::ImportedBuiltinResolution;
+    use crate::interpreter::errors::mex;
+    use runmat_builtins::Value;
+
+    #[test]
+    fn normalize_requested_outputs_collapses_singleton_for_single_request() {
+        let value = normalize_requested_outputs(Value::OutputList(vec![Value::Num(7.0)]), 1);
+        assert_eq!(value, Value::Num(7.0));
+    }
+
+    #[test]
+    fn normalize_requested_outputs_preserves_value_for_zero_request() {
+        let value = normalize_requested_outputs(Value::Num(7.0), 0);
+        assert_eq!(value, Value::Num(7.0));
+    }
+
+    #[test]
+    fn handle_builtin_outcome_preserves_ambiguous_import_identifier() {
+        let mut try_stack: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut vars: Vec<Value> = Vec::new();
+        let mut last_exception = None;
+        let mut pc = 0usize;
+        let mut stack: Vec<Value> = Vec::new();
+
+        let outcome = handle_builtin_outcome(
+            Err("primary builtin failure".into()),
+            ImportedBuiltinResolution::Ambiguous(mex(
+                "AmbiguousBuiltinImport",
+                "ambiguous builtin via imports",
+            )),
+            1,
+            &mut stack,
+            ExceptionRouteContext {
+                try_stack: &mut try_stack,
+                vars: &mut vars,
+                last_exception: &mut last_exception,
+                pc: &mut pc,
+            },
+            |_| {},
+        );
+        let err = match outcome {
+            Err(err) => err,
+            Ok(_) => panic!("ambiguous imported builtin must surface explicit identifier"),
+        };
+        assert_eq!(err.identifier(), Some("RunMat:AmbiguousBuiltinImport"));
+        assert!(err.message().contains("ambiguous builtin via imports"));
+    }
 }

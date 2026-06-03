@@ -1,7 +1,11 @@
 //! MATLAB-compatible `rad2deg` builtin for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -15,6 +19,52 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "rad2deg";
 const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
+
+const RAD2DEG_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Element-wise radian-to-degree conversion result.",
+}];
+
+const RAD2DEG_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar, array, logical array, complex value, or gpuArray.",
+}];
+
+const RAD2DEG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Y = rad2deg(X)",
+    inputs: &RAD2DEG_INPUTS,
+    outputs: &RAD2DEG_OUTPUT,
+}];
+
+const RAD2DEG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RAD2DEG.INVALID_INPUT",
+    identifier: Some("RunMat:rad2deg:InvalidInput"),
+    when: "Input cannot be interpreted as supported numeric/logical/complex data.",
+    message: "rad2deg: invalid input",
+};
+
+const RAD2DEG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RAD2DEG.INTERNAL",
+    identifier: Some("RunMat:rad2deg:Internal"),
+    when: "Internal gather/conversion/allocation flow failed.",
+    message: "rad2deg: internal error",
+};
+
+const RAD2DEG_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [RAD2DEG_ERROR_INVALID_INPUT, RAD2DEG_ERROR_INTERNAL];
+
+pub const RAD2DEG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RAD2DEG_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RAD2DEG_ERRORS,
+};
 
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::trigonometry::rad2deg"
@@ -39,19 +89,34 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Fusion emits a multiplication by 180/pi for radian-to-degree conversion.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn rad2deg_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn rad2deg_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "rad2deg",
     category = "math/trigonometry",
-    summary = "Convert angles from radians to degrees.",
+    summary = "Convert angle values from radians to degrees.",
     keywords = "rad2deg,radians,degrees,angle,trigonometry,gpu",
     accel = "unary",
     type_resolver(numeric_unary_type),
+    descriptor(crate::builtins::math::trigonometry::rad2deg::RAD2DEG_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::rad2deg"
 )]
 async fn rad2deg_builtin(value: Value) -> BuiltinResult<Value> {
@@ -60,7 +125,7 @@ async fn rad2deg_builtin(value: Value) -> BuiltinResult<Value> {
         Value::Complex(re, im) => Ok(Value::Complex(re * RAD_TO_DEG, im * RAD_TO_DEG)),
         Value::ComplexTensor(tensor) => rad2deg_complex_tensor(tensor),
         Value::String(_) | Value::StringArray(_) => {
-            Err(builtin_error("rad2deg: expected numeric input"))
+            Err(rad2deg_error(&RAD2DEG_ERROR_INVALID_INPUT))
         }
         other => rad2deg_real(other),
     }
@@ -72,7 +137,8 @@ async fn rad2deg_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn rad2deg_real(value: Value) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value).map_err(builtin_error)?;
+    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
+        .map_err(|e| rad2deg_error_with_detail(&RAD2DEG_ERROR_INVALID_INPUT, e))?;
     rad2deg_tensor(tensor).map(tensor::tensor_into_value)
 }
 
@@ -82,7 +148,8 @@ fn rad2deg_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
         .iter()
         .map(|&value| value * RAD_TO_DEG)
         .collect::<Vec<_>>();
-    Tensor::new(data, tensor.shape.clone()).map_err(|err| builtin_error(format!("rad2deg: {err}")))
+    Tensor::new(data, tensor.shape.clone())
+        .map_err(|err| rad2deg_error_with_detail(&RAD2DEG_ERROR_INTERNAL, err))
 }
 
 fn rad2deg_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
@@ -92,7 +159,7 @@ fn rad2deg_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
         .map(|&(re, im)| (re * RAD_TO_DEG, im * RAD_TO_DEG))
         .collect::<Vec<_>>();
     let converted = ComplexTensor::new(data, tensor.shape.clone())
-        .map_err(|err| builtin_error(format!("rad2deg: {err}")))?;
+        .map_err(|err| rad2deg_error_with_detail(&RAD2DEG_ERROR_INTERNAL, err))?;
     Ok(complex_tensor_into_value(converted))
 }
 
@@ -106,8 +173,18 @@ pub(crate) mod tests {
         block_on(super::rad2deg_builtin(value))
     }
 
-    fn error_message(err: RuntimeError) -> String {
+    fn error_message(err: &RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn rad2deg_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = RAD2DEG_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Y = rad2deg(X)"));
     }
 
     #[test]
@@ -209,6 +286,7 @@ pub(crate) mod tests {
     #[test]
     fn rad2deg_string_errors() {
         let err = rad2deg_builtin(Value::String("pi".into())).expect_err("expected error");
-        assert!(error_message(err).contains("rad2deg: expected numeric input"));
+        assert!(error_message(&err).contains("invalid input"));
+        assert_eq!(err.identifier(), RAD2DEG_ERROR_INVALID_INPUT.identifier);
     }
 }

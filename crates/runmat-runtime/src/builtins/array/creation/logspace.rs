@@ -1,7 +1,11 @@
 //! MATLAB-compatible `logspace` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -59,14 +63,111 @@ fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     row_vector_type(ctx)
 }
 
+const LOGSPACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "x",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Row vector of logarithmically spaced values.",
+}];
+
+const LOGSPACE_SIG_2_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Starting exponent value.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Ending exponent value.",
+    },
+];
+
+const LOGSPACE_SIG_3_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Starting exponent value.",
+    },
+    BuiltinParamDescriptor {
+        name: "stop",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Ending exponent value.",
+    },
+    BuiltinParamDescriptor {
+        name: "n",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("50"),
+        description: "Number of points.",
+    },
+];
+
+const LOGSPACE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "x = logspace(start, stop)",
+        inputs: &LOGSPACE_SIG_2_INPUTS,
+        outputs: &LOGSPACE_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "x = logspace(start, stop, n)",
+        inputs: &LOGSPACE_SIG_3_INPUTS,
+        outputs: &LOGSPACE_OUTPUT,
+    },
+];
+
+const LOGSPACE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    BuiltinErrorDescriptor {
+        code: "RM.LOGSPACE.ARG_COUNT",
+        identifier: None,
+        when: "More than three input arguments are provided.",
+        message: "logspace: expected two or three input arguments",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.LOGSPACE.COUNT_NOT_SCALAR",
+        identifier: None,
+        when: "The count argument is not a numeric scalar value.",
+        message: "logspace: number of points must be a scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.LOGSPACE.COUNT_NOT_INTEGER",
+        identifier: None,
+        when: "The count argument is not an integer value.",
+        message: "logspace: number of points must be an integer",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.LOGSPACE.COUNT_NEGATIVE",
+        identifier: None,
+        when: "The count argument is negative.",
+        message: "logspace: number of points must be >= 0",
+    },
+];
+
+pub const LOGSPACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LOGSPACE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LOGSPACE_ERRORS,
+};
+
 #[runtime_builtin(
     name = "logspace",
     category = "array/creation",
-    summary = "Logarithmically spaced vector.",
+    summary = "Generate logarithmically spaced row vectors.",
     keywords = "logspace,logarithmic,vector,gpu",
     examples = "x = logspace(1, 3, 3)  % [10 100 1000]",
     accel = "array_construct",
     type_resolver(logspace_type),
+    descriptor(crate::builtins::array::creation::logspace::LOGSPACE_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::logspace"
 )]
 async fn logspace_builtin(

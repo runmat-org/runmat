@@ -6,7 +6,11 @@ use std::path::PathBuf;
 use glob::Pattern;
 use regex::Regex;
 use runmat_accelerate_api::{handle_is_logical, ProviderPrecision};
-use runmat_builtins::{StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::shape::value_dimensions;
@@ -46,13 +50,159 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Introspection builtin; not eligible for fusion. Registration is for diagnostics only.",
 };
 
+const WHOS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "vars",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cell array of structs describing matching variables.",
+}];
+
+const WHOS_SIG_NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const WHOS_SIG_SELECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "selector",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Name filters, wildcard patterns, or options.",
+}];
+
+const WHOS_SIG_FILE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "file_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-file\""),
+        description: "File mode option.",
+    },
+    BuiltinParamDescriptor {
+        name: "filename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "MAT-file path.",
+    },
+];
+
+const WHOS_SIG_REGEXP_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "regexp_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"-regexp\""),
+        description: "Regexp mode option.",
+    },
+    BuiltinParamDescriptor {
+        name: "pattern",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Regular-expression patterns.",
+    },
+];
+
+const WHOS_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "vars = whos()",
+        inputs: &WHOS_SIG_NO_INPUTS,
+        outputs: &WHOS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "vars = whos(selector, ...)",
+        inputs: &WHOS_SIG_SELECTOR_INPUTS,
+        outputs: &WHOS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "vars = whos(\"-file\", filename, selector, ...)",
+        inputs: &WHOS_SIG_FILE_INPUTS,
+        outputs: &WHOS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "vars = whos(\"-regexp\", pattern, ...)",
+        inputs: &WHOS_SIG_REGEXP_INPUTS,
+        outputs: &WHOS_OUTPUT,
+    },
+];
+
+const WHOS_ERRORS: [BuiltinErrorDescriptor; 10] = [
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.FILE_REQUIRES_FILENAME",
+        identifier: None,
+        when: "The '-file' option is provided without a filename.",
+        message: "whos: '-file' requires a filename",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.FILE_DUPLICATE",
+        identifier: None,
+        when: "The '-file' option is provided more than once.",
+        message: "whos: '-file' may only be specified once",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.REGEXP_REQUIRES_PATTERN",
+        identifier: None,
+        when: "The '-regexp' option is provided without patterns.",
+        message: "whos: '-regexp' requires at least one pattern",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.REGEXP_EMPTY_PATTERN",
+        identifier: None,
+        when: "The '-regexp' option receives only empty patterns.",
+        message: "whos: '-regexp' requires non-empty pattern strings",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.REGEXP_INVALID",
+        identifier: None,
+        when: "A regexp pattern fails to compile.",
+        message: "whos: invalid regular expression",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.OPTION_UNSUPPORTED",
+        identifier: None,
+        when: "An unsupported option token is provided.",
+        message: "whos: unsupported option",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.FILENAME_ARG_TYPE",
+        identifier: None,
+        when: "Filename argument is not a char row or string scalar.",
+        message: "whos: filename must be a character vector or string scalar",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.SELECTOR_CELL_MEMBER_TYPE",
+        identifier: None,
+        when: "A selector cell contains a non-string-like element.",
+        message: "whos: selection cells must contain string or character scalars",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.SELECTOR_ARG_TYPE",
+        identifier: None,
+        when: "Selector argument is not a char array/string/string array/cell thereof.",
+        message: "whos: selections must be character vectors, string scalars, string arrays, or cell arrays of those types",
+    },
+    BuiltinErrorDescriptor {
+        code: "RM.WHOS.PATTERN_INVALID",
+        identifier: None,
+        when: "Wildcard selector pattern fails to parse.",
+        message: "whos: invalid pattern",
+    },
+];
+
+pub const WHOS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &WHOS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &WHOS_ERRORS,
+};
+
 #[runtime_builtin(
     name = "whos",
     category = "introspection",
-    summary = "List variables in the workspace or MAT-files with MATLAB-compatible metadata.",
+    summary = "List workspace or MAT-file variables with metadata.",
     keywords = "whos,workspace variables,memory usage,struct array",
     accel = "cpu",
     type_resolver(whos_type),
+    descriptor(crate::builtins::introspection::whos::WHOS_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::whos"
 )]
 async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -64,7 +214,7 @@ async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut entries = match &request.source {
         WhosSource::Workspace => crate::workspace::snapshot().unwrap_or_default(),
-        WhosSource::File(path) => read_mat_file_for_builtin(path, "whos")?,
+        WhosSource::File(path) => read_mat_file_for_builtin(path, "whos").await?,
     };
 
     if matches!(request.source, WhosSource::File(_)) {
@@ -488,7 +638,10 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
         Value::Closure(closure) => closure.captures.iter().fold(0usize, |acc, v| {
             acc.saturating_add(value_memory_bytes(v, seen))
         }),
-        Value::FunctionHandle(_) => 0,
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. } => 0,
         Value::ClassRef(name) => name.len().saturating_mul(2),
         Value::MException(exc) => {
             let base = exc

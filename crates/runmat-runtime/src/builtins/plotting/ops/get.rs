@@ -1,29 +1,125 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::properties::{get_properties, resolve_plot_handle};
 use crate::builtins::plotting::type_resolvers::get_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "get";
+
+const GET_OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "value",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Property value or a struct of all readable properties.",
+}];
+
+const GET_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Graphics handle (figure, axes, plot object, text, legend, etc.).",
+}];
+
+const GET_INPUTS_HANDLE_PROPERTY: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "h",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Graphics handle (figure, axes, plot object, text, legend, etc.).",
+    },
+    BuiltinParamDescriptor {
+        name: "property",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Property name to query (case-insensitive).",
+    },
+];
+
+const GET_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "value = get(h)",
+        inputs: &GET_INPUTS_HANDLE,
+        outputs: &GET_OUTPUT_VALUE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "value = get(h, property)",
+        inputs: &GET_INPUTS_HANDLE_PROPERTY,
+        outputs: &GET_OUTPUT_VALUE,
+    },
+];
+
+const GET_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GET.INVALID_ARGUMENT",
+    identifier: Some("RunMat:get:InvalidArgument"),
+    when:
+        "Handle value or property selector is missing/invalid, or property lookup fails validation.",
+    message: "get: invalid argument",
+};
+
+const GET_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GET.INTERNAL",
+    identifier: Some("RunMat:get:Internal"),
+    when: "Internal handle/property retrieval fails unexpectedly.",
+    message: "get: internal operation failed",
+};
+
+const GET_ERRORS: [BuiltinErrorDescriptor; 2] = [GET_ERROR_INVALID_ARGUMENT, GET_ERROR_INTERNAL];
+
+pub const GET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GET_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GET_ERRORS,
+};
+
+fn get_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_get_error(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    get_error_with_detail(&GET_ERROR_INVALID_ARGUMENT, err.message)
+}
 
 #[runtime_builtin(
     name = "get",
     category = "plotting",
-    summary = "Get properties from plotting handles.",
+    summary = "Get graphics object properties.",
     keywords = "get,plotting,handle,property",
     type_resolver(get_type),
+    descriptor(crate::builtins::plotting::get::GET_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::get"
 )]
 pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
-        return Err(crate::builtins::plotting::plotting_error(
-            "get",
-            "get: expected a plotting handle",
+        return Err(get_error_with_detail(
+            &GET_ERROR_INVALID_ARGUMENT,
+            "expected a plotting handle",
         ));
     }
-    let handle = resolve_plot_handle(&args[0], "get")?;
+    let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_get_error)?;
     let property = args
         .get(1)
         .and_then(|v| crate::builtins::plotting::style::value_as_string(v));
-    get_properties(handle, property.as_deref(), "get")
+    get_properties(handle, property.as_deref(), BUILTIN_NAME).map_err(map_get_error)
 }
 
 #[cfg(test)]
@@ -44,6 +140,24 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    #[test]
+    fn get_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = GET_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"value = get(h)"));
+        assert!(labels.contains(&"value = get(h, property)"));
+    }
+
+    #[test]
+    fn get_missing_handle_uses_stable_identifier() {
+        let _guard = setup();
+        let err = get_builtin(vec![]).expect_err("expected missing handle to fail");
+        assert_eq!(err.identifier(), GET_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

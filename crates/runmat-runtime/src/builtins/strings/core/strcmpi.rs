@@ -1,6 +1,9 @@
 //! MATLAB-compatible `strcmpi` builtin for RunMat (case-insensitive string comparison).
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -41,22 +44,100 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Produces logical host results; not eligible for GPU fusion.",
 };
 
-#[allow(dead_code)]
-fn strcmpi_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("strcmpi").build()
+const BUILTIN_NAME: &str = "strcmpi";
+
+const STRCMPI_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical comparison result.",
+}];
+
+const STRCMPI_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First text input (string/char/cell/string array).",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second text input (string/char/cell/string array).",
+    },
+];
+
+const STRCMPI_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = strcmpi(A, B)",
+    inputs: &STRCMPI_INPUTS,
+    outputs: &STRCMPI_OUTPUT,
+}];
+
+const STRCMPI_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCMPI.INVALID_INPUT",
+    identifier: Some("RunMat:strcmpi:InvalidInput"),
+    when: "At least one input is not a supported text container.",
+    message: "strcmpi: text inputs must be string/char/cell/string-array values",
+};
+
+const STRCMPI_ERROR_SHAPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCMPI.SHAPE_MISMATCH",
+    identifier: Some("RunMat:strcmpi:ShapeMismatch"),
+    when: "Inputs are not broadcast-compatible for elementwise comparison.",
+    message: "strcmpi: input sizes are not broadcast-compatible",
+};
+
+const STRCMPI_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRCMPI.INTERNAL",
+    identifier: Some("RunMat:strcmpi:InternalError"),
+    when: "Internal logical result assembly failed.",
+    message: "strcmpi: internal error",
+};
+
+const STRCMPI_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    STRCMPI_ERROR_INVALID_INPUT,
+    STRCMPI_ERROR_SHAPE_MISMATCH,
+    STRCMPI_ERROR_INTERNAL,
+];
+
+pub const STRCMPI_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STRCMPI_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STRCMPI_ERRORS,
+};
+
+fn strcmpi_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    strcmpi_error_with_message(error.message, error)
+}
+
+fn strcmpi_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_strcmpi_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "strcmpi")
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runtime_builtin(
     name = "strcmpi",
     category = "strings/core",
-    summary = "Compare text inputs for equality without considering case.",
+    summary = "Compare text inputs for case-insensitive equality.",
     keywords = "strcmpi,string compare,text equality",
     accel = "sink",
     type_resolver(logical_text_match_type),
+    descriptor(crate::builtins::strings::core::strcmpi::STRCMPI_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::strcmpi"
 )]
 async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
@@ -66,16 +147,20 @@ async fn strcmpi_builtin(a: Value, b: Value) -> crate::BuiltinResult<Value> {
     let b = gather_if_needed_async(&b)
         .await
         .map_err(remap_strcmpi_flow)?;
-    let left = TextCollection::from_argument("strcmpi", a, "first argument")?;
-    let right = TextCollection::from_argument("strcmpi", b, "second argument")?;
+    let left = TextCollection::from_argument(BUILTIN_NAME, a, "first argument")
+        .map_err(|_| strcmpi_error(&STRCMPI_ERROR_INVALID_INPUT))?;
+    let right = TextCollection::from_argument(BUILTIN_NAME, b, "second argument")
+        .map_err(|_| strcmpi_error(&STRCMPI_ERROR_INVALID_INPUT))?;
     evaluate_strcmpi(&left, &right)
 }
 
 fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinResult<Value> {
-    let shape = broadcast_shapes("strcmpi", &left.shape, &right.shape)?;
+    let shape = broadcast_shapes(BUILTIN_NAME, &left.shape, &right.shape)
+        .map_err(|_| strcmpi_error(&STRCMPI_ERROR_SHAPE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
-        return logical_result("strcmpi", Vec::new(), shape);
+        return logical_result(BUILTIN_NAME, Vec::new(), shape)
+            .map_err(|_| strcmpi_error(&STRCMPI_ERROR_INTERNAL));
     }
     let left_strides = compute_strides(&left.shape);
     let right_strides = compute_strides(&right.shape);
@@ -97,7 +182,7 @@ fn evaluate_strcmpi(left: &TextCollection, right: &TextCollection) -> BuiltinRes
         };
         data.push(if equal { 1 } else { 0 });
     }
-    logical_result("strcmpi", data, shape)
+    logical_result(BUILTIN_NAME, data, shape).map_err(|_| strcmpi_error(&STRCMPI_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
@@ -111,7 +196,7 @@ pub(crate) mod tests {
     }
 
     fn error_message(err: RuntimeError) -> String {
-        err.message().to_string()
+        err.to_string()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -245,7 +330,7 @@ pub(crate) mod tests {
             strcmpi_builtin(Value::StringArray(left), Value::StringArray(right))
                 .expect_err("size mismatch"),
         );
-        assert!(err.contains("size mismatch"));
+        assert!(err.contains(STRCMPI_ERROR_SHAPE_MISMATCH.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -254,7 +339,7 @@ pub(crate) mod tests {
         let err = error_message(
             strcmpi_builtin(Value::Num(1.0), Value::String("a".into())).expect_err("invalid type"),
         );
-        assert!(err.contains("first argument must be text"));
+        assert!(err.contains(STRCMPI_ERROR_INVALID_INPUT.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -265,7 +350,7 @@ pub(crate) mod tests {
             strcmpi_builtin(Value::Cell(cell), Value::String("test".into()))
                 .expect_err("cell element type"),
         );
-        assert!(err.contains("cell array elements must be character vectors or string scalars"));
+        assert!(err.contains(STRCMPI_ERROR_INVALID_INPUT.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

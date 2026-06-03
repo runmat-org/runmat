@@ -15,6 +15,9 @@ use super::style::{
     ParsedLineStyle,
 };
 
+const POINTS_TO_PX: f32 = 96.0 / 72.0;
+const DEFAULT_MARKER_AREA_POINTS2: f64 = 36.0;
+
 #[derive(Clone)]
 pub struct PointArgs {
     pub size: PointSizeArg,
@@ -127,6 +130,16 @@ impl PointColorArg {
             Value::Tensor(tensor) => {
                 if tensor.data.len() == 1 {
                     Ok(Self::ScalarValues(Value::Tensor(tensor.clone())))
+                } else if tensor.rows == 1 && (tensor.cols == 3 || tensor.cols == 4) {
+                    let r = tensor_value(tensor, 0, 0) as f32;
+                    let g = tensor_value(tensor, 0, 1) as f32;
+                    let b = tensor_value(tensor, 0, 2) as f32;
+                    let a = if tensor.cols == 4 {
+                        tensor_value(tensor, 0, 3) as f32
+                    } else {
+                        1.0
+                    };
+                    Ok(Self::Uniform(Vec4::new(r, g, b, a)))
                 } else if tensor.cols == 3 || tensor.cols == 4 {
                     Ok(Self::RgbMatrix(Value::Tensor(tensor.clone())))
                 } else {
@@ -279,7 +292,25 @@ pub(crate) fn convert_size_vector(
             ),
         ));
     }
-    Ok(tensor.data.into_iter().map(|v| v.max(0.1) as f32).collect())
+    Ok(tensor
+        .data
+        .into_iter()
+        .map(marker_area_points2_to_diameter_px)
+        .collect())
+}
+
+pub(crate) fn marker_area_points2_to_diameter_px(area_points2: f64) -> f32 {
+    let clamped = area_points2.max(0.1);
+    (clamped.sqrt() as f32 * POINTS_TO_PX).max(1.0)
+}
+
+pub(crate) fn marker_diameter_px_to_area_points2(diameter_px: f32) -> f64 {
+    let d_pt = (diameter_px.max(1.0) / POINTS_TO_PX) as f64;
+    (d_pt * d_pt).max(0.1)
+}
+
+pub(crate) fn default_marker_diameter_px() -> f32 {
+    marker_area_points2_to_diameter_px(DEFAULT_MARKER_AREA_POINTS2)
 }
 
 pub(crate) fn convert_scalar_color_values(

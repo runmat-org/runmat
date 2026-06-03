@@ -11,7 +11,11 @@ use std::collections::{HashMap, HashSet};
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, HostTensorOwned, SetdiffOptions, SetdiffOrder, SetdiffResult,
 };
-use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::set_values_output_type;
@@ -54,22 +58,209 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`setdiff` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn setdiff_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("setdiff").build()
+const BUILTIN_NAME: &str = "setdiff";
+
+const SETDIFF_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Values that appear in A but not in B.",
+}];
+
+const SETDIFF_OUTPUT_C_IA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Values that appear in A but not in B.",
+    },
+    BuiltinParamDescriptor {
+        name: "ia",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting retained values/rows from A.",
+    },
+];
+
+const SETDIFF_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+];
+
+const SETDIFF_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option tokens: 'rows'|'sorted'|'stable'.",
+    },
+];
+
+const SETDIFF_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "C = setdiff(A, B)",
+        inputs: &SETDIFF_INPUTS_A_B,
+        outputs: &SETDIFF_OUTPUT_C,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = setdiff(A, B, option...)",
+        inputs: &SETDIFF_INPUTS_A_B_OPTIONS,
+        outputs: &SETDIFF_OUTPUT_C,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia] = setdiff(A, B)",
+        inputs: &SETDIFF_INPUTS_A_B,
+        outputs: &SETDIFF_OUTPUT_C_IA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia] = setdiff(A, B, option...)",
+        inputs: &SETDIFF_INPUTS_A_B_OPTIONS,
+        outputs: &SETDIFF_OUTPUT_C_IA,
+    },
+];
+
+const SETDIFF_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.LEGACY_OPTION_UNSUPPORTED",
+    identifier: Some("RunMat:setdiff:LegacyOptionUnsupported"),
+    when: "Legacy compatibility options are requested.",
+    message: "setdiff: the 'legacy' behaviour is not supported",
+};
+
+const SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.CONFLICTING_ORDER_OPTIONS",
+    identifier: Some("RunMat:setdiff:ConflictingOrderOptions"),
+    when: "Both 'sorted' and 'stable' options are provided.",
+    message: "setdiff: cannot combine 'sorted' with 'stable'",
+};
+
+const SETDIFF_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.UNKNOWN_OPTION",
+    identifier: Some("RunMat:setdiff:UnknownOption"),
+    when: "An unsupported option token is provided.",
+    message: "setdiff: unrecognised option",
+};
+
+const SETDIFF_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.ROWS_COLUMN_MISMATCH",
+    identifier: Some("RunMat:setdiff:RowsColumnMismatch"),
+    when: "'rows' mode is used and column counts differ.",
+    message: "setdiff: inputs must have the same number of columns when using 'rows'",
+};
+
+const SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.UNSUPPORTED_INPUT_TYPE",
+    identifier: Some("RunMat:setdiff:UnsupportedInputType"),
+    when: "Input values cannot be converted into supported setdiff domains.",
+    message: "setdiff: unsupported input type",
+};
+
+const SETDIFF_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.INVALID_ARGUMENT",
+    identifier: Some("RunMat:setdiff:InvalidArgument"),
+    when: "Option arguments are not string-like where required.",
+    message: "setdiff: expected string option arguments",
+};
+
+const SETDIFF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETDIFF.INTERNAL",
+    identifier: Some("RunMat:setdiff:Internal"),
+    when: "Internal conversion/allocation/provider decode fails.",
+    message: "setdiff: internal operation failed",
+};
+
+const SETDIFF_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    SETDIFF_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS,
+    SETDIFF_ERROR_UNKNOWN_OPTION,
+    SETDIFF_ERROR_ROWS_COLUMN_MISMATCH,
+    SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE,
+    SETDIFF_ERROR_INVALID_ARGUMENT,
+    SETDIFF_ERROR_INTERNAL,
+];
+
+pub const SETDIFF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SETDIFF_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SETDIFF_ERRORS,
+};
+
+fn setdiff_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn setdiff_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    setdiff_error_with(error, error.message)
+}
+
+fn setdiff_internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    setdiff_error_with(&SETDIFF_ERROR_INTERNAL, message)
 }
 
 #[runtime_builtin(
     name = "setdiff",
     category = "array/sorting_sets",
-    summary = "Return the values that appear in the first input but not the second.",
+    summary = "Return values that appear in the first input but not the second.",
     keywords = "setdiff,difference,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
     type_resolver(set_values_output_type),
+    descriptor(crate::builtins::array::sorting_sets::setdiff::SETDIFF_DESCRIPTOR),
     builtin_path = "crate::builtins::array::sorting_sets::setdiff"
 )]
 async fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest).await?.into_values_value())
+    let eval = evaluate(a, b, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+        }
+        let (values, ia) = eval.into_pair();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![values, ia],
+        ));
+    }
+    Ok(eval.into_values_value())
 }
 
 /// Evaluate the `setdiff` builtin once and expose all outputs.
@@ -106,7 +297,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<SetdiffOptions> {
             crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
             _ => {
                 let text = tensor::value_to_string(arg)
-                    .ok_or_else(|| setdiff_error("setdiff: expected string option arguments"))?;
+                    .ok_or_else(|| setdiff_error(&SETDIFF_ERROR_INVALID_ARGUMENT))?;
                 let lowered = text.trim().to_ascii_lowercase();
                 parse_setdiff_option(&mut opts, &mut seen_order, &lowered)?;
                 continue;
@@ -128,9 +319,7 @@ fn parse_setdiff_option(
         "sorted" => {
             if let Some(prev) = seen_order {
                 if *prev != SetdiffOrder::Sorted {
-                    return Err(setdiff_error(
-                        "setdiff: cannot combine 'sorted' with 'stable'",
-                    ));
+                    return Err(setdiff_error(&SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS));
                 }
             }
             *seen_order = Some(SetdiffOrder::Sorted);
@@ -139,23 +328,20 @@ fn parse_setdiff_option(
         "stable" => {
             if let Some(prev) = seen_order {
                 if *prev != SetdiffOrder::Stable {
-                    return Err(setdiff_error(
-                        "setdiff: cannot combine 'sorted' with 'stable'",
-                    ));
+                    return Err(setdiff_error(&SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS));
                 }
             }
             *seen_order = Some(SetdiffOrder::Stable);
             opts.order = SetdiffOrder::Stable;
         }
         "legacy" | "r2012a" => {
-            return Err(setdiff_error(
-                "setdiff: the 'legacy' behaviour is not supported",
-            ));
+            return Err(setdiff_error(&SETDIFF_ERROR_LEGACY_OPTION_UNSUPPORTED));
         }
         other => {
-            return Err(setdiff_error(format!(
-                "setdiff: unrecognised option '{other}'"
-            )))
+            return Err(setdiff_error_with(
+                &SETDIFF_ERROR_UNKNOWN_OPTION,
+                format!("setdiff: unrecognised option '{other}'"),
+            ))
         }
     }
     Ok(())
@@ -187,7 +373,7 @@ async fn setdiff_gpu_mixed(
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let gpu_tensor = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
     let other_tensor =
-        tensor::value_into_tensor_for("setdiff", other).map_err(|e| setdiff_error(e))?;
+        tensor::value_into_tensor_for("setdiff", other).map_err(setdiff_internal_error)?;
     if gpu_is_a {
         setdiff_numeric(gpu_tensor, other_tensor, opts)
     } else {
@@ -204,19 +390,19 @@ fn setdiff_host(
         (Value::ComplexTensor(at), Value::ComplexTensor(bt)) => setdiff_complex(at, bt, opts),
         (Value::ComplexTensor(at), Value::Complex(re, im)) => {
             let bt = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_complex(at, bt, opts)
         }
         (Value::Complex(a_re, a_im), Value::ComplexTensor(bt)) => {
             let at = ComplexTensor::new(vec![(a_re, a_im)], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_complex(at, bt, opts)
         }
         (Value::Complex(a_re, a_im), Value::Complex(b_re, b_im)) => {
             let at = ComplexTensor::new(vec![(a_re, a_im)], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             let bt = ComplexTensor::new(vec![(b_re, b_im)], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_complex(at, bt, opts)
         }
 
@@ -227,27 +413,27 @@ fn setdiff_host(
         }
         (Value::StringArray(astring), Value::String(b)) => {
             let bstring = StringArray::new(vec![b], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
             let astring = StringArray::new(vec![a], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
             let astring = StringArray::new(vec![a], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             let bstring = StringArray::new(vec![b], vec![1, 1])
-                .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+                .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
             setdiff_string(astring, bstring, opts)
         }
 
         (left, right) => {
-            let tensor_a =
-                tensor::value_into_tensor_for("setdiff", left).map_err(|e| setdiff_error(e))?;
-            let tensor_b =
-                tensor::value_into_tensor_for("setdiff", right).map_err(|e| setdiff_error(e))?;
+            let tensor_a = tensor::value_into_tensor_for("setdiff", left)
+                .map_err(|e| setdiff_error_with(&SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
+            let tensor_b = tensor::value_into_tensor_for("setdiff", right)
+                .map_err(|e| setdiff_error_with(&SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
             setdiff_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -315,14 +501,12 @@ fn setdiff_numeric_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(setdiff_error(
+        return Err(setdiff_internal_error(
             "setdiff: 'rows' option requires 2-D numeric matrices",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
     }
 
     let rows_a = a.shape[0];
@@ -418,14 +602,12 @@ fn setdiff_complex_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(setdiff_error(
+        return Err(setdiff_internal_error(
             "setdiff: 'rows' option requires 2-D complex matrices",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
     }
 
     let rows_a = a.shape[0];
@@ -528,9 +710,7 @@ fn setdiff_char_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.cols != b.cols {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
     }
 
     let rows_a = a.rows;
@@ -625,14 +805,12 @@ fn setdiff_string_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(setdiff_error(
+        return Err(setdiff_internal_error(
             "setdiff: 'rows' option requires 2-D string arrays",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_error(&SETDIFF_ERROR_ROWS_COLUMN_MISMATCH));
     }
 
     let rows_a = a.shape[0];
@@ -700,9 +878,9 @@ fn assemble_numeric_setdiff(
     }
 
     let value_tensor = Tensor::new(values, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::Tensor(value_tensor),
@@ -741,9 +919,9 @@ fn assemble_numeric_row_setdiff(
     }
 
     let value_tensor = Tensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::Tensor(value_tensor),
@@ -774,9 +952,9 @@ fn assemble_complex_setdiff(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -815,9 +993,9 @@ fn assemble_complex_row_setdiff(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -848,9 +1026,9 @@ fn assemble_char_setdiff(
     }
 
     let value_array = CharArray::new(values, order.len(), 1)
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::CharArray(value_array),
@@ -889,9 +1067,9 @@ fn assemble_char_row_setdiff(
     }
 
     let value_array = CharArray::new(values, unique_rows, cols)
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::CharArray(value_array),
@@ -922,9 +1100,9 @@ fn assemble_string_setdiff(
     }
 
     let value_array = StringArray::new(values, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::StringArray(value_array),
@@ -963,9 +1141,9 @@ fn assemble_string_row_setdiff(
     }
 
     let value_array = StringArray::new(values, vec![unique_rows, cols])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows, 1])
-        .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+        .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
 
     Ok(SetdiffEvaluation::new(
         Value::StringArray(value_array),
@@ -1079,9 +1257,9 @@ impl SetdiffEvaluation {
     pub fn from_setdiff_result(result: SetdiffResult) -> crate::BuiltinResult<Self> {
         let SetdiffResult { values, ia } = result;
         let values_tensor = Tensor::new(values.data, values.shape)
-            .map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
-        let ia_tensor =
-            Tensor::new(ia.data, ia.shape).map_err(|e| setdiff_error(format!("setdiff: {e}")))?;
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
+        let ia_tensor = Tensor::new(ia.data, ia.shape)
+            .map_err(|e| setdiff_internal_error(format!("setdiff: {e}")))?;
         Ok(SetdiffEvaluation::new(
             Value::Tensor(values_tensor),
             ia_tensor,
@@ -1090,8 +1268,8 @@ impl SetdiffEvaluation {
 
     pub fn into_numeric_setdiff_result(self) -> crate::BuiltinResult<SetdiffResult> {
         let SetdiffEvaluation { values, ia } = self;
-        let values_tensor =
-            tensor::value_into_tensor_for("setdiff", values).map_err(|e| setdiff_error(e))?;
+        let values_tensor = tensor::value_into_tensor_for("setdiff", values)
+            .map_err(|e| setdiff_internal_error(e))?;
         Ok(SetdiffResult {
             values: HostTensorOwned {
                 data: values_tensor.data,
@@ -1219,10 +1397,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ResolveContext, StringArray, Tensor, Type, Value};
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
 
     fn evaluate_sync(
         a: Value,
@@ -1380,18 +1554,58 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_type_mismatch_errors() {
-        let result = evaluate_sync(Value::from(1.0), Value::String("a".into()), &[]);
-        assert!(result.is_err());
+        let err = evaluate_sync(Value::from(1.0), Value::String("a".into()), &[]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            SETDIFF_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setdiff_rows_dimension_mismatch_reports_identifier() {
+        let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor a");
+        let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor b");
+        let err =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            SETDIFF_ERROR_ROWS_COLUMN_MISMATCH.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_rejects_legacy_option() {
-        let err = error_message(
-            evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")])
-                .unwrap_err(),
+        let err = evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")])
+            .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            SETDIFF_ERROR_LEGACY_OPTION_UNSUPPORTED.identifier
         );
-        assert!(err.contains("setdiff: the 'legacy' behaviour is not supported"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setdiff_rejects_conflicting_order_options() {
+        let err = evaluate_sync(
+            Value::from(1.0),
+            Value::from(2.0),
+            &[Value::from("stable"), Value::from("sorted")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            SETDIFF_ERROR_CONFLICTING_ORDER_OPTIONS.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setdiff_rejects_unknown_option() {
+        let err =
+            evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("bogus")]).unwrap_err();
+        assert_eq!(err.identifier(), SETDIFF_ERROR_UNKNOWN_OPTION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

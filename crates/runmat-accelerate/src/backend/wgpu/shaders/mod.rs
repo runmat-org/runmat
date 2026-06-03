@@ -17,6 +17,7 @@ pub mod imfilter;
 pub mod ind2sub;
 pub mod index_select;
 pub mod kron;
+pub mod logical;
 pub mod matmul;
 pub mod matmul_smallk;
 pub mod matmul_tall_skinny;

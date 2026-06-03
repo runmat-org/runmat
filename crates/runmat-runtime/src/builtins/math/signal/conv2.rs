@@ -2,7 +2,11 @@
 
 use num_complex::Complex;
 use runmat_accelerate_api::ProviderConvMode;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -44,19 +48,259 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "conv2";
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const CONV2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "2-D convolution result.",
+}];
+
+const CONV2_SIG_AB_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First matrix input.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second matrix input.",
+    },
+];
+
+const CONV2_SIG_AB_SHAPE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First matrix input.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second matrix input.",
+    },
+    BuiltinParamDescriptor {
+        name: "shape",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"full\""),
+        description: "Output shape: \"full\", \"same\", or \"valid\".",
+    },
+];
+
+const CONV2_SIG_SEPARABLE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "hcol",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column vector kernel component.",
+    },
+    BuiltinParamDescriptor {
+        name: "hrow",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row vector kernel component.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+];
+
+const CONV2_SIG_SEPARABLE_SHAPE_INPUTS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "hcol",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Column vector kernel component.",
+    },
+    BuiltinParamDescriptor {
+        name: "hrow",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Row vector kernel component.",
+    },
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "shape",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"full\""),
+        description: "Output shape: \"full\", \"same\", or \"valid\".",
+    },
+];
+
+const CONV2_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "C = conv2(A, B)",
+        inputs: &CONV2_SIG_AB_INPUTS,
+        outputs: &CONV2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = conv2(A, B, shape)",
+        inputs: &CONV2_SIG_AB_SHAPE_INPUTS,
+        outputs: &CONV2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = conv2(hcol, hrow, A)",
+        inputs: &CONV2_SIG_SEPARABLE_INPUTS,
+        outputs: &CONV2_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = conv2(hcol, hrow, A, shape)",
+        inputs: &CONV2_SIG_SEPARABLE_SHAPE_INPUTS,
+        outputs: &CONV2_OUTPUT,
+    },
+];
+
+const CONV2_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.ARG_COUNT",
+    identifier: Some("RunMat:conv2:ArgCount"),
+    when: "More than four input arguments are provided.",
+    message: "conv2: expected at most four input arguments",
+};
+
+const CONV2_ERROR_SHAPE_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.SHAPE_INVALID",
+    identifier: Some("RunMat:conv2:ShapeInvalid"),
+    when: "Shape argument is not one of full/same/valid.",
+    message: "conv2: shape argument must be the string 'full', 'same', or 'valid'",
+};
+
+const CONV2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.INVALID_INPUT",
+    identifier: Some("RunMat:conv2:InvalidInput"),
+    when: "An operand is not numeric/logical scalar/vector/matrix compatible.",
+    message: "conv2: unsupported input type",
+};
+
+const CONV2_ERROR_VECTOR_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.VECTOR_REQUIRED",
+    identifier: Some("RunMat:conv2:VectorRequired"),
+    when: "Separable hcol/hrow inputs are not vectors.",
+    message: "conv2: vector input required",
+};
+
+const CONV2_ERROR_MATRIX_REQUIRED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.MATRIX_REQUIRED",
+    identifier: Some("RunMat:conv2:MatrixRequired"),
+    when: "Input matrix has non-singleton dimensions beyond 2-D.",
+    message: "conv2: input must be 2-D",
+};
+
+const CONV2_ERROR_CONVERSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.CONVERSION",
+    identifier: Some("RunMat:conv2:Conversion"),
+    when: "Input conversion from logical/gpu tensor into host matrix domain fails.",
+    message: "conv2: input conversion failed",
+};
+
+const CONV2_ERROR_GATHER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.GATHER_FAILED",
+    identifier: Some("RunMat:conv2:GatherFailed"),
+    when: "GPU input cannot be gathered for host fallback normalization.",
+    message: "conv2: failed to gather GPU input",
+};
+
+const CONV2_ERROR_BUILD_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.BUILD_OUTPUT",
+    identifier: Some("RunMat:conv2:BuildOutput"),
+    when: "Output tensor allocation fails.",
+    message: "conv2: failed to build tensor",
+};
+
+const CONV2_ERROR_BUILD_COMPLEX_OUTPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONV2.BUILD_COMPLEX_OUTPUT",
+    identifier: Some("RunMat:conv2:BuildComplexOutput"),
+    when: "Output complex tensor allocation fails.",
+    message: "conv2: failed to build complex tensor",
+};
+
+const CONV2_ERRORS: [BuiltinErrorDescriptor; 9] = [
+    CONV2_ERROR_ARG_COUNT,
+    CONV2_ERROR_SHAPE_INVALID,
+    CONV2_ERROR_INVALID_INPUT,
+    CONV2_ERROR_VECTOR_REQUIRED,
+    CONV2_ERROR_MATRIX_REQUIRED,
+    CONV2_ERROR_CONVERSION,
+    CONV2_ERROR_GATHER_FAILED,
+    CONV2_ERROR_BUILD_OUTPUT,
+    CONV2_ERROR_BUILD_COMPLEX_OUTPUT,
+];
+
+pub const CONV2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CONV2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CONV2_ERRORS,
+};
+
+fn conv2_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    conv2_error_with_message(error.message, error)
+}
+
+fn conv2_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    conv2_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn conv2_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn conv2_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "conv2",
     category = "math/signal",
-    summary = "Two-dimensional convolution with MATLAB-compatible padding modes.",
+    summary = "Compute two-dimensional convolution.",
     keywords = "conv2,2d convolution,image filtering,gpu",
     accel = "custom",
     type_resolver(conv2_type),
+    descriptor(crate::builtins::math::signal::conv2::CONV2_DESCRIPTOR),
     builtin_path = "crate::builtins::math::signal::conv2"
 )]
 async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -85,9 +329,7 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             let result = conv2_matrices(&kernel, &signal, mode);
             matrix_to_value(result)
         }
-        _ => Err(runtime_error_for(
-            "conv2: expected at most four input arguments",
-        )),
+        _ => Err(conv2_error(&CONV2_ERROR_ARG_COUNT)),
     }
 }
 
@@ -245,9 +487,7 @@ fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
         "same" => Conv2Mode::Same,
         "valid" => Conv2Mode::Valid,
         _ => {
-            return Err(runtime_error_for(
-                "conv2: shape argument must be the string 'full', 'same', or 'valid'",
-            ))
+            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID));
         }
     };
     Ok(Some(mode))
@@ -258,13 +498,22 @@ async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Ma
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
+                .map_err(|flow| {
+                    let message = flow.message().to_owned();
+                    conv2_error_with_source(
+                        &CONV2_ERROR_GATHER_FAILED,
+                        message,
+                        map_control_flow_with_builtin(flow, BUILTIN_NAME),
+                    )
+                })?;
             tensor_to_matrix(tensor, name, arg)
         }
         Value::Tensor(tensor) => tensor_to_matrix(tensor, name, arg),
         Value::ComplexTensor(tensor) => complex_tensor_to_matrix(tensor, name, arg),
         Value::LogicalArray(logical) => tensor::logical_to_tensor(&logical)
-            .map_err(|err| runtime_error_for(format!("{name}: {err}")))
+            .map_err(|err| {
+                conv2_error_with_detail(&CONV2_ERROR_CONVERSION, format!("{name}: {err}"))
+            })
             .and_then(|tensor| tensor_to_matrix(tensor, name, arg)),
         Value::Num(n) => Ok(Matrix {
             rows: 1,
@@ -286,30 +535,30 @@ async fn convert_matrix(value: Value, name: &str, arg: &str) -> BuiltinResult<Ma
             cols: 1,
             data: vec![Complex::new(re, im)],
         }),
-        other => Err(runtime_error_for(format!(
-            "{name}: unsupported input type for {arg}: expected numeric or logical values, got {:?}",
-            other
-        ))),
+        other => Err(conv2_error_with_detail(
+            &CONV2_ERROR_INVALID_INPUT,
+            format!("{name}/{arg}: expected numeric or logical values, got {other:?}"),
+        )),
     }
 }
 
 async fn convert_vector(value: Value, name: &str, arg: &str) -> BuiltinResult<Vec<Complex<f64>>> {
     let matrix = convert_matrix(value, name, arg).await?;
     if matrix.rows > 1 && matrix.cols > 1 {
-        return Err(runtime_error_for(format!(
-            "{name}: {arg} must be a vector (row or column), got {}×{}",
-            matrix.rows, matrix.cols
-        )));
+        return Err(conv2_error_with_detail(
+            &CONV2_ERROR_VECTOR_REQUIRED,
+            format!("{name}: {arg} got {}x{}", matrix.rows, matrix.cols),
+        ));
     }
     Ok(matrix.data)
 }
 
 fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(runtime_error_for(format!(
-            "{name}: {arg} must be 2-D; received shape {:?}",
-            tensor.shape
-        )));
+        return Err(conv2_error_with_detail(
+            &CONV2_ERROR_MATRIX_REQUIRED,
+            format!("{name}: {arg} received shape {:?}", tensor.shape),
+        ));
     }
     Ok(Matrix {
         rows: tensor.rows,
@@ -324,10 +573,10 @@ fn tensor_to_matrix(tensor: Tensor, name: &str, arg: &str) -> BuiltinResult<Matr
 
 fn complex_tensor_to_matrix(tensor: ComplexTensor, name: &str, arg: &str) -> BuiltinResult<Matrix> {
     if tensor.shape.iter().skip(2).any(|&dim| dim > 1) {
-        return Err(runtime_error_for(format!(
-            "{name}: {arg} must be 2-D; received shape {:?}",
-            tensor.shape
-        )));
+        return Err(conv2_error_with_detail(
+            &CONV2_ERROR_MATRIX_REQUIRED,
+            format!("{name}: {arg} received shape {:?}", tensor.shape),
+        ));
     }
     Ok(Matrix {
         rows: tensor.rows,
@@ -414,13 +663,13 @@ fn matrix_to_value(matrix: Matrix) -> BuiltinResult<Value> {
     if all_real {
         let real_data: Vec<f64> = matrix.data.into_iter().map(|c| c.re).collect();
         let tensor = Tensor::new(real_data, vec![rows, cols])
-            .map_err(|e| runtime_error_for(format!("conv2: failed to build tensor: {e}")))?;
+            .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_OUTPUT, &e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
 
     let complex_data: Vec<(f64, f64)> = matrix.data.into_iter().map(|c| (c.re, c.im)).collect();
     let tensor = ComplexTensor::new(complex_data, vec![rows, cols])
-        .map_err(|e| runtime_error_for(format!("conv2: failed to build complex tensor: {e}")))?;
+        .map_err(|e| conv2_error_with_detail(&CONV2_ERROR_BUILD_COMPLEX_OUTPUT, &e))?;
     if tensor.data.len() == 1 {
         let (re, im) = tensor.data[0];
         if im.abs() <= EPS {
@@ -437,7 +686,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{LogicalArray, ResolveContext, Type};
+    use runmat_builtins::{builtin_function_by_name, LogicalArray, ResolveContext, Type};
 
     fn error_message(error: RuntimeError) -> String {
         error.message().to_string()
@@ -474,6 +723,21 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(4), Some(2)])
             }
         );
+    }
+
+    #[test]
+    fn conv2_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("conv2 builtin");
+        let descriptor = builtin.descriptor.expect("conv2 descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"C = conv2(A, B)"));
+        assert!(labels.contains(&"C = conv2(A, B, shape)"));
+        assert!(labels.contains(&"C = conv2(hcol, hrow, A)"));
+        assert!(labels.contains(&"C = conv2(hcol, hrow, A, shape)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.CONV2.SHAPE_INVALID"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

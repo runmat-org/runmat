@@ -1,7 +1,11 @@
 //! MATLAB-compatible `patch` builtin.
 
 use glam::{Vec3, Vec4};
-use runmat_builtins::{StructValue, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    StructValue, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 
@@ -10,17 +14,238 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::gather_tensor_from_gpu;
 use super::op_common::{apply_axes_target, split_leading_axes_handle};
-use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
 };
 
 const BUILTIN_NAME: &str = "patch";
+
+const PATCH_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created patch object.",
+}];
+
+const PATCH_INPUTS_XY_C: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Face color specification.",
+    },
+];
+
+const PATCH_INPUTS_XYZ_C: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch Z coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Face color specification.",
+    },
+];
+
+const PATCH_INPUTS_XYZ: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch X coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch Y coordinates.",
+    },
+    BuiltinParamDescriptor {
+        name: "Z",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Patch Z coordinates.",
+    },
+];
+
+const PATCH_INPUTS_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Struct containing patch properties.",
+}];
+
+const PATCH_INPUTS_FACEVERT_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "facevert",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Faces/Vertices property/value pairs.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional patch property/value pairs.",
+    },
+];
+
+const PATCH_INPUTS_AX_DATA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "data",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Patch positional/property arguments.",
+    },
+];
+
+const PATCH_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "h = patch(X, Y, C)",
+        inputs: &PATCH_INPUTS_XY_C,
+        outputs: &PATCH_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = patch(X, Y, Z)",
+        inputs: &PATCH_INPUTS_XYZ,
+        outputs: &PATCH_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = patch(X, Y, Z, C)",
+        inputs: &PATCH_INPUTS_XYZ_C,
+        outputs: &PATCH_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = patch(S)",
+        inputs: &PATCH_INPUTS_STRUCT,
+        outputs: &PATCH_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = patch('Faces', F, 'Vertices', V, ...)",
+        inputs: &PATCH_INPUTS_FACEVERT_PROPS,
+        outputs: &PATCH_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = patch(ax, ...)",
+        inputs: &PATCH_INPUTS_AX_DATA,
+        outputs: &PATCH_OUTPUT_HANDLE,
+    },
+];
+
+const PATCH_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PATCH.INVALID_ARGUMENT",
+    identifier: Some("RunMat:patch:InvalidArgument"),
+    when: "Patch coordinates, faces/vertices, or property/value arguments are malformed.",
+    message: "patch: invalid argument",
+};
+
+const PATCH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PATCH.INTERNAL",
+    identifier: Some("RunMat:patch:Internal"),
+    when: "Internal patch triangulation/render setup fails unexpectedly.",
+    message: "patch: internal operation failed",
+};
+
+const PATCH_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [PATCH_ERROR_INVALID_ARGUMENT, PATCH_ERROR_INTERNAL];
+
+pub const PATCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &PATCH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &PATCH_ERRORS,
+};
+
+fn patch_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let raw = detail.as_ref().trim();
+    let normalized = raw.strip_prefix("patch:").map(str::trim).unwrap_or(raw);
+    let message = if normalized.is_empty() {
+        error.message.to_string()
+    } else {
+        format!("{}: {}", error.message, normalized)
+    };
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_patch_invalid(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    patch_error_with_detail(&PATCH_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_patch_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    patch_error_with_detail(&PATCH_ERROR_INTERNAL, err.message)
+}
+
+fn patch_invalid(detail: impl AsRef<str>) -> RuntimeError {
+    patch_error_with_detail(&PATCH_ERROR_INVALID_ARGUMENT, detail)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::patch")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -91,17 +316,19 @@ impl Default for PatchOptions {
 #[runtime_builtin(
     name = "patch",
     category = "plotting",
-    summary = "Create MATLAB-compatible colored polygon patches.",
+    summary = "Create filled polygon patch graphics from coordinate or faces/vertices data.",
     keywords = "patch,plotting,polygon,faces,vertices",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::patch::PATCH_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::patch"
 )]
 pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (axes_target, args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
-    apply_axes_target(axes_target, BUILTIN_NAME)?;
-    let mut plot = Some(parse_patch_plot(args)?);
+    let (axes_target, args) =
+        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_patch_invalid)?;
+    apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_patch_invalid)?;
+    let mut plot = Some(parse_patch_plot(args).map_err(map_patch_invalid)?);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
@@ -130,14 +357,14 @@ pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_patch_internal(err));
     }
     Ok(handle)
 }
 
 pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
     if args.is_empty() {
-        return Err(plotting_error(BUILTIN_NAME, "patch: expected input data"));
+        return Err(patch_invalid("patch: expected input data"));
     }
     let mut opts = PatchOptions::default();
     let mut remaining = if let Some(Value::Struct(st)) = args.first() {
@@ -160,8 +387,8 @@ pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
         vertices_faces_from_xyz(&opts)?
     };
 
-    let mut plot = PatchPlot::new(vertices, faces)
-        .map_err(|err| plotting_error(BUILTIN_NAME, format!("patch: {err}")))?;
+    let mut plot =
+        PatchPlot::new(vertices, faces).map_err(|err| patch_invalid(format!("patch: {err}")))?;
     plot.set_face_color(opts.face_color);
     plot.set_edge_color(opts.edge_color);
     plot.set_face_color_mode(opts.face_color_mode);
@@ -258,14 +485,13 @@ fn apply_property_pairs(opts: &mut PatchOptions, args: &[Value]) -> BuiltinResul
         return Ok(());
     }
     if !args.len().is_multiple_of(2) {
-        return Err(plotting_error(
-            BUILTIN_NAME,
+        return Err(patch_invalid(
             "patch: property/value arguments must come in pairs",
         ));
     }
     for pair in args.chunks_exact(2) {
         let key = value_as_string(&pair[0])
-            .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: property names must be strings"))?;
+            .ok_or_else(|| patch_invalid("patch: property names must be strings"))?;
         apply_property(opts, &key, &pair[1])?;
     }
     Ok(())
@@ -282,23 +508,23 @@ fn apply_property(opts: &mut PatchOptions, key: &str, value: &Value) -> BuiltinR
         "edgecolor" => apply_edge_color(opts, value)?,
         "facealpha" => {
             opts.face_alpha = value_as_f64(value)
-                .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: FaceAlpha must be numeric"))?
+                .ok_or_else(|| patch_invalid("patch: FaceAlpha must be numeric"))?
                 .clamp(0.0, 1.0) as f32;
         }
         "edgealpha" => {
             opts.edge_alpha = value_as_f64(value)
-                .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: EdgeAlpha must be numeric"))?
+                .ok_or_else(|| patch_invalid("patch: EdgeAlpha must be numeric"))?
                 .clamp(0.0, 1.0) as f32;
         }
         "linewidth" => {
             opts.line_width = value_as_f64(value)
-                .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: LineWidth must be numeric"))?
+                .ok_or_else(|| patch_invalid("patch: LineWidth must be numeric"))?
                 .max(0.0) as f32;
         }
         "displayname" => opts.label = value_as_string(value),
         "visible" => {
             opts.visible = value_as_bool(value)
-                .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: Visible must be on/off"))?;
+                .ok_or_else(|| patch_invalid("patch: Visible must be on/off"))?;
         }
         _ => {}
     }
@@ -308,8 +534,7 @@ fn apply_property(opts: &mut PatchOptions, key: &str, value: &Value) -> BuiltinR
 fn tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::GpuTensor(handle) => gather_tensor_from_gpu(handle, BUILTIN_NAME),
-        other => Tensor::try_from(&other)
-            .map_err(|err| plotting_error(BUILTIN_NAME, format!("patch: {err}"))),
+        other => Tensor::try_from(&other).map_err(|err| patch_invalid(format!("patch: {err}"))),
     }
 }
 
@@ -355,8 +580,7 @@ fn apply_edge_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()>
 
 fn vertices_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec3>> {
     if tensor.cols != 2 && tensor.cols != 3 {
-        return Err(plotting_error(
-            BUILTIN_NAME,
+        return Err(patch_invalid(
             "patch: Vertices must be an N-by-2 or N-by-3 matrix",
         ));
     }
@@ -376,10 +600,7 @@ fn vertices_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec3>> {
 
 fn faces_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec<usize>>> {
     if tensor.rows == 0 || tensor.cols == 0 {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "patch: Faces must not be empty",
-        ));
+        return Err(patch_invalid("patch: Faces must not be empty"));
     }
     let mut faces = Vec::with_capacity(tensor.rows);
     for row in 0..tensor.rows {
@@ -390,8 +611,7 @@ fn faces_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec<usize>>> {
                 continue;
             }
             if value < 1.0 || value.fract() != 0.0 {
-                return Err(plotting_error(
-                    BUILTIN_NAME,
+                return Err(patch_invalid(
                     "patch: Faces must contain positive integer vertex indices",
                 ));
             }
@@ -408,21 +628,19 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
     let x = opts
         .x_data
         .as_ref()
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: missing XData"))?;
+        .ok_or_else(|| patch_invalid("patch: missing XData"))?;
     let y = opts
         .y_data
         .as_ref()
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "patch: missing YData"))?;
+        .ok_or_else(|| patch_invalid("patch: missing YData"))?;
     if x.rows != y.rows || x.cols != y.cols {
-        return Err(plotting_error(
-            BUILTIN_NAME,
+        return Err(patch_invalid(
             "patch: XData and YData must have the same size",
         ));
     }
     if let Some(z) = &opts.z_data {
         if z.rows != x.rows || z.cols != x.cols {
-            return Err(plotting_error(
-                BUILTIN_NAME,
+            return Err(patch_invalid(
                 "patch: ZData must have the same size as XData and YData",
             ));
         }
@@ -437,8 +655,7 @@ fn vertices_faces_from_xyz(opts: &PatchOptions) -> BuiltinResult<(Vec<Vec3>, Vec
                 .map(|z| z.len() != x_values.len())
                 .unwrap_or(false)
         {
-            return Err(plotting_error(
-                BUILTIN_NAME,
+            return Err(patch_invalid(
                 "patch: vector XData, YData, and ZData must have the same length",
             ));
         }
@@ -508,6 +725,8 @@ pub(super) fn is_property_name(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use runmat_builtins::NumericDType;
 
     fn tensor(rows: usize, cols: usize, data: &[f64]) -> Value {
@@ -518,6 +737,14 @@ mod tests {
             data: data.to_vec(),
             dtype: NumericDType::F64,
         })
+    }
+
+    fn setup_plot_test() -> crate::builtins::plotting::state::PlotTestLockGuard {
+        let guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        guard
     }
 
     #[test]
@@ -620,6 +847,7 @@ mod tests {
 
     #[test]
     fn patch_registers_as_dispatch_builtin_and_returns_handle() {
+        let _guard = setup_plot_test();
         unsafe {
             std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
         }
@@ -642,6 +870,7 @@ mod tests {
 
     #[test]
     fn patch_get_visible_tracks_set_visible() {
+        let _guard = setup_plot_test();
         unsafe {
             std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
         }
@@ -679,5 +908,23 @@ mod tests {
             panic!("expected patch property struct");
         };
         assert_eq!(st.fields.get("Visible"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn patch_descriptor_includes_core_signatures() {
+        let labels: Vec<&str> = PATCH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = patch(X, Y, C)"));
+        assert!(labels.contains(&"h = patch(S)"));
+        assert!(labels.contains(&"h = patch(ax, ...)"));
+    }
+
+    #[test]
+    fn patch_missing_input_uses_stable_identifier() {
+        let err = patch_builtin(Vec::new()).expect_err("expected patch argument validation error");
+        assert_eq!(err.identifier(), PATCH_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

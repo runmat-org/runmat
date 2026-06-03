@@ -1,7 +1,11 @@
 //! MATLAB-compatible `horzcat` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::shape_rules::scalar_tensor_shape;
-use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::{build_runtime_error, RuntimeError};
@@ -41,6 +45,70 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 fn horzcat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("horzcat").build()
 }
+
+const HORZCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Horizontally concatenated result (dimension 2).",
+}];
+
+const HORZCAT_INPUTS_EMPTY: [BuiltinParamDescriptor; 0] = [];
+
+const HORZCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A1",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "An",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional input arrays.",
+    },
+];
+
+const HORZCAT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = horzcat()",
+        inputs: &HORZCAT_INPUTS_EMPTY,
+        outputs: &HORZCAT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = horzcat(A1, An...)",
+        inputs: &HORZCAT_INPUTS,
+        outputs: &HORZCAT_OUTPUT,
+    },
+];
+
+const HORZCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HORZCAT.INVALID_INPUT",
+    identifier: Some("RunMat:horzcat:InvalidInput"),
+    when: "Inputs are malformed or incompatible for horizontal concatenation.",
+    message: "horzcat: invalid input arguments",
+};
+
+const HORZCAT_ERROR_TYPE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HORZCAT.TYPE_MISMATCH",
+    identifier: Some("RunMat:horzcat:TypeMismatch"),
+    when: "Input classes cannot be concatenated together.",
+    message: "horzcat: incompatible input classes for concatenation",
+};
+
+const HORZCAT_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [HORZCAT_ERROR_INVALID_INPUT, HORZCAT_ERROR_TYPE_MISMATCH];
+
+pub const HORZCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HORZCAT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HORZCAT_ERRORS,
+};
 
 fn concat_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
     match ty {
@@ -178,10 +246,11 @@ fn horzcat_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 #[runtime_builtin(
     name = "horzcat",
     category = "array/shape",
-    summary = "Concatenate inputs horizontally (dimension 2) just like MATLAB square brackets.",
+    summary = "Concatenate arrays horizontally.",
     keywords = "horzcat,horizontal concatenation,array,gpu",
     accel = "array_construct",
     type_resolver(horzcat_type),
+    descriptor(crate::builtins::array::shape::horzcat::HORZCAT_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
 async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -274,6 +343,14 @@ pub(crate) mod tests {
     fn single_argument_round_trips() {
         let result = horzcat_builtin(vec![Value::Num(3.5)]).expect("horzcat");
         assert_eq!(result, Value::Num(3.5));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn true_empty_operand_is_neutral_for_dynamic_growth() {
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
+        let result = horzcat_builtin(vec![Value::Tensor(empty), Value::Num(1.0)]).expect("horzcat");
+        assert_eq!(result, Value::Num(1.0));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

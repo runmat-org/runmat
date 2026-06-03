@@ -3,8 +3,6 @@ pub mod benchmark;
 pub mod bytecode;
 pub mod config;
 pub mod gc;
-pub mod jupyter;
-pub mod kernel;
 pub mod repl;
 pub mod script;
 pub mod session;

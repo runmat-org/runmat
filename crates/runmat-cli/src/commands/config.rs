@@ -1,29 +1,27 @@
 use anyhow::{Context, Result};
 use log::error;
-use runmat_config::{ConfigLoader, RunMatConfig};
+use runmat_config::runtime::{ConfigLoader, RunMatRuntimeConfig};
+use std::path::Path;
 
-use crate::cli::ConfigCommand;
+use crate::cli::{ConfigCommand, ConfigFormat};
 
 pub async fn execute_config_command(
     config_command: ConfigCommand,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     match config_command {
-        ConfigCommand::Show => {
-            println!("Current RunMat Configuration:");
-            println!("==============================");
-
-            let yaml =
-                serde_yaml::to_string(config).context("Failed to serialize configuration")?;
-            println!("{yaml}");
+        ConfigCommand::Show { format } => {
+            let rendered = render_runtime_config(config, format)?;
+            println!("{rendered}");
         }
-        ConfigCommand::Generate { output } => {
-            let sample_config = RunMatConfig::default();
-            ConfigLoader::save_to_file(&sample_config, &output)
+        ConfigCommand::Generate { output, format } => {
+            let format = format.unwrap_or_else(|| infer_format_from_path(&output));
+            let sample = render_sample_config(format)?;
+            std::fs::write(&output, sample)
                 .with_context(|| format!("Failed to write config to {}", output.display()))?;
 
-            println!("Sample configuration generated: {}", output.display());
-            println!("Edit this file to customize your RunMat settings.");
+            println!("Sample RunMat config generated: {}", output.display());
+            println!("This file includes project and runtime sections.");
         }
         ConfigCommand::Validate { config_file } => match ConfigLoader::load_from_file(&config_file)
         {
@@ -44,47 +42,14 @@ pub async fn execute_config_command(
                 println!("Environment override: {config_path}");
             }
 
-            println!("Current directory:");
-            if let Ok(current_dir) = std::env::current_dir() {
-                for name in &[
-                    ".runmat.yaml",
-                    ".runmat.yml",
-                    ".runmat.json",
-                    ".runmat.toml",
-                ] {
-                    let path = current_dir.join(name);
-                    let exists = if path.exists() { " (exists)" } else { "" };
-                    println!("  {}{}", path.display(), exists);
-                }
-            }
+            println!("Project discovery (walk-up): runmat.toml, runmat.json");
 
             println!();
-            println!("Home directory:");
+            println!("User config:");
             if let Some(home_dir) = dirs::home_dir() {
-                for name in &[".runmat.yaml", ".runmat.yml", ".runmat.json"] {
-                    let path = home_dir.join(name);
-                    let exists = if path.exists() { " (exists)" } else { "" };
-                    println!("  {}{}", path.display(), exists);
-                }
-
                 let config_dir = home_dir.join(".config/runmat");
-                for name in &["config.yaml", "config.yml", "config.json"] {
+                for name in &["config.toml", "config.json"] {
                     let path = config_dir.join(name);
-                    let exists = if path.exists() { " (exists)" } else { "" };
-                    println!("  {}{}", path.display(), exists);
-                }
-            }
-
-            #[cfg(unix)]
-            {
-                println!();
-                println!("System-wide:");
-                for name in &[
-                    "/etc/runmat/config.yaml",
-                    "/etc/runmat/config.yml",
-                    "/etc/runmat/config.json",
-                ] {
-                    let path = std::path::Path::new(name);
                     let exists = if path.exists() { " (exists)" } else { "" };
                     println!("  {}{}", path.display(), exists);
                 }
@@ -92,4 +57,32 @@ pub async fn execute_config_command(
         }
     }
     Ok(())
+}
+
+fn infer_format_from_path(path: &Path) -> ConfigFormat {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("json") => ConfigFormat::Json,
+        _ => ConfigFormat::Toml,
+    }
+}
+
+fn render_runtime_config(config: &RunMatRuntimeConfig, format: ConfigFormat) -> Result<String> {
+    let virtual_path = match format {
+        ConfigFormat::Toml => Path::new("resolved.runmat.toml"),
+        ConfigFormat::Json => Path::new("resolved.runmat.json"),
+    };
+    ConfigLoader::render_runtime_config(config, virtual_path)
+}
+
+fn render_sample_config(format: ConfigFormat) -> Result<String> {
+    let sample_toml = ConfigLoader::generate_sample_config();
+    match format {
+        ConfigFormat::Toml => Ok(sample_toml),
+        ConfigFormat::Json => {
+            let value: toml::Value = toml::from_str(&sample_toml)
+                .context("Failed to parse sample TOML for JSON conversion")?;
+            serde_json::to_string_pretty(&value)
+                .context("Failed to serialize sample config as JSON")
+        }
+    }
 }

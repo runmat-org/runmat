@@ -1,7 +1,11 @@
 //! MATLAB-compatible `le` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{CharArray, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
@@ -58,24 +62,88 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "le";
-const IDENT_INVALID_INPUT: &str = "RunMat:le:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "RunMat:le:SizeMismatch";
-const IDENT_COMPLEX_UNSUPPORTED: &str = "RunMat:le:ComplexNotSupported";
 
-fn le_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .build()
+const LE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Logical less-than-or-equal result.",
+}];
+
+const LE_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const LE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = le(A, B)",
+    inputs: &LE_INPUTS,
+    outputs: &LE_OUTPUT,
+}];
+
+const LE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LE.INVALID_INPUT",
+    identifier: Some("RunMat:le:InvalidInput"),
+    when: "Operands contain unsupported types or mixed numeric/string domains.",
+    message: "le: mixing numeric and string inputs is not supported",
+};
+
+const LE_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LE.SIZE_MISMATCH",
+    identifier: Some("RunMat:le:SizeMismatch"),
+    when: "Operands are not broadcast-compatible.",
+    message: "le: array sizes are not compatible for broadcasting",
+};
+
+const LE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LE.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:le:ComplexNotSupported"),
+    when: "At least one operand is complex.",
+    message: "le: complex numbers are not supported",
+};
+
+const LE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LE_ERROR_INVALID_INPUT,
+    LE_ERROR_SIZE_MISMATCH,
+    LE_ERROR_COMPLEX_UNSUPPORTED,
+];
+
+pub const LE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LE_ERRORS,
+};
+
+fn le_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "le",
     category = "logical/rel",
-    summary = "Element-wise less-than-or-equal comparison for scalars, arrays, and gpuArray inputs.",
+    summary = "Compute element-wise less-than-or-equal comparisons.",
     keywords = "le,less equal,comparison,logical,gpu",
     accel = "elementwise",
     type_resolver(logical_binary_type),
+    descriptor(crate::builtins::logical::rel::le::LE_DESCRIPTOR),
     builtin_path = "crate::builtins::logical::rel::le"
 )]
 async fn le_builtin(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
@@ -121,10 +189,7 @@ async fn le_host(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             logical_result(data, shape)
         }
         (LeOperand::Numeric(_), LeOperand::String(_))
-        | (LeOperand::String(_), LeOperand::Numeric(_)) => Err(le_error(
-            "le: mixing numeric and string inputs is not supported",
-            IDENT_INVALID_INPUT,
-        )),
+        | (LeOperand::String(_), LeOperand::Numeric(_)) => Err(le_error(&LE_ERROR_INVALID_INPUT)),
     }
 }
 
@@ -192,7 +257,7 @@ fn logical_result(data: Vec<u8>, shape: Vec<usize>) -> crate::BuiltinResult<Valu
     } else {
         LogicalArray::new(data, shape)
             .map(Value::LogicalArray)
-            .map_err(|e| le_error(format!("le: {e}"), IDENT_INVALID_INPUT))
+            .map_err(|_| le_error(&LE_ERROR_INVALID_INPUT))
     }
 }
 
@@ -223,19 +288,13 @@ impl LeOperand {
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle)
                     .await
-                    .map_err(|err| {
-                        le_error(format!("{BUILTIN_NAME}: {err}"), IDENT_INVALID_INPUT)
-                    })?;
+                    .map_err(|_| le_error(&LE_ERROR_INVALID_INPUT))?;
                 Ok(LeOperand::Numeric(NumericBuffer::from_tensor(tensor)))
             }
-            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(le_error(
-                "le: complex inputs are not supported",
-                IDENT_COMPLEX_UNSUPPORTED,
-            )),
-            unsupported => Err(le_error(
-                format!("le: unsupported input type {unsupported:?}"),
-                IDENT_INVALID_INPUT,
-            )),
+            Value::Complex(_, _) | Value::ComplexTensor(_) => {
+                Err(le_error(&LE_ERROR_COMPLEX_UNSUPPORTED))
+            }
+            _ => Err(le_error(&LE_ERROR_INVALID_INPUT)),
         }
     }
 }
@@ -245,7 +304,7 @@ fn numeric_le(
     rhs: &NumericBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| le_error(err, IDENT_SIZE_MISMATCH))?;
+        .map_err(|_| le_error(&LE_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -276,7 +335,7 @@ fn string_le(
     rhs: &StringBuffer,
 ) -> crate::BuiltinResult<(Vec<u8>, Vec<usize>)> {
     let shape = broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-        .map_err(|err| le_error(err, IDENT_SIZE_MISMATCH))?;
+        .map_err(|_| le_error(&LE_ERROR_SIZE_MISMATCH))?;
     let total = tensor::element_count(&shape);
     if total == 0 {
         return Ok((Vec::new(), shape));
@@ -458,7 +517,7 @@ pub(crate) mod tests {
         let err =
             run_le(Value::String("apple".into()), Value::Num(3.0)).expect_err("expected error");
         assert!(err.message().contains("mixing numeric and string"));
-        assert_eq!(err.identifier(), Some(IDENT_INVALID_INPUT));
+        assert_eq!(err.identifier(), LE_ERROR_INVALID_INPUT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -466,7 +525,7 @@ pub(crate) mod tests {
     fn le_complex_error() {
         let err = run_le(Value::Complex(1.0, 1.0), Value::Num(0.0)).expect_err("le");
         assert!(err.message().contains("complex"));
-        assert_eq!(err.identifier(), Some(IDENT_COMPLEX_UNSUPPORTED));
+        assert_eq!(err.identifier(), LE_ERROR_COMPLEX_UNSUPPORTED.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

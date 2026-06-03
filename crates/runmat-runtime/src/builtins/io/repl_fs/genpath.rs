@@ -1,6 +1,10 @@
 //! MATLAB-compatible `genpath` builtin for generating recursive search paths.
 
-use runmat_builtins::{CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{compare_names, expand_user_path, path_to_string};
@@ -15,9 +19,6 @@ use std::collections::HashSet;
 #[cfg(test)]
 use std::env;
 use std::path::{Path, PathBuf};
-
-const ERROR_FOLDER_TYPE: &str = "genpath: folder must be a character vector or string scalar";
-const ERROR_EXCLUDES_TYPE: &str = "genpath: excludes must be a character vector or string scalar";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::genpath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -49,10 +50,118 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "genpath";
 
-fn genpath_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const GENPATH_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "pathstr",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Generated recursive path string.",
+}];
+const GENPATH_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const GENPATH_INPUTS_FOLDER: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "folder",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Root folder to traverse recursively.",
+}];
+const GENPATH_INPUTS_FOLDER_EXCLUDES: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "folder",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Root folder to traverse recursively.",
+    },
+    BuiltinParamDescriptor {
+        name: "excludes",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Path-list string of folders to exclude.",
+    },
+];
+const GENPATH_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "pathstr = genpath()",
+        inputs: &GENPATH_INPUTS_NONE,
+        outputs: &GENPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pathstr = genpath(folder)",
+        inputs: &GENPATH_INPUTS_FOLDER,
+        outputs: &GENPATH_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "pathstr = genpath(folder, excludes)",
+        inputs: &GENPATH_INPUTS_FOLDER_EXCLUDES,
+        outputs: &GENPATH_OUTPUT,
+    },
+];
+const GENPATH_ERROR_FOLDER_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GENPATH.FOLDER_TYPE",
+    identifier: None,
+    when: "The folder argument is not a character vector, string scalar/array scalar, or tensor of character codes.",
+    message: "genpath: folder must be a character vector or string scalar",
+};
+const GENPATH_ERROR_EXCLUDES_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GENPATH.EXCLUDES_TYPE",
+    identifier: None,
+    when: "The excludes argument is not a character vector, string scalar/array scalar, or tensor of character codes.",
+    message: "genpath: excludes must be a character vector or string scalar",
+};
+const GENPATH_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GENPATH.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than two positional arguments are provided.",
+    message: "genpath: too many input arguments",
+};
+const GENPATH_ERROR_CWD_RESOLVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GENPATH.CWD_RESOLVE",
+    identifier: None,
+    when: "Current directory cannot be resolved while locating the traversal root.",
+    message: "genpath: unable to resolve current directory",
+};
+const GENPATH_ERROR_FOLDER_NOT_FOUND: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GENPATH.FOLDER_NOT_FOUND",
+    identifier: None,
+    when: "Requested folder path does not exist.",
+    message: "genpath: folder not found",
+};
+const GENPATH_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    GENPATH_ERROR_FOLDER_TYPE,
+    GENPATH_ERROR_EXCLUDES_TYPE,
+    GENPATH_ERROR_TOO_MANY_INPUTS,
+    GENPATH_ERROR_CWD_RESOLVE,
+    GENPATH_ERROR_FOLDER_NOT_FOUND,
+];
+pub const GENPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GENPATH_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GENPATH_ERRORS,
+};
+
+fn genpath_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    genpath_error_with_message(error.message, error)
+}
+
+fn genpath_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn genpath_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    genpath_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -69,11 +178,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "genpath",
     category = "io/repl_fs",
-    summary = "Generate a MATLAB-style search path string for a folder tree.",
+    summary = "Generate recursive path strings from folder trees.",
     keywords = "genpath,recursive path,search path,addpath",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::genpath_type),
+    descriptor(crate::builtins::io::repl_fs::genpath::GENPATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::genpath"
 )]
 async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -82,16 +192,13 @@ async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         0 => generate_from_current_directory().await,
         1 => generate_from_root(&gathered[0], None).await,
         2 => generate_from_root(&gathered[0], Some(&gathered[1])).await,
-        _ => Err(genpath_error("genpath: too many input arguments")),
+        _ => Err(genpath_error(&GENPATH_ERROR_TOO_MANY_INPUTS)),
     }
 }
 
 async fn generate_from_current_directory() -> BuiltinResult<Value> {
-    let cwd = vfs::current_dir().map_err(|err| {
-        genpath_error(format!(
-            "genpath: unable to resolve current directory: {err}"
-        ))
-    })?;
+    let cwd = vfs::current_dir()
+        .map_err(|err| genpath_error_with_detail(&GENPATH_ERROR_CWD_RESOLVE, err.to_string()))?;
     let (canonical_path, canonical_str) =
         canonicalize_existing_async(&cwd, "current directory").await?;
     let excludes = ExcludeSet::default();
@@ -109,10 +216,10 @@ async fn generate_from_current_directory() -> BuiltinResult<Value> {
 }
 
 async fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<Value> {
-    let root_text = extract_text(root, ERROR_FOLDER_TYPE)?;
+    let root_text = extract_text(root, &GENPATH_ERROR_FOLDER_TYPE)?;
     let root_info = normalize_root(&root_text).await?;
     let exclude_text = excludes
-        .map(|value| extract_text(value, ERROR_EXCLUDES_TYPE))
+        .map(|value| extract_text(value, &GENPATH_ERROR_EXCLUDES_TYPE))
         .transpose()?;
     let exclude_set = build_exclude_set(exclude_text.as_deref(), &root_info).await?;
     let mut seen = HashSet::new();
@@ -146,18 +253,20 @@ struct RootInfo {
 
 async fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
     if text.trim().is_empty() {
-        return Err(genpath_error(format!("genpath: folder '{text}' not found")));
+        return Err(genpath_error_with_detail(
+            &GENPATH_ERROR_FOLDER_NOT_FOUND,
+            text,
+        ));
     }
 
-    let expanded = expand_user_path(text, "genpath").map_err(genpath_error)?;
+    let expanded = expand_user_path(text, "genpath")
+        .map_err(|err| genpath_error_with_detail(&GENPATH_ERROR_FOLDER_NOT_FOUND, err))?;
     let raw_path = PathBuf::from(&expanded);
     let absolute = if raw_path.is_absolute() {
         raw_path
     } else {
         let cwd = vfs::current_dir().map_err(|err| {
-            genpath_error(format!(
-                "genpath: unable to resolve current directory: {err}"
-            ))
+            genpath_error_with_detail(&GENPATH_ERROR_CWD_RESOLVE, err.to_string())
         })?;
         cwd.join(raw_path)
     };
@@ -176,7 +285,7 @@ async fn canonicalize_existing_async(
 ) -> BuiltinResult<(PathBuf, String)> {
     let canonical = vfs::canonicalize_async(path)
         .await
-        .map_err(|_| genpath_error(format!("genpath: folder '{display}' not found")))?;
+        .map_err(|_| genpath_error_with_detail(&GENPATH_ERROR_FOLDER_NOT_FOUND, display))?;
     let canonical_str = canonical_string_from_path(&canonical);
     Ok((canonical, canonical_str))
 }
@@ -401,7 +510,10 @@ fn char_array_value(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-fn extract_text(value: &Value, type_error: &str) -> BuiltinResult<String> {
+fn extract_text(
+    value: &Value,
+    type_error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(StringArray { data, .. }) => {
@@ -422,7 +534,10 @@ fn extract_text(value: &Value, type_error: &str) -> BuiltinResult<String> {
     }
 }
 
-fn tensor_to_string(tensor: &Tensor, type_error: &str) -> BuiltinResult<String> {
+fn tensor_to_string(
+    tensor: &Tensor,
+    type_error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
         return Err(genpath_error(type_error));
     }
@@ -463,6 +578,19 @@ pub(crate) mod tests {
 
     fn genpath_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::genpath_builtin(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn genpath_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = GENPATH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"pathstr = genpath()"));
+        assert!(labels.contains(&"pathstr = genpath(folder)"));
+        assert!(labels.contains(&"pathstr = genpath(folder, excludes)"));
     }
 
     struct DirGuard {
@@ -650,7 +778,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
 
         let err = genpath_builtin(vec![Value::Num(1.0)]).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_FOLDER_TYPE);
+        assert_eq!(err.message(), GENPATH_ERROR_FOLDER_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

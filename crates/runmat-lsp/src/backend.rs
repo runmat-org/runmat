@@ -3,14 +3,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::core::analysis::{
-    analyze_document_with_compat, completion_at, definition_at, diagnostics_for_document,
-    document_symbols, formatting_edits, hover_at, semantic_tokens_full, semantic_tokens_legend,
-    signature_help_at, CompatMode, DocumentAnalysis,
+    analyze_document_with_compat_and_source, completion_at, definition_locations_at,
+    diagnostics_for_document, document_symbols, formatting_edits, function_definitions_in_document,
+    function_references_in_document, hover_at, references_locations_at, semantic_tokens_full,
+    semantic_tokens_legend, signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::position::position_to_offset;
-use crate::core::workspace::workspace_symbols;
+use crate::core::project::ProjectContext;
+use crate::core::workspace::{workspace_symbols_from_documents, workspace_symbols_with_project};
 use log::{debug, info};
-use runmat_config::{ConfigLoader, LanguageCompatMode};
+use runmat_config::runtime::{ConfigLoader, LanguageCompatMode};
 use serde_json::json;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::Result as RpcResult;
@@ -21,11 +23,11 @@ use tower_lsp::lsp_types::{
     DidSaveTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
     HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-    MessageType, OneOf, PositionEncodingKind, SemanticTokensOptions, SemanticTokensParams,
-    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, TextDocumentContentChangeEvent,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
-    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
+    MessageType, OneOf, PositionEncodingKind, ReferenceParams, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    TextDocumentContentChangeEvent, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
+    Url, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 // Cargo substitutes this at compile time so we can surface the precise build version in logs.
@@ -48,11 +50,28 @@ struct DocumentState {
 struct AnalyzerState {
     documents: HashMap<Url, DocumentState>,
     compat_mode: CompatMode,
+    workspace_roots: Vec<PathBuf>,
+    project_cache: Option<ProjectCache>,
+}
+
+#[derive(Clone)]
+struct CachedProjectDoc {
+    uri: Url,
+    text: String,
+    analysis: DocumentAnalysis,
+}
+
+#[derive(Clone)]
+struct ProjectCache {
+    manifest_path: PathBuf,
+    compat_mode: CompatMode,
+    files: HashMap<PathBuf, CachedProjectDoc>,
 }
 
 fn parser_compat(mode: LanguageCompatMode) -> CompatMode {
     match mode {
-        LanguageCompatMode::RunMat | LanguageCompatMode::Matlab => CompatMode::Matlab,
+        LanguageCompatMode::RunMat => CompatMode::RunMat,
+        LanguageCompatMode::Matlab => CompatMode::Matlab,
         LanguageCompatMode::Strict => CompatMode::Strict,
     }
 }
@@ -69,6 +88,8 @@ impl RunMatLanguageServer {
             state: Arc::new(RwLock::new(AnalyzerState {
                 documents: HashMap::new(),
                 compat_mode: CompatMode::Matlab,
+                workspace_roots: Vec::new(),
+                project_cache: None,
             })),
         }
     }
@@ -84,21 +105,88 @@ impl RunMatLanguageServer {
     }
 
     async fn reanalyze(&self, uri: &Url) {
+        let Some((analysis, previous_exports, new_exports)) = self.analyze_and_store(uri).await
+        else {
+            return;
+        };
+        self.publish_status_and_diagnostics(uri, &analysis).await;
+
+        let changed_symbols = symmetric_diff_symbols(&previous_exports, &new_exports);
+        if changed_symbols.is_empty() {
+            return;
+        }
+        let dependent_uris = self
+            .collect_dependent_documents(uri, &changed_symbols)
+            .await;
+        for dependent in dependent_uris {
+            if let Some((analysis, _, _)) = self.analyze_and_store(&dependent).await {
+                self.publish_status_and_diagnostics(&dependent, &analysis)
+                    .await;
+            }
+        }
+    }
+
+    async fn analyze_and_store(
+        &self,
+        uri: &Url,
+    ) -> Option<(
+        DocumentAnalysis,
+        std::collections::HashSet<String>,
+        std::collections::HashSet<String>,
+    )> {
+        let previous_exports = {
+            let state = self.state.read().await;
+            state
+                .documents
+                .get(uri)
+                .and_then(|doc| doc.analysis.as_ref())
+                .and_then(|analysis| analysis.semantic.as_ref())
+                .map(|semantic| semantic.exported_symbols.clone())
+                .unwrap_or_default()
+        };
         let compat = {
             let state = self.state.read().await;
             state.compat_mode
         };
-        let analysis = {
-            let mut state = self.state.write().await;
-            if let Some(doc) = state.documents.get_mut(uri) {
-                let analysis = analyze_document_with_compat(&doc.text, compat);
-                doc.analysis = Some(analysis.clone());
-                analysis
-            } else {
-                return;
-            }
+        let (text, source_name) = {
+            let state = self.state.read().await;
+            let doc = state.documents.get(uri)?;
+            let source_name = uri
+                .to_file_path()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_string));
+            (doc.text.clone(), source_name)
         };
+        let analysis =
+            analyze_document_with_compat_and_source(&text, compat, source_name.as_deref());
+        let new_exports = analysis
+            .semantic
+            .as_ref()
+            .map(|semantic| semantic.exported_symbols.clone())
+            .unwrap_or_default();
+        {
+            let mut state = self.state.write().await;
+            let doc = state.documents.get_mut(uri)?;
+            doc.analysis = Some(analysis.clone());
+            if let Some(cache) = state.project_cache.as_mut() {
+                if let Ok(path) = uri.to_file_path() {
+                    if cache.files.contains_key(&path) {
+                        cache.files.insert(
+                            path,
+                            CachedProjectDoc {
+                                uri: uri.clone(),
+                                text: text.clone(),
+                                analysis: analysis.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        Some((analysis, previous_exports, new_exports))
+    }
 
+    async fn publish_status_and_diagnostics(&self, uri: &Url, analysis: &DocumentAnalysis) {
         let status_payload = json!({
             "message": analysis.status_message(),
         });
@@ -107,7 +195,7 @@ impl RunMatLanguageServer {
             .send_notification::<RunmatStatusNotification>(status_payload)
             .await;
 
-        self.publish_diagnostics(uri, &analysis).await;
+        self.publish_diagnostics(uri, analysis).await;
     }
 
     async fn publish_diagnostics(&self, uri: &Url, analysis: &DocumentAnalysis) {
@@ -131,6 +219,11 @@ impl RunMatLanguageServer {
         {
             let mut state = self.state.write().await;
             state.documents.remove(uri);
+            if let Some(cache) = state.project_cache.as_mut() {
+                if let Ok(path) = uri.to_file_path() {
+                    cache.files.remove(&path);
+                }
+            }
         }
         self.client
             .publish_diagnostics(uri.clone(), Vec::new(), None)
@@ -150,6 +243,196 @@ impl RunMatLanguageServer {
             *text = change.text;
         }
     }
+
+    async fn collect_dependent_documents(
+        &self,
+        changed_uri: &Url,
+        changed_symbols: &std::collections::HashSet<String>,
+    ) -> Vec<Url> {
+        let state = self.state.read().await;
+        dependent_documents_for_symbols(&state.documents, changed_uri, changed_symbols)
+    }
+
+    async fn ensure_project_cache(&self, anchor_uri: Option<&Url>) -> Option<ProjectCache> {
+        let (compat_mode, workspace_roots, open_docs) = {
+            let state = self.state.read().await;
+            let open_docs = state
+                .documents
+                .iter()
+                .filter_map(|(uri, doc)| {
+                    doc.analysis
+                        .as_ref()
+                        .map(|analysis| (uri.clone(), doc.text.clone(), analysis.clone()))
+                })
+                .collect::<Vec<_>>();
+            (state.compat_mode, state.workspace_roots.clone(), open_docs)
+        };
+
+        let start_hint = anchor_uri
+            .and_then(uri_file_path_string)
+            .or_else(|| {
+                open_docs
+                    .first()
+                    .and_then(|(uri, _, _)| uri_file_path_string(uri))
+            })
+            .or_else(|| {
+                workspace_roots
+                    .first()
+                    .and_then(|path| path.to_str().map(str::to_owned))
+            });
+
+        let context = ProjectContext::discover_from_source_name(start_hint.as_deref())?;
+        let manifest_path = context.manifest_path().to_path_buf();
+
+        let existing = {
+            let state = self.state.read().await;
+            state.project_cache.clone()
+        };
+
+        if let Some(cache) = existing {
+            if cache.manifest_path == manifest_path && cache.compat_mode == compat_mode {
+                let mut updated = cache;
+                for (uri, text, analysis) in open_docs {
+                    if let Ok(path) = uri.to_file_path() {
+                        updated.files.insert(
+                            path,
+                            CachedProjectDoc {
+                                uri,
+                                text,
+                                analysis,
+                            },
+                        );
+                    }
+                }
+                let mut state = self.state.write().await;
+                state.project_cache = Some(updated.clone());
+                return Some(updated);
+            }
+        }
+
+        let mut files = HashMap::new();
+        let open_doc_by_path = open_docs
+            .iter()
+            .filter_map(|(uri, text, analysis)| {
+                uri.to_file_path()
+                    .ok()
+                    .map(|path| (path, (uri.clone(), text.clone(), analysis.clone())))
+            })
+            .collect::<HashMap<_, _>>();
+
+        for source_file in context.all_source_files() {
+            if let Some((uri, text, analysis)) = open_doc_by_path.get(source_file) {
+                files.insert(
+                    source_file.clone(),
+                    CachedProjectDoc {
+                        uri: uri.clone(),
+                        text: text.clone(),
+                        analysis: analysis.clone(),
+                    },
+                );
+                continue;
+            }
+            let Ok(text) =
+                futures::executor::block_on(runmat_filesystem::read_to_string_async(source_file))
+            else {
+                continue;
+            };
+            let source_name = source_file.to_str();
+            let analysis = analyze_document_with_compat_and_source(&text, compat_mode, source_name);
+            let Ok(uri) = Url::from_file_path(source_file) else {
+                continue;
+            };
+            files.insert(
+                source_file.clone(),
+                CachedProjectDoc {
+                    uri,
+                    text,
+                    analysis,
+                },
+            );
+        }
+
+        let cache = ProjectCache {
+            manifest_path,
+            compat_mode,
+            files,
+        };
+        let mut state = self.state.write().await;
+        state.project_cache = Some(cache.clone());
+        Some(cache)
+    }
+}
+
+fn symmetric_diff_symbols(
+    before: &std::collections::HashSet<String>,
+    after: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
+    before
+        .symmetric_difference(after)
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+}
+
+fn uri_file_path_string(uri: &Url) -> Option<String> {
+    uri.to_file_path()
+        .ok()
+        .and_then(|path| path.to_str().map(str::to_owned))
+}
+
+fn symbol_name_under_cursor(
+    text: &str,
+    analysis: &DocumentAnalysis,
+    position: &tower_lsp::lsp_types::Position,
+) -> Option<String> {
+    let offset = position_to_offset(text, position);
+    analysis
+        .tokens
+        .iter()
+        .find(|token| token.start <= offset && offset < token.end)
+        .map(|token| token.lexeme.clone())
+}
+
+fn dedupe_location_vec(locations: &mut Vec<Location>) {
+    let mut seen = std::collections::HashSet::new();
+    locations.retain(|loc| {
+        let key = format!(
+            "{}:{}:{}:{}:{}",
+            loc.uri,
+            loc.range.start.line,
+            loc.range.start.character,
+            loc.range.end.line,
+            loc.range.end.character
+        );
+        seen.insert(key)
+    });
+}
+
+fn dependent_documents_for_symbols(
+    documents: &HashMap<Url, DocumentState>,
+    changed_uri: &Url,
+    changed_symbols: &std::collections::HashSet<String>,
+) -> Vec<Url> {
+    documents
+        .iter()
+        .filter_map(|(uri, doc)| {
+            if uri == changed_uri {
+                return None;
+            }
+            let referenced = doc
+                .analysis
+                .as_ref()
+                .and_then(|analysis| analysis.semantic.as_ref())
+                .map(|semantic| &semantic.referenced_symbols)?;
+            if referenced
+                .iter()
+                .any(|symbol| changed_symbols.contains(symbol))
+            {
+                Some(uri.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -170,10 +453,14 @@ impl LanguageServer for RunMatLanguageServer {
             resolved_compat = compat_mode_from_workspace(&params);
         }
 
-        if let Some(mode) = resolved_compat {
-            let compat = parser_compat(mode);
+        let roots = workspace_roots(&params);
+        {
             let mut state = self.state.write().await;
-            state.compat_mode = compat;
+            state.workspace_roots = roots;
+            if let Some(mode) = resolved_compat {
+                state.compat_mode = parser_compat(mode);
+            }
+            state.project_cache = None;
         }
 
         let capabilities = ServerCapabilities {
@@ -182,6 +469,7 @@ impl LanguageServer for RunMatLanguageServer {
             )),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             definition_provider: Some(OneOf::Left(true)),
+            references_provider: Some(OneOf::Left(true)),
             signature_help_provider: Some(SignatureHelpOptions::default()),
             semantic_tokens_provider: Some(
                 SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
@@ -324,18 +612,61 @@ impl LanguageServer for RunMatLanguageServer {
             return Ok(None);
         };
 
-        let ranges = definition_at(&text, &analysis, &position);
-        if ranges.is_empty() {
+        let mut locations = definition_locations_at(&text, &analysis, &position, &uri);
+        if let Some(symbol) = symbol_name_under_cursor(&text, &analysis, &position) {
+            if let Some(cache) = self.ensure_project_cache(Some(&uri)).await {
+                for doc in cache.files.values() {
+                    for range in function_definitions_in_document(&doc.text, &doc.analysis, &symbol)
+                    {
+                        locations.push(Location {
+                            uri: doc.uri.clone(),
+                            range,
+                        });
+                    }
+                }
+                dedupe_location_vec(&mut locations);
+            }
+        }
+        if locations.is_empty() {
             Ok(None)
         } else {
-            let locs: Vec<Location> = ranges
-                .into_iter()
-                .map(|range| Location {
-                    uri: uri.clone(),
-                    range,
-                })
-                .collect();
-            Ok(Some(GotoDefinitionResponse::Array(locs)))
+            Ok(Some(GotoDefinitionResponse::Array(locations)))
+        }
+    }
+
+    async fn references(&self, params: ReferenceParams) -> RpcResult<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let (text, analysis) = {
+            let state = self.state.read().await;
+            match state.documents.get(&uri) {
+                Some(doc) => (doc.text.clone(), doc.analysis.clone()),
+                None => return Ok(None),
+            }
+        };
+        let Some(analysis) = analysis else {
+            return Ok(None);
+        };
+        let mut locations = references_locations_at(&text, &analysis, &position, &uri);
+        if let Some(symbol) = symbol_name_under_cursor(&text, &analysis, &position) {
+            if let Some(cache) = self.ensure_project_cache(Some(&uri)).await {
+                for doc in cache.files.values() {
+                    for range in function_references_in_document(&doc.text, &doc.analysis, &symbol)
+                    {
+                        locations.push(Location {
+                            uri: doc.uri.clone(),
+                            range,
+                        });
+                    }
+                }
+                dedupe_location_vec(&mut locations);
+            }
+        }
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(locations))
         }
     }
 
@@ -436,19 +767,37 @@ impl LanguageServer for RunMatLanguageServer {
         &self,
         _params: WorkspaceSymbolParams,
     ) -> RpcResult<Option<Vec<lsp_types::SymbolInformation>>> {
-        let docs = {
+        let (docs, compat_mode) = {
             let state = self.state.read().await;
-            state
-                .documents
-                .iter()
-                .filter_map(|(uri, doc)| {
-                    doc.analysis
-                        .as_ref()
-                        .map(|analysis| (uri.clone(), doc.text.clone(), analysis.clone()))
-                })
-                .collect::<Vec<_>>()
+            (
+                state
+                    .documents
+                    .iter()
+                    .filter_map(|(uri, doc)| {
+                        doc.analysis
+                            .as_ref()
+                            .map(|analysis| (uri.clone(), doc.text.clone(), analysis.clone()))
+                    })
+                    .collect::<Vec<_>>(),
+                state.compat_mode,
+            )
         };
-        Ok(Some(workspace_symbols(&docs)))
+        if let Some(cache) = self.ensure_project_cache(None).await {
+            let project_docs = cache
+                .files
+                .values()
+                .map(|doc| (doc.uri.clone(), doc.text.clone(), doc.analysis.clone()))
+                .collect::<Vec<_>>();
+            return Ok(Some(workspace_symbols_from_documents(
+                &project_docs,
+                Some(_params.query.as_str()),
+            )));
+        }
+        Ok(Some(workspace_symbols_with_project(
+            &docs,
+            compat_mode,
+            Some(_params.query.as_str()),
+        )))
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
@@ -508,7 +857,109 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
 
 fn compat_label(mode: CompatMode) -> &'static str {
     match mode {
+        CompatMode::RunMat => "runmat",
         CompatMode::Matlab => "matlab",
         CompatMode::Strict => "strict",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn dependent_selection_targets_only_docs_referencing_changed_symbols() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("runmat_lsp_invalidation_{suffix}"));
+        fs::create_dir_all(root.join("src/+stats")).expect("create package dir");
+        fs::write(
+            root.join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            root.join("src/+stats/summarize.m"),
+            "function y = summarize(x); y = x + 1; end",
+        )
+        .expect("write summarize");
+        fs::write(root.join("src/main.m"), "x = summarize(41);").expect("write main");
+        fs::write(root.join("src/other.m"), "x = 1 + 2;").expect("write other");
+
+        let summarize_uri =
+            Url::from_file_path(root.join("src/+stats/summarize.m")).expect("summarize uri");
+        let main_uri = Url::from_file_path(root.join("src/main.m")).expect("main uri");
+        let other_uri = Url::from_file_path(root.join("src/other.m")).expect("other uri");
+
+        let summarize_text =
+            fs::read_to_string(root.join("src/+stats/summarize.m")).expect("read summarize");
+        let main_text = fs::read_to_string(root.join("src/main.m")).expect("read main");
+        let other_text = fs::read_to_string(root.join("src/other.m")).expect("read other");
+
+        let summarize_analysis = analyze_document_with_compat_and_source(
+            &summarize_text,
+            CompatMode::RunMat,
+            root.join("src/+stats/summarize.m").to_str(),
+        );
+        let main_analysis = analyze_document_with_compat_and_source(
+            &main_text,
+            CompatMode::RunMat,
+            root.join("src/main.m").to_str(),
+        );
+        let other_analysis = analyze_document_with_compat_and_source(
+            &other_text,
+            CompatMode::RunMat,
+            root.join("src/other.m").to_str(),
+        );
+
+        let mut docs = HashMap::new();
+        docs.insert(
+            summarize_uri.clone(),
+            DocumentState {
+                text: summarize_text,
+                version: Some(1),
+                analysis: Some(summarize_analysis),
+            },
+        );
+        docs.insert(
+            main_uri.clone(),
+            DocumentState {
+                text: main_text,
+                version: Some(1),
+                analysis: Some(main_analysis),
+            },
+        );
+        docs.insert(
+            other_uri.clone(),
+            DocumentState {
+                text: other_text,
+                version: Some(1),
+                analysis: Some(other_analysis),
+            },
+        );
+
+        let changed_symbols = HashSet::from_iter([String::from("summarize")]);
+        let dependents = dependent_documents_for_symbols(&docs, &summarize_uri, &changed_symbols);
+        assert!(
+            dependents.contains(&main_uri),
+            "main.m should be invalidated by summarize change"
+        );
+        assert!(
+            !dependents.contains(&other_uri),
+            "other.m should not be invalidated"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

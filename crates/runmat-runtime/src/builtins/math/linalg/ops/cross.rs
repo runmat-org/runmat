@@ -6,7 +6,11 @@
 //! host implementation with result re-upload for real-valued outputs.
 
 use runmat_accelerate_api::HostTensorView;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -19,6 +23,102 @@ use crate::builtins::math::linalg::type_resolvers::cross_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const CROSS_NAME: &str = "cross";
+
+const CROSS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Cross product result.",
+}];
+
+const CROSS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+];
+
+const CROSS_INPUTS_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Left operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Dimension with extent 3.",
+    },
+];
+
+const CROSS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "C = cross(A, B)",
+        inputs: &CROSS_INPUTS,
+        outputs: &CROSS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = cross(A, B, dim)",
+        inputs: &CROSS_INPUTS_DIM,
+        outputs: &CROSS_OUTPUT,
+    },
+];
+
+const CROSS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CROSS.INVALID_ARGUMENT",
+    identifier: Some("RunMat:cross:InvalidArgument"),
+    when: "Argument count or dimension argument is invalid.",
+    message: "cross: invalid argument",
+};
+
+const CROSS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CROSS.INVALID_INPUT",
+    identifier: Some("RunMat:cross:InvalidInput"),
+    when: "Inputs are unsupported or incompatible for cross product.",
+    message: "cross: A and B must be the same size.",
+};
+
+const CROSS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CROSS.INTERNAL",
+    identifier: Some("RunMat:cross:Internal"),
+    when: "Runtime cannot materialize cross outputs.",
+    message: "cross: internal runtime failure",
+};
+
+const CROSS_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    CROSS_ERROR_INVALID_ARGUMENT,
+    CROSS_ERROR_INVALID_INPUT,
+    CROSS_ERROR_INTERNAL,
+];
+
+pub const CROSS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &CROSS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &CROSS_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::cross")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -47,26 +147,48 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Cross products allocate a fresh tensor and terminate fusion graphs.",
 };
 
-fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(CROSS_NAME)
-        .build()
+fn cross_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    cross_error_with_message(error.message, error)
 }
 
-async fn parse_dimension_arg(value: &Value) -> Result<usize, String> {
+fn cross_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(CROSS_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn cross_invalid_argument(message: impl Into<String>) -> RuntimeError {
+    cross_error_with_message(message, &CROSS_ERROR_INVALID_ARGUMENT)
+}
+
+fn cross_invalid_input(message: impl Into<String>) -> RuntimeError {
+    cross_error_with_message(message, &CROSS_ERROR_INVALID_INPUT)
+}
+
+fn cross_internal_error(message: impl Into<String>) -> RuntimeError {
+    cross_error_with_message(message, &CROSS_ERROR_INTERNAL)
+}
+
+async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Int(_) | Value::Num(_) => {
-            tensor::dimension_from_value_async(value, CROSS_NAME, false)
+            let dim = tensor::dimension_from_value_async(value, CROSS_NAME, false)
                 .await
-                .and_then(|dim| {
-                    dim.ok_or_else(|| {
-                        format!("{CROSS_NAME}: dimension must be numeric, got {value:?}")
-                    })
-                })
+                .map_err(cross_invalid_argument)?;
+            dim.ok_or_else(|| {
+                cross_invalid_argument(format!(
+                    "{CROSS_NAME}: dimension must be numeric, got {value:?}"
+                ))
+            })
         }
-        _ => Err(format!(
+        _ => Err(cross_invalid_argument(format!(
             "{CROSS_NAME}: dimension must be numeric, got {value:?}"
-        )),
+        ))),
     }
 }
 
@@ -95,18 +217,19 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "cross",
     category = "math/linalg/ops",
-    summary = "Cross product of 3-element vectors along a matching dimension.",
+    summary = "Compute vector cross products.",
     keywords = "cross,vector product,3d vector,gpu,linear algebra",
     accel = "custom",
     type_resolver(cross_type),
+    descriptor(crate::builtins::math::linalg::ops::cross::CROSS_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::ops::cross"
 )]
 async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(builtin_error("cross: too many input arguments"));
+        return Err(cross_invalid_argument("cross: too many input arguments"));
     }
     let dim = match rest.first() {
-        Some(value) => Some(parse_dimension_arg(value).await.map_err(builtin_error)?),
+        Some(value) => Some(parse_dimension_arg(value).await?),
         None => None,
     };
 
@@ -140,9 +263,9 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
         complex_tensor_into_value(result)
     } else {
         let lhs_tensor =
-            tensor::value_into_tensor_for(CROSS_NAME, lhs_host).map_err(builtin_error)?;
+            tensor::value_into_tensor_for(CROSS_NAME, lhs_host).map_err(cross_invalid_input)?;
         let rhs_tensor =
-            tensor::value_into_tensor_for(CROSS_NAME, rhs_host).map_err(builtin_error)?;
+            tensor::value_into_tensor_for(CROSS_NAME, rhs_host).map_err(cross_invalid_input)?;
         let result = cross_real_tensor(&lhs_tensor, &rhs_tensor, dim)?;
         if lhs_gpu || rhs_gpu {
             return promote_real_result_to_gpu(result);
@@ -161,28 +284,28 @@ fn value_into_complex_tensor(value: Value) -> BuiltinResult<ComplexTensor> {
     match value {
         Value::ComplexTensor(t) => Ok(t),
         Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
-            .map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}"))),
+            .map_err(|e| cross_invalid_input(format!("{CROSS_NAME}: {e}"))),
         Value::Tensor(t) => real_tensor_to_complex(&t),
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}")))?;
+                .map_err(|e| cross_invalid_input(format!("{CROSS_NAME}: {e}")))?;
             real_tensor_to_complex(&tensor)
         }
         Value::Int(i) => {
             let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}")))?;
+                .map_err(|e| cross_invalid_input(format!("{CROSS_NAME}: {e}")))?;
             real_tensor_to_complex(&tensor)
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}")))?;
+                .map_err(|e| cross_invalid_input(format!("{CROSS_NAME}: {e}")))?;
             real_tensor_to_complex(&tensor)
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(builtin_error)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(cross_invalid_input)?;
             real_tensor_to_complex(&tensor)
         }
-        other => Err(builtin_error(format!(
+        other => Err(cross_invalid_input(format!(
             "{CROSS_NAME}: unsupported input type {:?}; expected numeric or logical values",
             other
         ))),
@@ -195,7 +318,7 @@ fn real_tensor_to_complex(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
     for &value in &tensor.data {
         data.push((value, 0.0));
     }
-    ComplexTensor::new(data, shape).map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}")))
+    ComplexTensor::new(data, shape).map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
 }
 
 pub fn cross_host_real_for_provider(
@@ -237,7 +360,7 @@ fn cross_real_tensor(a: &Tensor, b: &Tensor, dim: Option<usize>) -> BuiltinResul
         }
     }
 
-    Tensor::new(output, shape).map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}")))
+    Tensor::new(output, shape).map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
 }
 
 fn cross_complex_tensor(
@@ -275,7 +398,8 @@ fn cross_complex_tensor(
         }
     }
 
-    ComplexTensor::new(output, shape).map_err(|e| builtin_error(format!("{CROSS_NAME}: {e}")))
+    ComplexTensor::new(output, shape)
+        .map_err(|e| cross_internal_error(format!("{CROSS_NAME}: {e}")))
 }
 
 fn complex_mul(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
@@ -288,14 +412,14 @@ fn complex_sub(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
 
 fn ensure_same_size(a: &Tensor, b: &Tensor) -> BuiltinResult<()> {
     if a.data.len() != b.data.len() || canonical_shape_tensor(a) != canonical_shape_tensor(b) {
-        return Err(builtin_error("cross: A and B must be the same size."));
+        return Err(cross_error(&CROSS_ERROR_INVALID_INPUT));
     }
     Ok(())
 }
 
 fn ensure_same_size_complex(a: &ComplexTensor, b: &ComplexTensor) -> BuiltinResult<()> {
     if a.data.len() != b.data.len() || canonical_shape_complex(a) != canonical_shape_complex(b) {
-        return Err(builtin_error("cross: A and B must be the same size."));
+        return Err(cross_error(&CROSS_ERROR_INVALID_INPUT));
     }
     Ok(())
 }
@@ -320,14 +444,14 @@ fn resolve_dimension(shape: &[usize], dim: Option<usize>) -> BuiltinResult<usize
     match dim {
         Some(target_dim) => {
             if target_dim > shape.len() {
-                return Err(builtin_error(format!(
+                return Err(cross_invalid_input(format!(
                     "cross: dimension {} exceeds the number of array dimensions ({})",
                     target_dim,
                     shape.len()
                 )));
             }
             if shape[target_dim - 1] != 3 {
-                return Err(builtin_error(format!(
+                return Err(cross_invalid_input(format!(
                     "cross: dimension {} must have length 3",
                     target_dim
                 )));
@@ -338,7 +462,7 @@ fn resolve_dimension(shape: &[usize], dim: Option<usize>) -> BuiltinResult<usize
             .iter()
             .position(|&extent| extent == 3)
             .map(|idx| idx + 1)
-            .ok_or_else(|| builtin_error("cross: inputs must have a dimension of length 3")),
+            .ok_or_else(|| cross_invalid_input("cross: inputs must have a dimension of length 3")),
     }
 }
 
@@ -421,6 +545,25 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn cross_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = CROSS_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"C = cross(A, B)"));
+        assert!(labels.contains(&"C = cross(A, B, dim)"));
+    }
+
+    #[test]
+    fn cross_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = CROSS_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.CROSS.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.CROSS.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.CROSS.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -535,6 +678,7 @@ pub(crate) mod tests {
         let err = unwrap_error(
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new()).expect_err("cross"),
         );
+        assert_eq!(err.identifier(), CROSS_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("A and B must be the same size"));
     }
 
@@ -547,6 +691,7 @@ pub(crate) mod tests {
             cross_builtin(Value::Tensor(lhs), Value::Tensor(rhs), Vec::new())
                 .expect_err("expected cross error"),
         );
+        assert_eq!(err.identifier(), CROSS_ERROR_INVALID_INPUT.identifier);
         assert!(err.message().contains("dimension of length 3"));
     }
 
@@ -563,6 +708,7 @@ pub(crate) mod tests {
             )
             .expect_err("expected rank error"),
         );
+        assert_eq!(err.identifier(), CROSS_ERROR_INVALID_INPUT.identifier);
         assert!(err
             .message()
             .contains("exceeds the number of array dimensions"));
@@ -597,6 +743,7 @@ pub(crate) mod tests {
             )
             .expect_err("expected dimension error"),
         );
+        assert_eq!(err.identifier(), CROSS_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("dimension must be >= 1"));
     }
 
@@ -613,6 +760,7 @@ pub(crate) mod tests {
             )
             .expect_err("expected integer dimension error"),
         );
+        assert_eq!(err.identifier(), CROSS_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("dimension must be an integer"));
     }
 

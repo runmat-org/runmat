@@ -31,12 +31,15 @@ use runmat_runtime::builtins::plotting::{
     get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
     install_figure_observer as runtime_install_figure_observer,
-    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    install_surface as runtime_install_surface,
+    invalidate_surface_revisions as runtime_invalidate_surface_revisions,
+    new_figure_handle as runtime_new_figure_handle,
     present_figure_on_surface as runtime_present_figure_on_surface,
     present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
+    reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure, set_hold as runtime_set_hold,
     set_plot_theme_config as runtime_set_plot_theme_config,
@@ -49,11 +52,9 @@ use runmat_runtime::RuntimeError;
 use crate::runtime::logging::init_logging_once;
 use crate::runtime::state::{
     figure_event_callback, replace_figure_event_callback, FIGURE_EVENT_OBSERVER,
-    LEGACY_FIGURE_SURFACES, LEGACY_PLOT_SURFACE_ID, PLOT_SURFACE_NEXT_ID,
+    PLOT_SURFACE_NEXT_ID,
 };
-use crate::wire::errors::{
-    init_error_with_details, js_error, runtime_error_payload, runtime_error_to_js, InitErrorCode,
-};
+use crate::wire::errors::{js_error, runtime_error_payload, runtime_error_to_js};
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn ensure_figure_event_bridge() {
@@ -62,77 +63,6 @@ pub(crate) fn ensure_figure_event_bridge() {
             Arc::new(emit_js_figure_event);
         let _ = runtime_install_figure_observer(observer);
     });
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = registerPlotCanvas)]
-pub async fn register_plot_canvas(canvas: JsValue) -> Result<(), JsValue> {
-    let canvas = parse_web_canvas(canvas)?;
-    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    install_surface_renderer(surface_id, canvas)
-        .await
-        .map_err(|err| {
-            init_error_with_details(
-                InitErrorCode::PlotCanvas,
-                "Failed to register plot canvas",
-                Some(err),
-            )
-        })?;
-    LEGACY_PLOT_SURFACE_ID.with(|slot| {
-        slot.borrow_mut().replace(surface_id);
-    });
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = registerFigureCanvas)]
-pub async fn register_figure_canvas(handle: u32, canvas: JsValue) -> Result<(), JsValue> {
-    let canvas = parse_web_canvas(canvas)?;
-    let surface_id = PLOT_SURFACE_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    install_surface_renderer(surface_id, canvas)
-        .await
-        .map_err(|err| {
-            init_error_with_details(
-                InitErrorCode::PlotCanvas,
-                "Failed to register figure canvas",
-                Some(err),
-            )
-        })?;
-    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| runtime_error_to_js(&err))?;
-    LEGACY_FIGURE_SURFACES.with(|slot| {
-        slot.borrow_mut().insert(handle, surface_id);
-    });
-    let _ = runtime_render_current_scene(handle);
-    Ok(())
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = deregisterPlotCanvas)]
-pub fn deregister_plot_canvas() {
-    let surface_id = LEGACY_PLOT_SURFACE_ID.with(|slot| slot.borrow_mut().take());
-    if let Some(id) = surface_id {
-        runtime_detach_surface(id);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = deregisterFigureCanvas)]
-pub fn deregister_figure_canvas(handle: u32) {
-    let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
-    if let Some(id) = surface_id {
-        runtime_detach_surface(id);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(js_name = resizeFigureCanvas)]
-pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), JsValue> {
-    let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow().get(&handle).copied());
-    let Some(surface_id) = surface_id else {
-        return Err(js_error("Figure canvas not registered"));
-    };
-    runtime_resize_surface(surface_id, width.max(1), height.max(1), 1.0)
-        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -409,6 +339,13 @@ pub fn wasm_clear_figure(handle: JsValue) -> Result<u32, JsValue> {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = resetPlotState)]
+pub fn wasm_reset_plot_state() {
+    runtime_reset_plot_state();
+    runtime_invalidate_surface_revisions();
+}
+
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = closeFigure)]
 pub fn wasm_close_figure(handle: JsValue) -> Result<u32, JsValue> {
     let target = parse_optional_handle(handle)?;
@@ -637,7 +574,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
 
 #[cfg(target_arch = "wasm32")]
 fn runtime_flow_to_js(err: RuntimeError) -> JsValue {
-    serde_wasm_bindgen::to_value(&runtime_error_payload(&err, None))
+    serde_wasm_bindgen::to_value(&runtime_error_payload(&err, None, None))
         .unwrap_or_else(|_| js_error(err.message()))
 }
 
@@ -672,10 +609,6 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
     if let FigureEventKind::Closed = event.kind {
         let handle = event.handle.as_u32();
         let _ = runtime_clear_closed_figure_surfaces(handle);
-        let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
-        if let Some(id) = surface_id {
-            runtime_detach_surface(id);
-        }
     }
     if let Some(cb) = figure_event_callback() {
         let payload = convert_event_view(event);
@@ -686,6 +619,8 @@ fn emit_js_figure_event(event: FigureEventView<'_>) {
 
 #[cfg(target_arch = "wasm32")]
 fn convert_event_view(view: FigureEventView<'_>) -> PlotFigureEvent {
+    let figure = view.figure.map(FigureSnapshot::capture);
+    let fingerprint = figure_event_fingerprint(view, figure.as_ref());
     PlotFigureEvent {
         handle: view.handle.as_u32(),
         kind: match view.kind {
@@ -694,8 +629,20 @@ fn convert_event_view(view: FigureEventView<'_>) -> PlotFigureEvent {
             FigureEventKind::Cleared => PlotFigureEventKind::Cleared,
             FigureEventKind::Closed => PlotFigureEventKind::Closed,
         },
-        figure: view.figure.map(FigureSnapshot::capture),
+        fingerprint,
+        figure,
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn figure_event_fingerprint(
+    view: FigureEventView<'_>,
+    figure: Option<&FigureSnapshot>,
+) -> Option<String> {
+    if let Some(revision) = view.revision {
+        return Some(format!("fig:{}:rev:{revision}", view.handle.as_u32()));
+    }
+    figure.map(FigureSnapshot::fingerprint)
 }
 
 #[cfg(target_arch = "wasm32")]

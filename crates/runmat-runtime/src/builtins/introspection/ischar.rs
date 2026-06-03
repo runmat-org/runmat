@@ -7,7 +7,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::introspection::type_resolvers::ischar_type;
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::introspection::ischar")]
@@ -37,13 +40,45 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata-only predicate that does not participate in fusion planning.",
 };
 
+const ISCHAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input is a character array.",
+}];
+
+const ISCHAR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const ISCHAR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = ischar(A)",
+    inputs: &ISCHAR_INPUTS,
+    outputs: &ISCHAR_OUTPUT,
+}];
+
+const ISCHAR_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const ISCHAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISCHAR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISCHAR_ERRORS,
+};
+
 #[runtime_builtin(
     name = "ischar",
     category = "introspection",
-    summary = "Return true when a value is a MATLAB character array.",
+    summary = "Return true when a value is a character array.",
     keywords = "ischar,char array,type checking,introspection",
     accel = "metadata",
     type_resolver(ischar_type),
+    descriptor(crate::builtins::introspection::ischar::ISCHAR_DESCRIPTOR),
     builtin_path = "crate::builtins::introspection::ischar"
 )]
 fn ischar_builtin(value: Value) -> crate::BuiltinResult<Value> {

@@ -9,7 +9,11 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use runmat_builtins::{IntValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, LogicalArray, NumericDType, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::tensor;
@@ -18,8 +22,180 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "mode";
 
-fn mode_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+const MODE_OUTPUT_M: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "M",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Most frequent value along the selected dimension.",
+}];
+
+const MODE_OUTPUT_MF: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Most frequent value along the selected dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "F",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Frequency counts for each reported mode.",
+    },
+];
+
+const MODE_OUTPUT_MFC: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "M",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Most frequent value along the selected dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "F",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Frequency counts for each reported mode.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Cell array containing all tied modal values per slice.",
+    },
+];
+
+const MODE_INPUTS_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input data array.",
+}];
+
+const MODE_INPUTS_X_DIM_OR_ALL: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input data array.",
+    },
+    BuiltinParamDescriptor {
+        name: "dim_or_all",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Reduction axis (positive integer) or 'all'.",
+    },
+];
+
+const MODE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "M = mode(X)",
+        inputs: &MODE_INPUTS_X,
+        outputs: &MODE_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "M = mode(X, dim_or_all)",
+        inputs: &MODE_INPUTS_X_DIM_OR_ALL,
+        outputs: &MODE_OUTPUT_M,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, F] = mode(X)",
+        inputs: &MODE_INPUTS_X,
+        outputs: &MODE_OUTPUT_MF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, F] = mode(X, dim_or_all)",
+        inputs: &MODE_INPUTS_X_DIM_OR_ALL,
+        outputs: &MODE_OUTPUT_MF,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, F, C] = mode(X)",
+        inputs: &MODE_INPUTS_X,
+        outputs: &MODE_OUTPUT_MFC,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[M, F, C] = mode(X, dim_or_all)",
+        inputs: &MODE_INPUTS_X_DIM_OR_ALL,
+        outputs: &MODE_OUTPUT_MFC,
+    },
+];
+
+const MODE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MODE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:mode:InvalidArgument"),
+    when: "Arguments are malformed, duplicated, or unrecognised.",
+    message: "mode: invalid argument",
+};
+
+const MODE_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MODE.INVALID_DIMENSION",
+    identifier: Some("RunMat:mode:InvalidDimension"),
+    when: "Dimension argument is zero or negative.",
+    message: "mode: dimension must be >= 1",
+};
+
+const MODE_ERROR_GPU_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MODE.GPU_UNSUPPORTED",
+    identifier: Some("RunMat:mode:GpuUnsupported"),
+    when: "Input is GPU-resident and mode requires host data.",
+    message: "mode: GPU tensors must be gathered to the host before mode can be computed",
+};
+
+const MODE_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MODE.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:mode:ComplexUnsupported"),
+    when: "Input data is complex-valued.",
+    message: "mode: complex inputs are not supported; gather real data first",
+};
+
+const MODE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MODE.INTERNAL",
+    identifier: Some("RunMat:mode:Internal"),
+    when: "Internal conversion/allocation/shape handling fails.",
+    message: "mode: internal operation failed",
+};
+
+const MODE_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    MODE_ERROR_INVALID_ARGUMENT,
+    MODE_ERROR_INVALID_DIMENSION,
+    MODE_ERROR_GPU_UNSUPPORTED,
+    MODE_ERROR_COMPLEX_UNSUPPORTED,
+    MODE_ERROR_INTERNAL,
+];
+
+pub const MODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &MODE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &MODE_ERRORS,
+};
+
+fn mode_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn mode_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    mode_error_with(error, error.message)
+}
+
+fn mode_internal_error(message: impl Into<String>) -> RuntimeError {
+    mode_error_with(&MODE_ERROR_INTERNAL, message)
 }
 
 fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
@@ -32,6 +208,7 @@ fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
     summary = "Most frequent value along a dimension with MATLAB-compatible tie semantics.",
     keywords = "mode,frequency,statistics,reduction,ties",
     type_resolver(mode_type_resolver),
+    descriptor(crate::builtins::stats::summary::mode::MODE_DESCRIPTOR),
     builtin_path = "crate::builtins::stats::summary::mode"
 )]
 async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -76,16 +253,20 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
 
     for arg in args {
         if axes_set {
-            return Err(mode_error(format!(
-                "mode: unexpected extra argument {arg:?}"
-            )));
+            return Err(mode_error_with(
+                &MODE_ERROR_INVALID_ARGUMENT,
+                format!("mode: unexpected extra argument {arg:?}"),
+            ));
         }
         if let Some(selection) = parse_axes(arg).await? {
             axes = selection;
             axes_set = true;
             continue;
         }
-        return Err(mode_error(format!("mode: unrecognised argument {arg:?}")));
+        return Err(mode_error_with(
+            &MODE_ERROR_INVALID_ARGUMENT,
+            format!("mode: unrecognised argument {arg:?}"),
+        ));
     }
 
     Ok(ParsedArguments { axes })
@@ -95,12 +276,18 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
     if let Some(text) = value_as_str(value) {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err(mode_error("mode: dimension string must not be empty"));
+            return Err(mode_error_with(
+                &MODE_ERROR_INVALID_ARGUMENT,
+                "mode: dimension string must not be empty",
+            ));
         }
         let lowered = trimmed.to_ascii_lowercase();
         return match lowered.as_str() {
             "all" => Ok(Some(ModeAxes::All)),
-            other => Err(mode_error(format!("mode: unrecognised argument '{other}'"))),
+            other => Err(mode_error_with(
+                &MODE_ERROR_INVALID_ARGUMENT,
+                format!("mode: unrecognised argument '{other}'"),
+            )),
         };
     }
 
@@ -108,17 +295,17 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
             tensor::dimension_from_value_async(value, NAME, false)
                 .await
-                .map_err(mode_error)?
+                .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
         }
         Value::Tensor(t) if t.data.len() == 1 => {
             tensor::dimension_from_value_async(value, NAME, false)
                 .await
-                .map_err(mode_error)?
+                .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
         }
         Value::LogicalArray(la) if la.data.len() == 1 => {
             tensor::dimension_from_value_async(value, NAME, false)
                 .await
-                .map_err(mode_error)?
+                .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_DIMENSION, e))?
         }
         _ => return Ok(None),
     };
@@ -127,7 +314,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
         return Ok(None);
     };
     if dim < 1 {
-        return Err(mode_error("mode: dimension must be >= 1"));
+        return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
     Ok(Some(ModeAxes::Dim(dim)))
 }
@@ -160,9 +347,9 @@ impl ModeEvaluation {
     fn empty(output_shape: Vec<usize>, output_class: OutputClass) -> BuiltinResult<Self> {
         let len = tensor::element_count(&output_shape);
         let values = Tensor::new(vec![f64::NAN; len], output_shape.clone())
-            .map_err(|e| mode_error(format!("mode: {e}")))?;
+            .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
         let freq = Tensor::new(vec![0.0; len], output_shape.clone())
-            .map_err(|e| mode_error(format!("mode: {e}")))?;
+            .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
         let ties = vec![Vec::new(); len];
         Ok(Self {
             values,
@@ -221,10 +408,10 @@ fn ties_to_cell(
     for entry in ties {
         let rows = entry.len();
         let tensor = Tensor::new(entry, vec![rows, 1])
-            .map_err(|e| mode_error(format!("mode: cell construction failed: {e}")))?;
+            .map_err(|e| mode_internal_error(format!("mode: cell construction failed: {e}")))?;
         cell_values.push(tensor_into_class_array_value(tensor, output_class)?);
     }
-    crate::make_cell_with_shape(cell_values, cell_shape).map_err(mode_error)
+    crate::make_cell_with_shape(cell_values, cell_shape).map_err(mode_internal_error)
 }
 
 fn mode_evaluate(
@@ -245,13 +432,12 @@ fn mode_evaluate(
 
 fn materialize_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
-        Value::GpuTensor(_) => Err(mode_error(
-            "mode: GPU tensors must be gathered to the host before mode can be computed",
-        )),
-        Value::ComplexTensor(_) | Value::Complex(_, _) => Err(mode_error(
-            "mode: complex inputs are not supported; gather real data first",
-        )),
-        other => tensor::value_into_tensor_for(NAME, other).map_err(mode_error),
+        Value::GpuTensor(_) => Err(mode_error(&MODE_ERROR_GPU_UNSUPPORTED)),
+        Value::ComplexTensor(_) | Value::Complex(_, _) => {
+            Err(mode_error(&MODE_ERROR_COMPLEX_UNSUPPORTED))
+        }
+        other => tensor::value_into_tensor_for(NAME, other)
+            .map_err(|e| mode_error_with(&MODE_ERROR_INVALID_ARGUMENT, e)),
     }
 }
 
@@ -281,9 +467,9 @@ fn finalize_single_slice(
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
     let values = Tensor::new(vec![scalar.value], output_shape.clone())
-        .map_err(|e| mode_error(format!("mode: {e}")))?;
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
     let freq = Tensor::new(vec![scalar.frequency], output_shape.clone())
-        .map_err(|e| mode_error(format!("mode: {e}")))?;
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
     let ties = vec![scalar.ties];
     Ok(ModeEvaluation {
         values,
@@ -300,7 +486,7 @@ fn reduce_along_dim(
     output_class: OutputClass,
 ) -> BuiltinResult<ModeEvaluation> {
     if dim == 0 {
-        return Err(mode_error("mode: dimension must be >= 1"));
+        return Err(mode_error(&MODE_ERROR_INVALID_DIMENSION));
     }
 
     if tensor.shape.is_empty() {
@@ -336,9 +522,9 @@ fn reduce_along_dim(
             }
         }
         let values_tensor = Tensor::new(values, output_shape.clone())
-            .map_err(|e| mode_error(format!("mode: {e}")))?;
+            .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
         let freq_tensor = Tensor::new(freq, output_shape.clone())
-            .map_err(|e| mode_error(format!("mode: {e}")))?;
+            .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
         return Ok(ModeEvaluation {
             values: values_tensor,
             freq: freq_tensor,
@@ -361,7 +547,7 @@ fn reduce_along_dim(
     let stride_after = dim_product(&tensor.shape[dim_index + 1..])?;
     let output_len = stride_before
         .checked_mul(stride_after)
-        .ok_or_else(|| mode_error("mode: output size overflow"))?;
+        .ok_or_else(|| mode_internal_error("mode: output size overflow"))?;
 
     let mut values = vec![0.0f64; output_len];
     let mut freq = vec![0.0f64; output_len];
@@ -383,10 +569,10 @@ fn reduce_along_dim(
         }
     }
 
-    let values_tensor =
-        Tensor::new(values, output_shape.clone()).map_err(|e| mode_error(format!("mode: {e}")))?;
-    let freq_tensor =
-        Tensor::new(freq, output_shape.clone()).map_err(|e| mode_error(format!("mode: {e}")))?;
+    let values_tensor = Tensor::new(values, output_shape.clone())
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
+    let freq_tensor = Tensor::new(freq, output_shape.clone())
+        .map_err(|e| mode_internal_error(format!("mode: {e}")))?;
 
     Ok(ModeEvaluation {
         values: values_tensor,
@@ -516,7 +702,7 @@ fn tensor_into_class_value(mut tensor: Tensor, class: OutputClass) -> BuiltinRes
             } else {
                 LogicalArray::new(data, tensor.shape)
                     .map(Value::LogicalArray)
-                    .map_err(mode_error)
+                    .map_err(mode_internal_error)
             }
         }
         OutputClass::Int(kind) => {
@@ -574,7 +760,7 @@ fn tensor_into_class_array_value(mut tensor: Tensor, class: OutputClass) -> Buil
                 .collect();
             LogicalArray::new(data, tensor.shape)
                 .map(Value::LogicalArray)
-                .map_err(mode_error)
+                .map_err(mode_internal_error)
         }
         OutputClass::Int(kind) => {
             if contains_nan || tensor.data.len() != 1 {
@@ -589,7 +775,7 @@ fn dim_product(dims: &[usize]) -> BuiltinResult<usize> {
     dims.iter()
         .copied()
         .try_fold(1usize, |acc, dim| acc.checked_mul(dim))
-        .ok_or_else(|| mode_error("mode: output size overflow"))
+        .ok_or_else(|| mode_internal_error("mode: output size overflow"))
 }
 
 #[derive(Debug, Clone)]
@@ -882,14 +1068,30 @@ pub(crate) mod tests {
     fn mode_rejects_unknown_string_argument() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = mode_call(Value::Tensor(tensor), vec![Value::from("flat")]).unwrap_err();
-        assert!(err.message().contains("unrecognised argument"));
+        assert_eq!(err.identifier(), MODE_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
     fn mode_rejects_negative_dimension() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let err = mode_call(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]).unwrap_err();
-        assert!(err.message().contains("dimension"));
+        assert_eq!(err.identifier(), MODE_ERROR_INVALID_DIMENSION.identifier);
+    }
+
+    #[test]
+    fn mode_rejects_gpu_input_without_gather() {
+        use crate::builtins::common::test_support;
+
+        test_support::with_test_provider(|provider| {
+            let source = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &source.data,
+                shape: &source.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let err = mode_call(Value::GpuTensor(handle), Vec::new()).unwrap_err();
+            assert_eq!(err.identifier(), MODE_ERROR_GPU_UNSUPPORTED.identifier);
+        });
     }
 
     #[test]

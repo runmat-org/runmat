@@ -3,7 +3,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use log::warn;
-use runmat_builtins::{NumericDType, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 
@@ -18,8 +22,170 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "image";
+
+const IMAGE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the rendered image object.",
+}];
+
+const IMAGE_INPUTS_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
+}];
+
+const IMAGE_INPUTS_X_Y_C: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
+    },
+];
+
+const IMAGE_INPUTS_C_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value surface style options.",
+    },
+];
+
+const IMAGE_INPUTS_X_Y_C_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value surface style options.",
+    },
+];
+
+const IMAGE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = image(C)",
+        inputs: &IMAGE_INPUTS_C,
+        outputs: &IMAGE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = image(X, Y, C)",
+        inputs: &IMAGE_INPUTS_X_Y_C,
+        outputs: &IMAGE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = image(C, Name, Value, ...)",
+        inputs: &IMAGE_INPUTS_C_PROPS,
+        outputs: &IMAGE_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = image(X, Y, C, Name, Value, ...)",
+        inputs: &IMAGE_INPUTS_X_Y_C_PROPS,
+        outputs: &IMAGE_OUTPUT_HANDLE,
+    },
+];
+
+pub const IMAGE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMAGE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:image:InvalidArgument"),
+    when: "Image data, axis inputs, or name/value style arguments are invalid.",
+    message: "image: invalid argument",
+};
+
+pub const IMAGE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.IMAGE.INTERNAL",
+    identifier: Some("RunMat:image:Internal"),
+    when: "Internal image/surface construction or rendering fails unexpectedly.",
+    message: "image: internal operation failed",
+};
+
+const IMAGE_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [IMAGE_ERROR_INVALID_ARGUMENT, IMAGE_ERROR_INTERNAL];
+
+pub const IMAGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &IMAGE_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &IMAGE_ERRORS,
+};
+
+fn image_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_image_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    image_error_with_detail(&IMAGE_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_image_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    image_error_with_detail(&IMAGE_ERROR_INTERNAL, err.message)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::image")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -51,34 +217,47 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "image",
     category = "plotting",
-    summary = "Render MATLAB-compatible image plots on the modern surface path.",
+    summary = "Display indexed or truecolor images.",
     keywords = "image,plotting,imshow,colormap",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::image::IMAGE_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::image"
 )]
 pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (x, y, c, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
-    let (rows, cols, kind) = classify_image_input(&c, BUILTIN_NAME).await?;
-    let (x_axis, y_axis) =
-        image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x, y, c, rest) =
+        parse_surface_call_args(args, BUILTIN_NAME).map_err(map_image_invalid_argument)?;
+    let (rows, cols, kind) = classify_image_input(&c, BUILTIN_NAME)
+        .await
+        .map_err(map_image_invalid_argument)?;
+    let (x_axis, y_axis) = image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME)
+        .await
+        .map_err(map_image_invalid_argument)?;
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
-    let style = Arc::new(parse_surface_style_args(BUILTIN_NAME, &rest, defaults)?);
+    let style = Arc::new(
+        parse_surface_style_args(BUILTIN_NAME, &rest, defaults)
+            .map_err(map_image_invalid_argument)?,
+    );
     let color_limits = color_limits_snapshot();
 
     let mut surface = match kind {
         ImageInputKind::TrueColorHost(tensor) => {
-            let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-            build_truecolor_image_surface(tensor, x_host, y_host)?
+            let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME)
+                .await
+                .map_err(map_image_invalid_argument)?;
+            build_truecolor_image_surface(tensor, x_host, y_host)
+                .map_err(map_image_invalid_argument)?
         }
         ImageInputKind::TrueColorGpu(handle, channels) => {
-            build_truecolor_image_surface_gpu(&handle, &x_axis, &y_axis, rows, cols, channels)?
+            build_truecolor_image_surface_gpu(&handle, &x_axis, &y_axis, rows, cols, channels)
+                .map_err(map_image_invalid_argument)?
         }
         ImageInputKind::Indexed(input) => {
             build_indexed_image_surface(&input, &x_axis, &y_axis, style.colormap, color_limits)
-                .await?
+                .await
+                .map_err(map_image_invalid_argument)?
         }
     };
 
@@ -113,7 +292,7 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_image_internal(err));
     }
     Ok(handle)
 }
@@ -466,5 +645,28 @@ mod tests {
             surface.y_data,
             vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
         );
+    }
+
+    #[test]
+    fn image_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = IMAGE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = image(C)"));
+        assert!(labels.contains(&"h = image(X, Y, C)"));
+        assert!(labels.contains(&"h = image(X, Y, C, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn image_missing_input_uses_stable_identifier() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let err = futures::executor::block_on(image_builtin(vec![]))
+            .expect_err("missing args should fail");
+        assert_eq!(err.identifier(), IMAGE_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

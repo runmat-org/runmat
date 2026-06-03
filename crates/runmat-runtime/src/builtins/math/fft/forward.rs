@@ -5,7 +5,11 @@ use super::common::{
     value_to_complex_tensor, TransformDirection,
 };
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{ComplexTensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -47,18 +51,174 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "fft";
 
-fn fft_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
+const FFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Complex Fourier spectrum output.",
+}];
+
+const FFT_INPUTS_CORE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input signal/array.",
+}];
+
+const FFT_INPUTS_WITH_N: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input signal/array.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Transform length along selected dimension.",
+    },
+];
+
+const FFT_INPUTS_WITH_N_DIM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input signal/array.",
+    },
+    BuiltinParamDescriptor {
+        name: "N",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("[]"),
+        description: "Transform length along selected dimension.",
+    },
+    BuiltinParamDescriptor {
+        name: "DIM",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("first non-singleton dimension"),
+        description: "Dimension to transform along.",
+    },
+];
+
+const FFT_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "Y = fft(X)",
+        inputs: &FFT_INPUTS_CORE,
+        outputs: &FFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = fft(X, N)",
+        inputs: &FFT_INPUTS_WITH_N,
+        outputs: &FFT_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "Y = fft(X, N, DIM)",
+        inputs: &FFT_INPUTS_WITH_N_DIM,
+        outputs: &FFT_OUTPUT,
+    },
+];
+
+const FFT_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT.ARG_COUNT",
+    identifier: Some("RunMat:fft:ArgCount"),
+    when: "More than three input arguments are supplied.",
+    message: "fft: expected fft(X), fft(X, N), or fft(X, N, DIM)",
+};
+
+const FFT_ERROR_INVALID_LENGTH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT.INVALID_LENGTH",
+    identifier: Some("RunMat:fft:InvalidLength"),
+    when: "Length argument N is invalid.",
+    message: "fft: invalid length argument",
+};
+
+const FFT_ERROR_INVALID_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT.INVALID_DIMENSION",
+    identifier: Some("RunMat:fft:InvalidDimension"),
+    when: "Dimension argument DIM is invalid.",
+    message: "fft: invalid dimension argument",
+};
+
+const FFT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT.INVALID_INPUT",
+    identifier: Some("RunMat:fft:InvalidInput"),
+    when: "Input cannot be converted to supported numeric/complex domain.",
+    message: "fft: invalid input",
+};
+
+const FFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FFT.INTERNAL",
+    identifier: Some("RunMat:fft:Internal"),
+    when: "FFT execution or tensor shaping fails.",
+    message: "fft: internal error",
+};
+
+const FFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    FFT_ERROR_ARG_COUNT,
+    FFT_ERROR_INVALID_LENGTH,
+    FFT_ERROR_INVALID_DIMENSION,
+    FFT_ERROR_INVALID_INPUT,
+    FFT_ERROR_INTERNAL,
+];
+
+pub const FFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &FFT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &FFT_ERRORS,
+};
+
+fn fft_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    fft_error_with_message(error.message, error)
+}
+
+fn fft_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    fft_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn fft_error_with_source(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
         .with_builtin(BUILTIN_NAME)
-        .build()
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn fft_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "fft",
     category = "math/fft",
-    summary = "Compute the discrete Fourier transform (DFT) of numeric or complex data.",
+    summary = "Compute discrete Fourier transforms.",
     keywords = "fft,fourier transform,complex,gpu",
     type_resolver(fft_type),
+    descriptor(crate::builtins::math::fft::forward::FFT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::fft::forward"
 )]
 async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -70,7 +230,9 @@ async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
 }
 
 fn fft_host(value: Value, length: Option<usize>, dimension: Option<usize>) -> BuiltinResult<Value> {
-    let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
+    let tensor = value_to_complex_tensor(value, BUILTIN_NAME).map_err(|source| {
+        fft_error_with_source(&FFT_ERROR_INVALID_INPUT, "input conversion failed", source)
+    })?;
     let transformed = fft_complex_tensor(tensor, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -83,7 +245,7 @@ async fn fft_gpu(
     let mut shape = normalize_scalar_shape(&handle.shape);
 
     let dim_one_based = match dimension {
-        Some(0) => return Err(fft_error("fft: dimension must be >= 1")),
+        Some(0) => return Err(fft_error(&FFT_ERROR_INVALID_DIMENSION)),
         Some(dim) => dim,
         None => default_dimension(&shape),
     };
@@ -96,7 +258,11 @@ async fn fft_gpu(
     let target_len = length.unwrap_or(current_len);
 
     if target_len == 0 {
-        let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
+        let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
+            .await
+            .map_err(|source| {
+                fft_error_with_source(&FFT_ERROR_INVALID_INPUT, "gpu gather failed", source)
+            })?;
         let transformed = fft_complex_tensor(complex, length, dimension)?;
         return Ok(complex_tensor_into_value(transformed));
     }
@@ -107,7 +273,11 @@ async fn fft_gpu(
         }
     }
 
-    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
+        .await
+        .map_err(|source| {
+            fft_error_with_source(&FFT_ERROR_INVALID_INPUT, "gpu gather failed", source)
+        })?;
     let transformed = fft_complex_tensor(complex, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -115,11 +285,9 @@ async fn fft_gpu(
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
         .await
-        .map_err(fft_error)?
+        .map_err(|detail| fft_error_with_detail(&FFT_ERROR_INVALID_DIMENSION, detail))?
         .ok_or_else(|| {
-            fft_error(format!(
-                "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-            ))
+            fft_error_with_detail(&FFT_ERROR_INVALID_DIMENSION, format!("received {value:?}"))
         })
 }
 
@@ -127,17 +295,19 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option
     match args.len() {
         0 => Ok((None, None)),
         1 => {
-            let len = parse_length(&args[0], BUILTIN_NAME)?;
+            let len = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                fft_error_with_source(&FFT_ERROR_INVALID_LENGTH, "length parse failed", source)
+            })?;
             Ok((len, None))
         }
         2 => {
-            let len = parse_length(&args[0], BUILTIN_NAME)?;
+            let len = parse_length(&args[0], BUILTIN_NAME).map_err(|source| {
+                fft_error_with_source(&FFT_ERROR_INVALID_LENGTH, "length parse failed", source)
+            })?;
             let dim = Some(parse_dimension_arg(&args[1]).await?);
             Ok((len, dim))
         }
-        _ => Err(fft_error(
-            "fft: expected fft(X), fft(X, N), or fft(X, N, DIM)",
-        )),
+        _ => Err(fft_error(&FFT_ERROR_ARG_COUNT)),
     }
 }
 
@@ -153,6 +323,7 @@ pub(super) fn fft_complex_tensor(
         TransformDirection::Forward,
         BUILTIN_NAME,
     )
+    .map_err(|source| fft_error_with_source(&FFT_ERROR_INTERNAL, "transform failed", source))
 }
 
 #[cfg(test)]
@@ -165,7 +336,8 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
-        ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Tensor, Type,
+        builtin_function_by_name, ComplexTensor as HostComplexTensor, IntValue, ResolveContext,
+        Tensor, Type,
     };
     use rustfft::FftPlanner;
 
@@ -175,6 +347,10 @@ pub(crate) mod tests {
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {
+        error.identifier()
     }
 
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
@@ -210,6 +386,20 @@ pub(crate) mod tests {
                 shape: Some(vec![Some(2), Some(3)])
             }
         );
+    }
+
+    #[test]
+    fn fft_descriptor_signatures_and_errors() {
+        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("fft builtin");
+        let descriptor = builtin.descriptor.expect("fft descriptor");
+        let labels: Vec<&str> = descriptor.signatures.iter().map(|sig| sig.label).collect();
+        assert!(labels.contains(&"Y = fft(X)"));
+        assert!(labels.contains(&"Y = fft(X, N)"));
+        assert!(labels.contains(&"Y = fft(X, N, DIM)"));
+        assert!(descriptor
+            .errors
+            .iter()
+            .any(|err| err.code == "RM.FFT.INVALID_LENGTH"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -451,34 +641,40 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_non_numeric_length() {
-        assert!(block_on(parse_arguments(&[Value::Bool(true)])).is_err());
+        let err = block_on(parse_arguments(&[Value::Bool(true)])).unwrap_err();
+        assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
+        assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_negative_length() {
-        let err = error_message(block_on(parse_arguments(&[Value::Num(-1.0)])).unwrap_err());
-        assert!(err.contains("length must be non-negative"));
+        let err = block_on(parse_arguments(&[Value::Num(-1.0)])).unwrap_err();
+        assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
+        assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_fractional_length() {
-        let err = error_message(block_on(parse_arguments(&[Value::Num(1.5)])).unwrap_err());
-        assert!(err.contains("length must be an integer"));
+        let err = block_on(parse_arguments(&[Value::Num(1.5)])).unwrap_err();
+        assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
+        assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_dimension_zero() {
-        let err = error_message(
-            block_on(parse_arguments(&[
-                Value::Num(4.0),
-                Value::Int(IntValue::I32(0)),
-            ]))
-            .unwrap_err(),
+        let err = block_on(parse_arguments(&[
+            Value::Num(4.0),
+            Value::Int(IntValue::I32(0)),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            error_identifier(&err),
+            FFT_ERROR_INVALID_DIMENSION.identifier
         );
-        assert!(err.contains("dimension must be >= 1"));
+        assert!(error_message(err).contains(FFT_ERROR_INVALID_DIMENSION.message));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

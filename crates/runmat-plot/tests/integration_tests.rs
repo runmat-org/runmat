@@ -1,10 +1,7 @@
 //! Comprehensive integration tests for RunMat Plot
 //!
 //! Tests the complete plotting system including 2D plots, 3D plots,
-//! Jupyter integration, and performance characteristics.
-
-#[cfg(feature = "jupyter")]
-use runmat_plot::jupyter::{JupyterBackend, OutputFormat};
+//! and performance characteristics.
 use runmat_plot::plots::*;
 
 #[test]
@@ -168,36 +165,6 @@ fn test_matlab_compatibility_functions() {
     assert!(mesh.wireframe);
 
     // 3D scatter not available in plots module; runtime handles future scatter3
-}
-
-#[cfg(feature = "jupyter")]
-#[test]
-fn test_jupyter_integration() {
-    // Test Jupyter backend creation
-    let backend = JupyterBackend::new();
-    assert_eq!(backend.output_format, OutputFormat::HTML);
-
-    // Test different output formats
-    let formats = vec![
-        OutputFormat::PNG,
-        OutputFormat::SVG,
-        OutputFormat::HTML,
-        OutputFormat::Base64,
-        OutputFormat::PlotlyJSON,
-    ];
-
-    for format in formats {
-        let backend_fmt = JupyterBackend::with_format(format);
-        assert_eq!(backend_fmt.output_format, format);
-    }
-
-    // Test direct backend usage
-    let line_plot = LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap();
-    let mut backend = JupyterBackend::new();
-
-    // These should not panic and return valid output
-    let display_result = backend.display_line_plot(&line_plot);
-    assert!(display_result.is_ok());
 }
 
 #[test]

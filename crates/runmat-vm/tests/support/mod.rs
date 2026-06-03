@@ -2,7 +2,7 @@
 
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_hir::{HirProgram, LoweringContext, SemanticError};
+use runmat_hir::LoweringContext;
 use runmat_runtime::RuntimeError;
 
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
@@ -22,17 +22,20 @@ where
     }
 }
 
-pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
-    let program = program.clone();
-    run_with_stack(move || {
-        let bc = runmat_vm::compile(&program, &std::collections::HashMap::new())
-            .map_err(RuntimeError::from)?;
-        block_on(runmat_vm::interpret(&bc))
-    })?
+pub fn compile_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {
+    let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
+    let hir = runmat_hir::lower(&ast, &LoweringContext::empty())
+        .map_err(|err| RuntimeError::from(runmat_vm::CompileError::from(err)))?;
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly)
+        .map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+    let entrypoint = hir.assembly.entrypoints[0].id;
+    runmat_vm::compile(&hir.assembly, &mir, entrypoint).map_err(RuntimeError::from)
 }
 
-pub fn lower(program: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
-    runmat_hir::lower(program, &LoweringContext::empty()).map(|result| result.hir)
+#[allow(dead_code)]
+pub fn execute_source(source: &str) -> Result<Vec<Value>, RuntimeError> {
+    let bc = compile_source(source)?;
+    interpret(&bc)
 }
 
 #[allow(dead_code)]

@@ -1,710 +1,779 @@
-use runmat_builtins::Type;
-use runmat_hir::{
-    eval_const_num, infer_expr_type_with_env, merge_span, HirClassMember, HirDiagnostic,
-    HirDiagnosticSeverity, HirExpr, HirExprKind, HirStmt, LoweringResult, Span, VarId,
-};
-use runmat_parser as parser;
+use runmat_builtins::{BuiltinSemanticKind, ConcatKind, ShapeTransformKind};
+use runmat_hir::{BindingId, HirDiagnostic, HirDiagnosticSeverity, OperatorKind, Span};
+use runmat_mir::analysis::{AnalysisStore, MirLocalKey};
+use std::collections::HashMap;
 
-pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
-    fn vector_literal_length(expr: &HirExpr) -> Option<usize> {
-        let shape = tensor_literal_shape(expr)?;
-        match (
-            shape.first().copied().flatten(),
-            shape.get(1).copied().flatten(),
-        ) {
-            (Some(r), Some(c)) => {
-                if r == 1 {
-                    Some(c)
-                } else if c == 1 {
-                    Some(r)
-                } else {
-                    None
+pub fn lint_shapes(result: &runmat_hir::LoweringResult) -> Vec<HirDiagnostic> {
+    let mir = match runmat_mir::lowering::lower_assembly(&result.assembly) {
+        Ok(mir) => mir,
+        Err(err) => return vec![mir_lowering_diagnostic(err)],
+    };
+    let store = runmat_mir::analysis::analyze_assembly(&mir);
+    let mut ctx = ShapeLintContext::default();
+    ctx.seed_from_analysis(&mir, &store);
+    ctx.walk_mir_assembly(&mir);
+    ctx.diagnostics
+}
+
+pub fn infer_binding_shapes(
+    result: &runmat_hir::LoweringResult,
+) -> HashMap<BindingId, Vec<Option<usize>>> {
+    let Ok(mir) = runmat_mir::lowering::lower_assembly(&result.assembly) else {
+        return HashMap::new();
+    };
+    let store = runmat_mir::analysis::analyze_assembly(&mir);
+    let mut ctx = ShapeLintContext::default();
+    ctx.seed_from_analysis(&mir, &store);
+    ctx.walk_mir_assembly(&mir);
+    ctx.env
+        .into_iter()
+        .map(|(binding, shape)| (binding, shape.0))
+        .collect()
+}
+
+fn mir_lowering_diagnostic(err: runmat_hir::HirError) -> HirDiagnostic {
+    HirDiagnostic::new(
+        "lint.mir.lowering_failed",
+        HirDiagnosticSeverity::Error,
+        format!("MIR lowering failed: {}", err.message),
+        err.span.unwrap_or(runmat_hir::Span { start: 0, end: 0 }),
+    )
+    .with_category("mir-lowering")
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Shape(Vec<Option<usize>>);
+
+#[derive(Default)]
+struct ShapeLintContext {
+    env: HashMap<BindingId, Shape>,
+    local_env: HashMap<MirLocalKey, Shape>,
+    number_env: HashMap<MirLocalKey, f64>,
+    int_vector_env: HashMap<MirLocalKey, Vec<usize>>,
+    diagnostics: Vec<HirDiagnostic>,
+}
+
+#[derive(Default)]
+struct MirShapeValue {
+    shape: Option<Shape>,
+    number: Option<f64>,
+    int_vector: Option<Vec<usize>>,
+}
+
+impl ShapeLintContext {
+    fn seed_from_analysis(&mut self, mir: &runmat_mir::MirAssembly, store: &AnalysisStore) {
+        for body in mir.bodies.values() {
+            for local in &body.locals {
+                let Some(binding) = local.binding else {
+                    continue;
+                };
+                let Some(fact) = store.mir_locals.get(&MirLocalKey {
+                    function: body.function,
+                    local: local.id,
+                }) else {
+                    continue;
+                };
+                if let Some(shape) = shape_from_fact(&fact.shape) {
+                    self.env.insert(binding, shape);
                 }
             }
-            _ => None,
         }
     }
 
-    fn concat_dims(ty: &Type) -> Option<(Option<usize>, Option<usize>)> {
-        match ty {
-            Type::Num | Type::Int | Type::Bool => Some((Some(1), Some(1))),
-            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                Some(runmat_builtins::shape_rules::matrix_dims(shape))
+    fn walk_mir_assembly(&mut self, mir: &runmat_mir::MirAssembly) {
+        for body in mir.bodies.values() {
+            for block in &body.blocks {
+                for stmt in &block.statements {
+                    match &stmt.kind {
+                        runmat_mir::MirStmtKind::Assign { place, value } => {
+                            let value = self.infer_mir_rvalue(body, value, stmt.span);
+                            if let runmat_mir::MirPlace::Local(local) = place {
+                                self.record_mir_value(body, *local, value);
+                            }
+                        }
+                        runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                        | runmat_mir::MirStmtKind::Expr(value) => {
+                            self.infer_mir_rvalue(body, value, stmt.span);
+                        }
+                        runmat_mir::MirStmtKind::PlaceMutation(_)
+                        | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+                        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}
+                    }
+                }
             }
-            _ => None,
         }
     }
 
-    fn format_dim(dim: Option<usize>) -> String {
-        dim.map(|v| v.to_string())
-            .unwrap_or_else(|| "unknown".to_string())
-    }
-
-    fn format_shape(shape: &[Option<usize>]) -> String {
-        if shape.len() == 2 {
-            return format!("{} x {}", format_dim(shape[0]), format_dim(shape[1]));
-        }
-        let dims: Vec<String> = shape.iter().map(|d| format_dim(*d)).collect();
-        format!("[{}]", dims.join(", "))
-    }
-
-    fn matrix_dims_from_type(ty: &Type) -> Option<(Option<usize>, Option<usize>)> {
-        match ty {
-            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                Some(runmat_builtins::shape_rules::matrix_dims(shape))
-            }
-            _ => None,
-        }
-    }
-
-    fn element_count(shape: &[Option<usize>]) -> Option<usize> {
-        runmat_builtins::shape_rules::element_count_if_known(shape)
-    }
-
-    fn vector_length(shape: &[Option<usize>]) -> Option<usize> {
-        let count = element_count(shape)?;
-        let is_vector = shape.len() == 1
-            || (shape.len() == 2
-                && (shape[0] == Some(1) || shape[1] == Some(1))
-                && shape.iter().all(|d| d.is_some()));
-        if is_vector {
-            Some(count)
-        } else {
-            None
-        }
-    }
-
-    fn tensor_literal_shape(expr: &HirExpr) -> Option<Vec<Option<usize>>> {
-        let HirExprKind::Tensor(rows) = &expr.kind else {
-            return None;
+    fn record_mir_value(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        local: runmat_mir::MirLocalId,
+        value: MirShapeValue,
+    ) {
+        let key = MirLocalKey {
+            function: body.function,
+            local,
         };
-        if rows.is_empty() {
-            return Some(vec![Some(0), Some(0)]);
+        if let Some(shape) = value.shape {
+            if let Some(binding) = body.locals.get(local.0).and_then(|local| local.binding) {
+                self.env.insert(binding, shape.clone());
+            }
+            self.local_env.insert(key, shape);
         }
-        let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-        Some(vec![Some(rows.len()), Some(cols)])
+        if let Some(number) = value.number {
+            self.number_env.insert(key, number);
+        }
+        if let Some(vector) = value.int_vector {
+            self.int_vector_env.insert(key, vector);
+        }
     }
 
-    enum DimSpec {
-        Known(usize),
-        Unknown,
-        Negative,
-        NonInteger,
-    }
-
-    fn parse_dim(expr: &HirExpr) -> DimSpec {
-        if let Some(value) = eval_const_num(expr) {
-            if value.is_finite() {
-                let rounded = value.round();
-                if (value - rounded).abs() <= 1e-9 {
-                    if rounded < 0.0 {
-                        return DimSpec::Negative;
-                    }
-                    return DimSpec::Known(rounded as usize);
+    fn infer_mir_rvalue(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        value: &runmat_mir::MirRvalue,
+        span: Span,
+    ) -> MirShapeValue {
+        match value {
+            runmat_mir::MirRvalue::Use(operand) => self.infer_mir_operand(body, operand),
+            runmat_mir::MirRvalue::Unary(op, operand) => {
+                let inner = self.infer_mir_operand(body, operand);
+                let number = match (op, inner.number) {
+                    (OperatorKind::UnaryMinus, Some(value)) => Some(-value),
+                    _ => None,
+                };
+                MirShapeValue {
+                    shape: inner.shape,
+                    number,
+                    int_vector: None,
                 }
-                return DimSpec::NonInteger;
             }
+            runmat_mir::MirRvalue::Binary(left, op, right) => {
+                let lhs = self.infer_mir_operand(body, left);
+                let rhs = self.infer_mir_operand(body, right);
+                MirShapeValue {
+                    shape: self.infer_mir_binary(span, lhs.shape.as_ref(), op, rhs.shape.as_ref()),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::ShortCircuit {
+                left,
+                right_temps,
+                right,
+                ..
+            } => {
+                self.infer_mir_operand(body, left);
+                for stmt in right_temps {
+                    match &stmt.kind {
+                        runmat_mir::MirStmtKind::Assign { place, value } => {
+                            let inferred = self.infer_mir_rvalue(body, value, stmt.span);
+                            if let runmat_mir::MirPlace::Local(local) = place {
+                                self.record_mir_value(body, *local, inferred);
+                            }
+                        }
+                        runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                        | runmat_mir::MirStmtKind::Expr(value) => {
+                            self.infer_mir_rvalue(body, value, stmt.span);
+                        }
+                        runmat_mir::MirStmtKind::PlaceMutation(_)
+                        | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+                        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}
+                    }
+                }
+                self.infer_mir_operand(body, right);
+                MirShapeValue::default()
+            }
+            runmat_mir::MirRvalue::Range { start, step, end } => {
+                let start = self.infer_mir_operand(body, start).number;
+                let step = step
+                    .as_ref()
+                    .and_then(|step| self.infer_mir_operand(body, step).number)
+                    .unwrap_or(1.0);
+                let end = self.infer_mir_operand(body, end).number;
+                let width = start
+                    .zip(end)
+                    .and_then(|(start, end)| range_width(start, step, end));
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), width])),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::Call(call) => self.infer_mir_call(body, span, call),
+            runmat_mir::MirRvalue::Aggregate {
+                kind,
+                rows,
+                elements,
+                ..
+            } => self.infer_mir_aggregate(body, span, kind, *rows, elements),
+            runmat_mir::MirRvalue::StructLiteral { fields } => {
+                for (_, value) in fields {
+                    self.infer_mir_operand(body, value);
+                }
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), Some(1)])),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::ObjectLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    self.infer_mir_operand(body, value);
+                }
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), Some(1)])),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::Index { base, indexing } => {
+                let base_shape = self.infer_mir_operand(body, base).shape;
+                for component in &indexing.components {
+                    match component {
+                        runmat_mir::MirIndexComponent::Expr(operand) => {
+                            let idx_shape = self.infer_mir_operand(body, operand).shape;
+                            if indexing.components.len() == 1 {
+                                self.check_logical_index(
+                                    span,
+                                    base_shape.as_ref(),
+                                    idx_shape.as_ref(),
+                                );
+                            }
+                        }
+                        runmat_mir::MirIndexComponent::Colon
+                        | runmat_mir::MirIndexComponent::End { .. } => {}
+                    }
+                }
+                MirShapeValue::default()
+            }
+            runmat_mir::MirRvalue::Member { base, .. } => self.infer_mir_operand(body, base),
+            runmat_mir::MirRvalue::DynamicMember { base, member } => {
+                self.infer_mir_operand(body, member);
+                self.infer_mir_operand(body, base)
+            }
+            runmat_mir::MirRvalue::Future { args, .. } => {
+                for arg in args {
+                    self.infer_mir_operand(body, arg.operand());
+                }
+                MirShapeValue::default()
+            }
+            runmat_mir::MirRvalue::Spawn(operand) => self.infer_mir_operand(body, operand),
+            runmat_mir::MirRvalue::MetaClass(_)
+            | runmat_mir::MirRvalue::Colon
+            | runmat_mir::MirRvalue::End => MirShapeValue::default(),
         }
-        DimSpec::Unknown
     }
 
-    fn type_shape_for_broadcast(ty: &Type) -> Option<Vec<Option<usize>>> {
-        match ty {
-            Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-                Some(shape.clone())
+    fn infer_mir_operand(
+        &self,
+        body: &runmat_mir::MirBody,
+        operand: &runmat_mir::MirOperand,
+    ) -> MirShapeValue {
+        match operand {
+            runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::Number(value)) => {
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), Some(1)])),
+                    number: value.parse().ok(),
+                    int_vector: None,
+                }
             }
-            Type::Num | Type::Int | Type::Bool => Some(vec![Some(1), Some(1)]),
-            _ => None,
+            runmat_mir::MirOperand::Local(local) => {
+                let key = MirLocalKey {
+                    function: body.function,
+                    local: *local,
+                };
+                MirShapeValue {
+                    shape: self.local_env.get(&key).cloned(),
+                    number: self.number_env.get(&key).copied(),
+                    int_vector: self.int_vector_env.get(&key).cloned(),
+                }
+            }
+            runmat_mir::MirOperand::Constant(_) | runmat_mir::MirOperand::FunctionHandle(_) => {
+                MirShapeValue::default()
+            }
         }
     }
 
-    fn check_binary(
-        op: &parser::BinOp,
-        lhs: &HirExpr,
-        rhs: &HirExpr,
-        env: &std::collections::HashMap<VarId, Type>,
-        returns: &std::collections::HashMap<String, Vec<Type>>,
-        diags: &mut Vec<HirDiagnostic>,
-    ) {
-        let lhs_ty = infer_expr_type_with_env(lhs, env, returns);
-        let rhs_ty = infer_expr_type_with_env(rhs, env, returns);
+    fn infer_mir_binary(
+        &mut self,
+        span: Span,
+        lhs: Option<&Shape>,
+        op: &OperatorKind,
+        rhs: Option<&Shape>,
+    ) -> Option<Shape> {
         match op {
-            parser::BinOp::Mul => {
-                if let Some(false) =
-                    runmat_builtins::shape_rules::matmul_compatible(&lhs_ty, &rhs_ty)
-                {
-                    let detail = match (
-                        matrix_dims_from_type(&lhs_ty),
-                        matrix_dims_from_type(&rhs_ty),
-                    ) {
-                        (Some((lrows, lcols)), Some((rrows, rcols))) => format!(
-                            "left is {} x {}, right is {} x {} (inner dimensions {} and {})",
-                            format_dim(lrows),
-                            format_dim(lcols),
-                            format_dim(rrows),
-                            format_dim(rcols),
-                            format_dim(lcols),
-                            format_dim(rrows)
-                        ),
-                        _ => "unknown shapes".to_string(),
-                    };
-                    diags.push(HirDiagnostic {
-                        message: format!(
-                            "Matrix multiply dimension mismatch: {detail} (inner dimensions must match)"
-                        ),
-                        span: merge_span(lhs.span, rhs.span),
-                        code: "lint.shape.matmul",
-                        severity: HirDiagnosticSeverity::Warning,
-                    });
-                }
-            }
-            parser::BinOp::LeftDiv => {
-                if let Some(false) =
-                    runmat_builtins::shape_rules::left_divide_compatible(&lhs_ty, &rhs_ty)
-                {
-                    let detail = match (
-                        matrix_dims_from_type(&lhs_ty),
-                        matrix_dims_from_type(&rhs_ty),
-                    ) {
-                        (Some((lrows, _)), Some((rrows, _))) => format!(
-                            "left row dimension {}, right row dimension {}",
-                            format_dim(lrows),
-                            format_dim(rrows)
-                        ),
-                        _ => "unknown shapes".to_string(),
-                    };
-                    diags.push(HirDiagnostic {
-                        message: format!(
-                            "Left divide dimension mismatch: {detail} (row dimensions must match)"
-                        ),
-                        span: merge_span(lhs.span, rhs.span),
-                        code: "lint.shape.ldivide",
-                        severity: HirDiagnosticSeverity::Warning,
-                    });
-                }
-            }
-            parser::BinOp::RightDiv => {
-                if let Some(false) =
-                    runmat_builtins::shape_rules::right_divide_compatible(&lhs_ty, &rhs_ty)
-                {
-                    let detail = match (
-                        matrix_dims_from_type(&lhs_ty),
-                        matrix_dims_from_type(&rhs_ty),
-                    ) {
-                        (Some((_, lcols)), Some((_, rcols))) => format!(
-                            "left column dimension {}, right column dimension {}",
-                            format_dim(lcols),
-                            format_dim(rcols)
-                        ),
-                        _ => "unknown shapes".to_string(),
-                    };
-                    diags.push(HirDiagnostic {
-                        message: format!(
-                            "Right divide dimension mismatch: {detail} (column dimensions must match)"
-                        ),
-                        span: merge_span(lhs.span, rhs.span),
-                        code: "lint.shape.rdivide",
-                        severity: HirDiagnosticSeverity::Warning,
-                    });
-                }
-            }
-            parser::BinOp::Add
-            | parser::BinOp::Sub
-            | parser::BinOp::ElemMul
-            | parser::BinOp::ElemDiv
-            | parser::BinOp::ElemPow
-            | parser::BinOp::ElemLeftDiv
-            | parser::BinOp::Equal
-            | parser::BinOp::NotEqual
-            | parser::BinOp::Less
-            | parser::BinOp::LessEqual
-            | parser::BinOp::Greater
-            | parser::BinOp::GreaterEqual => {
-                let lhs_shape = type_shape_for_broadcast(&lhs_ty);
-                let rhs_shape = type_shape_for_broadcast(&rhs_ty);
-                if let (Some(a), Some(b)) = (lhs_shape, rhs_shape) {
-                    if let Some(false) = runmat_builtins::shape_rules::broadcast_compatible(&a, &b)
+            OperatorKind::MatrixMultiply => {
+                if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
+                    if matrix_dims(lhs)
+                        .zip(matrix_dims(rhs))
+                        .is_some_and(|((_, lc), (rr, _))| lc.is_some() && rr.is_some() && lc != rr)
                     {
-                        let detail = format!(
-                            "left is {}, right is {}",
-                            format_shape(&a),
-                            format_shape(&b)
+                        self.warn(
+                            "lint.shape.matmul",
+                            "matrix multiply inner dimensions must match",
+                            span,
                         );
-                        diags.push(HirDiagnostic {
-                            message: format!(
-                                "Elementwise/broadcast dimension mismatch: {detail} (broadcasting failed)"
-                            ),
-                            span: merge_span(lhs.span, rhs.span),
-                            code: "lint.shape.broadcast",
-                            severity: HirDiagnosticSeverity::Warning,
-                        });
                     }
                 }
+                match (lhs.and_then(matrix_dims), rhs.and_then(matrix_dims)) {
+                    (Some((rows, _)), Some((_, cols))) => Some(Shape(vec![rows, cols])),
+                    _ => None,
+                }
             }
-            _ => {}
+            OperatorKind::Add
+            | OperatorKind::Subtract
+            | OperatorKind::ElementwiseMultiply
+            | OperatorKind::ElementwiseDivide
+            | OperatorKind::ElementwiseLeftDivide
+            | OperatorKind::ElementwisePower
+            | OperatorKind::Greater
+            | OperatorKind::GreaterEqual
+            | OperatorKind::Less
+            | OperatorKind::LessEqual
+            | OperatorKind::Equal
+            | OperatorKind::NotEqual => {
+                if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
+                    if !broadcast_compatible(lhs, rhs) {
+                        self.warn(
+                            "lint.shape.broadcast",
+                            "array dimensions are not broadcast compatible",
+                            span,
+                        );
+                    }
+                }
+                lhs.cloned().or_else(|| rhs.cloned())
+            }
+            _ => lhs.cloned().or_else(|| rhs.cloned()),
         }
     }
 
-    fn walk_expr(
-        expr: &HirExpr,
-        env: &std::collections::HashMap<VarId, Type>,
-        returns: &std::collections::HashMap<String, Vec<Type>>,
-        diags: &mut Vec<HirDiagnostic>,
-    ) {
-        match &expr.kind {
-            HirExprKind::Unary(_, inner) => walk_expr(inner, env, returns, diags),
-            HirExprKind::Binary(lhs, op, rhs) => {
-                check_binary(op, lhs, rhs, env, returns, diags);
-                walk_expr(lhs, env, returns, diags);
-                walk_expr(rhs, env, returns, diags);
-            }
-            HirExprKind::Tensor(rows) => {
-                let mut col_constraint: Option<usize> = None;
-                for row in rows {
-                    let mut row_dim: Option<usize> = None;
-                    let mut row_cols: Option<usize> = Some(0);
-                    let mut first_span: Option<Span> = None;
-                    for e in row {
-                        if first_span.is_none() {
-                            first_span = Some(e.span);
-                        }
-                        let ty = infer_expr_type_with_env(e, env, returns);
-                        if let Some((rows_dim, cols_dim)) = concat_dims(&ty) {
-                            if let (Some(prev), Some(curr)) = (row_dim, rows_dim) {
-                                if prev != curr {
-                                    diags.push(HirDiagnostic {
-                                        message: format!(
-                                            "Horizontal concatenation dimension mismatch: left row dimension {prev}, right row dimension {curr} (row dimensions must match)"
-                                        ),
-                                        span: merge_span(first_span.unwrap_or(e.span), e.span),
-                                        code: "lint.shape.horzcat",
-                                        severity: HirDiagnosticSeverity::Warning,
-                                    });
+    fn infer_mir_aggregate(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        span: Span,
+        kind: &runmat_mir::MirAggregateKind,
+        rows: usize,
+        elements: &[runmat_mir::MirOperand],
+    ) -> MirShapeValue {
+        let values: Vec<_> = elements
+            .iter()
+            .map(|element| self.infer_mir_operand(body, element))
+            .collect();
+        let int_vector = values
+            .iter()
+            .map(|value| value.number.and_then(number_to_int))
+            .collect::<Option<Vec<_>>>();
+        let shape = match kind {
+            runmat_mir::MirAggregateKind::Tensor => {
+                let row_count = rows.max(1);
+                let cols_per_row = if row_count == 0 {
+                    0
+                } else {
+                    elements.len() / row_count
+                };
+                let mut row_dims = Vec::new();
+                for row_idx in 0..row_count {
+                    let start = row_idx * cols_per_row;
+                    let end = start + cols_per_row;
+                    let mut total_cols = 0usize;
+                    let mut expected_rows = None;
+                    for value in &values[start..end] {
+                        if let Some((rows, cols)) = value.shape.as_ref().and_then(matrix_dims) {
+                            if let (Some(expected), Some(rows)) = (expected_rows, rows) {
+                                if expected != rows {
+                                    self.warn(
+                                        "lint.shape.horzcat",
+                                        "horizontal concatenation row dimensions do not agree",
+                                        span,
+                                    );
                                 }
                             }
-                            if row_dim.is_none() {
-                                row_dim = rows_dim;
-                            }
-                            match (row_cols, cols_dim) {
-                                (Some(total), Some(value)) => row_cols = Some(total + value),
-                                _ => row_cols = None,
-                            }
+                            expected_rows = expected_rows.or(rows);
+                            total_cols += cols.unwrap_or(1);
                         } else {
-                            row_dim = None;
-                            row_cols = None;
+                            total_cols += 1;
                         }
                     }
+                    row_dims.push((expected_rows.unwrap_or(1), total_cols));
+                }
+                if let Some((_, first_cols)) = row_dims.first().copied() {
+                    for (_, cols) in &row_dims {
+                        if *cols != first_cols {
+                            self.warn(
+                                "lint.shape.vertcat",
+                                "vertical concatenation column dimensions do not agree",
+                                span,
+                            );
+                        }
+                    }
+                    Some(Shape(vec![
+                        Some(row_dims.iter().map(|(rows, _)| rows).sum()),
+                        Some(first_cols),
+                    ]))
+                } else {
+                    Some(Shape(vec![Some(0), Some(0)]))
+                }
+            }
+            runmat_mir::MirAggregateKind::Cell => Some(Shape(vec![Some(1), Some(elements.len())])),
+        };
+        MirShapeValue {
+            shape,
+            number: None,
+            int_vector,
+        }
+    }
 
-                    if let (Some(prev_cols), Some(curr_cols)) = (col_constraint, row_cols) {
-                        if prev_cols != curr_cols {
-                            diags.push(HirDiagnostic {
-                                message: format!(
-                                    "Vertical concatenation dimension mismatch: upper column dimension {prev_cols}, lower column dimension {curr_cols} (column dimensions must match)"
-                                ),
-                                span: expr.span,
-                                code: "lint.shape.vertcat",
-                                severity: HirDiagnosticSeverity::Warning,
-                            });
-                        }
-                    }
-                    if col_constraint.is_none() {
-                        col_constraint = row_cols;
-                    }
-                }
-
-                for row in rows {
-                    for e in row {
-                        walk_expr(e, env, returns, diags);
-                    }
-                }
+    fn infer_mir_call(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        span: Span,
+        call: &runmat_mir::MirCall,
+    ) -> MirShapeValue {
+        let arg_values: Vec<_> = call
+            .args
+            .iter()
+            .map(|arg| self.infer_mir_operand(body, arg.operand()))
+            .collect();
+        let shape = match call.semantic_kind {
+            BuiltinSemanticKind::Elementwise => {
+                arg_values.first().and_then(|value| value.shape.clone())
             }
-            HirExprKind::Cell(rows) => {
-                for row in rows {
-                    for e in row {
-                        walk_expr(e, env, returns, diags);
-                    }
-                }
+            BuiltinSemanticKind::ArrayConstructor => sized_constructor_shape(&arg_values),
+            BuiltinSemanticKind::ParameterizedArrayConstructor => {
+                sized_constructor_shape(arg_values.get(1..).unwrap_or(&[]))
             }
-            HirExprKind::Index(base, idxs) | HirExprKind::IndexCell(base, idxs) => {
-                walk_expr(base, env, returns, diags);
-                for idx in idxs {
-                    walk_expr(idx, env, returns, diags);
-                }
-                if matches!(expr.kind, HirExprKind::Index(_, _)) && idxs.len() == 1 {
-                    let base_ty = infer_expr_type_with_env(base, env, returns);
-                    let idx_ty = infer_expr_type_with_env(&idxs[0], env, returns);
-                    let base_shape = match base_ty {
-                        Type::Tensor { shape: Some(shape) }
-                        | Type::Logical { shape: Some(shape) } => Some(shape),
-                        _ => None,
-                    };
-                    let mask_shape = match idx_ty {
-                        Type::Logical { shape: Some(shape) }
-                        | Type::Tensor { shape: Some(shape) } => Some(shape),
-                        _ => None,
-                    };
-                    if let (Some(base_shape), Some(mask_shape)) = (base_shape, mask_shape) {
-                        if let (Some(base_count), Some(mask_count)) =
-                            (element_count(&base_shape), element_count(&mask_shape))
-                        {
-                            if base_count != mask_count {
-                                diags.push(HirDiagnostic {
-                                    message: format!(
-                                        "Logical index size mismatch: mask has {mask_count}, array has {base_count} (must match)"
-                                    ),
-                                    span: merge_span(base.span, idxs[0].span),
-                                    code: "lint.shape.logical_index",
-                                    severity: HirDiagnosticSeverity::Warning,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            HirExprKind::Range(start, step, end) => {
-                walk_expr(start, env, returns, diags);
-                if let Some(step) = step.as_ref() {
-                    walk_expr(step, env, returns, diags);
-                }
-                walk_expr(end, env, returns, diags);
-            }
-            HirExprKind::FuncCall(name, args) => {
-                if name.eq_ignore_ascii_case("dot") && args.len() >= 2 {
-                    let lhs_ty = infer_expr_type_with_env(&args[0], env, returns);
-                    let rhs_ty = infer_expr_type_with_env(&args[1], env, returns);
-                    let lhs_len = match lhs_ty {
-                        Type::Tensor { shape: Some(shape) }
-                        | Type::Logical { shape: Some(shape) } => vector_length(&shape),
-                        _ => None,
-                    };
-                    let rhs_len = match rhs_ty {
-                        Type::Tensor { shape: Some(shape) }
-                        | Type::Logical { shape: Some(shape) } => vector_length(&shape),
-                        _ => None,
-                    };
-                    if let (Some(a), Some(b)) = (lhs_len, rhs_len) {
-                        if a != b {
-                            diags.push(HirDiagnostic {
-                                message: format!(
-                                    "Dot product length mismatch: left length {a}, right length {b} (lengths must match)"
-                                ),
-                                span: merge_span(args[0].span, args[1].span),
-                                code: "lint.shape.dot",
-                                severity: HirDiagnosticSeverity::Warning,
-                            });
-                        }
-                    }
-                }
-
-                if name.eq_ignore_ascii_case("reshape") && args.len() >= 2 {
-                    let input_ty = infer_expr_type_with_env(&args[0], env, returns);
-                    let input_shape = match input_ty {
-                        Type::Tensor { shape: Some(shape) }
-                        | Type::Logical { shape: Some(shape) } => Some(shape),
-                        _ => None,
-                    };
-                    let mut dims: Vec<Option<usize>> = Vec::new();
-                    let mut negative_count = 0usize;
-                    let mut non_integer = false;
-                    for arg in args.iter().skip(1) {
-                        match parse_dim(arg) {
-                            DimSpec::Known(value) => dims.push(Some(value)),
-                            DimSpec::Negative => {
-                                negative_count += 1;
-                                dims.push(None);
-                            }
-                            DimSpec::NonInteger => {
-                                non_integer = true;
-                                dims.push(None);
-                            }
-                            DimSpec::Unknown => dims.push(None),
-                        }
-                    }
-                    if negative_count > 1 {
-                        diags.push(HirDiagnostic {
-                            message:
-                                "Reshape dimension mismatch: more than one negative dimension (only one allowed)"
-                                    .to_string(),
-                            span: merge_span(args[0].span, args[1].span),
-                            code: "lint.shape.reshape",
-                            severity: HirDiagnosticSeverity::Warning,
-                        });
-                    } else if negative_count == 1 && non_integer {
-                        diags.push(HirDiagnostic {
-                            message:
-                                "Reshape dimension mismatch: negative dimensions require integer sizes"
-                                    .to_string(),
-                            span: merge_span(args[0].span, args[1].span),
-                            code: "lint.shape.reshape",
-                            severity: HirDiagnosticSeverity::Warning,
-                        });
-                    }
-                    if non_integer {
-                        diags.push(HirDiagnostic {
-                            message: "Reshape dimension mismatch: non-integer dimensions"
-                                .to_string(),
-                            span: merge_span(args[0].span, args[1].span),
-                            code: "lint.shape.reshape",
-                            severity: HirDiagnosticSeverity::Warning,
-                        });
-                    }
-                    if let Some(shape) =
-                        runmat_builtins::shape_rules::constructor_shape_from_dims(&dims)
+            BuiltinSemanticKind::PermutationConstructor => Some(Shape(vec![
+                Some(1),
+                arg_values
+                    .first()
+                    .and_then(|value| value.number.and_then(number_to_int)),
+            ])),
+            BuiltinSemanticKind::RangeConstructor => Some(Shape(vec![Some(1), None])),
+            BuiltinSemanticKind::EmptyConstructor => Some(Shape(vec![Some(0), Some(0)])),
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Dot) => {
+                let lhs = arg_values.first().and_then(|value| value.shape.as_ref());
+                let rhs = arg_values.get(1).and_then(|value| value.shape.as_ref());
+                if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
+                    if vector_len(lhs)
+                        .zip(vector_len(rhs))
+                        .is_some_and(|(l, r)| l != r)
                     {
-                        if let Some(input_shape) = input_shape {
-                            if let (Some(in_count), Some(out_count)) =
-                                (element_count(&input_shape), element_count(&shape))
-                            {
-                                if in_count != out_count {
-                                    diags.push(HirDiagnostic {
-                                        message: format!(
-                                            "Reshape element count mismatch: input has {in_count}, output has {out_count} (must match)"
-                                        ),
-                                        span: merge_span(args[0].span, args[1].span),
-                                        code: "lint.shape.reshape",
-                                        severity: HirDiagnosticSeverity::Warning,
-                                    });
-                                }
-                            }
-                        }
+                        self.warn(
+                            "lint.shape.dot",
+                            "dot product vector lengths do not agree",
+                            span,
+                        );
                     }
                 }
-
-                if (name.eq_ignore_ascii_case("permute") || name.eq_ignore_ascii_case("ipermute"))
-                    && args.len() >= 2
+                Some(Shape(vec![Some(1), Some(1)]))
+            }
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Reshape) => {
+                let input = arg_values.first().and_then(|value| value.shape.as_ref());
+                let dims = mir_parse_dims(&arg_values[1..]);
+                if dims.iter().filter(|dim| matches!(dim, Dim::Infer)).count() > 1
+                    || incompatible_element_count(input, &dims)
                 {
-                    let input_ty = infer_expr_type_with_env(&args[0], env, returns);
-                    let input_rank = match input_ty {
-                        Type::Tensor { shape: Some(shape) }
-                        | Type::Logical { shape: Some(shape) } => Some(shape.len()),
-                        _ => None,
-                    };
-                    let order_rank = vector_literal_length(&args[1]);
-                    if let (Some(in_rank), Some(ord_rank)) = (input_rank, order_rank) {
-                        if in_rank != ord_rank {
-                            diags.push(HirDiagnostic {
-                                message: format!(
-                                    "Permute rank mismatch: input rank {in_rank}, order length {ord_rank} (must match)"
-                                ),
-                                span: merge_span(args[0].span, args[1].span),
-                                code: "lint.shape.permute",
-                                severity: HirDiagnosticSeverity::Warning,
-                            });
-                        }
-                    }
-                    if let HirExprKind::Tensor(rows) = &args[1].kind {
-                        let mut seen: std::collections::BTreeSet<usize> =
-                            std::collections::BTreeSet::new();
-                        let mut duplicate = false;
-                        let mut max_index = 0usize;
-                        for row in rows {
-                            for entry in row {
-                                if let Some(value) = eval_const_num(entry) {
-                                    let rounded = value.round();
-                                    if (value - rounded).abs() <= 1e-9 && rounded >= 1.0 {
-                                        let idx = rounded as usize;
-                                        max_index = max_index.max(idx);
-                                        if !seen.insert(idx) {
-                                            duplicate = true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if duplicate {
-                            diags.push(HirDiagnostic {
-                                message:
-                                    "Permute order mismatch: duplicate dimensions in order vector"
-                                        .to_string(),
-                                span: args[1].span,
-                                code: "lint.shape.permute",
-                                severity: HirDiagnosticSeverity::Warning,
-                            });
-                        }
-                        if let Some(in_rank) = input_rank {
-                            if max_index > in_rank {
-                                diags.push(HirDiagnostic {
-                                    message: "Permute order mismatch: order references a dimension larger than the input rank"
-                                        .to_string(),
-                                    span: args[1].span,
-                                    code: "lint.shape.permute",
-                                    severity: HirDiagnosticSeverity::Warning,
-                                });
-                            }
-                        }
-                    }
+                    self.warn(
+                        "lint.shape.reshape",
+                        "reshape dimensions are not compatible",
+                        span,
+                    );
                 }
-
-                if name.eq_ignore_ascii_case("repmat") && args.len() >= 2 {
-                    let mut non_integer = false;
-                    let mut negative = false;
-                    for arg in args.iter().skip(1) {
-                        match parse_dim(arg) {
-                            DimSpec::Known(_) => {}
-                            DimSpec::NonInteger => non_integer = true,
-                            DimSpec::Negative => negative = true,
-                            _ => {}
-                        }
-                    }
-                    if non_integer || negative {
-                        let reason = if non_integer {
-                            "non-integer"
-                        } else {
-                            "negative"
-                        };
-                        diags.push(HirDiagnostic {
-                            message: format!(
-                                "Repmat dimension mismatch: {reason} replication factors"
-                            ),
-                            span: merge_span(args[0].span, args[1].span),
-                            code: "lint.shape.repmat",
-                            severity: HirDiagnosticSeverity::Warning,
-                        });
-                    }
-                }
-
-                if (name.eq_ignore_ascii_case("sum")
-                    || name.eq_ignore_ascii_case("mean")
-                    || name.eq_ignore_ascii_case("prod")
-                    || name.eq_ignore_ascii_case("min")
-                    || name.eq_ignore_ascii_case("max"))
-                    && args.len() >= 2
-                {
-                    let input_ty = infer_expr_type_with_env(&args[0], env, returns);
-                    let input_rank = match input_ty {
-                        Type::Tensor { shape: Some(shape) }
-                        | Type::Logical { shape: Some(shape) } => Some(shape.len()),
-                        _ => None,
-                    };
-                    if let Some(rank) = input_rank {
-                        if let DimSpec::Known(dim) = parse_dim(&args[1]) {
-                            if dim == 0 || dim > rank {
-                                diags.push(HirDiagnostic {
-                                    message: format!(
-                                        "Reduction dimension mismatch: dimension {dim} is out of range for rank {rank}"
-                                    ),
-                                    span: args[1].span,
-                                    code: "lint.shape.reduction",
-                                    severity: HirDiagnosticSeverity::Warning,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                for arg in args {
-                    walk_expr(arg, env, returns, diags);
-                }
+                Some(Shape(dims.iter().map(|dim| dim.as_shape_dim()).collect()))
             }
-            HirExprKind::MethodCall(_, _, args) => {
-                for arg in args {
-                    walk_expr(arg, env, returns, diags);
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Repmat) => {
+                for arg in &arg_values[1..] {
+                    if !matches!(mir_parse_dim(arg), Dim::Known(_)) {
+                        self.warn(
+                            "lint.shape.repmat",
+                            "repmat dimensions must be non-negative integers",
+                            span,
+                        );
+                    }
                 }
+                arg_values.first().and_then(|value| value.shape.clone())
             }
-            HirExprKind::Member(base, _) | HirExprKind::MemberDynamic(base, _) => {
-                walk_expr(base, env, returns, diags);
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Permute) => {
+                let base = arg_values.first().and_then(|value| value.shape.clone());
+                let order = arg_values.get(1).and_then(|value| value.int_vector.clone());
+                if let Some(order) = &order {
+                    let mut sorted = order.clone();
+                    sorted.sort_unstable();
+                    if sorted.windows(2).any(|pair| pair[0] == pair[1])
+                        || base
+                            .as_ref()
+                            .is_some_and(|shape| order.len() != shape.0.len())
+                    {
+                        self.warn(
+                            "lint.shape.permute",
+                            "permute order is invalid for input rank",
+                            span,
+                        );
+                    }
+                }
+                base
             }
-            HirExprKind::AnonFunc { body, .. } => {
-                walk_expr(body, env, returns, diags);
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Transpose) => {
+                let base = arg_values.first().and_then(|value| value.shape.clone());
+                base.map(|shape| {
+                    if shape.0.len() >= 2 {
+                        Shape(vec![shape.0[1], shape.0[0]])
+                    } else {
+                        shape
+                    }
+                })
             }
-            _ => {}
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Concatenate(kind)) => {
+                self.infer_mir_concat(span, kind, &arg_values)
+            }
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::General) => {
+                arg_values.first().and_then(|value| value.shape.clone())
+            }
+            BuiltinSemanticKind::Reduction => {
+                let base = arg_values.first().and_then(|value| value.shape.clone());
+                if let (Some(base_shape), Some(dim)) = (
+                    base.as_ref(),
+                    arg_values
+                        .get(1)
+                        .and_then(|value| value.number.and_then(number_to_int)),
+                ) {
+                    if dim == 0 || dim > base_shape.0.len() {
+                        self.warn(
+                            "lint.shape.reduction",
+                            "reduction dimension is out of range",
+                            span,
+                        );
+                    }
+                }
+                base
+            }
+            _ => None,
+        };
+        MirShapeValue {
+            shape,
+            number: None,
+            int_vector: None,
         }
     }
 
-    fn walk_stmt(
-        stmt: &HirStmt,
-        env: &std::collections::HashMap<VarId, Type>,
-        returns: &std::collections::HashMap<String, Vec<Type>>,
-        func_envs: &std::collections::HashMap<String, std::collections::HashMap<VarId, Type>>,
-        diags: &mut Vec<HirDiagnostic>,
-    ) {
-        match stmt {
-            HirStmt::Assign(_, expr, _, _)
-            | HirStmt::ExprStmt(expr, _, _)
-            | HirStmt::MultiAssign(_, expr, _, _) => walk_expr(expr, env, returns, diags),
-            HirStmt::If {
-                cond,
-                then_body,
-                elseif_blocks,
-                else_body,
-                ..
-            } => {
-                walk_expr(cond, env, returns, diags);
-                for s in then_body {
-                    walk_stmt(s, env, returns, func_envs, diags);
-                }
-                for (cond, body) in elseif_blocks {
-                    walk_expr(cond, env, returns, diags);
-                    for s in body {
-                        walk_stmt(s, env, returns, func_envs, diags);
+    fn infer_mir_concat(
+        &mut self,
+        span: Span,
+        kind: ConcatKind,
+        arg_values: &[MirShapeValue],
+    ) -> Option<Shape> {
+        let (dim, values) = match kind {
+            ConcatKind::Dimension => {
+                let dim = arg_values
+                    .first()
+                    .and_then(|value| value.number.and_then(number_to_int))?;
+                (dim, &arg_values[1..])
+            }
+            ConcatKind::Horizontal => (2, arg_values),
+            ConcatKind::Vertical => (1, arg_values),
+        };
+        let shapes: Vec<_> = values
+            .iter()
+            .filter_map(|value| value.shape.as_ref())
+            .collect();
+        if shapes.is_empty() || dim == 0 {
+            return None;
+        }
+        let rank = shapes
+            .iter()
+            .map(|shape| shape.0.len())
+            .max()
+            .unwrap_or(dim);
+        let axis = dim - 1;
+        if axis >= rank {
+            return None;
+        }
+        let mut out = vec![Some(1); rank];
+        for (idx, out_dim) in out.iter_mut().enumerate().take(rank) {
+            if idx == axis {
+                *out_dim = shapes
+                    .iter()
+                    .map(|shape| shape.0.get(idx).copied().flatten())
+                    .try_fold(0usize, |sum, dim| dim.map(|dim| sum + dim));
+                continue;
+            }
+            let mut expected = None;
+            for shape in &shapes {
+                let dim = shape.0.get(idx).copied().flatten().or(Some(1));
+                if let (Some(expected), Some(dim)) = (expected, dim) {
+                    if expected != dim {
+                        self.warn(
+                            "lint.shape.concat",
+                            "concatenation dimensions do not agree",
+                            span,
+                        );
                     }
                 }
-                if let Some(body) = else_body {
-                    for s in body {
-                        walk_stmt(s, env, returns, func_envs, diags);
-                    }
-                }
+                expected = expected.or(dim);
             }
-            HirStmt::While { cond, body, .. } => {
-                walk_expr(cond, env, returns, diags);
-                for s in body {
-                    walk_stmt(s, env, returns, func_envs, diags);
-                }
+            *out_dim = expected;
+        }
+        Some(Shape(out))
+    }
+
+    fn check_logical_index(&mut self, span: Span, base: Option<&Shape>, idx: Option<&Shape>) {
+        if let (Some(base), Some(idx)) = (base, idx) {
+            if element_count(base)
+                .zip(element_count(idx))
+                .is_some_and(|(base, idx)| base != idx)
+            {
+                self.warn(
+                    "lint.shape.logical_index",
+                    "logical index shape does not match indexed value",
+                    span,
+                );
             }
-            HirStmt::For { expr, body, .. } => {
-                walk_expr(expr, env, returns, diags);
-                for s in body {
-                    walk_stmt(s, env, returns, func_envs, diags);
-                }
-            }
-            HirStmt::Switch {
-                expr,
-                cases,
-                otherwise,
-                ..
-            } => {
-                walk_expr(expr, env, returns, diags);
-                for (case_expr, case_body) in cases {
-                    walk_expr(case_expr, env, returns, diags);
-                    for s in case_body {
-                        walk_stmt(s, env, returns, func_envs, diags);
-                    }
-                }
-                if let Some(body) = otherwise {
-                    for s in body {
-                        walk_stmt(s, env, returns, func_envs, diags);
-                    }
-                }
-            }
-            HirStmt::Function { name, body, .. } => {
-                let func_env = func_envs.get(name).cloned().unwrap_or_default();
-                for s in body {
-                    walk_stmt(s, &func_env, returns, func_envs, diags);
-                }
-            }
-            HirStmt::ClassDef { members, .. } => {
-                for member in members {
-                    if let HirClassMember::Methods { body, .. } = member {
-                        for s in body {
-                            walk_stmt(s, env, returns, func_envs, diags);
-                        }
-                    }
-                }
-            }
-            _ => {}
         }
     }
 
-    let mut diags = Vec::new();
-    let global_env = result.inferred_globals.clone();
-    for stmt in &result.hir.body {
-        walk_stmt(
-            stmt,
-            &global_env,
-            &result.inferred_function_returns,
-            &result.inferred_function_envs,
-            &mut diags,
+    fn warn(&mut self, code: &'static str, message: &'static str, span: Span) {
+        self.diagnostics.push(
+            HirDiagnostic::new(code, HirDiagnosticSeverity::Warning, message, span)
+                .with_category("shape"),
         );
     }
-    diags
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Dim {
+    Known(usize),
+    Infer,
+    Unknown,
+}
+
+impl Dim {
+    fn as_shape_dim(self) -> Option<usize> {
+        match self {
+            Dim::Known(value) => Some(value),
+            Dim::Infer | Dim::Unknown => None,
+        }
+    }
+}
+
+fn number_to_int(value: f64) -> Option<usize> {
+    if value.is_finite() && value >= 0.0 && (value.fract().abs() <= 1e-9) {
+        Some(value as usize)
+    } else {
+        None
+    }
+}
+
+fn mir_parse_dim(value: &MirShapeValue) -> Dim {
+    match value.number {
+        Some(-1.0) => Dim::Infer,
+        Some(value) => number_to_int(value).map(Dim::Known).unwrap_or(Dim::Unknown),
+        None => Dim::Unknown,
+    }
+}
+
+fn mir_parse_dims(args: &[MirShapeValue]) -> Vec<Dim> {
+    if args.len() == 1 {
+        if let Some(values) = &args[0].int_vector {
+            return values.iter().copied().map(Dim::Known).collect();
+        }
+    }
+    args.iter().map(mir_parse_dim).collect()
+}
+
+fn sized_constructor_shape(args: &[MirShapeValue]) -> Option<Shape> {
+    let dims: Vec<_> = args
+        .iter()
+        .filter_map(|value| value.number.and_then(number_to_int))
+        .map(Some)
+        .collect();
+    match dims.as_slice() {
+        [] => None,
+        [dim] => Some(Shape(vec![*dim, *dim])),
+        _ => Some(Shape(dims)),
+    }
+}
+
+fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {
+    match shape {
+        runmat_hir::ShapeFact::Scalar => Some(Shape(vec![Some(1), Some(1)])),
+        runmat_hir::ShapeFact::Shaped { dims } => Some(Shape(
+            dims.iter()
+                .map(|dim| match dim {
+                    runmat_hir::DimFact::Known(value) => Some(*value),
+                    runmat_hir::DimFact::Symbolic(_) | runmat_hir::DimFact::Unknown => None,
+                })
+                .collect(),
+        )),
+        runmat_hir::ShapeFact::Ranked { .. }
+        | runmat_hir::ShapeFact::Unknown
+        | runmat_hir::ShapeFact::Unreachable => None,
+    }
+}
+
+fn range_width(start: f64, step: f64, end: f64) -> Option<usize> {
+    if step == 0.0 || !start.is_finite() || !step.is_finite() || !end.is_finite() {
+        return None;
+    }
+    let span = end - start;
+    if (span > 0.0 && step < 0.0) || (span < 0.0 && step > 0.0) {
+        return Some(0);
+    }
+    Some((span / step).floor().abs() as usize + 1)
+}
+
+fn matrix_dims(shape: &Shape) -> Option<(Option<usize>, Option<usize>)> {
+    Some((*shape.0.first()?, *shape.0.get(1)?))
+}
+
+fn element_count(shape: &Shape) -> Option<usize> {
+    shape
+        .0
+        .iter()
+        .try_fold(1usize, |acc, dim| dim.map(|dim| acc * dim))
+}
+
+fn vector_len(shape: &Shape) -> Option<usize> {
+    let count = element_count(shape)?;
+    if shape.0.len() == 1
+        || (shape.0.len() == 2 && (shape.0[0] == Some(1) || shape.0[1] == Some(1)))
+    {
+        Some(count)
+    } else {
+        None
+    }
+}
+
+fn broadcast_compatible(left: &Shape, right: &Shape) -> bool {
+    let len = left.0.len().max(right.0.len());
+    (0..len).all(|idx| {
+        let l = left.0.iter().rev().nth(idx).copied().flatten().unwrap_or(1);
+        let r = right
+            .0
+            .iter()
+            .rev()
+            .nth(idx)
+            .copied()
+            .flatten()
+            .unwrap_or(1);
+        l == r || l == 1 || r == 1
+    })
+}
+
+fn incompatible_element_count(input: Option<&Shape>, dims: &[Dim]) -> bool {
+    let Some(input_count) = input.and_then(element_count) else {
+        return false;
+    };
+    if dims.iter().any(|dim| matches!(dim, Dim::Unknown)) {
+        return true;
+    }
+    let known_product = dims.iter().fold(1usize, |acc, dim| match dim {
+        Dim::Known(value) => acc * value,
+        Dim::Infer | Dim::Unknown => acc,
+    });
+    if dims.iter().any(|dim| matches!(dim, Dim::Infer)) {
+        known_product == 0 || input_count % known_product != 0
+    } else {
+        known_product != input_count
+    }
 }

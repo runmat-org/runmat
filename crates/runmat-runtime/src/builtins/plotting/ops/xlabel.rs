@@ -1,9 +1,133 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::op_common::{map_figure_error, parse_text_command};
 use super::state::set_xlabel_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
+const XLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created/updated xlabel object.",
+}];
+
+const XLABEL_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Label text (string/char/cellstr-like multiline forms).",
+}];
+
+const XLABEL_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Label text (string/char/cellstr-like multiline forms).",
+    },
+];
+
+const XLABEL_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Label text (string/char/cellstr-like multiline forms).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const XLABEL_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Label text (string/char/cellstr-like multiline forms).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const XLABEL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = xlabel(txt)",
+        inputs: &XLABEL_INPUTS_TEXT,
+        outputs: &XLABEL_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = xlabel(ax, txt)",
+        inputs: &XLABEL_INPUTS_AX_TEXT,
+        outputs: &XLABEL_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = xlabel(txt, Name, Value, ...)",
+        inputs: &XLABEL_INPUTS_TEXT_PROPS,
+        outputs: &XLABEL_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = xlabel(ax, txt, Name, Value, ...)",
+        inputs: &XLABEL_INPUTS_AX_TEXT_PROPS,
+        outputs: &XLABEL_OUTPUT_HANDLE,
+    },
+];
+
+const XLABEL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.XLABEL.INVALID_ARGUMENT",
+    identifier: Some("RunMat:xlabel:InvalidArgument"),
+    when: "Axes handle, text payload, or property/value arguments are invalid.",
+    message: "xlabel: invalid argument",
+};
+
+const XLABEL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.XLABEL.INTERNAL",
+    identifier: Some("RunMat:xlabel:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "xlabel: internal operation failed",
+};
+
+const XLABEL_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [XLABEL_ERROR_INVALID_ARGUMENT, XLABEL_ERROR_INTERNAL];
+
+pub const XLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &XLABEL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &XLABEL_ERRORS,
+};
 
 #[runtime_builtin(
     name = "xlabel",
@@ -12,6 +136,7 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
     keywords = "xlabel,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::xlabel::XLABEL_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::xlabel"
 )]
 pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -44,6 +169,18 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         guard
+    }
+
+    #[test]
+    fn xlabel_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = XLABEL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = xlabel(txt)"));
+        assert!(labels.contains(&"h = xlabel(ax, txt)"));
+        assert!(labels.contains(&"h = xlabel(txt, Name, Value, ...)"));
     }
 
     #[test]

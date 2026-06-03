@@ -11,7 +11,11 @@ use std::collections::{hash_map::Entry, HashMap};
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, HostTensorOwned, UnionOptions, UnionOrder, UnionResult,
 };
-use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::type_resolvers::set_values_output_type;
@@ -52,18 +56,225 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "`union` terminates fusion chains and materialises results on the host; upstream tensors are gathered when necessary.",
 };
 
-fn union_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin("union").build()
+const BUILTIN_NAME: &str = "union";
+
+const UNION_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Union values or rows.",
+}];
+
+const UNION_OUTPUT_C_IA: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Union values or rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "ia",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting contributions from A.",
+    },
+];
+
+const UNION_OUTPUT_C_IA_IB: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Union values or rows.",
+    },
+    BuiltinParamDescriptor {
+        name: "ia",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting contributions from A.",
+    },
+    BuiltinParamDescriptor {
+        name: "ib",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indices selecting contributions from B.",
+    },
+];
+
+const UNION_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+];
+
+const UNION_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Second input array.",
+    },
+    BuiltinParamDescriptor {
+        name: "option",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Option tokens: 'rows'|'sorted'|'stable'.",
+    },
+];
+
+const UNION_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "C = union(A, B)",
+        inputs: &UNION_INPUTS_A_B,
+        outputs: &UNION_OUTPUT_C,
+    },
+    BuiltinSignatureDescriptor {
+        label: "C = union(A, B, option...)",
+        inputs: &UNION_INPUTS_A_B_OPTIONS,
+        outputs: &UNION_OUTPUT_C,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia] = union(A, B)",
+        inputs: &UNION_INPUTS_A_B,
+        outputs: &UNION_OUTPUT_C_IA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia] = union(A, B, option...)",
+        inputs: &UNION_INPUTS_A_B_OPTIONS,
+        outputs: &UNION_OUTPUT_C_IA,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia, ib] = union(A, B)",
+        inputs: &UNION_INPUTS_A_B,
+        outputs: &UNION_OUTPUT_C_IA_IB,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, ia, ib] = union(A, B, option...)",
+        inputs: &UNION_INPUTS_A_B_OPTIONS,
+        outputs: &UNION_OUTPUT_C_IA_IB,
+    },
+];
+
+const UNION_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.LEGACY_OPTION_UNSUPPORTED",
+    identifier: Some("RunMat:union:LegacyOptionUnsupported"),
+    when: "Legacy compatibility options are requested.",
+    message: "union: the 'legacy' behaviour is not supported",
+};
+
+const UNION_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.CONFLICTING_ORDER_OPTIONS",
+    identifier: Some("RunMat:union:ConflictingOrderOptions"),
+    when: "Both 'sorted' and 'stable' options are provided.",
+    message: "union: cannot combine 'sorted' with 'stable'",
+};
+
+const UNION_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.UNKNOWN_OPTION",
+    identifier: Some("RunMat:union:UnknownOption"),
+    when: "An unsupported option token is provided.",
+    message: "union: unrecognised option",
+};
+
+const UNION_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.ROWS_COLUMN_MISMATCH",
+    identifier: Some("RunMat:union:RowsColumnMismatch"),
+    when: "'rows' mode is used and column counts differ.",
+    message: "union: inputs must have the same number of columns when using 'rows'",
+};
+
+const UNION_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.UNSUPPORTED_INPUT_TYPE",
+    identifier: Some("RunMat:union:UnsupportedInputType"),
+    when: "Input values cannot be converted into supported union domains.",
+    message: "union: unsupported input type",
+};
+
+const UNION_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.INVALID_ARGUMENT",
+    identifier: Some("RunMat:union:InvalidArgument"),
+    when: "Option arguments are not string-like where required.",
+    message: "union: expected string option arguments",
+};
+
+const UNION_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.UNION.INTERNAL",
+    identifier: Some("RunMat:union:Internal"),
+    when: "Internal conversion/allocation/provider decode fails.",
+    message: "union: internal operation failed",
+};
+
+const UNION_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    UNION_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    UNION_ERROR_CONFLICTING_ORDER_OPTIONS,
+    UNION_ERROR_UNKNOWN_OPTION,
+    UNION_ERROR_ROWS_COLUMN_MISMATCH,
+    UNION_ERROR_UNSUPPORTED_INPUT_TYPE,
+    UNION_ERROR_INVALID_ARGUMENT,
+    UNION_ERROR_INTERNAL,
+];
+
+pub const UNION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &UNION_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &UNION_ERRORS,
+};
+
+fn union_error_with(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl Into<String>,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn union_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    union_error_with(error, error.message)
+}
+
+fn union_internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    union_error_with(&UNION_ERROR_INTERNAL, message)
 }
 
 #[runtime_builtin(
     name = "union",
     category = "array/sorting_sets",
-    summary = "Combine two arrays, returning their union with MATLAB-compatible ordering and index outputs.",
+    summary = "Return unions of input arrays with ordering and index-output controls.",
     keywords = "union,set,stable,rows,indices,gpu",
     accel = "array_construct",
     sink = true,
     type_resolver(set_values_output_type),
+    descriptor(crate::builtins::array::sorting_sets::union::UNION_DESCRIPTOR),
     builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
 async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -114,7 +325,7 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UnionOptions> {
             crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
             _ => {
                 let text = tensor::value_to_string(arg)
-                    .ok_or_else(|| union_error("union: expected string option arguments"))?;
+                    .ok_or_else(|| union_error(&UNION_ERROR_INVALID_ARGUMENT))?;
                 let lowered = text.trim().to_ascii_lowercase();
                 parse_union_option(&mut opts, &mut seen_order, &lowered)?;
                 continue;
@@ -136,7 +347,7 @@ fn parse_union_option(
         "sorted" => {
             if let Some(prev) = seen_order {
                 if *prev != UnionOrder::Sorted {
-                    return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
+                    return Err(union_error(&UNION_ERROR_CONFLICTING_ORDER_OPTIONS));
                 }
             }
             *seen_order = Some(UnionOrder::Sorted);
@@ -145,18 +356,21 @@ fn parse_union_option(
         "stable" => {
             if let Some(prev) = seen_order {
                 if *prev != UnionOrder::Stable {
-                    return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
+                    return Err(union_error(&UNION_ERROR_CONFLICTING_ORDER_OPTIONS));
                 }
             }
             *seen_order = Some(UnionOrder::Stable);
             opts.order = UnionOrder::Stable;
         }
         "legacy" | "r2012a" => {
-            return Err(union_error(
-                "union: the 'legacy' behaviour is not supported",
-            ));
+            return Err(union_error(&UNION_ERROR_LEGACY_OPTION_UNSUPPORTED));
         }
-        other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
+        other => {
+            return Err(union_error_with(
+                &UNION_ERROR_UNKNOWN_OPTION,
+                format!("union: unrecognised option '{other}'"),
+            ))
+        }
     }
     Ok(())
 }
@@ -186,7 +400,8 @@ async fn union_gpu_mixed(
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
-    let tensor_other = tensor::value_into_tensor_for("union", other).map_err(|e| union_error(e))?;
+    let tensor_other =
+        tensor::value_into_tensor_for("union", other).map_err(|e| union_internal_error(e))?;
     if gpu_is_a {
         union_numeric(tensor_gpu, tensor_other, opts)
     } else {
@@ -200,19 +415,19 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
         (Value::ComplexTensor(at), Value::ComplexTensor(bt)) => union_complex(at, bt, opts),
         (Value::ComplexTensor(at), Value::Complex(re, im)) => {
             let bt = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_complex(at, bt, opts)
         }
         (Value::Complex(re, im), Value::ComplexTensor(bt)) => {
             let at = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_complex(at, bt, opts)
         }
         (Value::Complex(a_re, a_im), Value::Complex(b_re, b_im)) => {
             let at = ComplexTensor::new(vec![(a_re, a_im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             let bt = ComplexTensor::new(vec![(b_re, b_im)], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_complex(at, bt, opts)
         }
 
@@ -225,28 +440,28 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
         }
         (Value::StringArray(astring), Value::String(b)) => {
             let bstring = StringArray::new(vec![b], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
             let astring = StringArray::new(vec![a], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
             let astring = StringArray::new(vec![a], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             let bstring = StringArray::new(vec![b], vec![1, 1])
-                .map_err(|e| union_error(format!("union: {e}")))?;
+                .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
 
         // Fallback to numeric (includes tensors, logical arrays, ints, bools, doubles)
         (left, right) => {
-            let tensor_a =
-                tensor::value_into_tensor_for("union", left).map_err(|e| union_error(e))?;
-            let tensor_b =
-                tensor::value_into_tensor_for("union", right).map_err(|e| union_error(e))?;
+            let tensor_a = tensor::value_into_tensor_for("union", left)
+                .map_err(|e| union_error_with(&UNION_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
+            let tensor_b = tensor::value_into_tensor_for("union", right)
+                .map_err(|e| union_error_with(&UNION_ERROR_UNSUPPORTED_INPUT_TYPE, e))?;
             union_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -334,13 +549,14 @@ fn union_numeric_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(union_error(
+        return Err(union_internal_error(
             "union: 'rows' option requires 2-D numeric matrices",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
+        return Err(union_error_with(
+            &UNION_ERROR_ROWS_COLUMN_MISMATCH,
+            UNION_ERROR_ROWS_COLUMN_MISMATCH.message,
         ));
     }
     let rows_a = a.shape[0];
@@ -476,13 +692,14 @@ fn union_complex_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(union_error(
+        return Err(union_internal_error(
             "union: 'rows' option requires 2-D complex matrices",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
+        return Err(union_error_with(
+            &UNION_ERROR_ROWS_COLUMN_MISMATCH,
+            UNION_ERROR_ROWS_COLUMN_MISMATCH.message,
         ));
     }
     let rows_a = a.shape[0];
@@ -632,8 +849,9 @@ fn union_char_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.cols != b.cols {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
+        return Err(union_error_with(
+            &UNION_ERROR_ROWS_COLUMN_MISMATCH,
+            UNION_ERROR_ROWS_COLUMN_MISMATCH.message,
         ));
     }
     let rows_a = a.rows;
@@ -767,13 +985,14 @@ fn union_string_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(union_error(
+        return Err(union_internal_error(
             "union: 'rows' option requires 2-D string arrays",
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
+        return Err(union_error_with(
+            &UNION_ERROR_ROWS_COLUMN_MISMATCH,
+            UNION_ERROR_ROWS_COLUMN_MISMATCH.message,
         ));
     }
     let rows_a = a.shape[0];
@@ -853,11 +1072,11 @@ impl UnionEvaluation {
     pub fn from_union_result(result: UnionResult) -> crate::BuiltinResult<Self> {
         let UnionResult { values, ia, ib } = result;
         let values_tensor = Tensor::new(values.data, values.shape)
-            .map_err(|e| union_error(format!("union: {e}")))?;
-        let ia_tensor =
-            Tensor::new(ia.data, ia.shape).map_err(|e| union_error(format!("union: {e}")))?;
-        let ib_tensor =
-            Tensor::new(ib.data, ib.shape).map_err(|e| union_error(format!("union: {e}")))?;
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
+        let ia_tensor = Tensor::new(ia.data, ia.shape)
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
+        let ib_tensor = Tensor::new(ib.data, ib.shape)
+            .map_err(|e| union_internal_error(format!("union: {e}")))?;
         Ok(UnionEvaluation::new(
             tensor::tensor_into_value(values_tensor),
             ia_tensor,
@@ -868,7 +1087,7 @@ impl UnionEvaluation {
     pub fn into_numeric_union_result(self) -> crate::BuiltinResult<UnionResult> {
         let UnionEvaluation { values, ia, ib } = self;
         let values_tensor =
-            tensor::value_into_tensor_for("union", values).map_err(|e| union_error(e))?;
+            tensor::value_into_tensor_for("union", values).map_err(|e| union_internal_error(e))?;
         Ok(UnionResult {
             values: HostTensorOwned {
                 data: values_tensor.data,
@@ -1044,13 +1263,13 @@ fn assemble_numeric_union(
     }
 
     let value_tensor = Tensor::new(values, vec![order.len(), 1])
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1095,13 +1314,13 @@ fn assemble_numeric_row_union(
     }
 
     let value_tensor = Tensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         tensor::tensor_into_value(value_tensor),
@@ -1138,13 +1357,13 @@ fn assemble_complex_union(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![order.len(), 1])
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1189,13 +1408,13 @@ fn assemble_complex_row_union(
     }
 
     let value_tensor = ComplexTensor::new(values, vec![unique_rows, cols])
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         complex_tensor_into_value(value_tensor),
@@ -1231,14 +1450,14 @@ fn assemble_char_union(
         }
     }
 
-    let value_array =
-        CharArray::new(values, order.len(), 1).map_err(|e| union_error(format!("union: {e}")))?;
+    let value_array = CharArray::new(values, order.len(), 1)
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::CharArray(value_array),
@@ -1283,13 +1502,13 @@ fn assemble_char_row_union(
     }
 
     let value_array = CharArray::new(values, unique_rows, cols)
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::CharArray(value_array),
@@ -1326,13 +1545,13 @@ fn assemble_string_union(
     }
 
     let value_array = StringArray::new(values, vec![order.len(), 1])
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::StringArray(value_array),
@@ -1377,13 +1596,13 @@ fn assemble_string_row_union(
     }
 
     let value_array = StringArray::new(values, vec![unique_rows, cols])
-        .map_err(|e| union_error(format!("union: {e}")))?;
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
-    let ia_tensor =
-        Tensor::new(ia, vec![ia_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
-    let ib_tensor =
-        Tensor::new(ib, vec![ib_len, 1]).map_err(|e| union_error(format!("union: {e}")))?;
+    let ia_tensor = Tensor::new(ia, vec![ia_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
+    let ib_tensor = Tensor::new(ib, vec![ib_len, 1])
+        .map_err(|e| union_internal_error(format!("union: {e}")))?;
 
     Ok(UnionEvaluation::new(
         Value::StringArray(value_array),
@@ -1487,10 +1706,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
 
     fn evaluate_sync(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
@@ -1729,15 +1944,45 @@ pub(crate) mod tests {
     fn union_rejects_legacy_option() {
         let tensor =
             Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor construction failed");
-        let err = error_message(
-            evaluate_sync(
-                Value::Tensor(tensor.clone()),
-                Value::Tensor(tensor),
-                &[Value::from("legacy")],
-            )
-            .unwrap_err(),
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("legacy")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            UNION_ERROR_LEGACY_OPTION_UNSUPPORTED.identifier
         );
-        assert!(err.contains("legacy"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn union_rejects_conflicting_order_options() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor construction failed");
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("stable"), Value::from("sorted")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            UNION_ERROR_CONFLICTING_ORDER_OPTIONS.identifier
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn union_rejects_unknown_option() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor construction failed");
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("bogus")],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), UNION_ERROR_UNKNOWN_OPTION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1745,10 +1990,12 @@ pub(crate) mod tests {
     fn union_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err(),
+        let err =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            UNION_ERROR_ROWS_COLUMN_MISMATCH.identifier
         );
-        assert!(err.contains("same number of columns"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1756,18 +2003,19 @@ pub(crate) mod tests {
     fn union_requires_matching_types() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = CharArray::new(vec!['a', 'b'], 1, 2).unwrap();
-        let err = error_message(
-            union_host(
-                Value::Tensor(a),
-                Value::CharArray(b),
-                &UnionOptions {
-                    rows: false,
-                    order: UnionOrder::Sorted,
-                },
-            )
-            .unwrap_err(),
+        let err = union_host(
+            Value::Tensor(a),
+            Value::CharArray(b),
+            &UnionOptions {
+                rows: false,
+                order: UnionOrder::Sorted,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            UNION_ERROR_UNSUPPORTED_INPUT_TYPE.identifier
         );
-        assert!(err.contains("unsupported input type"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

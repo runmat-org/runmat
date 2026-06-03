@@ -3,7 +3,11 @@
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderCondNorm};
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -17,6 +21,86 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cond";
+
+const COND_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "c",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Condition number estimate of A.",
+}];
+
+const COND_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix.",
+}];
+
+const COND_INPUTS_NORM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Norm selector (1, 2, inf, or \"fro\").",
+    },
+];
+
+const COND_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "c = cond(A)",
+        inputs: &COND_INPUTS,
+        outputs: &COND_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "c = cond(A, p)",
+        inputs: &COND_INPUTS_NORM,
+        outputs: &COND_OUTPUT,
+    },
+];
+
+const COND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COND.INVALID_ARGUMENT",
+    identifier: Some("RunMat:cond:InvalidArgument"),
+    when: "Norm selector argument is malformed or unsupported.",
+    message: "cond: invalid argument",
+};
+
+const COND_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COND.INVALID_INPUT",
+    identifier: Some("RunMat:cond:InvalidInput"),
+    when: "Input shape/type cannot be processed for condition-number evaluation.",
+    message: "cond: invalid input",
+};
+
+const COND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COND.INTERNAL",
+    identifier: Some("RunMat:cond:Internal"),
+    when: "Runtime fails while computing cond or executing fallback/upload paths.",
+    message: "cond: internal runtime failure",
+};
+
+const COND_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    COND_ERROR_INVALID_ARGUMENT,
+    COND_ERROR_INVALID_INPUT,
+    COND_ERROR_INTERNAL,
+];
+
+pub const COND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &COND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &COND_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::cond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,8 +118,27 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers may expose a direct condition-number kernel; the reference backends gather to the host, evaluate the shared implementation, and upload the scalar result.",
 };
 
+fn cond_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+    cond_error_with_message(message, &COND_ERROR_INVALID_INPUT)
+}
+
+fn argument_error(message: impl Into<String>) -> RuntimeError {
+    cond_error_with_message(message, &COND_ERROR_INVALID_ARGUMENT)
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeError {
+    cond_error_with_message(message, &COND_ERROR_INTERNAL)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -74,10 +177,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "cond",
     category = "math/linalg/solve",
-    summary = "Compute the matrix condition number with MATLAB-compatible norms.",
+    summary = "Compute matrix condition numbers.",
     keywords = "cond,condition number,norm,gpu",
     accel = "cond",
     type_resolver(numeric_scalar_type),
+    descriptor(crate::builtins::math::linalg::solve::cond::COND_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
 async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -366,7 +470,7 @@ fn parse_norm_argument(args: &[Value]) -> BuiltinResult<CondNorm> {
     match args.len() {
         0 => Ok(CondNorm::Two),
         1 => parse_norm_value(&args[0]),
-        _ => Err(builtin_error(format!("{NAME}: too many input arguments"))),
+        _ => Err(argument_error(format!("{NAME}: too many input arguments"))),
     }
 }
 
@@ -382,7 +486,7 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
             if *b {
                 Ok(CondNorm::One)
             } else {
-                Err(builtin_error(format!(
+                Err(argument_error(format!(
                     "{NAME}: norm must be 1, 2, Inf, or 'fro'"
                 )))
             }
@@ -391,12 +495,12 @@ fn parse_norm_value(value: &Value) -> BuiltinResult<CondNorm> {
             if logical.data[0] != 0 {
                 Ok(CondNorm::One)
             } else {
-                Err(builtin_error(format!(
+                Err(argument_error(format!(
                     "{NAME}: norm must be 1, 2, Inf, or 'fro'"
                 )))
             }
         }
-        _ => Err(builtin_error(format!(
+        _ => Err(argument_error(format!(
             "{NAME}: norm must be 1, 2, Inf, or 'fro'"
         ))),
     }
@@ -410,7 +514,7 @@ fn parse_norm_numeric(raw: f64) -> BuiltinResult<CondNorm> {
     } else if raw.is_infinite() && raw.is_sign_positive() {
         Ok(CondNorm::Inf)
     } else {
-        Err(builtin_error(format!(
+        Err(argument_error(format!(
             "{NAME}: norm must be 1, 2, Inf, or 'fro'"
         )))
     }
@@ -423,7 +527,9 @@ fn parse_norm_string(text: &str) -> BuiltinResult<CondNorm> {
         "1" | "one" => Ok(CondNorm::One),
         "inf" | "infinity" => Ok(CondNorm::Inf),
         "fro" | "frobenius" => Ok(CondNorm::Fro),
-        _ => Err(builtin_error(format!("{NAME}: unrecognised norm '{text}'"))),
+        _ => Err(argument_error(format!(
+            "{NAME}: unrecognised norm '{text}'"
+        ))),
     }
 }
 
@@ -439,7 +545,7 @@ fn upload_scalar(
     };
     provider
         .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+        .map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 /// Helper for provider backends that reuse the host implementation.
@@ -507,6 +613,25 @@ pub(crate) mod tests {
             &ResolveContext::new(Vec::new()),
         );
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn cond_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = COND_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"c = cond(A)"));
+        assert!(labels.contains(&"c = cond(A, p)"));
+    }
+
+    #[test]
+    fn cond_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = COND_DESCRIPTOR.errors.iter().map(|err| err.code).collect();
+        assert!(codes.contains(&"RM.COND.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.COND.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.COND.INTERNAL"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -588,6 +713,18 @@ pub(crate) mod tests {
             err.message(),
             "cond: matrix must be square for the requested norm."
         );
+        assert_eq!(err.identifier(), COND_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cond_invalid_norm_argument_identifier() {
+        let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let err = unwrap_error(
+            cond_builtin(Value::Tensor(tensor), vec![Value::from("badnorm")]).unwrap_err(),
+        );
+        assert!(err.message().contains("unrecognised norm"));
+        assert_eq!(err.identifier(), COND_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

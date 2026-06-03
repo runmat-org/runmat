@@ -1,6 +1,6 @@
 use clap::parser::ValueSource;
 use clap::{ArgMatches, Parser, Subcommand};
-use runmat_config::{PlotBackend, PlotMode};
+use runmat_config::runtime::{PlotBackend, PlotMode};
 use runmat_server_client::auth::CredentialStoreMode;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -26,7 +26,6 @@ Key features:
 • JIT compilation with Cranelift for optimal performance
 • Generational garbage collection with configurable policies
 • High-performance BLAS/LAPACK operations
-• Jupyter kernel protocol support with async execution
 • Fast startup with snapshotting capabilities
 • World-class error messages and debugging
 • Compatible with MATLAB/Octave syntax and semantics
@@ -44,32 +43,15 @@ Examples:
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
   runmat --emit-bytecode script.m           # Emit bytecode disassembly
-  runmat --install-kernel                  # Install as Jupyter kernel
-  runmat kernel                            # Start Jupyter kernel
-  runmat kernel-connection connection.json # Start with connection file
   runmat version --detailed                # Show detailed version information
 "#,
     after_help = r#"
 Environment Variables:
-  RUNMAT_DEBUG=1              Enable debug logging
-  RUNMAT_LOG_LEVEL=debug      Set log level (error, warn, info, debug, trace)
-  RUNMAT_KERNEL_IP=127.0.0.1  Kernel IP address  
-  RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
-  RUNMAT_TIMEOUT=300          Execution timeout in seconds
-  RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
-  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix override
-  RUNMAT_CONFIG=<path>        Path to configuration file
-  RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
-  
-  Garbage Collector:
-  RUNMAT_GC_PRESET=<preset>   GC preset (low-latency, high-throughput, low-memory, debug)
-  RUNMAT_GC_YOUNG_SIZE=<mb>   Young generation size in MB
-  RUNMAT_GC_THREADS=<n>       Number of GC threads
-  
-  JIT Compiler:
-  RUNMAT_JIT_ENABLE=1         Enable JIT compilation (default: true)
-  RUNMAT_JIT_THRESHOLD=<n>    JIT compilation threshold (default: 10)
-  RUNMAT_JIT_OPT_LEVEL=<level> JIT optimization level (none, size, speed, aggressive; default: speed)
+  RUNMAT_CONFIG=<path>        Explicit path to runmat.toml/runmat.json
+  RUNMAT_API_KEY=<token>      Remote API token (remote commands)
+  RUNMAT_SERVER_URL=<url>     Remote server URL (remote commands)
+  RUNMAT_ORG_ID=<uuid>        Remote org override (remote commands)
+  RUNMAT_PROJECT_ID=<uuid>    Remote project override (remote commands)
 
 For more information, visit: https://github.com/runmat-org/runmat
 "#
@@ -77,19 +59,15 @@ For more information, visit: https://github.com/runmat-org/runmat
 #[command(propagate_version = true)]
 pub struct Cli {
     /// Enable debug logging
-    #[arg(short, long, env = "RUNMAT_DEBUG", value_parser = parse_bool_env)]
+    #[arg(short, long, value_parser = parse_bool_env)]
     pub debug: bool,
 
     /// Set log level
-    #[arg(long, value_enum, env = "RUNMAT_LOG_LEVEL", default_value = "warn", value_parser = parse_log_level_env)]
+    #[arg(long, value_enum, default_value = "warn", value_parser = parse_log_level_env)]
     pub log_level: LogLevel,
 
-    /// Execution timeout in seconds
-    #[arg(long, env = "RUNMAT_TIMEOUT", default_value = "300")]
-    pub timeout: u64,
-
     /// Maximum number of call stack frames to record
-    #[arg(long, env = "RUNMAT_CALLSTACK_LIMIT", default_value = "200")]
+    #[arg(long, default_value = "200")]
     pub callstack_limit: usize,
 
     /// Emit bytecode disassembly for a script (stdout if omitted path)
@@ -97,7 +75,7 @@ pub struct Cli {
     pub emit_bytecode: Option<PathBuf>,
 
     /// Error identifier namespace prefix
-    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE")]
+    #[arg(long)]
     pub error_namespace: Option<String>,
 
     /// Configuration file path
@@ -105,36 +83,31 @@ pub struct Cli {
     pub config: Option<PathBuf>,
 
     /// Disable JIT compilation (use interpreter only)
-    #[arg(long, env = "RUNMAT_JIT_DISABLE", value_parser = parse_bool_env)]
+    #[arg(long, value_parser = parse_bool_env)]
     pub no_jit: bool,
 
     /// JIT compilation threshold (number of executions before JIT)
-    #[arg(long, env = "RUNMAT_JIT_THRESHOLD", default_value = "10")]
+    #[arg(long, default_value = "10")]
     pub jit_threshold: u32,
 
     /// JIT optimization level (none, size, speed, aggressive)
-    #[arg(
-        long,
-        value_enum,
-        env = "RUNMAT_JIT_OPT_LEVEL",
-        default_value = "speed"
-    )]
+    #[arg(long, value_enum, default_value = "speed")]
     pub jit_opt_level: OptLevel,
 
     /// GC configuration preset
-    #[arg(long, value_enum, env = "RUNMAT_GC_PRESET")]
+    #[arg(long, value_enum)]
     pub gc_preset: Option<GcPreset>,
 
     /// Young generation size in MB
-    #[arg(long, env = "RUNMAT_GC_YOUNG_SIZE")]
+    #[arg(long)]
     pub gc_young_size: Option<usize>,
 
     /// Maximum number of GC threads
-    #[arg(long, env = "RUNMAT_GC_THREADS")]
+    #[arg(long)]
     pub gc_threads: Option<usize>,
 
     /// Enable GC statistics collection
-    #[arg(long, env = "RUNMAT_GC_STATS", value_parser = parse_bool_env)]
+    #[arg(long, value_parser = parse_bool_env)]
     pub gc_stats: bool,
 
     /// Verbose output for REPL and execution
@@ -142,19 +115,19 @@ pub struct Cli {
     pub verbose: bool,
 
     /// Snapshot file to preload standard library
-    #[arg(long, env = "RUNMAT_SNAPSHOT_PATH")]
+    #[arg(long)]
     pub snapshot: Option<PathBuf>,
 
     /// Plotting mode
-    #[arg(long, value_enum, env = "RUNMAT_PLOT_MODE")]
+    #[arg(long, value_enum)]
     pub plot_mode: Option<PlotMode>,
 
     /// Force headless plotting mode
-    #[arg(long, env = "RUNMAT_PLOT_HEADLESS", value_parser = parse_bool_env)]
+    #[arg(long, value_parser = parse_bool_env)]
     pub plot_headless: bool,
 
     /// Plotting backend
-    #[arg(long, value_enum, env = "RUNMAT_PLOT_BACKEND")]
+    #[arg(long, value_enum)]
     pub plot_backend: Option<PlotBackend>,
 
     /// Override scatter target points for GPU decimation
@@ -166,37 +139,28 @@ pub struct Cli {
     pub plot_surface_vertex_budget: Option<u64>,
 
     /// Directory where run artifacts are written
-    #[arg(long, env = "RUNMAT_ARTIFACTS_DIR")]
+    #[arg(long)]
     pub artifacts_dir: Option<PathBuf>,
 
     /// Path to write artifact manifest JSON
-    #[arg(long, env = "RUNMAT_ARTIFACTS_MANIFEST")]
+    #[arg(long)]
     pub artifacts_manifest: Option<PathBuf>,
 
     /// Figure capture mode when artifact output is enabled
-    #[arg(
-        long,
-        value_enum,
-        env = "RUNMAT_CAPTURE_FIGURES",
-        default_value = "auto"
-    )]
+    #[arg(long, value_enum, default_value = "auto")]
     pub capture_figures: CaptureFiguresMode,
 
     /// Figure export size (WIDTHxHEIGHT)
-    #[arg(long, env = "RUNMAT_FIGURE_SIZE", default_value = "1280x720", value_parser = parse_figure_size)]
+    #[arg(long, default_value = "1280x720", value_parser = parse_figure_size)]
     pub figure_size: FigureSize,
 
     /// Maximum number of figures to export
-    #[arg(long, env = "RUNMAT_MAX_FIGURES", default_value = "8")]
+    #[arg(long, default_value = "8")]
     pub max_figures: usize,
 
     /// Generate sample configuration file
     #[arg(long)]
     pub generate_config: bool,
-
-    /// Install RunMat as a Jupyter kernel
-    #[arg(long)]
-    pub install_kernel: bool,
 
     /// Command to execute
     #[command(subcommand)]
@@ -210,7 +174,6 @@ pub struct Cli {
 pub struct CliOverrideSources {
     pub debug: bool,
     pub log_level: bool,
-    pub timeout: bool,
     pub callstack_limit: bool,
     pub jit_threshold: bool,
     pub jit_opt_level: bool,
@@ -223,7 +186,6 @@ impl CliOverrideSources {
         Self {
             debug: Self::was_provided(matches, "debug"),
             log_level: Self::was_provided(matches, "log_level"),
-            timeout: Self::was_provided(matches, "timeout"),
             callstack_limit: Self::was_provided(matches, "callstack_limit"),
             jit_threshold: Self::was_provided(matches, "jit_threshold"),
             jit_opt_level: Self::was_provided(matches, "jit_opt_level"),
@@ -246,44 +208,6 @@ pub enum Commands {
         /// Enable verbose output
         #[arg(short, long)]
         verbose: bool,
-    },
-    /// Start Jupyter kernel
-    Kernel {
-        /// Kernel IP address
-        #[arg(long, env = "RUNMAT_KERNEL_IP", default_value = "127.0.0.1")]
-        ip: String,
-        /// Kernel authentication key
-        #[arg(long, env = "RUNMAT_KERNEL_KEY")]
-        key: Option<String>,
-        /// Transport protocol
-        #[arg(long, default_value = "tcp")]
-        transport: String,
-        /// Signature scheme
-        #[arg(long, default_value = "hmac-sha256")]
-        signature_scheme: String,
-        /// Shell socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_SHELL_PORT", default_value = "0")]
-        shell_port: u16,
-        /// IOPub socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_IOPUB_PORT", default_value = "0")]
-        iopub_port: u16,
-        /// Stdin socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_STDIN_PORT", default_value = "0")]
-        stdin_port: u16,
-        /// Control socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_CONTROL_PORT", default_value = "0")]
-        control_port: u16,
-        /// Heartbeat socket port (0 for auto-assign)
-        #[arg(long, env = "RUNMAT_HB_PORT", default_value = "0")]
-        hb_port: u16,
-        /// Write connection file to path
-        #[arg(long)]
-        connection_file: Option<PathBuf>,
-    },
-    /// Start kernel with connection file
-    KernelConnection {
-        /// Path to Jupyter connection file
-        connection_file: PathBuf,
     },
     /// Execute MATLAB script file
     Run {
@@ -439,13 +363,20 @@ pub enum SnapshotCommand {
 
 #[derive(Subcommand, Clone)]
 pub enum ConfigCommand {
-    /// Show current configuration
-    Show,
-    /// Generate sample configuration file
+    /// Show resolved runtime configuration
+    Show {
+        /// Output format
+        #[arg(long, value_enum, default_value = "toml")]
+        format: ConfigFormat,
+    },
+    /// Generate a starter runmat config file (project + runtime sections)
     Generate {
         /// Output file path
-        #[arg(short, long, default_value = ".runmat.yaml")]
+        #[arg(short, long, default_value = "runmat.toml")]
         output: PathBuf,
+        /// Output format (overrides file extension when set)
+        #[arg(long, value_enum)]
+        format: Option<ConfigFormat>,
     },
     /// Validate configuration file
     Validate {
@@ -454,4 +385,10 @@ pub enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum ConfigFormat {
+    Toml,
+    Json,
 }

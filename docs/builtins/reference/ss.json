@@ -1,0 +1,121 @@
+{
+  "title": "ss",
+  "category": "control",
+  "keywords": [
+    "ss",
+    "state space",
+    "control system",
+    "state matrix",
+    "sample time"
+  ],
+  "summary": "Create continuous-time state-space model objects from A, B, C, and D matrices.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`ss` constructs host-side metadata. If matrix inputs are gpuArray values, RunMat gathers them before validating dimensions and creating the object."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline",
+    "notes": "`ss` is not fused; it constructs a host-side object."
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::control::ss::tests",
+    "integration": "crates/runmat-vm/tests/control.rs"
+  },
+  "description": "`ss(A, B, C, D)` creates a state-space model object from numeric system matrices. It follows MATLAB-compatible matrix-shape validation for state, input, output, and direct-feedthrough terms.",
+  "behaviors": [
+    "Returns an object whose class name is `ss`.",
+    "Stores `A`, `B`, `C`, `D`, `Ts`, `InputDelay`, `OutputDelay`, `StateName`, `InputName`, and `OutputName` properties.",
+    "Preserves the input matrix orientations on the returned object.",
+    "Uses continuous-time defaults with `Ts` equal to `0`.",
+    "`ss(A, B, C, D, Ts)` stores a finite non-negative sample time.",
+    "`ss(A, B, C, D, 'Ts', Ts)` and `ss(A, B, C, D, 'SampleTime', Ts)` store a finite non-negative sample time.",
+    "Numeric scalar inputs are treated as 1-by-1 matrices and are accepted only when the resulting dimensions are consistent.",
+    "Complex, sparse, descriptor-form, uncertain, identified, and generalized models are not supported in this initial implementation."
+  ],
+  "examples": [
+    {
+      "description": "Creating a continuous-time state-space model",
+      "input": "A = [0 1; -2 -3];\nB = [0; 1];\nC = [1 0];\nD = 0;\nG = ss(A, B, C, D);\nclass(G)",
+      "output": "ans = \"ss\""
+    },
+    {
+      "description": "Reading stored state-space matrices",
+      "input": "G = ss([0 1; -2 -3], [0; 1], [1 0], 0);\nfprintf(\"%.0f %.0f %.0f %.0f %.0f %.0f\\n\", G.A(1), G.A(2), G.A(3), G.A(4), G.B(1), G.B(2));",
+      "output": "0 -2 1 -3 0 1"
+    },
+    {
+      "description": "Creating a discrete-time model",
+      "input": "G = ss(0.5, 1, 1, 0, 0.1);\nfprintf(\"%.1f\\n\", G.Ts);",
+      "output": "0.1"
+    },
+    {
+      "description": "Specifying sample time with a name-value pair",
+      "input": "G = ss(0.5, 1, 1, 0, 'SampleTime', 0.2);\nfprintf(\"%.1f\\n\", G.Ts);",
+      "output": "0.2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `ss` simulate step or impulse responses?",
+      "answer": "No. This builtin constructs a state-space object. Response functions can add `ss` parsing separately."
+    },
+    {
+      "question": "Does `ss` accept complex or sparse matrices?",
+      "answer": "Not yet. Inputs must be finite real numeric scalars or dense matrices."
+    },
+    {
+      "question": "How are dimensions validated?",
+      "answer": "`A` must be n-by-n, `B` must be n-by-nu, `C` must be ny-by-n, and `D` must be ny-by-nu."
+    },
+    {
+      "question": "Will `ss(gpuArray(A), B, C, D)` return a gpuArray-backed object?",
+      "answer": "No. `ss` gathers gpuArray inputs and stores host tensors on the returned object."
+    }
+  ],
+  "links": [
+    {
+      "label": "tf",
+      "url": "./tf"
+    },
+    {
+      "label": "step",
+      "url": "./step"
+    },
+    {
+      "label": "impulse",
+      "url": "./impulse"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/control/ss.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/ss.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Supported forms",
+      "input": "G = ss(A, B, C, D)\nG = ss(A, B, C, D, Ts)\nG = ss(A, B, C, D, 'Ts', Ts)\nG = ss(A, B, C, D, 'SampleTime', Ts)",
+      "output": "G is an ss object."
+    },
+    "points": [
+      "`A`, `B`, `C`, and `D` must be finite real numeric scalars or dense matrices.",
+      "`Ts` is optional and must be a finite non-negative scalar.",
+      "The object stores matrices exactly in the provided orientation after gpuArray gathering."
+    ]
+  },
+  "validation": {
+    "summary": "`ss` validates finite real matrix inputs, state-space dimension consistency, supported name-value options, and sample-time constraints before constructing the host-side object. Unit and integration tests cover continuous and discrete constructors, property access, invalid dimensions, invalid sample times, descriptor signatures, and gpuArray gathering.",
+    "implementation": {
+      "label": "`crates/runmat-runtime/src/builtins/control/ss.rs`",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/ss.rs"
+    }
+  },
+  "gpu_residency": "`ss` is a host-side object constructor. gpuArray matrix inputs are gathered before object construction, and the returned state-space object does not live on the GPU."
+}

@@ -8,6 +8,8 @@ use runmat_builtins::{IntValue, LogicalArray, StringArray, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
+const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:UnsupportedSpecifier";
+
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
 pub struct ArgCursor<'a> {
@@ -42,6 +44,15 @@ impl<'a> ArgCursor<'a> {
 
 fn format_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
+}
+
+fn format_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(identifier)
+        .build()
 }
 
 fn map_control_flow_with_context(err: RuntimeError, context: &str) -> RuntimeError {
@@ -370,9 +381,10 @@ fn apply_format_spec(
             format_char(value, flags, width)
         }
         other => {
-            return Err(format_error(format!(
-                "sprintf: unsupported format %{other}"
-            )));
+            return Err(format_error_with_identifier(
+                format!("sprintf: unsupported format %{other}"),
+                FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER,
+            ));
         }
     }?;
 
@@ -1122,6 +1134,9 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Object(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_) => {
             return Err(format_error(format!(

@@ -16,9 +16,13 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
 use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
     CharArray, ComplexTensor, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
 };
 use runmat_macros::runtime_builtin;
+
+const BUILTIN_NAME: &str = "rot90";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::rot90")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -84,22 +88,122 @@ fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 }
 
-fn rot90_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("rot90").build()
+const ROT90_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Array rotated by multiples of 90 degrees around dimensions 1 and 2.",
+}];
+
+const ROT90_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input matrix or N-D array.",
+}];
+
+const ROT90_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input matrix or N-D array.",
+    },
+    BuiltinParamDescriptor {
+        name: "k_or_direction",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Rotation count K or direction string ('clockwise'/'counterclockwise').",
+    },
+];
+
+const ROT90_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "B = rot90(A)",
+        inputs: &ROT90_INPUTS_A,
+        outputs: &ROT90_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "B = rot90(A, k_or_direction)",
+        inputs: &ROT90_INPUTS_A_K,
+        outputs: &ROT90_OUTPUT,
+    },
+];
+
+const ROT90_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROT90.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:rot90:TooManyInputs"),
+    when: "More than one optional rotation argument is provided.",
+    message: "rot90: too many input arguments",
+};
+
+const ROT90_ERROR_INVALID_ROTATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROT90.INVALID_ROTATION",
+    identifier: Some("RunMat:rot90:InvalidRotation"),
+    when: "Rotation count/direction argument is invalid.",
+    message: "rot90: invalid rotation argument",
+};
+
+const ROT90_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROT90.UNSUPPORTED_INPUT",
+    identifier: Some("RunMat:rot90:UnsupportedInput"),
+    when: "Input value type is unsupported.",
+    message: "rot90: unsupported input type",
+};
+
+const ROT90_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ROT90.INTERNAL",
+    identifier: Some("RunMat:rot90:Internal"),
+    when: "Internal rotation or provider fallback path fails.",
+    message: "rot90: internal operation failed",
+};
+
+const ROT90_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ROT90_ERROR_TOO_MANY_INPUTS,
+    ROT90_ERROR_INVALID_ROTATION,
+    ROT90_ERROR_UNSUPPORTED_INPUT,
+    ROT90_ERROR_INTERNAL,
+];
+
+pub const ROT90_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ROT90_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ROT90_ERRORS,
+};
+
+fn rot90_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    rot90_error_with_message(error.message, error)
+}
+
+fn rot90_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "rot90",
     category = "array/shape",
-    summary = "Rotate matrices and N-D arrays by multiples of 90 degrees.",
+    summary = "Rotate matrices and N-D arrays in 90-degree increments.",
     keywords = "rot90,rotate,90 degrees,matrix,gpu,clockwise,counterclockwise",
     accel = "custom",
     type_resolver(preserve_matrix_type),
+    descriptor(crate::builtins::array::shape::rot90::ROT90_DESCRIPTOR),
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
 async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
-        return Err(rot90_error("rot90: too many input arguments"));
+        return Err(rot90_error(&ROT90_ERROR_TOO_MANY_INPUTS));
     }
     let steps = parse_rotation_steps(rest.first())?;
     match value {
@@ -107,8 +211,9 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         Value::LogicalArray(logical) => Ok(rot90_logical(logical, steps).map(Value::LogicalArray)?),
         Value::ComplexTensor(ct) => Ok(rot90_complex_tensor(ct, steps).map(Value::ComplexTensor)?),
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| rot90_error(format!("rot90: {e}")))?;
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|e| {
+                rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL)
+            })?;
             Ok(rot90_complex_tensor(tensor, steps).map(complex_tensor_into_value)?)
         }
         Value::StringArray(strings) => {
@@ -117,12 +222,19 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         Value::CharArray(chars) => Ok(rot90_char_array(chars, steps).map(Value::CharArray)?),
         Value::String(s) => Ok(Value::String(s)),
         v @ (Value::Num(_) | Value::Int(_) | Value::Bool(_)) => {
-            let tensor = tensor::value_into_tensor_for("rot90", v).map_err(|e| rot90_error(e))?;
+            let tensor = tensor::value_into_tensor_for("rot90", v)
+                .map_err(|e| rot90_error_with_message(e, &ROT90_ERROR_INTERNAL))?;
             Ok(rot90_tensor(tensor, steps).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps).await?),
-        Value::Cell(_) => Err(rot90_error("rot90: cell arrays are not yet supported")),
+        Value::Cell(_) => Err(rot90_error_with_message(
+            "rot90: cell arrays are not yet supported",
+            &ROT90_ERROR_UNSUPPORTED_INPUT,
+        )),
         Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)
@@ -130,7 +242,7 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         | Value::Listener(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::OutputList(_) => Err(rot90_error("rot90: unsupported input type")),
+        | Value::OutputList(_) => Err(rot90_error(&ROT90_ERROR_UNSUPPORTED_INPUT)),
     }
 }
 
@@ -153,20 +265,27 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         Value::Tensor(t) => parse_tensor_rotation(t),
         Value::LogicalArray(array) => parse_logical_rotation(array),
-        Value::StringArray(sa) if sa.data.len() != 1 => Err(rot90_error(
+        Value::StringArray(sa) if sa.data.len() != 1 => Err(rot90_error_with_message(
             "rot90: rotation direction must be a scalar string",
+            &ROT90_ERROR_INVALID_ROTATION,
         )),
         Value::StringArray(_) | Value::String(_) | Value::CharArray(_) => {
-            Err(rot90_error("rot90: unknown rotation direction string"))
+            Err(rot90_error_with_message(
+                "rot90: unknown rotation direction string",
+                &ROT90_ERROR_INVALID_ROTATION,
+            ))
         }
-        Value::GpuTensor(_) => Err(rot90_error(
+        Value::GpuTensor(_) => Err(rot90_error_with_message(
             "rot90: rotation count must be specified on the host (numeric or direction string)",
+            &ROT90_ERROR_INVALID_ROTATION,
         )),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(rot90_error("rot90: K must be an integer"))
-        }
-        _ => Err(rot90_error(
+        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(rot90_error_with_message(
+            "rot90: K must be an integer",
+            &ROT90_ERROR_INVALID_ROTATION,
+        )),
+        _ => Err(rot90_error_with_message(
             "rot90: rotation count must be numeric or a direction string",
+            &ROT90_ERROR_INVALID_ROTATION,
         )),
     }
 }
@@ -184,9 +303,10 @@ fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
             "clockwise" | "cw" => -1,
             "counterclockwise" | "anticlockwise" | "ccw" | "acw" => 1,
             other => {
-                return Err(rot90_error(format!(
-                    "rot90: unknown rotation direction '{other}'"
-                )));
+                return Err(rot90_error_with_message(
+                    format!("rot90: unknown rotation direction '{other}'"),
+                    &ROT90_ERROR_INVALID_ROTATION,
+                ));
             }
         };
         return Ok(Some(turns));
@@ -196,25 +316,37 @@ fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
 
 fn parse_numeric_rotation(value: f64) -> crate::BuiltinResult<i64> {
     if !value.is_finite() {
-        return Err(rot90_error("rot90: K must be finite"));
+        return Err(rot90_error_with_message(
+            "rot90: K must be finite",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
     }
     let rounded = value.round();
     if (rounded - value).abs() > f64::EPSILON {
-        return Err(rot90_error("rot90: K must be an integer"));
+        return Err(rot90_error_with_message(
+            "rot90: K must be an integer",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
     }
     Ok(rounded as i64)
 }
 
 fn parse_tensor_rotation(tensor: &Tensor) -> crate::BuiltinResult<i64> {
     if tensor.data.len() != 1 {
-        return Err(rot90_error("rot90: K must be a scalar integer"));
+        return Err(rot90_error_with_message(
+            "rot90: K must be a scalar integer",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
     }
     parse_numeric_rotation(tensor.data[0])
 }
 
 fn parse_logical_rotation(array: &LogicalArray) -> crate::BuiltinResult<i64> {
     if array.data.len() != 1 {
-        return Err(rot90_error("rot90: K must be a scalar integer"));
+        return Err(rot90_error_with_message(
+            "rot90: K must be a scalar integer",
+            &ROT90_ERROR_INVALID_ROTATION,
+        ));
     }
     Ok(if array.data[0] != 0 { 1 } else { 0 })
 }
@@ -224,7 +356,8 @@ fn rot90_tensor(tensor: Tensor, steps: usize) -> crate::BuiltinResult<Tensor> {
         return Ok(tensor);
     }
     let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    Tensor::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
+    Tensor::new(data, shape)
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
 fn rot90_complex_tensor(
@@ -235,7 +368,8 @@ fn rot90_complex_tensor(
         return Ok(tensor);
     }
     let (data, shape) = rot90_generic(&tensor.data, &tensor.shape, steps)?;
-    ComplexTensor::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
+    ComplexTensor::new(data, shape)
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
 fn rot90_logical(array: LogicalArray, steps: usize) -> crate::BuiltinResult<LogicalArray> {
@@ -243,7 +377,8 @@ fn rot90_logical(array: LogicalArray, steps: usize) -> crate::BuiltinResult<Logi
         return Ok(array);
     }
     let (data, shape) = rot90_generic(&array.data, &array.shape, steps)?;
-    LogicalArray::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
+    LogicalArray::new(data, shape)
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
 fn rot90_string_array(array: StringArray, steps: usize) -> crate::BuiltinResult<StringArray> {
@@ -251,7 +386,8 @@ fn rot90_string_array(array: StringArray, steps: usize) -> crate::BuiltinResult<
         return Ok(array);
     }
     let (data, shape) = rot90_generic(&array.data, &array.shape, steps)?;
-    StringArray::new(data, shape).map_err(|e| rot90_error(format!("rot90: {e}")))
+    StringArray::new(data, shape)
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
 fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<CharArray> {
@@ -268,7 +404,7 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
     let mut out = vec!['\0'; out_rows * out_cols];
     if rows == 0 || cols == 0 {
         return CharArray::new(out, out_rows, out_cols)
-            .map_err(|e| rot90_error(format!("rot90: {e}")));
+            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL));
     }
     for row in 0..rows {
         for col in 0..cols {
@@ -283,7 +419,8 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
             out[dst_idx] = array.data[src_idx];
         }
     }
-    CharArray::new(out, out_rows, out_cols).map_err(|e| rot90_error(format!("rot90: {e}")))
+    CharArray::new(out, out_rows, out_cols)
+        .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
 async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResult<Value> {
@@ -313,7 +450,7 @@ async fn rot90_gpu(handle: GpuTensorHandle, steps: usize) -> crate::BuiltinResul
         provider
             .upload(&view)
             .map(Value::GpuTensor)
-            .map_err(|e| rot90_error(format!("rot90: {e}")))
+            .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
     } else {
         Ok(tensor::tensor_into_value(rotated))
     }
@@ -372,8 +509,9 @@ fn rot90_generic<T: Clone>(
     };
     let total: usize = ext_shape.iter().product();
     if total != data.len() {
-        return Err(rot90_error(
+        return Err(rot90_error_with_message(
             "rot90: data length does not match shape product",
+            &ROT90_ERROR_INTERNAL,
         ));
     }
     let rows = ext_shape[0];
@@ -720,6 +858,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let err = rot90_builtin(Value::Tensor(tensor), vec![Value::Num(1.5)]).unwrap_err();
         assert!(err.to_string().contains("K must be an integer"));
+        assert_eq!(err.identifier(), ROT90_ERROR_INVALID_ROTATION.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

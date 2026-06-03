@@ -60,11 +60,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let py = buf_y[idx];
     let pz = buf_z[idx];
 
-    var vertex: VertexRaw;
-    vertex.data[0u] = px;
-    vertex.data[1u] = py;
-    vertex.data[2u] = pz;
-
     var v_color = params.color;
     if (params.has_colors != 0u) {
         let base = idx * params.color_stride;
@@ -84,18 +79,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         point_size = buf_sizes[idx];
     }
 
-    vertex.data[3u] = v_color.x;
-    vertex.data[4u] = v_color.y;
-    vertex.data[5u] = v_color.z;
-    vertex.data[6u] = v_color.w;
-    vertex.data[7u] = 0.0;
-    vertex.data[8u] = 0.0;
-    vertex.data[9u] = point_size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    let out_idx = atomicAdd(&(indirect.vertex_count), 1u);
-    out_vertices[out_idx] = vertex;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    let out_base = atomicAdd(&(indirect.vertex_count), 6u);
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
+        var vertex: VertexRaw;
+        vertex.data[0u] = px;
+        vertex.data[1u] = py;
+        vertex.data[2u] = pz;
+        vertex.data[3u] = v_color.x;
+        vertex.data[4u] = v_color.y;
+        vertex.data[5u] = v_color.z;
+        vertex.data[6u] = v_color.w;
+        vertex.data[7u] = 0.0;
+        vertex.data[8u] = 0.0;
+        vertex.data[9u] = point_size;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[out_base + i] = vertex;
+    }
 }
 "#;
 
@@ -161,11 +169,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let py = f32(buf_y[idx]);
     let pz = f32(buf_z[idx]);
 
-    var vertex: VertexRaw;
-    vertex.data[0u] = px;
-    vertex.data[1u] = py;
-    vertex.data[2u] = pz;
-
     var v_color = params.color;
     if (params.has_colors != 0u) {
         let base = idx * params.color_stride;
@@ -185,17 +188,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         point_size = buf_sizes[idx];
     }
 
-    vertex.data[3u] = v_color.x;
-    vertex.data[4u] = v_color.y;
-    vertex.data[5u] = v_color.z;
-    vertex.data[6u] = v_color.w;
-    vertex.data[7u] = 0.0;
-    vertex.data[8u] = 0.0;
-    vertex.data[9u] = point_size;
-    vertex.data[10u] = 0.0;
-    vertex.data[11u] = 0.0;
-
-    let out_idx = atomicAdd(&(indirect.vertex_count), 1u);
-    out_vertices[out_idx] = vertex;
+    let corners = array<vec2<f32>, 6u>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    let out_base = atomicAdd(&(indirect.vertex_count), 6u);
+    for (var i: u32 = 0u; i < 6u; i = i + 1u) {
+        var vertex: VertexRaw;
+        vertex.data[0u] = px;
+        vertex.data[1u] = py;
+        vertex.data[2u] = pz;
+        vertex.data[3u] = v_color.x;
+        vertex.data[4u] = v_color.y;
+        vertex.data[5u] = v_color.z;
+        vertex.data[6u] = v_color.w;
+        vertex.data[7u] = 0.0;
+        vertex.data[8u] = 0.0;
+        vertex.data[9u] = point_size;
+        vertex.data[10u] = corners[i].x;
+        vertex.data[11u] = corners[i].y;
+        out_vertices[out_base + i] = vertex;
+    }
 }
 "#;

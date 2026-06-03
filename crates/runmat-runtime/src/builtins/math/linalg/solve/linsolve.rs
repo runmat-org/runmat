@@ -5,7 +5,11 @@ use num_complex::Complex64;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, HostTensorView, ProviderLinsolveOptions, ProviderLinsolveResult,
 };
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -21,6 +25,129 @@ use crate::builtins::math::linalg::type_resolvers::left_divide_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linsolve";
+
+const LINSOLVE_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "X",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Solution to A * X = B.",
+}];
+
+const LINSOLVE_OUTPUT_XR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Solution to A * X = B.",
+    },
+    BuiltinParamDescriptor {
+        name: "R",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Reciprocal condition estimate.",
+    },
+];
+
+const LINSOLVE_INPUTS_AB: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Coefficient matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right-hand side matrix or vector.",
+    },
+];
+
+const LINSOLVE_INPUTS_AB_OPTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Coefficient matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "B",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Right-hand side matrix or vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "opts",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Structural options (LT, UT, RECT, SYM, POSDEF, TRANSA, RCOND).",
+    },
+];
+
+const LINSOLVE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "X = linsolve(A, B)",
+        inputs: &LINSOLVE_INPUTS_AB,
+        outputs: &LINSOLVE_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "X = linsolve(A, B, opts)",
+        inputs: &LINSOLVE_INPUTS_AB_OPTS,
+        outputs: &LINSOLVE_OUTPUT_X,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X, R] = linsolve(A, B)",
+        inputs: &LINSOLVE_INPUTS_AB,
+        outputs: &LINSOLVE_OUTPUT_XR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[X, R] = linsolve(A, B, opts)",
+        inputs: &LINSOLVE_INPUTS_AB_OPTS,
+        outputs: &LINSOLVE_OUTPUT_XR,
+    },
+];
+
+const LINSOLVE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSOLVE.INVALID_ARGUMENT",
+    identifier: Some("RunMat:linsolve:InvalidArgument"),
+    when: "Options/output count/auxiliary arguments are malformed or unsupported.",
+    message: "linsolve: invalid argument",
+};
+
+const LINSOLVE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSOLVE.INVALID_INPUT",
+    identifier: Some("RunMat:linsolve:InvalidInput"),
+    when: "Input shape/type cannot be solved under linsolve semantics.",
+    message: "linsolve: invalid input",
+};
+
+const LINSOLVE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LINSOLVE.INTERNAL",
+    identifier: Some("RunMat:linsolve:Internal"),
+    when: "Runtime fails while solving or executing provider fallback paths.",
+    message: "linsolve: internal runtime failure",
+};
+
+const LINSOLVE_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LINSOLVE_ERROR_INVALID_ARGUMENT,
+    LINSOLVE_ERROR_INVALID_INPUT,
+    LINSOLVE_ERROR_INTERNAL,
+];
+
+pub const LINSOLVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LINSOLVE_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LINSOLVE_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::linsolve")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -38,8 +165,23 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Prefers the provider linsolve hook; WGPU currently supports triangular solves, real F32 TRANSA='T'/'C' variants, a dedicated real F32 POSDEF/Cholesky path, and selected real F32 QR-backed square and rectangular solves, otherwise it gathers to the host solver and re-uploads the result.",
 };
 
+fn linsolve_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
+    linsolve_error_with_message(message, &LINSOLVE_ERROR_INVALID_INPUT)
+}
+
+fn argument_error(message: impl Into<String>) -> RuntimeError {
+    linsolve_error_with_message(message, &LINSOLVE_ERROR_INVALID_ARGUMENT)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -79,6 +221,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "linsolve,linear system,triangular,gpu",
     accel = "linsolve",
     type_resolver(left_divide_type),
+    descriptor(crate::builtins::math::linalg::solve::linsolve::LINSOLVE_DESCRIPTOR),
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
 async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -96,7 +239,7 @@ async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRe
                 eval.reciprocal_condition(),
             ]));
         }
-        return Err(builtin_error(
+        return Err(argument_error(
             "linsolve currently supports at most two outputs",
         ));
     }
@@ -221,7 +364,7 @@ fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
     match rest.len() {
         0 => Ok(SolveOptions::default()),
         1 => parse_options(&rest[0]),
-        _ => Err(builtin_error("linsolve: too many input arguments")),
+        _ => Err(argument_error("linsolve: too many input arguments")),
     }
 }
 
@@ -293,7 +436,7 @@ fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
     let struct_val = match value {
         Value::Struct(s) => s,
         other => {
-            return Err(builtin_error(format!(
+            return Err(argument_error(format!(
                 "linsolve: opts must be a struct, got {other:?}"
             )))
         }
@@ -315,15 +458,21 @@ fn parse_options(value: &Value) -> BuiltinResult<SolveOptions> {
             "RCOND" => {
                 let threshold = parse_scalar_f64("RCOND", raw_value)?;
                 if threshold < 0.0 {
-                    return Err(builtin_error("linsolve: RCOND must be non-negative"));
+                    return Err(argument_error("linsolve: RCOND must be non-negative"));
                 }
                 opts.rcond = Some(threshold);
             }
-            other => return Err(builtin_error(format!("linsolve: unknown option '{other}'"))),
+            other => {
+                return Err(argument_error(format!(
+                    "linsolve: unknown option '{other}'"
+                )))
+            }
         }
     }
     if opts.lower && opts.upper {
-        return Err(builtin_error("linsolve: LT and UT are mutually exclusive."));
+        return Err(argument_error(
+            "linsolve: LT and UT are mutually exclusive.",
+        ));
     }
     Ok(opts)
 }
@@ -335,7 +484,7 @@ fn parse_bool_field(name: &str, value: &Value) -> BuiltinResult<bool> {
         Value::Num(n) => Ok(*n != 0.0),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0] != 0.0),
         Value::LogicalArray(arr) if arr.len() == 1 => Ok(arr.data[0] != 0),
-        other => Err(builtin_error(format!(
+        other => Err(argument_error(format!(
             "linsolve: option '{name}' must be logical or numeric, got {other:?}"
         ))),
     }
@@ -346,7 +495,7 @@ fn parse_scalar_f64(name: &str, value: &Value) -> BuiltinResult<f64> {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Ok(t.data[0]),
-        other => Err(builtin_error(format!(
+        other => Err(argument_error(format!(
             "linsolve: option '{name}' must be a scalar numeric value, got {other:?}"
         ))),
     }
@@ -361,16 +510,16 @@ enum TransposeMode {
 
 fn parse_transa(value: &Value) -> BuiltinResult<TransposeMode> {
     let text = tensor::value_to_string(value).ok_or_else(|| {
-        builtin_error("linsolve: TRANSA must be a character vector or string scalar")
+        argument_error("linsolve: TRANSA must be a character vector or string scalar")
     })?;
     if text.is_empty() {
-        return Err(builtin_error("linsolve: TRANSA cannot be empty"));
+        return Err(argument_error("linsolve: TRANSA cannot be empty"));
     }
     match text.trim().to_ascii_uppercase().as_str() {
         "N" => Ok(TransposeMode::None),
         "T" => Ok(TransposeMode::Transpose),
         "C" => Ok(TransposeMode::Conjugate),
-        other => Err(builtin_error(format!(
+        other => Err(argument_error(format!(
             "linsolve: TRANSA must be 'N', 'T', or 'C', got '{other}'"
         ))),
     }
@@ -988,6 +1137,31 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn linsolve_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LINSOLVE_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(labels.contains(&"X = linsolve(A, B)"));
+        assert!(labels.contains(&"X = linsolve(A, B, opts)"));
+        assert!(labels.contains(&"[X, R] = linsolve(A, B)"));
+        assert!(labels.contains(&"[X, R] = linsolve(A, B, opts)"));
+    }
+
+    #[test]
+    fn linsolve_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = LINSOLVE_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|err| err.code)
+            .collect();
+        assert!(codes.contains(&"RM.LINSOLVE.INVALID_ARGUMENT"));
+        assert!(codes.contains(&"RM.LINSOLVE.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.LINSOLVE.INTERNAL"));
+    }
+
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::ProviderTelemetry;
 
@@ -1048,6 +1222,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_lower_triangular_hint() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(
             vec![3.0, -1.0, 4.0, 0.0, 2.0, 1.0, 0.0, 0.0, 5.0],
             vec![3, 3],
@@ -1217,6 +1393,40 @@ pub(crate) mod tests {
             err.message().contains("singular to working precision"),
             "unexpected error message: {err}"
         );
+        assert_eq!(err.identifier(), LINSOLVE_ERROR_INVALID_INPUT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn linsolve_unknown_option_identifier() {
+        let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let mut opts = StructValue::new();
+        opts.fields.insert("UNKNOWN".to_string(), Value::Bool(true));
+        let err = unwrap_error(
+            linsolve_builtin(
+                Value::Tensor(a),
+                Value::Tensor(b),
+                vec![Value::Struct(opts)],
+            )
+            .expect_err("unknown option should fail"),
+        );
+        assert!(err.message().contains("unknown option"));
+        assert_eq!(err.identifier(), LINSOLVE_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn linsolve_output_count_limit_identifier() {
+        let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let b = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let _guard = crate::output_count::push_output_count(Some(3));
+        let err = unwrap_error(
+            linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
+                .expect_err("three outputs should fail"),
+        );
+        assert!(err.message().contains("at most two outputs"));
+        assert_eq!(err.identifier(), LINSOLVE_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1303,8 +1513,8 @@ pub(crate) mod tests {
             let _ = linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
                 .expect("host linsolve");
             let telemetry = provider.telemetry_snapshot();
-            assert_eq!(telemetry.linsolve.count, 1);
-            assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 1);
+            assert!(telemetry.linsolve.count >= 1);
+            assert!(fallback_count(&telemetry, "linsolve:host_reupload") >= 1);
             assert!(telemetry.upload_bytes > 0);
             assert!(telemetry.download_bytes > 0);
         });

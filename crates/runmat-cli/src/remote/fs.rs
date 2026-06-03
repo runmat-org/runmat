@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use runmat_config::RunMatConfig;
+use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_filesystem::{FsFileType, FsProvider, RemoteFsConfig, RemoteFsProvider};
 use runmat_server_client::auth::{
     resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
@@ -265,7 +265,7 @@ pub async fn run_with_remote_fs(
     project: Option<Uuid>,
     server: Option<String>,
     cli: &Cli,
-    config: &RunMatConfig,
+    config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let mut remote_config = RemoteConfig::load()?;
     let project_id = resolve_project_id(&remote_config, project)?;

@@ -9,37 +9,22 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
-# Legacy static plotting support
-plotters = { version = "0.3", default-features = false, features = [
-    "svg_backend",
-    "bitmap_backend",
-    "bitmap_encoder",
-    "line_series",
-    "point_series"
-] }
-
 # Interactive GPU-accelerated plotting
 wgpu = "0.19.1"
 winit = { version = "0.29.11", optional = true }
 egui = { version = "0.27.2", optional = true }
 egui-wgpu = { version = "0.27.2", optional = true }
 egui-winit = { version = "0.27.2", optional = true }
-lyon = "1.0"
 bytemuck = { version = "1.0", features = ["derive"] }
 
 # Math and geometry
 glam = "0.24"
-nalgebra = "0.32"
 
 # Async runtime for WGPU
 pollster = "0.3"
 futures = "0.3"
 
-# Data processing
-rayon = "1.0"
-
 # Runtime environment detection
-atty = "0.2"
 log = "0.4"
 tracing = "0.1"
 once_cell = "1.19"
@@ -47,31 +32,23 @@ once_cell = "1.19"
 # Web browser integration
 webbrowser = "0.8"
 
-# Jupyter integration (optional)
-eframe = { version = "0.27.2", optional = true, features = ["glow"] }
-
 # Serialization and config
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
 
 # Image processing for export
 image = { version = "0.24", features = ["png", "jpeg"] }
-base64 = "0.22"
+font8x8 = "0.3"
 rfd = { version = "0.14", optional = true }
 
 
 
 # RunMat integration
-inventory = { workspace = true }
-runmat-builtins = { workspace = true }
-runmat-macros = { workspace = true }
 thiserror = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "OffscreenCanvas",
@@ -93,12 +70,8 @@ static = []  # Static image export (always enabled)
 # Lightweight egui overlay renderer (usable on wasm without winit).
 egui-overlay = ["egui", "egui-wgpu"]
 # Interactive GUI (native windowing + egui integration).
-gui = ["winit", "egui-overlay", "egui-winit", "eframe", "rfd"]
-jupyter = ["eframe"]  # Jupyter widget support
-web = []  # WebGL backend for web/jupyter
+gui = ["winit", "egui-overlay", "egui-winit", "rfd"]
+web = []  # WebGL backend for web
 
 [dev-dependencies]
-tempfile = "3"
-serial_test = "2"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
-env_logger = "0.10"

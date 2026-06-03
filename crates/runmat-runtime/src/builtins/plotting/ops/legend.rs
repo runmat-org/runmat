@@ -1,9 +1,180 @@
 use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+};
 use runmat_macros::runtime_builtin;
 
-use super::op_common::{map_figure_error, parse_legend_command};
-use super::state::set_legend_for_axes;
+use super::op_common::parse_legend_command;
+use super::state::{set_legend_for_axes, FigureError};
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
+
+const BUILTIN_NAME: &str = "legend";
+
+const LEGEND_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Legend object handle.",
+}];
+
+const LEGEND_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+
+const LEGEND_INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "ax",
+    ty: BuiltinParamType::AxesHandle,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Target axes handle.",
+}];
+
+const LEGEND_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "mode",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Legend mode token: 'on'|'off'|'show'|'hide'|'boxon'|'boxoff'.",
+}];
+
+const LEGEND_INPUTS_AX_MODE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "mode",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Legend mode token: 'on'|'off'|'show'|'hide'|'boxon'|'boxoff'.",
+    },
+];
+
+const LEGEND_INPUTS_LABELS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "labels_or_pairs",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description:
+        "Labels (string/cell/string-array) with optional trailing Name/Value legend style pairs.",
+}];
+
+const LEGEND_INPUTS_AX_LABELS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "labels_or_pairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Labels (string/cell/string-array) with optional trailing Name/Value legend style pairs.",
+    },
+];
+
+const LEGEND_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+    BuiltinSignatureDescriptor {
+        label: "h = legend()",
+        inputs: &LEGEND_INPUTS_NONE,
+        outputs: &LEGEND_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = legend(ax)",
+        inputs: &LEGEND_INPUTS_AX,
+        outputs: &LEGEND_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = legend(mode)",
+        inputs: &LEGEND_INPUTS_MODE,
+        outputs: &LEGEND_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = legend(ax, mode)",
+        inputs: &LEGEND_INPUTS_AX_MODE,
+        outputs: &LEGEND_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = legend(labels..., Name, Value, ...)",
+        inputs: &LEGEND_INPUTS_LABELS,
+        outputs: &LEGEND_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = legend(ax, labels..., Name, Value, ...)",
+        inputs: &LEGEND_INPUTS_AX_LABELS,
+        outputs: &LEGEND_OUTPUT_HANDLE,
+    },
+];
+
+const LEGEND_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LEGEND.INVALID_ARGUMENT",
+    identifier: Some("RunMat:legend:InvalidArgument"),
+    when: "Legend arguments are malformed, unsupported, or have invalid labels/properties.",
+    message: "legend: invalid argument",
+};
+
+const LEGEND_ERROR_INVALID_AXES: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LEGEND.INVALID_AXES",
+    identifier: Some("RunMat:legend:InvalidAxes"),
+    when: "Resolved axes target is invalid or out of range.",
+    message: "legend: invalid axes target",
+};
+
+const LEGEND_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LEGEND.INTERNAL",
+    identifier: Some("RunMat:legend:Internal"),
+    when: "Internal legend state operation fails.",
+    message: "legend: internal operation failed",
+};
+
+const LEGEND_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    LEGEND_ERROR_INVALID_ARGUMENT,
+    LEGEND_ERROR_INVALID_AXES,
+    LEGEND_ERROR_INTERNAL,
+];
+
+pub const LEGEND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &LEGEND_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &LEGEND_ERRORS,
+};
+
+fn legend_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    legend_error_with_message(error.message, error)
+}
+
+fn legend_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_legend_figure_error(err: FigureError) -> RuntimeError {
+    match err {
+        FigureError::InvalidHandle(_)
+        | FigureError::InvalidAxesHandle
+        | FigureError::InvalidSubplotIndex { .. } => legend_error(&LEGEND_ERROR_INVALID_AXES),
+        other => legend_error_with_message(
+            format!("{}: {}", LEGEND_ERROR_INTERNAL.message, other),
+            &LEGEND_ERROR_INTERNAL,
+        ),
+    }
+}
 
 #[runtime_builtin(
     name = "legend",
@@ -12,10 +183,20 @@ use crate::builtins::plotting::type_resolvers::handle_scalar_type;
     keywords = "legend,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::legend::LEGEND_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::legend"
 )]
 pub fn legend_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let command = parse_legend_command("legend", &args)?;
+    let command = parse_legend_command(BUILTIN_NAME, &args).map_err(|err| {
+        legend_error_with_message(
+            format!(
+                "{}: {}",
+                LEGEND_ERROR_INVALID_ARGUMENT.message,
+                err.message()
+            ),
+            &LEGEND_ERROR_INVALID_ARGUMENT,
+        )
+    })?;
     set_legend_for_axes(
         command.target.0,
         command.target.1,
@@ -23,7 +204,7 @@ pub fn legend_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         command.labels.as_deref(),
         Some(command.style),
     )
-    .map_err(|err| map_figure_error("legend", err))
+    .map_err(map_legend_figure_error)
 }
 
 #[cfg(test)]
@@ -293,5 +474,20 @@ mod tests {
 
         let err = legend_builtin(vec![ax, Value::Num(3.0)]).unwrap_err();
         assert!(err.message.contains("labels must be strings"));
+    }
+
+    #[test]
+    fn legend_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = LEGEND_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = legend()"));
+        assert!(labels.contains(&"h = legend(ax)"));
+        assert!(labels.contains(&"h = legend(mode)"));
+        assert!(labels.contains(&"h = legend(ax, mode)"));
+        assert!(labels.contains(&"h = legend(labels..., Name, Value, ...)"));
+        assert!(labels.contains(&"h = legend(ax, labels..., Name, Value, ...)"));
     }
 }

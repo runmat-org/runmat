@@ -1,17 +1,142 @@
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::op_common::{map_figure_error, parse_text_command};
 use super::state::set_zlabel_for_axes;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
+const ZLABEL_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the created/updated zlabel object.",
+}];
+
+const ZLABEL_INPUTS_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Label text (string/char/cellstr-like multiline forms).",
+}];
+
+const ZLABEL_INPUTS_AX_TEXT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Label text (string/char/cellstr-like multiline forms).",
+    },
+];
+
+const ZLABEL_INPUTS_TEXT_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Label text (string/char/cellstr-like multiline forms).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const ZLABEL_INPUTS_AX_TEXT_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "txt",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Label text (string/char/cellstr-like multiline forms).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Property/value pairs (Color, FontSize, FontWeight, etc.).",
+    },
+];
+
+const ZLABEL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "h = zlabel(txt)",
+        inputs: &ZLABEL_INPUTS_TEXT,
+        outputs: &ZLABEL_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = zlabel(ax, txt)",
+        inputs: &ZLABEL_INPUTS_AX_TEXT,
+        outputs: &ZLABEL_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = zlabel(txt, Name, Value, ...)",
+        inputs: &ZLABEL_INPUTS_TEXT_PROPS,
+        outputs: &ZLABEL_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = zlabel(ax, txt, Name, Value, ...)",
+        inputs: &ZLABEL_INPUTS_AX_TEXT_PROPS,
+        outputs: &ZLABEL_OUTPUT_HANDLE,
+    },
+];
+
+const ZLABEL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZLABEL.INVALID_ARGUMENT",
+    identifier: Some("RunMat:zlabel:InvalidArgument"),
+    when: "Axes handle, text payload, or property/value arguments are invalid.",
+    message: "zlabel: invalid argument",
+};
+
+const ZLABEL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZLABEL.INTERNAL",
+    identifier: Some("RunMat:zlabel:Internal"),
+    when: "Internal plotting state update fails.",
+    message: "zlabel: internal operation failed",
+};
+
+const ZLABEL_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [ZLABEL_ERROR_INVALID_ARGUMENT, ZLABEL_ERROR_INTERNAL];
+
+pub const ZLABEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ZLABEL_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ZLABEL_ERRORS,
+};
+
 #[runtime_builtin(
     name = "zlabel",
     category = "plotting",
-    summary = "Set the current axes z-axis label.",
+    summary = "Set z-axis label text for current or specified axes.",
     keywords = "zlabel,plotting",
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::zlabel::ZLABEL_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::zlabel"
 )]
 pub fn zlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
@@ -37,6 +162,18 @@ mod tests {
         reset_hold_state_for_run,
     };
     use runmat_builtins::{CellArray, StringArray};
+
+    #[test]
+    fn zlabel_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = ZLABEL_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = zlabel(txt)"));
+        assert!(labels.contains(&"h = zlabel(ax, txt)"));
+        assert!(labels.contains(&"h = zlabel(txt, Name, Value, ...)"));
+    }
 
     #[test]
     fn zlabel_sets_axes_local_metadata_and_returns_handle() {

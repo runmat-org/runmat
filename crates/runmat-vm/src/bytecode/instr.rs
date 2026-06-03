@@ -1,3 +1,4 @@
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +18,11 @@ pub enum EndExpr {
     End,
     Const(f64),
     Var(usize),
-    Call(String, Vec<EndExpr>),
+    ResolvedCall {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        args: Vec<EndExpr>,
+    },
     Add(Box<EndExpr>, Box<EndExpr>),
     Sub(Box<EndExpr>, Box<EndExpr>),
     Mul(Box<EndExpr>, Box<EndExpr>),
@@ -33,6 +38,13 @@ pub enum EndExpr {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PropertyDefaultLiteral {
+    Num(f64),
+    Bool(bool),
+    String(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     // Constant and variable loads.
     LoadConst(f64),
@@ -41,6 +53,7 @@ pub enum Instr {
     LoadString(String),
     LoadCharRow(String),
     LoadVar(usize),
+    LoadVarForIndexAssignment(usize),
     StoreVar(usize),
 
     // Scalar and matrix arithmetic.
@@ -64,6 +77,9 @@ pub enum Instr {
     GreaterEqual,
     Equal,
     NotEqual,
+    LogicalNot,
+    LogicalAnd,
+    LogicalOr,
 
     // Short-circuit logical control flow.
     AndAnd(usize),
@@ -74,9 +90,6 @@ pub enum Instr {
 
     // Expands a single value into N outputs, padding with zero values when needed.
     Unpack(usize),
-
-    // Direct builtin invocation.
-    CallBuiltin(String, usize),
 
     // Specialized lowering target for the stochastic evolution fast path.
     StochasticEvolution,
@@ -117,20 +130,64 @@ pub enum Instr {
         range_end_exprs: Vec<EndExpr>,
         end_numeric_exprs: Vec<(usize, EndExpr)>,
     },
+    StoreSliceExprDelete {
+        dims: usize,
+        numeric_count: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: Vec<usize>,
+        range_has_step: Vec<bool>,
+        range_start_exprs: Vec<Option<EndExpr>>,
+        range_step_exprs: Vec<Option<EndExpr>>,
+        range_end_exprs: Vec<EndExpr>,
+        end_numeric_exprs: Vec<(usize, EndExpr)>,
+    },
 
     // Cell array construction and indexing.
     CreateCell2D(usize, usize),
-    IndexCell(usize),
+    CreateStructLiteral(Vec<String>),
+    CreateObjectLiteral {
+        class_name: String,
+        fields: Vec<String>,
+    },
+    IndexCell {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
+    },
 
     // Expands cell contents into a comma-separated list with fixed output arity.
-    IndexCellExpand(usize, usize),
+    IndexCellExpand {
+        num_indices: usize,
+        out_count: usize,
+        end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
+    },
+
+    // Expands cell contents into a first-class comma-separated list value.
+    IndexCellList {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
+    },
 
     // Indexed assignment updates the base value and pushes the updated base.
     StoreIndex(usize),
-    StoreIndexCell(usize),
+    StoreIndexCell {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
+    },
+    StoreIndexDelete(usize),
+    StoreIndexCellDelete {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
+    },
 
     // Slice assignment with compiler-encoded colon and plain `end` masks.
     StoreSlice(usize, usize, u32, u32),
+    StoreSliceDelete(usize, usize, u32, u32),
 
     // Struct, object, and class member access.
     LoadMember(String),
@@ -142,27 +199,60 @@ pub enum Instr {
     StoreMemberDynamic,
     StoreMemberDynamicOrInit,
     LoadMethod(String),
-    CallMethod(String, usize),
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
-    CallMethodOrMemberIndex(String, usize),
+    CallMethodOrMemberIndexMulti {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallMethodOrMemberIndexExpandMultiOutput {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
 
     // Closure and static class dispatch.
+    CreateFunctionHandle(String),
+    CreateExternalFunctionHandle(String),
+    CreateMethodFunctionHandle(String),
+    CreateBoundFunctionHandle(FunctionId, String),
     CreateClosure(String, usize),
+    CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
-    CallStaticMethod(String, String, usize),
 
     // Registers a runtime class definition produced by `classdef` lowering.
     RegisterClass {
         name: String,
         super_class: Option<String>,
-        properties: Vec<(String, bool, String, String)>,
-        methods: Vec<(String, String, bool, String)>,
+        is_sealed: bool,
+        is_abstract: bool,
+        properties: Vec<(
+            String,
+            bool,
+            bool,
+            Option<PropertyDefaultLiteral>,
+            String,
+            String,
+        )>,
+        methods: Vec<(String, String, bool, bool, bool, String)>,
+        enumerations: Vec<String>,
     },
 
     // `feval` keeps the callable value on the stack instead of naming the target statically.
-    CallFeval(usize),
-    CallFevalExpandMulti(Vec<ArgSpec>),
+    CallFevalMulti(usize, usize),
+    CallFevalMultiUsingOutputSlot(usize, usize),
+    CallFevalExpandMultiOutput(Vec<ArgSpec>, usize),
+    CallFevalExpandMultiOutputUsingOutputSlot(Vec<ArgSpec>, usize),
+    // Create a lazy semantic-future descriptor from call arguments.
+    CreateSemanticFuture(FunctionId, usize, usize),
+    CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
+    // Explicit async spawn boundary.
+    Spawn,
+    // Explicit await boundary.
+    Await,
 
     // Stack and exception-control operations.
     Swap,
@@ -172,17 +262,77 @@ pub enum Instr {
     ReturnValue,
 
     // User-function invocation variants.
-    CallFunction(String, usize),
+    CallBuiltinMulti(String, usize, usize),
+    CallBuiltinMultiUsingOutputSlot(String, usize, usize),
+    CallSuperConstructorMulti {
+        current_class: String,
+        super_class: String,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallSuperMethodMulti {
+        current_class: String,
+        super_class: String,
+        method: String,
+        arg_count: usize,
+        out_count: usize,
+    },
 
     // Calls a user function and shapes the result list to `out_count`.
-    CallFunctionMulti(String, usize, usize),
+    CallFunctionMulti {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallFunctionMultiUsingOutputSlot {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count_slot: usize,
+    },
+    CallSemanticFunctionMulti(FunctionId, usize, usize),
+    CallSemanticFunctionMultiUsingOutputSlot(FunctionId, usize, usize),
+    CallSemanticNestedFunctionMulti {
+        function: FunctionId,
+        capture_slots: Vec<usize>,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallSemanticNestedFunctionMultiUsingOutputSlot {
+        function: FunctionId,
+        capture_slots: Vec<usize>,
+        arg_count: usize,
+        out_count_slot: usize,
+    },
 
-    // Expands one argument position from cell indexing at runtime.
-    CallFunctionExpandAt(String, usize, usize, usize),
-    CallBuiltinExpandLast(String, usize, usize),
-    CallBuiltinExpandAt(String, usize, usize, usize),
-    CallFunctionExpandMulti(String, Vec<ArgSpec>),
-    CallBuiltinExpandMulti(String, Vec<ArgSpec>),
+    CallFunctionExpandMultiOutput {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
+    CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
+    CallSemanticNestedFunctionExpandMultiOutput {
+        function: FunctionId,
+        capture_slots: Vec<usize>,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
+    CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
+    CallSuperConstructorExpandMultiOutput {
+        current_class: String,
+        super_class: String,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
+    CallSuperMethodExpandMultiOutput {
+        current_class: String,
+        super_class: String,
+        method: String,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
 
     // Packs the top N values into row or column tensor form.
     PackToRow(usize),
@@ -235,7 +385,12 @@ impl Instr {
             | Instr::LoadBool(_)
             | Instr::LoadString(_)
             | Instr::LoadCharRow(_)
+            | Instr::CreateFunctionHandle(_)
+            | Instr::CreateExternalFunctionHandle(_)
+            | Instr::CreateMethodFunctionHandle(_)
+            | Instr::CreateBoundFunctionHandle(_, _)
             | Instr::LoadVar(_)
+            | Instr::LoadVarForIndexAssignment(_)
             | Instr::LoadLocal(_) => effect(0, 1),
             Instr::StoreVar(_)
             | Instr::StoreLocal(_)
@@ -258,35 +413,71 @@ impl Instr {
             | Instr::Greater
             | Instr::GreaterEqual
             | Instr::Equal
-            | Instr::NotEqual => effect(2, 1),
+            | Instr::NotEqual
+            | Instr::LogicalAnd
+            | Instr::LogicalOr => effect(2, 1),
             Instr::Swap => effect(2, 2),
             Instr::Neg
             | Instr::UPlus
+            | Instr::LogicalNot
             | Instr::Transpose
             | Instr::ConjugateTranspose
             | Instr::LoadMember(_)
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
-            Instr::CallBuiltin(_, argc) | Instr::CallFunction(_, argc) => effect(*argc, 1),
-            Instr::CallFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
-            Instr::CallMethod(_, argc) | Instr::CallMethodOrMemberIndex(_, argc) => {
-                effect(argc + 1, 1)
+            Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
+            Instr::CallBuiltinMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
+            Instr::CallSuperConstructorMulti { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallSuperMethodMulti { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallFunctionMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
+            Instr::CallFunctionMultiUsingOutputSlot { arg_count, .. } => effect(*arg_count, 1),
+            Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
+            Instr::CallSemanticFunctionMultiUsingOutputSlot(_, argc, _) => effect(*argc, 1),
+            Instr::CallSemanticNestedFunctionMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
+            Instr::CallSemanticNestedFunctionMultiUsingOutputSlot { arg_count, .. } => {
+                effect(*arg_count, 1)
             }
-            Instr::CallStaticMethod(_, _, argc) => effect(*argc, 1),
-            Instr::CallFeval(argc) => effect(argc + 1, 1),
+            Instr::CallMethodOrMemberIndexMulti { arg_count, .. } => effect(arg_count + 1, 1),
+            Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
+            Instr::CallFevalMultiUsingOutputSlot(argc, _) => effect(argc + 1, 1),
+            Instr::CreateSemanticFuture(_, arg_count, _) => effect(*arg_count, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
             }
+            Instr::CreateStructLiteral(fields) => effect(fields.len(), 1),
+            Instr::CreateObjectLiteral { fields, .. } => effect(fields.len(), 1),
             Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
             Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
             Instr::Unpack(n) => effect(1, *n),
-            Instr::Index(n) | Instr::IndexCell(n) => effect(n + 1, 1),
-            Instr::IndexCellExpand(n, out_count) => effect(n + 1, *out_count),
-            Instr::StoreIndex(n) | Instr::StoreIndexCell(n) => effect(n + 2, 1),
+            Instr::Index(n) => effect(n + 1, 1),
+            Instr::IndexCell { num_indices, .. } | Instr::IndexCellList { num_indices, .. } => {
+                effect(num_indices + 1, 1)
+            }
+            Instr::IndexCellExpand {
+                num_indices,
+                out_count,
+                ..
+            } => effect(num_indices + 1, *out_count),
+            Instr::StoreIndex(n)
+            | Instr::StoreIndexDelete(n)
+            | Instr::StoreIndexCell { num_indices: n, .. }
+            | Instr::StoreIndexCellDelete { num_indices: n, .. } => effect(n + 2, 1),
             Instr::IndexSlice(dims, numeric_count, _, _)
-            | Instr::StoreSlice(dims, numeric_count, _, _) => {
+            | Instr::StoreSlice(dims, numeric_count, _, _)
+            | Instr::StoreSliceDelete(dims, numeric_count, _, _) => {
                 let pops = 1 + numeric_count;
-                if matches!(self, Instr::StoreSlice(_, _, _, _)) {
+                if matches!(
+                    self,
+                    Instr::StoreSlice(_, _, _, _) | Instr::StoreSliceDelete(_, _, _, _)
+                ) {
                     effect(pops + 1, 1)
                 } else {
                     let _ = dims;
@@ -302,33 +493,43 @@ impl Instr {
                 numeric_count,
                 range_dims,
                 ..
+            }
+            | Instr::StoreSliceExprDelete {
+                numeric_count,
+                range_dims,
+                ..
             } => effect(2 + numeric_count + range_dims.len(), 1),
             Instr::StoreMember(_)
             | Instr::StoreMemberOrInit(_)
             | Instr::StoreMemberDynamic
             | Instr::StoreMemberDynamicOrInit => effect(2, 1),
             Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => effect(2, 1),
-            Instr::CreateClosure(_, capture_count) => effect(*capture_count, 1),
+            Instr::CreateClosure(_, capture_count)
+            | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
             Instr::LoadStaticProperty(_, _) => effect(0, 1),
             Instr::RegisterClass { .. } => effect(0, 0),
-            Instr::CallFevalExpandMulti(specs)
-            | Instr::CallFunctionExpandMulti(_, specs)
-            | Instr::CallBuiltinExpandMulti(_, specs) => {
+            Instr::CallFevalExpandMultiOutput(specs, _)
+            | Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, _)
+            | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
+            | Instr::CallFunctionExpandMultiOutput { specs, .. }
+            | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
+            | Instr::CallSemanticNestedFunctionExpandMultiOutput { specs, .. }
+            | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
+            | Instr::CallSuperConstructorExpandMultiOutput { specs, .. }
+            | Instr::CallSuperMethodExpandMultiOutput { specs, .. }
+            | Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, .. } => {
                 let fixed = specs.iter().filter(|s| !s.is_expand).count();
                 let expanded: usize = specs
                     .iter()
                     .filter(|s| s.is_expand)
                     .map(|s| 1 + s.num_indices)
                     .sum();
-                let handle = usize::from(matches!(self, Instr::CallFevalExpandMulti(_)));
+                let handle = usize::from(matches!(
+                    self,
+                    Instr::CallFevalExpandMultiOutput(_, _)
+                        | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, _)
+                ));
                 effect(handle + fixed + expanded, 1)
-            }
-            Instr::CallFunctionExpandAt(_, before, num_indices, after)
-            | Instr::CallBuiltinExpandAt(_, before, num_indices, after) => {
-                effect(before + after + 1 + num_indices, 1)
-            }
-            Instr::CallBuiltinExpandLast(_, fixed_argc, num_indices) => {
-                effect(fixed_argc + 1 + num_indices, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),
             Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::PopTry => {
@@ -342,6 +543,8 @@ impl Instr {
             | Instr::DeclarePersistent(_)
             | Instr::DeclareGlobalNamed(_, _)
             | Instr::DeclarePersistentNamed(_, _) => effect(0, 0),
+            Instr::Spawn => effect(1, 1),
+            Instr::Await => effect(1, 1),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),
             Instr::StochasticEvolution => None,

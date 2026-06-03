@@ -11,11 +11,14 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::structs::type_resolvers::setfield_type;
 use crate::{
-    build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
+    build_runtime_error, call_builtin_async, gather_if_needed_async, object_property_getter_name,
+    object_property_setter_name, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
-    Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance,
-    StructValue, Tensor, Value,
+    Access, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance, StructValue,
+    Tensor, Value,
 };
 use runmat_gc_api::GcPtr;
 use runmat_macros::runtime_builtin;
@@ -49,11 +52,259 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "setfield";
+const SETFIELD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Updated struct/object/array value.",
+}];
+
+const SETFIELD_INPUTS_SCALAR: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct/object/struct-array target.",
+    },
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::PropertyName,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Field/property name to assign.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const SETFIELD_INPUTS_NESTED: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct/object/struct-array target.",
+    },
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Alternating field names and optional index-selector cells `{...}` for nested assignment.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const SETFIELD_INPUTS_LEADING_INDEX: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct-array target.",
+    },
+    BuiltinParamDescriptor {
+        name: "index_selector",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Leading index selector in a cell array, e.g. `{2}` or `{end}`.",
+    },
+    BuiltinParamDescriptor {
+        name: "path",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Alternating field names and optional index-selector cells `{...}` for nested assignment.",
+    },
+    BuiltinParamDescriptor {
+        name: "value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Assigned value.",
+    },
+];
+
+const SETFIELD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "S = setfield(S, field, value)",
+        inputs: &SETFIELD_INPUTS_SCALAR,
+        outputs: &SETFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = setfield(S, field_or_index, ..., value)",
+        inputs: &SETFIELD_INPUTS_NESTED,
+        outputs: &SETFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = setfield(S, {idx0}, field_or_index, ..., value)",
+        inputs: &SETFIELD_INPUTS_LEADING_INDEX,
+        outputs: &SETFIELD_OUTPUT,
+    },
+];
+
+const SETFIELD_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:setfield:NotEnoughInputs"),
+    when: "Input does not provide at least one path component plus assigned value.",
+    message: "setfield: expected at least one field name and a value",
+};
+
+const SETFIELD_ERROR_FIELD_EXPECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.FIELD_EXPECTED",
+    identifier: Some("RunMat:setfield:FieldExpected"),
+    when: "Field/path arguments are missing after parsing selectors.",
+    message: "setfield: expected field name arguments",
+};
+
+const SETFIELD_ERROR_INDEX_SELECTOR_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_SELECTOR_TYPE",
+    identifier: Some("RunMat:setfield:IndexSelectorType"),
+    when: "Index selector is not provided as a cell array.",
+    message: "setfield: indices must be provided in a cell array",
+};
+
+const SETFIELD_ERROR_INDEX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_INVALID",
+    identifier: Some("RunMat:setfield:InvalidIndex"),
+    when: "Index component is malformed, empty, unsupported, or not a positive integer.",
+    message: "setfield: invalid index element",
+};
+
+const SETFIELD_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.FIELD_NAME_TYPE",
+    identifier: Some("RunMat:setfield:FieldNameType"),
+    when: "Field name is not a scalar string or 1-by-N char vector.",
+    message: "setfield: expected field name",
+};
+
+const SETFIELD_ERROR_INDEX_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_SHAPE",
+    identifier: Some("RunMat:setfield:IndexShape"),
+    when: "Indexing rank/shape is unsupported for the targeted value.",
+    message: "setfield: unsupported index shape for target value",
+};
+
+const SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.NON_STRUCT_ASSIGNMENT",
+    identifier: Some("RunMat:setfield:NonStructAssignment"),
+    when: "Assignment target does not support struct-like field updates.",
+    message: "Struct contents assignment to a non-struct object is not supported.",
+};
+
+const SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INDEX_OUT_OF_BOUNDS",
+    identifier: Some("RunMat:setfield:IndexOutOfBounds"),
+    when: "Resolved index is outside bounds for target value.",
+    message: "Index exceeds the number of array elements.",
+};
+
+const SETFIELD_ERROR_MISSING_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.MISSING_FIELD",
+    identifier: Some("RunMat:setfield:MissingField"),
+    when: "Indexed assignment path references a missing field.",
+    message: "Reference to non-existent field",
+};
+
+const SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.PROPERTY_PRIVATE_ACCESS",
+    identifier: Some("RunMat:PropertyPrivateAccess"),
+    when: "Property exists but get/set access is private.",
+    message: "setfield: private property access denied",
+};
+
+const SETFIELD_ERROR_PROPERTY_STATIC_ACCESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.PROPERTY_STATIC_ACCESS",
+    identifier: Some("RunMat:PropertyStaticAccess"),
+    when: "Property exists but is static and cannot be assigned through an instance.",
+    message: "setfield: static property access denied",
+};
+
+const SETFIELD_ERROR_OBJECT_PROPERTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.OBJECT_PROPERTY",
+    identifier: Some("RunMat:setfield:ObjectProperty"),
+    when: "Object property operation is invalid (static, non-public, or malformed setter result).",
+    message: "setfield: invalid object property operation",
+};
+
+const SETFIELD_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INVALID_HANDLE",
+    identifier: Some("RunMat:setfield:InvalidHandle"),
+    when: "Handle target is invalid/deleted/null.",
+    message: "setfield: invalid or deleted handle object",
+};
+
+const SETFIELD_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SETFIELD.INTERNAL",
+    identifier: Some("RunMat:setfield:InternalError"),
+    when: "Internal conversion/allocation failed while assigning values.",
+    message: "setfield: internal error",
+};
+
+const SETFIELD_ERRORS: [BuiltinErrorDescriptor; 14] = [
+    SETFIELD_ERROR_NOT_ENOUGH_INPUTS,
+    SETFIELD_ERROR_FIELD_EXPECTED,
+    SETFIELD_ERROR_INDEX_SELECTOR_TYPE,
+    SETFIELD_ERROR_INDEX_INVALID,
+    SETFIELD_ERROR_FIELD_NAME_TYPE,
+    SETFIELD_ERROR_INDEX_SHAPE,
+    SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT,
+    SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS,
+    SETFIELD_ERROR_MISSING_FIELD,
+    SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS,
+    SETFIELD_ERROR_PROPERTY_STATIC_ACCESS,
+    SETFIELD_ERROR_OBJECT_PROPERTY,
+    SETFIELD_ERROR_INVALID_HANDLE,
+    SETFIELD_ERROR_INTERNAL,
+];
+
+pub const SETFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SETFIELD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SETFIELD_ERRORS,
+};
 
 fn setfield_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+    setfield_error_with_message(
+        format!("{}: {}", SETFIELD_ERROR_INTERNAL.message, message.into()),
+        &SETFIELD_ERROR_INTERNAL,
+    )
+}
+
+fn setfield_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn setfield_private_access(message: impl Into<String>) -> RuntimeError {
+    setfield_error_with_message(message, &SETFIELD_ERROR_PROPERTY_PRIVATE_ACCESS)
+}
+
+fn setfield_static_access(message: impl Into<String>) -> RuntimeError {
+    setfield_error_with_message(message, &SETFIELD_ERROR_PROPERTY_STATIC_ACCESS)
 }
 
 fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError {
@@ -71,16 +322,16 @@ fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError 
 }
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
-    err.identifier() == Some("RunMat:UndefinedFunction")
-        || err.message().contains("RunMat:UndefinedFunction")
+    err.identifier() == Some(crate::IDENT_UNDEFINED_FUNCTION)
 }
 
 #[runtime_builtin(
     name = "setfield",
     category = "structs/core",
-    summary = "Assign into struct fields, struct arrays, or MATLAB-style object properties.",
+    summary = "Assign values into struct fields, nested fields, or struct-array elements.",
     keywords = "setfield,struct,assignment,object property",
     type_resolver(setfield_type),
+    descriptor(crate::builtins::structs::core::setfield::SETFIELD_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
 async fn setfield_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -117,9 +368,7 @@ enum IndexComponent {
 
 fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     if rest.len() < 2 {
-        return Err(setfield_flow(
-            "setfield: expected at least one field name and a value",
-        ));
+        return Err(setfield_flow(SETFIELD_ERROR_NOT_ENOUGH_INPUTS.message));
     }
 
     let value = rest
@@ -140,7 +389,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     }
 
     if rest.is_empty() {
-        return Err(setfield_flow("setfield: expected field name arguments"));
+        return Err(setfield_flow(SETFIELD_ERROR_FIELD_EXPECTED.message));
     }
 
     let mut iter = rest.into_iter().peekable();
@@ -157,7 +406,7 @@ fn parse_arguments(mut rest: Vec<Value>) -> BuiltinResult<ParsedArguments> {
     }
 
     if parsed.steps.is_empty() {
-        return Err(setfield_flow("setfield: expected field name arguments"));
+        return Err(setfield_flow(SETFIELD_ERROR_FIELD_EXPECTED.message));
     }
 
     Ok(parsed)
@@ -170,7 +419,7 @@ async fn assign_value(
     rhs: Value,
 ) -> BuiltinResult<Value> {
     if steps.is_empty() {
-        return Err(setfield_flow("setfield: expected field name arguments"));
+        return Err(setfield_flow(SETFIELD_ERROR_FIELD_EXPECTED.message));
     }
     if let Some(selector) = leading_index {
         assign_with_leading_index(base, &selector, &steps, rhs).await
@@ -242,7 +491,7 @@ async fn assign_into_struct_array(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > cell.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             idx - 1
         }
@@ -250,7 +499,7 @@ async fn assign_into_struct_array(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             (row - 1) * cell.cols + (col - 1)
         }
@@ -264,7 +513,7 @@ async fn assign_into_struct_array(
     let handle = cell
         .data
         .get(position)
-        .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))?
+        .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
         .clone();
 
     let current = unsafe { &*handle.as_raw() }.clone();
@@ -400,7 +649,7 @@ async fn assign_with_selector(
                 1 => {
                     let idx = resolved[0];
                     if idx == 0 || idx > cell.data.len() {
-                        return Err(setfield_flow("Index exceeds the number of array elements."));
+                        return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
                     }
                     idx - 1
                 }
@@ -408,7 +657,7 @@ async fn assign_with_selector(
                     let row = resolved[0];
                     let col = resolved[1];
                     if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
-                        return Err(setfield_flow("Index exceeds the number of array elements."));
+                        return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
                     }
                     (row - 1) * cell.cols + (col - 1)
                 }
@@ -422,7 +671,7 @@ async fn assign_with_selector(
             let handle = cell
                 .data
                 .get(position)
-                .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))?
+                .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))?
                 .clone();
             let existing = unsafe { &*handle.as_raw() }.clone();
             let new_value = if rest.is_empty() {
@@ -495,7 +744,7 @@ fn assign_tensor_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > tensor.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             tensor.data[idx - 1] = value;
             Ok(())
@@ -504,14 +753,14 @@ fn assign_tensor_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > tensor.rows() || col == 0 || col > tensor.cols() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows();
             tensor
                 .data
                 .get_mut(pos)
                 .map(|slot| *slot = value)
-                .ok_or_else(|| setfield_flow("Index exceeds the number of array elements."))
+                .ok_or_else(|| setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message))
         }
         _ => Err(setfield_flow(
             "setfield: indexing with more than two indices is not supported yet",
@@ -530,25 +779,25 @@ fn assign_logical_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > logical.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             logical.data[idx - 1] = if value { 1 } else { 0 };
             Ok(())
         }
         2 => {
             if logical.shape.len() < 2 {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let row = resolved[0];
             let col = resolved[1];
             let rows = logical.shape[0];
             let cols = logical.shape[1];
             if row == 0 || row > rows || col == 0 || col > cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * rows;
             if pos >= logical.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             logical.data[pos] = if value { 1 } else { 0 };
             Ok(())
@@ -572,7 +821,7 @@ fn assign_string_array_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[idx - 1] = text;
             Ok(())
@@ -581,11 +830,11 @@ fn assign_string_array_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > array.rows || col == 0 || col > array.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * array.rows;
             if pos >= array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[pos] = text;
             Ok(())
@@ -614,7 +863,7 @@ fn assign_char_array_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[idx - 1] = ch;
             Ok(())
@@ -623,11 +872,11 @@ fn assign_char_array_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > array.rows || col == 0 || col > array.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) * array.cols + (col - 1);
             if pos >= array.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             array.data[pos] = ch;
             Ok(())
@@ -658,7 +907,7 @@ fn assign_complex_tensor_element(
         1 => {
             let idx = resolved[0];
             if idx == 0 || idx > tensor.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             tensor.data[idx - 1] = (re, im);
             Ok(())
@@ -667,11 +916,11 @@ fn assign_complex_tensor_element(
             let row = resolved[0];
             let col = resolved[1];
             if row == 0 || row > tensor.rows || col == 0 || col > tensor.cols {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             let pos = (row - 1) + (col - 1) * tensor.rows;
             if pos >= tensor.data.len() {
-                return Err(setfield_flow("Index exceeds the number of array elements."));
+                return Err(setfield_flow(SETFIELD_ERROR_INDEX_OUT_OF_BOUNDS.message));
             }
             tensor.data[pos] = (re, im);
             Ok(())
@@ -691,13 +940,13 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
             )));
         }
         if prop.get_access == Access::Private {
-            return Err(setfield_flow(format!(
+            return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
             )));
         }
         if prop.is_dependent {
-            let getter = format!("get.{name}");
+            let getter = object_property_getter_name(name);
             match call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {
@@ -718,7 +967,7 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
 
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.get_access == Access::Private {
-            return Err(setfield_flow(format!(
+            return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
             )));
@@ -742,16 +991,18 @@ async fn write_object_property(
 ) -> BuiltinResult<()> {
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.is_static {
-            return Err(setfield_flow(format!(
+            return Err(setfield_static_access(format!(
                 "Property '{}' is static; use classref('{}').{}",
                 name, obj.class_name, name
             )));
         }
         if prop.set_access == Access::Private {
-            return Err(setfield_flow(format!("Property '{name}' is private")));
+            return Err(setfield_private_access(format!(
+                "Property '{name}' is private"
+            )));
         }
         if prop.is_dependent {
-            let setter = format!("set.{name}");
+            let setter = object_property_setter_name(name);
             match call_builtin_async(&setter, &[Value::Object(obj.clone()), rhs.clone()]).await {
                 Ok(value) => {
                     if let Value::Object(updated) = value {
@@ -788,7 +1039,7 @@ async fn assign_into_handle(
             "setfield: expected at least one field name when assigning into a handle",
         ));
     }
-    if !handle.valid {
+    if !runmat_builtins::is_handle_valid(&handle) {
         return Err(setfield_flow(format!(
             "Invalid or deleted handle object '{}'.",
             handle.class_name
@@ -812,9 +1063,7 @@ fn is_index_selector(value: &Value) -> bool {
 
 fn parse_index_selector(value: Value) -> BuiltinResult<IndexSelector> {
     let Value::Cell(cell) = value else {
-        return Err(setfield_flow(
-            "setfield: indices must be provided in a cell array",
-        ));
+        return Err(setfield_flow(SETFIELD_ERROR_INDEX_SELECTOR_TYPE.message));
     };
     let mut components = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
@@ -1376,6 +1625,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "x".to_string(),
                 is_static: false,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -1435,6 +1685,7 @@ pub(crate) mod tests {
             PropertyDef {
                 name: "version".to_string(),
                 is_static: true,
+                is_constant: false,
                 is_dependent: false,
                 get_access: Access::Public,
                 set_access: Access::Public,
@@ -1450,6 +1701,52 @@ pub(crate) mod tests {
                 vec![Value::from("version"), Value::Num(2.0)],
             )
             .expect_err("setfield should reject static property writes"),
+        );
+        assert!(
+            err.contains("Property 'version' is static"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setfield_rejects_inherited_static_property_assignment() {
+        let parent_name = "runmat.unittest.StaticSetfieldParent";
+        let child_name = "runmat.unittest.StaticSetfieldChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: Default::default(),
+            methods: Default::default(),
+        };
+        parent.properties.insert(
+            "version".to_string(),
+            PropertyDef {
+                name: "version".to_string(),
+                is_static: true,
+                is_constant: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+        runmat_builtins::register_class(ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: Default::default(),
+            methods: Default::default(),
+        });
+
+        let obj = ObjectInstance::new(child_name.to_string());
+        let err = error_message(
+            run_setfield(
+                Value::Object(obj),
+                vec![Value::from("version"), Value::Num(2.0)],
+            )
+            .expect_err("setfield should reject inherited static property writes"),
         );
         assert!(
             err.contains("Property 'version' is static"),
@@ -1477,7 +1774,7 @@ pub(crate) mod tests {
         .expect("setfield handle update");
 
         match updated {
-            Value::HandleObject(h) => assert!(h.valid),
+            Value::HandleObject(h) => assert!(runmat_builtins::is_handle_valid(&h)),
             other => panic!("expected handle, got {other:?}"),
         }
 
@@ -1547,5 +1844,22 @@ pub(crate) mod tests {
             }
             other => panic!("expected struct result, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setfield_undefined_detection_requires_identifier() {
+        let with_identifier = build_runtime_error("missing")
+            .with_identifier(crate::IDENT_UNDEFINED_FUNCTION)
+            .build();
+        assert!(is_undefined_function(&with_identifier));
+
+        let message_only =
+            build_runtime_error(format!("{} message only", crate::IDENT_UNDEFINED_FUNCTION))
+                .build();
+        assert!(
+            !is_undefined_function(&message_only),
+            "message-only undefined markers should not trigger setter fallback"
+        );
     }
 }

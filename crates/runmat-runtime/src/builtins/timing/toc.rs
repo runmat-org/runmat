@@ -1,6 +1,9 @@
 //! MATLAB-compatible `toc` builtin that reports elapsed stopwatch time.
 
-use runmat_builtins::Value;
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_time::Instant;
 use std::convert::TryFrom;
@@ -40,51 +43,121 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "toc";
-const ERR_NO_MATCHING_TIC: &str = "RunMat:toc:NoMatchingTic";
-const ERR_INVALID_HANDLE: &str = "RunMat:toc:InvalidTimerHandle";
-const ERR_TOO_MANY_INPUTS: &str = "RunMat:toc:TooManyInputs";
 
-fn toc_error_with_identifier(message: impl Into<String>, identifier: &str) -> crate::RuntimeError {
-    crate::build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .with_identifier(identifier)
-        .build()
-        .into()
+const TOC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "elapsed",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Elapsed time in seconds.",
+}];
+
+const TOC_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const TOC_INPUTS_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "timerVal",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Optional,
+    default: None,
+    description: "Handle returned by tic.",
+}];
+
+const TOC_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "elapsed = toc()",
+        inputs: &TOC_INPUTS_NONE,
+        outputs: &TOC_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "elapsed = toc(timerVal)",
+        inputs: &TOC_INPUTS_HANDLE,
+        outputs: &TOC_OUTPUT,
+    },
+];
+
+const TOC_ERROR_NO_MATCHING_TIC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TOC.NO_MATCHING_TIC",
+    identifier: Some("RunMat:toc:NoMatchingTic"),
+    when: "toc() is called without a matching prior tic().",
+    message: "toc: no matching tic",
+};
+
+const TOC_ERROR_INVALID_HANDLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TOC.INVALID_HANDLE",
+    identifier: Some("RunMat:toc:InvalidTimerHandle"),
+    when: "The timer handle is missing, malformed, non-finite, negative, or points to a future instant.",
+    message: "toc: invalid timer handle",
+};
+
+const TOC_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TOC.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:toc:TooManyInputs"),
+    when: "More than one input argument is supplied.",
+    message: "toc: too many input arguments",
+};
+
+const TOC_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    TOC_ERROR_NO_MATCHING_TIC,
+    TOC_ERROR_INVALID_HANDLE,
+    TOC_ERROR_TOO_MANY_INPUTS,
+];
+
+pub const TOC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TOC_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TOC_ERRORS,
+};
+
+fn toc_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = crate::build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 /// Read elapsed time from the stopwatch stack or a specific handle.
 #[runtime_builtin(
     name = "toc",
     category = "timing",
-    summary = "Read the elapsed time since the most recent tic or an explicit handle.",
+    summary = "Return elapsed time since the latest tic or a specific tic handle.",
     keywords = "toc,timing,profiling,benchmark",
     type_resolver(toc_type),
+    descriptor(crate::builtins::timing::toc::TOC_DESCRIPTOR),
     builtin_path = "crate::builtins::timing::toc"
 )]
 pub async fn toc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     match args.len() {
         0 => latest_elapsed(),
         1 => elapsed_from_value(&args[0]),
-        _ => Err(toc_error_with_identifier(
-            "toc: too many input arguments",
-            ERR_TOO_MANY_INPUTS,
+        _ => Err(toc_error_with_message(
+            TOC_ERROR_TOO_MANY_INPUTS.message,
+            &TOC_ERROR_TOO_MANY_INPUTS,
         )),
     }
 }
 
 fn latest_elapsed() -> Result<f64, crate::RuntimeError> {
-    let start = take_latest_start(BUILTIN_NAME)?
-        .ok_or_else(|| toc_error_with_identifier("toc: no matching tic", ERR_NO_MATCHING_TIC))?;
+    let start = take_latest_start(BUILTIN_NAME)?.ok_or_else(|| {
+        toc_error_with_message(
+            TOC_ERROR_NO_MATCHING_TIC.message,
+            &TOC_ERROR_NO_MATCHING_TIC,
+        )
+    })?;
     Ok(start.elapsed().as_secs_f64())
 }
 
 fn elapsed_from_value(value: &Value) -> Result<f64, crate::RuntimeError> {
-    let handle = f64::try_from(value)
-        .map_err(|_| toc_error_with_identifier("toc: invalid timer handle", ERR_INVALID_HANDLE))?;
-    let instant = decode_handle(handle, BUILTIN_NAME)?;
+    let handle = f64::try_from(value).map_err(|_| {
+        toc_error_with_message(TOC_ERROR_INVALID_HANDLE.message, &TOC_ERROR_INVALID_HANDLE)
+    })?;
+    let instant = decode_handle(handle, BUILTIN_NAME, &TOC_ERROR_INVALID_HANDLE)?;
     let now = Instant::now();
     let elapsed = now.checked_duration_since(instant).ok_or_else(|| {
-        toc_error_with_identifier("toc: invalid timer handle", ERR_INVALID_HANDLE)
+        toc_error_with_message(TOC_ERROR_INVALID_HANDLE.message, &TOC_ERROR_INVALID_HANDLE)
     })?;
     Ok(elapsed.as_secs_f64())
 }
@@ -115,7 +188,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
         let err = block_on(toc_builtin(Vec::new())).unwrap_err();
-        assert_toc_error_identifier(err, ERR_NO_MATCHING_TIC);
+        assert_toc_error_identifier(err, TOC_ERROR_NO_MATCHING_TIC.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -150,7 +223,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
         let err = block_on(toc_builtin(vec![Value::Num(f64::NAN)])).unwrap_err();
-        assert_toc_error_identifier(err, ERR_INVALID_HANDLE);
+        assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -160,7 +233,7 @@ pub(crate) mod tests {
         clear_tic_stack();
         let future_handle = encode_instant(Instant::now()) + 10_000.0;
         let err = block_on(toc_builtin(vec![Value::Num(future_handle)])).unwrap_err();
-        assert_toc_error_identifier(err, ERR_INVALID_HANDLE);
+        assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -169,7 +242,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
         let err = block_on(toc_builtin(vec![Value::from("not a timer")])).unwrap_err();
-        assert_toc_error_identifier(err, ERR_INVALID_HANDLE);
+        assert_toc_error_identifier(err, TOC_ERROR_INVALID_HANDLE.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -178,7 +251,7 @@ pub(crate) mod tests {
         let _guard = TEST_GUARD.lock().unwrap();
         clear_tic_stack();
         let err = block_on(toc_builtin(vec![Value::Num(0.0), Value::Num(0.0)])).unwrap_err();
-        assert_toc_error_identifier(err, ERR_TOO_MANY_INPUTS);
+        assert_toc_error_identifier(err, TOC_ERROR_TOO_MANY_INPUTS.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

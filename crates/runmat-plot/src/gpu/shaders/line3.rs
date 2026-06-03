@@ -13,10 +13,82 @@ fn should_draw(segment: u32, style: u32) -> bool {
   switch(style) {
     case 0u: { return true; }
     case 1u: { return (segment % 4u) < 2u; }
-    case 2u: { return (segment % 4u) < 2u; }
+    case 2u: { return (segment % 4u) == 0u; }
     case 3u: { let m = segment % 6u; return (m < 2u) || (m == 3u); }
     default: { return true; }
   }
+}
+
+fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
+  let len = length(v);
+  if (len < 0.000001) {
+    return vec3<f32>(1.0, 0.0, 0.0);
+  }
+  return v / len;
+}
+
+fn point(i: u32) -> vec3<f32> {
+  return vec3<f32>(buf_x[i], buf_y[i], buf_z[i]);
+}
+
+fn segment_dir(i0: u32, i1: u32) -> vec3<f32> {
+  let d = point(i1) - point(i0);
+  let len = length(d);
+  if (len < 0.000001) {
+    return vec3<f32>(0.0, 0.0, 0.0);
+  }
+  return d / len;
+}
+
+fn side_at(i: u32) -> vec3<f32> {
+  var prev = vec3<f32>(0.0, 0.0, 0.0);
+  var next = vec3<f32>(0.0, 0.0, 0.0);
+  var has_prev = false;
+  var has_next = false;
+
+  if (i > 0u) {
+    let d = segment_dir(i - 1u, i);
+    if (length(d) > 0.0) {
+      prev = d;
+      has_prev = true;
+    }
+  }
+
+  if (i + 1u < params.count) {
+    let d = segment_dir(i, i + 1u);
+    if (length(d) > 0.0) {
+      next = d;
+      has_next = true;
+    }
+  }
+
+  var tangent = vec3<f32>(1.0, 0.0, 0.0);
+  if (has_prev && has_next) {
+    let s = prev + next;
+    if (length(s) > 0.000001) {
+      tangent = normalize(s);
+    } else {
+      tangent = next;
+    }
+  } else if (has_prev) {
+    tangent = prev;
+  } else if (has_next) {
+    tangent = next;
+  }
+
+  let ref_axis = select(
+    vec3<f32>(1.0, 0.0, 0.0),
+    vec3<f32>(0.0, 0.0, 1.0),
+    abs(tangent.z) < 0.95,
+  );
+  var side = cross(tangent, ref_axis);
+  if (length(side) < 0.000001) {
+    side = cross(tangent, vec3<f32>(0.0, 1.0, 0.0));
+  }
+  if (length(side) < 0.000001) {
+    return vec3<f32>(0.0, 1.0, 0.0);
+  }
+  return normalize(side);
 }
 
 fn write_line_vertices(base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>) {
@@ -24,17 +96,17 @@ fn write_line_vertices(base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>
   write_vertex(base + 1u, p1, color);
 }
 
-fn write_thick_vertices(base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>, half_width: f32) {
-  var dir = normalize(p1 - p0);
-  var normal = cross(dir, vec3<f32>(0.0, 0.0, 1.0));
-  if (length(normal) < 0.0001) {
-    normal = cross(dir, vec3<f32>(1.0, 0.0, 0.0));
-  }
-  normal = normalize(normal) * half_width;
-  let v0 = p0 + normal;
-  let v1 = p1 + normal;
-  let v2 = p1 - normal;
-  let v3 = p0 - normal;
+fn write_thick_vertices(segment: u32, base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>, half_width: f32) {
+  let dir = safe_normalize(p1 - p0);
+  let side0 = side_at(segment);
+  let side1 = side_at(segment + 1u);
+  let ext = dir * half_width;
+  let a = p0 - ext;
+  let b = p1 + ext;
+  let v0 = a + side0 * half_width;
+  let v1 = b + side1 * half_width;
+  let v2 = b - side1 * half_width;
+  let v3 = a - side0 * half_width;
   write_vertex(base + 0u, v0, color);
   write_vertex(base + 1u, v1, color);
   write_vertex(base + 2u, v2, color);
@@ -57,13 +129,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let segments = params.count - 1u;
   let idx = gid.x;
   if (idx >= segments) { return; }
+
   var color = params.color;
-  if (!should_draw(idx, params.line_style)) { color.w = 0.0; }
-  let p0 = vec3<f32>(buf_x[idx], buf_y[idx], buf_z[idx]);
-  let p1 = vec3<f32>(buf_x[idx + 1u], buf_y[idx + 1u], buf_z[idx + 1u]);
+  if (!should_draw(idx, params.line_style)) {
+    color.w = 0.0;
+  }
+
+  let p0 = point(idx);
+  let p1 = point(idx + 1u);
+  if (distance(p0, p1) < 0.000001) {
+    color.w = 0.0;
+  }
+
   if (params.thick != 0u) {
     let base = idx * 6u;
-    write_thick_vertices(base, p0, p1, color, params.half_width_data);
+    write_thick_vertices(idx, base, p0, p1, color, params.half_width_data);
   } else {
     let base = idx * 2u;
     write_line_vertices(base, p0, p1, color);
@@ -86,10 +166,82 @@ fn should_draw(segment: u32, style: u32) -> bool {
   switch(style) {
     case 0u: { return true; }
     case 1u: { return (segment % 4u) < 2u; }
-    case 2u: { return (segment % 4u) < 2u; }
+    case 2u: { return (segment % 4u) == 0u; }
     case 3u: { let m = segment % 6u; return (m < 2u) || (m == 3u); }
     default: { return true; }
   }
+}
+
+fn safe_normalize(v: vec3<f32>) -> vec3<f32> {
+  let len = length(v);
+  if (len < 0.000001) {
+    return vec3<f32>(1.0, 0.0, 0.0);
+  }
+  return v / len;
+}
+
+fn point(i: u32) -> vec3<f32> {
+  return vec3<f32>(f32(buf_x[i]), f32(buf_y[i]), f32(buf_z[i]));
+}
+
+fn segment_dir(i0: u32, i1: u32) -> vec3<f32> {
+  let d = point(i1) - point(i0);
+  let len = length(d);
+  if (len < 0.000001) {
+    return vec3<f32>(0.0, 0.0, 0.0);
+  }
+  return d / len;
+}
+
+fn side_at(i: u32) -> vec3<f32> {
+  var prev = vec3<f32>(0.0, 0.0, 0.0);
+  var next = vec3<f32>(0.0, 0.0, 0.0);
+  var has_prev = false;
+  var has_next = false;
+
+  if (i > 0u) {
+    let d = segment_dir(i - 1u, i);
+    if (length(d) > 0.0) {
+      prev = d;
+      has_prev = true;
+    }
+  }
+
+  if (i + 1u < params.count) {
+    let d = segment_dir(i, i + 1u);
+    if (length(d) > 0.0) {
+      next = d;
+      has_next = true;
+    }
+  }
+
+  var tangent = vec3<f32>(1.0, 0.0, 0.0);
+  if (has_prev && has_next) {
+    let s = prev + next;
+    if (length(s) > 0.000001) {
+      tangent = normalize(s);
+    } else {
+      tangent = next;
+    }
+  } else if (has_prev) {
+    tangent = prev;
+  } else if (has_next) {
+    tangent = next;
+  }
+
+  let ref_axis = select(
+    vec3<f32>(1.0, 0.0, 0.0),
+    vec3<f32>(0.0, 0.0, 1.0),
+    abs(tangent.z) < 0.95,
+  );
+  var side = cross(tangent, ref_axis);
+  if (length(side) < 0.000001) {
+    side = cross(tangent, vec3<f32>(0.0, 1.0, 0.0));
+  }
+  if (length(side) < 0.000001) {
+    return vec3<f32>(0.0, 1.0, 0.0);
+  }
+  return normalize(side);
 }
 
 fn write_line_vertices(base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>) {
@@ -97,17 +249,17 @@ fn write_line_vertices(base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>
   write_vertex(base + 1u, p1, color);
 }
 
-fn write_thick_vertices(base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>, half_width: f32) {
-  var dir = normalize(p1 - p0);
-  var normal = cross(dir, vec3<f32>(0.0, 0.0, 1.0));
-  if (length(normal) < 0.0001) {
-    normal = cross(dir, vec3<f32>(1.0, 0.0, 0.0));
-  }
-  normal = normalize(normal) * half_width;
-  let v0 = p0 + normal;
-  let v1 = p1 + normal;
-  let v2 = p1 - normal;
-  let v3 = p0 - normal;
+fn write_thick_vertices(segment: u32, base: u32, p0: vec3<f32>, p1: vec3<f32>, color: vec4<f32>, half_width: f32) {
+  let dir = safe_normalize(p1 - p0);
+  let side0 = side_at(segment);
+  let side1 = side_at(segment + 1u);
+  let ext = dir * half_width;
+  let a = p0 - ext;
+  let b = p1 + ext;
+  let v0 = a + side0 * half_width;
+  let v1 = b + side1 * half_width;
+  let v2 = b - side1 * half_width;
+  let v3 = a - side0 * half_width;
   write_vertex(base + 0u, v0, color);
   write_vertex(base + 1u, v1, color);
   write_vertex(base + 2u, v2, color);
@@ -130,13 +282,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let segments = params.count - 1u;
   let idx = gid.x;
   if (idx >= segments) { return; }
+
   var color = params.color;
-  if (!should_draw(idx, params.line_style)) { color.w = 0.0; }
-  let p0 = vec3<f32>(f32(buf_x[idx]), f32(buf_y[idx]), f32(buf_z[idx]));
-  let p1 = vec3<f32>(f32(buf_x[idx + 1u]), f32(buf_y[idx + 1u]), f32(buf_z[idx + 1u]));
+  if (!should_draw(idx, params.line_style)) {
+    color.w = 0.0;
+  }
+
+  let p0 = point(idx);
+  let p1 = point(idx + 1u);
+  if (distance(p0, p1) < 0.000001) {
+    color.w = 0.0;
+  }
+
   if (params.thick != 0u) {
     let base = idx * 6u;
-    write_thick_vertices(base, p0, p1, color, params.half_width_data);
+    write_thick_vertices(idx, base, p0, p1, color, params.half_width_data);
   } else {
     let base = idx * 2u;
     write_line_vertices(base, p0, p1, color);

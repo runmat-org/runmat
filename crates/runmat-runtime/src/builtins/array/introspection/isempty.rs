@@ -5,7 +5,11 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use runmat_builtins::{ResolveContext, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ResolveContext, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::introspection::isempty")]
@@ -44,6 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "isempty,empty array,metadata query,gpu,logical",
     accel = "metadata",
     type_resolver(bool_scalar_type),
+    descriptor(crate::builtins::array::introspection::isempty::ISEMPTY_DESCRIPTOR),
     builtin_path = "crate::builtins::array::introspection::isempty"
 )]
 async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
@@ -54,6 +59,37 @@ async fn isempty_builtin(value: Value) -> crate::BuiltinResult<Value> {
 fn bool_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Bool
 }
+
+const ISEMPTY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "tf",
+    ty: BuiltinParamType::LogicalArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "True when input has zero elements.",
+}];
+
+const ISEMPTY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input value to inspect.",
+}];
+
+const ISEMPTY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "tf = isempty(A)",
+    inputs: &ISEMPTY_INPUTS,
+    outputs: &ISEMPTY_OUTPUT,
+}];
+
+const ISEMPTY_ERRORS: [BuiltinErrorDescriptor; 0] = [];
+
+pub const ISEMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ISEMPTY_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ISEMPTY_ERRORS,
+};
 
 async fn value_is_empty(value: &Value) -> crate::BuiltinResult<bool> {
     Ok(value_numel(value).await? == 0)

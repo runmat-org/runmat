@@ -1,7 +1,11 @@
 //! MATLAB-compatible `atan2` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -14,6 +18,79 @@ use crate::builtins::math::type_resolvers::numeric_binary_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atan2";
+
+const ATAN2_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Z",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Quadrant-aware inverse tangent result.",
+}];
+
+const ATAN2_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numerator operand.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Denominator operand.",
+    },
+];
+
+const ATAN2_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "Z = atan2(Y, X)",
+    inputs: &ATAN2_INPUTS,
+    outputs: &ATAN2_OUTPUT,
+}];
+
+const ATAN2_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATAN2.INVALID_INPUT",
+    identifier: Some("RunMat:atan2:InvalidInput"),
+    when: "An input cannot be interpreted as supported numeric/logical/char data.",
+    message: "atan2: invalid input",
+};
+
+const ATAN2_ERROR_COMPLEX_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATAN2.COMPLEX_UNSUPPORTED",
+    identifier: Some("RunMat:atan2:ComplexUnsupported"),
+    when: "At least one operand is complex.",
+    message: "atan2: complex inputs are not supported",
+};
+
+const ATAN2_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATAN2.SIZE_MISMATCH",
+    identifier: Some("RunMat:atan2:SizeMismatch"),
+    when: "Input operands are not broadcast-compatible.",
+    message: "atan2: size mismatch",
+};
+
+const ATAN2_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ATAN2.INTERNAL",
+    identifier: Some("RunMat:atan2:Internal"),
+    when: "Internal gather/conversion/allocation/provider flow failed.",
+    message: "atan2: internal error",
+};
+
+const ATAN2_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ATAN2_ERROR_INVALID_INPUT,
+    ATAN2_ERROR_COMPLEX_UNSUPPORTED,
+    ATAN2_ERROR_SIZE_MISMATCH,
+    ATAN2_ERROR_INTERNAL,
+];
+
+pub const ATAN2_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ATAN2_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ATAN2_ERRORS,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -34,10 +111,24 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Providers can implement elem_atan2 to keep the computation on device; the runtime gathers operands to the host when the hook is unavailable or broadcasting is required.",
 };
 
-fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+fn atan2_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn atan2_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl std::fmt::Display,
+) -> RuntimeError {
+    let mut builder =
+        build_runtime_error(format!("{}: {}", error.message, detail)).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
@@ -61,10 +152,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "atan2",
     category = "math/trigonometry",
-    summary = "Quadrant-aware inverse tangent atan2(y, x) with MATLAB-compatible broadcasting.",
+    summary = "Quadrant-aware inverse tangent atan2(y, x).",
     keywords = "atan2,inverse tangent,quadrant,gpu",
     accel = "binary",
     type_resolver(numeric_binary_type),
+    descriptor(crate::builtins::math::trigonometry::atan2::ATAN2_DESCRIPTOR),
     builtin_path = "crate::builtins::math::trigonometry::atan2"
 )]
 async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
@@ -107,10 +199,11 @@ fn atan2_host(y: Value, x: Value) -> BuiltinResult<Value> {
 }
 
 fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> BuiltinResult<Value> {
-    let plan = BroadcastPlan::new(&y.shape, &x.shape).map_err(runtime_error_for)?;
+    let plan = BroadcastPlan::new(&y.shape, &x.shape)
+        .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_SIZE_MISMATCH, e))?;
     if plan.is_empty() {
         let empty = Tensor::new(Vec::new(), plan.output_shape().to_vec())
-            .map_err(|e| runtime_error_for(format!("atan2: {e}")))?;
+            .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(empty));
     }
     let mut out = vec![0.0f64; plan.len()];
@@ -118,7 +211,7 @@ fn compute_atan2_tensor(y: &Tensor, x: &Tensor) -> BuiltinResult<Value> {
         out[out_index] = y.data[idx_y].atan2(x.data[idx_x]);
     }
     let tensor = Tensor::new(out, plan.output_shape().to_vec())
-        .map_err(|e| runtime_error_for(format!("atan2: {e}")))?;
+        .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
@@ -127,15 +220,17 @@ fn value_into_atan2_tensor(value: Value) -> BuiltinResult<Tensor> {
         Value::CharArray(chars) => {
             let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
             Tensor::new(data, vec![chars.rows, chars.cols])
-                .map_err(|e| runtime_error_for(format!("atan2: {e}")))
+                .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(runtime_error_for("atan2: complex inputs are not supported"))
+            Err(atan2_error(&ATAN2_ERROR_COMPLEX_UNSUPPORTED))
         }
-        Value::GpuTensor(_) => Err(runtime_error_for(
-            "atan2: internal error converting GPU tensor",
+        Value::GpuTensor(_) => Err(atan2_error_with_detail(
+            &ATAN2_ERROR_INTERNAL,
+            "internal error converting GPU tensor",
         )),
-        other => tensor::value_into_tensor_for("atan2", other).map_err(runtime_error_for),
+        other => tensor::value_into_tensor_for("atan2", other)
+            .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, e)),
     }
 }
 
@@ -173,6 +268,16 @@ pub(crate) mod tests {
 
     fn error_message(err: RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[test]
+    fn atan2_descriptor_signatures_cover_core_form() {
+        let labels: Vec<&str> = ATAN2_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"Z = atan2(Y, X)"));
     }
 
     #[test]
@@ -360,6 +465,7 @@ pub(crate) mod tests {
     #[test]
     fn atan2_complex_input_errors() {
         let err = atan2_builtin(Value::Complex(1.0, 1.0), Value::Num(1.0)).unwrap_err();
+        assert_eq!(err.identifier(), ATAN2_ERROR_COMPLEX_UNSUPPORTED.identifier);
         let message = error_message(err);
         assert!(message.to_ascii_lowercase().contains("complex"));
     }
@@ -370,9 +476,10 @@ pub(crate) mod tests {
         let y = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let x = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
         let err = atan2_builtin(Value::Tensor(y), Value::Tensor(x)).unwrap_err();
+        assert_eq!(err.identifier(), ATAN2_ERROR_SIZE_MISMATCH.identifier);
         let message = error_message(err);
         assert!(
-            message.to_ascii_lowercase().contains("dimension"),
+            message.to_ascii_lowercase().contains("size"),
             "unexpected error: {message}"
         );
     }

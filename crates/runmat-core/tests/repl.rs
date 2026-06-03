@@ -3,7 +3,13 @@
 // runmat-runtime wasm binary per test file with zero executable tests.
 #![cfg(not(target_arch = "wasm32"))]
 
-use runmat_core::format_tokens;
+fn format_tokens(input: &str) -> String {
+    runmat_lexer::tokenize_detailed(input)
+        .into_iter()
+        .map(|t| format!("{:?}", t.token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 #[test]
 fn tokenize_simple_input() {
@@ -32,7 +38,7 @@ fn unknown_char_produces_error() {
 #[test]
 fn unterminated_string_is_error_token() {
     let result = format_tokens("'oops");
-    assert!(result.contains("Error"));
+    assert_eq!(result.split_whitespace().next(), Some("Error"));
 }
 
 #[test]

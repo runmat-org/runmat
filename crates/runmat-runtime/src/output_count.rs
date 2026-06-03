@@ -34,6 +34,9 @@ pub fn current_output_count() -> Option<usize> {
 }
 
 pub fn output_list_with_padding(out_count: usize, mut outputs: Vec<Value>) -> Value {
+    if outputs.len() > out_count {
+        outputs.truncate(out_count);
+    }
     if outputs.len() < out_count {
         outputs.resize(out_count, Value::Num(0.0));
     }

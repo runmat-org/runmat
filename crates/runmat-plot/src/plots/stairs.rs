@@ -216,7 +216,9 @@ impl StairsPlot {
 
         let bounds = self.bounds();
         let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
-            let viewport_px = viewport_px.unwrap_or((600, 400));
+            let Some(viewport_px) = viewport_px else {
+                return self.render_data();
+            };
             let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
             let width_data = self.line_width.max(0.1) * data_per_px;
             let verts = self.generate_vertices().clone();

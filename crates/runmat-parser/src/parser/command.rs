@@ -45,7 +45,7 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     CommandVerb {
         name: "axis",
         arg_kind: CommandArgKind::Keyword {
-            allowed: &["auto", "manual", "tight", "equal", "ij", "xy"],
+            allowed: &["auto", "manual", "tight", "equal", "ij", "xy", "on", "off"],
             optional: false,
         },
     },
@@ -90,6 +90,18 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "clc",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "pause",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
+        name: "drawnow",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },
@@ -99,6 +111,14 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     },
     CommandVerb {
         name: "clearvars",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "warning",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "print",
         arg_kind: CommandArgKind::StringifyWords,
     },
     CommandVerb {
@@ -128,7 +148,7 @@ impl Parser {
         let end = self.last_token_end();
         let span = self.span_from(name_token.position, end);
         Ok(crate::Stmt::ExprStmt(
-            Expr::FuncCall(name_token.lexeme, args, span),
+            Expr::CommandCall(name_token.lexeme, args, span),
             false,
             span,
         ))
@@ -150,6 +170,12 @@ impl Parser {
             command,
             Some(CommandVerb {
                 arg_kind: CommandArgKind::Keyword { optional: true, .. },
+                ..
+            })
+        ) || matches!(
+            command,
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::StringifyWords,
                 ..
             })
         );
@@ -176,6 +202,7 @@ impl Parser {
                 Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
                     saw_arg = true;
                     i += 1;
+                    self.skip_dotted_word_suffix(verb, &mut i);
                 }
                 Some(Token::Minus) if self.try_skip_dash_option(verb, &mut i) => {
                     saw_arg = true;
@@ -214,8 +241,24 @@ impl Parser {
             match self.peek_token() {
                 Some(Token::Ident) => {
                     let token = self.next().unwrap();
-                    let span = self.span_from(token.position, token.end);
-                    args.push(Expr::Ident(token.lexeme, span));
+                    let start = token.position;
+                    let mut end = token.end;
+                    let mut word = token.lexeme;
+                    if self.can_parse_dotted_word_arg(verb) {
+                        while matches!(self.peek_token(), Some(Token::Dot))
+                            && matches!(self.peek_token_at(1), Some(Token::Ident | Token::Integer))
+                        {
+                            self.next();
+                            let Some(part) = self.next() else {
+                                break;
+                            };
+                            word.push('.');
+                            word.push_str(&part.lexeme);
+                            end = part.end;
+                        }
+                    }
+                    let span = self.span_from(start, end);
+                    args.push(Expr::Ident(word, span));
                 }
                 // In command-form, accept 'end' as a literal identifier token for compatibility.
                 Some(Token::End) => {
@@ -274,7 +317,25 @@ impl Parser {
     }
 
     fn can_parse_dash_option_arg(&self, verb: &str) -> bool {
-        verb.eq_ignore_ascii_case("clearvars")
+        verb.eq_ignore_ascii_case("clearvars") || verb.eq_ignore_ascii_case("print")
+    }
+
+    fn can_parse_dotted_word_arg(&self, verb: &str) -> bool {
+        verb.eq_ignore_ascii_case("print")
+    }
+
+    fn skip_dotted_word_suffix(&self, verb: &str, offset: &mut usize) {
+        if !self.can_parse_dotted_word_arg(verb) {
+            return;
+        }
+        while matches!(self.peek_token_at(*offset), Some(Token::Dot))
+            && matches!(
+                self.peek_token_at(*offset + 1),
+                Some(Token::Ident | Token::Integer)
+            )
+        {
+            *offset += 2;
+        }
     }
 
     fn skip_command_continuations(&self, offset: &mut usize) {

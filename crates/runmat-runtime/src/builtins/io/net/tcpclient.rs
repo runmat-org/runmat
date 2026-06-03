@@ -1,6 +1,10 @@
 //! MATLAB-compatible `tcpclient` builtin for RunMat.
 
-use runmat_builtins::{IntValue, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    IntValue, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use super::accept::{configure_stream, insert_client, parse_timeout_value, CLIENT_HANDLE_FIELD};
@@ -18,11 +22,111 @@ use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
-const MESSAGE_ID_INVALID_ADDRESS: &str = "RunMat:tcpclient:InvalidAddress";
-const MESSAGE_ID_INVALID_PORT: &str = "RunMat:tcpclient:InvalidPort";
-const MESSAGE_ID_INVALID_NAME_VALUE: &str = "RunMat:tcpclient:InvalidNameValue";
-const MESSAGE_ID_CONNECT_FAILED: &str = "RunMat:tcpclient:ConnectionFailed";
-const MESSAGE_ID_INTERNAL: &str = "RunMat:tcpclient:InternalError";
+const BUILTIN_NAME: &str = "tcpclient";
+
+const TCPCLIENT_OUTPUT_CLIENT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "client",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "tcpclient handle struct for subsequent read/write/close operations.",
+}];
+const TCPCLIENT_INPUTS_HOST_PORT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "host",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Server hostname or IP address.",
+    },
+    BuiltinParamDescriptor {
+        name: "port",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Server TCP port (0..65535).",
+    },
+];
+const TCPCLIENT_INPUTS_HOST_PORT_NAME_VALUE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "host",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Server hostname or IP address.",
+    },
+    BuiltinParamDescriptor {
+        name: "port",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Server TCP port (0..65535).",
+    },
+    BuiltinParamDescriptor {
+        name: "name_value_pairs",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description:
+            "Name/Value options such as Timeout, ConnectTimeout, ByteOrder, UserData, Name, InputBufferSize, and OutputBufferSize.",
+    },
+];
+const TCPCLIENT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+    BuiltinSignatureDescriptor {
+        label: "client = tcpclient(host, port)",
+        inputs: &TCPCLIENT_INPUTS_HOST_PORT,
+        outputs: &TCPCLIENT_OUTPUT_CLIENT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "client = tcpclient(host, port, Name, Value, ...)",
+        inputs: &TCPCLIENT_INPUTS_HOST_PORT_NAME_VALUE,
+        outputs: &TCPCLIENT_OUTPUT_CLIENT,
+    },
+];
+
+const TCPCLIENT_ERROR_INVALID_ADDRESS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPCLIENT.INVALID_ADDRESS",
+    identifier: Some("RunMat:tcpclient:InvalidAddress"),
+    when: "Host/address argument is not a valid string scalar.",
+    message: "tcpclient: invalid host argument",
+};
+const TCPCLIENT_ERROR_INVALID_PORT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPCLIENT.INVALID_PORT",
+    identifier: Some("RunMat:tcpclient:InvalidPort"),
+    when: "Port argument is non-scalar, non-integer, non-finite, or out of range.",
+    message: "tcpclient: invalid port argument",
+};
+const TCPCLIENT_ERROR_INVALID_NAME_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPCLIENT.INVALID_NAME_VALUE",
+    identifier: Some("RunMat:tcpclient:InvalidNameValue"),
+    when: "Name/Value arguments are malformed, unsupported, or have invalid values.",
+    message: "tcpclient: invalid name-value arguments",
+};
+const TCPCLIENT_ERROR_CONNECT_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPCLIENT.CONNECT_FAILED",
+    identifier: Some("RunMat:tcpclient:ConnectionFailed"),
+    when: "Socket connect attempt fails.",
+    message: "tcpclient: unable to connect",
+};
+const TCPCLIENT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TCPCLIENT.INTERNAL",
+    identifier: Some("RunMat:tcpclient:InternalError"),
+    when: "Internal stream setup or metadata query fails.",
+    message: "tcpclient: internal error",
+};
+const TCPCLIENT_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    TCPCLIENT_ERROR_INVALID_ADDRESS,
+    TCPCLIENT_ERROR_INVALID_PORT,
+    TCPCLIENT_ERROR_INVALID_NAME_VALUE,
+    TCPCLIENT_ERROR_CONNECT_FAILED,
+    TCPCLIENT_ERROR_INTERNAL,
+];
+pub const TCPCLIENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &TCPCLIENT_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &TCPCLIENT_ERRORS,
+};
 
 const DEFAULT_BUFFER_SIZE: usize = 8192;
 
@@ -42,15 +146,31 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Host networking only. Inputs backed by GPU memory are gathered before connecting.",
 };
 
-fn tcpclient_error(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_identifier(message_id)
-        .with_builtin("tcpclient")
-        .build()
+fn tcpclient_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn tcpclient_flow(message_id: &'static str, message: impl Into<String>) -> RuntimeError {
-    tcpclient_error(message_id, message)
+fn tcpclient_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let detail = detail.as_ref();
+    let detail = detail.strip_prefix("tcpclient: ").unwrap_or(detail);
+    tcpclient_error_with_message(format!("{}: {}", error.message, detail), error)
+}
+
+fn tcpclient_flow(
+    error: &'static BuiltinErrorDescriptor,
+    message: impl AsRef<str>,
+) -> RuntimeError {
+    tcpclient_error_with_detail(error, message)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::net::tcpclient")]
@@ -67,9 +187,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "tcpclient",
     category = "io/net",
-    summary = "Open a TCP client socket that connects to MATLAB-compatible servers.",
+    summary = "Open TCP client connections and return MATLAB-compatible client structs.",
     keywords = "tcpclient,tcp,network,client",
     type_resolver(crate::builtins::io::type_resolvers::tcpclient_type),
+    descriptor(crate::builtins::io::net::tcpclient::TCPCLIENT_DESCRIPTOR),
     builtin_path = "crate::builtins::io::net::tcpclient"
 )]
 pub(crate) async fn tcpclient_builtin(
@@ -77,18 +198,22 @@ pub(crate) async fn tcpclient_builtin(
     port: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    let host = gather_if_needed_async(&host).await?;
-    let port = gather_if_needed_async(&port).await?;
+    let host = gather_if_needed_async(&host)
+        .await
+        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
+    let port = gather_if_needed_async(&port)
+        .await
+        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
 
     let host_text = string_scalar(&host, "tcpclient host").map_err(|err| {
         tcpclient_flow(
-            MESSAGE_ID_INVALID_ADDRESS,
+            &TCPCLIENT_ERROR_INVALID_ADDRESS,
             format!("tcpclient: invalid host argument ({err})"),
         )
     })?;
     let port_num = parse_port(&port).map_err(|err| {
         tcpclient_flow(
-            MESSAGE_ID_INVALID_PORT,
+            &TCPCLIENT_ERROR_INVALID_PORT,
             format!("tcpclient: invalid port argument ({err})"),
         )
     })?;
@@ -98,27 +223,27 @@ pub(crate) async fn tcpclient_builtin(
     let (stream, resolved_addr) =
         connect_with_timeout(&host_text, port_num, options.connect_timeout).map_err(|err| {
             tcpclient_flow(
-                MESSAGE_ID_CONNECT_FAILED,
+                &TCPCLIENT_ERROR_CONNECT_FAILED,
                 format!("tcpclient: unable to connect to {host_text}:{port_num} ({err})"),
             )
         })?;
 
     if let Err(err) = configure_stream(&stream, options.timeout) {
         return Err(tcpclient_flow(
-            MESSAGE_ID_INTERNAL,
+            &TCPCLIENT_ERROR_INTERNAL,
             format!("tcpclient: failed to configure stream timeouts ({err})"),
         ));
     }
 
     let peer_addr = stream.peer_addr().map_err(|err| {
         tcpclient_flow(
-            MESSAGE_ID_INTERNAL,
+            &TCPCLIENT_ERROR_INTERNAL,
             format!("tcpclient: failed to query peer address for {resolved_addr} ({err})"),
         )
     })?;
     let local_addr = stream
         .local_addr()
-        .map_err(|err| tcpclient_flow(MESSAGE_ID_INTERNAL, format!("tcpclient: {err}")))?;
+        .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, format!("tcpclient: {err}")))?;
 
     let client_id = insert_client(
         stream,
@@ -164,7 +289,7 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
     }
     if !rest.len().is_multiple_of(2) {
         return Err(tcpclient_flow(
-            MESSAGE_ID_INVALID_NAME_VALUE,
+            &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
             "tcpclient: name-value arguments must appear in pairs",
         ));
     }
@@ -175,44 +300,52 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
         let value_raw = iter
             .next()
             .expect("even-length vec ensures paired name/value");
-        let name_value = gather_if_needed_async(&name_raw).await?;
+        let name_value = gather_if_needed_async(&name_raw)
+            .await
+            .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
         let option_name = string_scalar(&name_value, "OptionName").map_err(|err| {
             tcpclient_flow(
-                MESSAGE_ID_INVALID_NAME_VALUE,
+                &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                 format!("tcpclient: invalid option name ({err})"),
             )
         })?;
         let lower = option_name.to_ascii_lowercase();
         match lower.as_str() {
             "timeout" => {
-                let timeout_value = gather_if_needed_async(&value_raw).await?;
+                let timeout_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
                 options.timeout = parse_timeout_value(&timeout_value).map_err(|err| {
                     tcpclient_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                         format!("tcpclient: invalid Timeout value ({err})"),
                     )
                 })?;
             }
             "connecttimeout" => {
-                let connect_value = gather_if_needed_async(&value_raw).await?;
+                let connect_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
                 options.connect_timeout = parse_timeout_value(&connect_value).map_err(|err| {
                     tcpclient_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                         format!("tcpclient: invalid ConnectTimeout value ({err})"),
                     )
                 })?;
             }
             "byteorder" => {
-                let order_value = gather_if_needed_async(&value_raw).await?;
+                let order_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
                 let raw_order = string_scalar(&order_value, "ByteOrder").map_err(|err| {
                     tcpclient_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                         format!("tcpclient: invalid ByteOrder value ({err})"),
                     )
                 })?;
                 let canon = canonicalize_byte_order(&raw_order).ok_or_else(|| {
                     tcpclient_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                         format!("tcpclient: unsupported ByteOrder '{raw_order}'"),
                     )
                 })?;
@@ -220,26 +353,32 @@ async fn parse_name_value_pairs(rest: Vec<Value>) -> BuiltinResult<TcpClientOpti
             }
             "userdata" => options.user_data = value_raw,
             "name" => {
-                let name_value = gather_if_needed_async(&value_raw).await?;
+                let name_value = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
                 let text = string_scalar(&name_value, "Name").map_err(|err| {
                     tcpclient_flow(
-                        MESSAGE_ID_INVALID_NAME_VALUE,
+                        &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                         format!("tcpclient: invalid Name value ({err})"),
                     )
                 })?;
                 options.name = Some(text);
             }
             "inputbuffersize" => {
-                let gathered = gather_if_needed_async(&value_raw).await?;
+                let gathered = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
                 options.input_buffer_size = parse_buffer_size(&gathered, "InputBufferSize")?;
             }
             "outputbuffersize" => {
-                let gathered = gather_if_needed_async(&value_raw).await?;
+                let gathered = gather_if_needed_async(&value_raw)
+                    .await
+                    .map_err(|err| tcpclient_flow(&TCPCLIENT_ERROR_INTERNAL, err.message()))?;
                 options.output_buffer_size = parse_buffer_size(&gathered, "OutputBufferSize")?;
             }
             _ => {
                 return Err(tcpclient_flow(
-                    MESSAGE_ID_INVALID_NAME_VALUE,
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                     format!("tcpclient: unsupported option '{option_name}'"),
                 ));
             }
@@ -255,7 +394,7 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
         Value::Num(n) => {
             if !n.is_finite() || n.fract() != 0.0 {
                 return Err(tcpclient_flow(
-                    MESSAGE_ID_INVALID_NAME_VALUE,
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                     format!("tcpclient: {label} must be a finite integer"),
                 ));
             }
@@ -265,7 +404,7 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
             let n = t.data[0];
             if !n.is_finite() || n.fract() != 0.0 {
                 return Err(tcpclient_flow(
-                    MESSAGE_ID_INVALID_NAME_VALUE,
+                    &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                     format!("tcpclient: {label} must be a finite integer"),
                 ));
             }
@@ -273,7 +412,7 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
         }
         _ => {
             return Err(tcpclient_flow(
-                MESSAGE_ID_INVALID_NAME_VALUE,
+                &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
                 format!("tcpclient: {label} must be a numeric scalar"),
             ));
         }
@@ -281,7 +420,7 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
 
     if raw <= 0 || raw > i32::MAX as i64 {
         return Err(tcpclient_flow(
-            MESSAGE_ID_INVALID_NAME_VALUE,
+            &TCPCLIENT_ERROR_INVALID_NAME_VALUE,
             format!("tcpclient: {label} must lie in 1..{}", i32::MAX),
         ));
     }
@@ -441,6 +580,18 @@ pub(crate) mod tests {
         futures::executor::block_on(tcpclient_builtin(host, port, rest))
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn tcpclient_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = TCPCLIENT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"client = tcpclient(host, port)"));
+        assert!(labels.contains(&"client = tcpclient(host, port, Name, Value, ...)"));
+    }
+
     fn net_guard() -> std::sync::MutexGuard<'static, ()> {
         crate::builtins::io::net::accept::test_guard()
     }
@@ -550,7 +701,7 @@ pub(crate) mod tests {
             Vec::new(),
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_INVALID_PORT);
+        assert_error_identifier(err, TCPCLIENT_ERROR_INVALID_PORT.identifier.unwrap());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -567,6 +718,6 @@ pub(crate) mod tests {
             vec![Value::from("ConnectTimeout"), Value::Num(0.05)],
         )
         .unwrap_err();
-        assert_error_identifier(err, MESSAGE_ID_CONNECT_FAILED);
+        assert_error_identifier(err, TCPCLIENT_ERROR_CONNECT_FAILED.identifier.unwrap());
     }
 }

@@ -1,18 +1,17 @@
 use miette::{SourceOffset, SourceSpan};
-use runmat_config::{self as config, RunMatConfig};
+use runmat_config::runtime::{self as config, RunMatRuntimeConfig};
 use runmat_core::RunError;
 use runmat_runtime::build_runtime_error;
 
 pub fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
     match mode {
-        config::LanguageCompatMode::RunMat | config::LanguageCompatMode::Matlab => {
-            runmat_parser::CompatMode::Matlab
-        }
+        config::LanguageCompatMode::RunMat => runmat_parser::CompatMode::RunMat,
+        config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
         config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
     }
 }
 
-pub fn resolved_error_namespace(cfg: &RunMatConfig) -> String {
+pub fn resolved_error_namespace(cfg: &RunMatRuntimeConfig) -> String {
     let configured = cfg.runtime.error_namespace.trim();
     if configured.is_empty() {
         config::error_namespace_for_language_compat(cfg.language.compat).to_string()
@@ -47,7 +46,7 @@ pub fn format_frontend_error(err: &RunError, source_name: &str, source: &str) ->
                     span.end.saturating_sub(span.start).max(1),
                 )
             });
-            let identifier = err.identifier.as_deref().or(Some("RunMat:SemanticError"));
+            let identifier = err.identifier.as_deref().or(Some("RunMat:HirError"));
             Some(format_diagnostic(
                 &err.message,
                 identifier,
@@ -103,7 +102,7 @@ mod compat_tests {
 
     #[test]
     fn resolved_error_namespace_defaults_from_language_compat() {
-        let mut cfg = RunMatConfig::default();
+        let mut cfg = RunMatRuntimeConfig::default();
         cfg.runtime.error_namespace.clear();
 
         cfg.language.compat = config::LanguageCompatMode::RunMat;
@@ -118,7 +117,7 @@ mod compat_tests {
 
     #[test]
     fn resolved_error_namespace_honors_explicit_override() {
-        let mut cfg = RunMatConfig::default();
+        let mut cfg = RunMatRuntimeConfig::default();
         cfg.language.compat = config::LanguageCompatMode::Matlab;
         cfg.runtime.error_namespace = "CustomNS".to_string();
         assert_eq!(resolved_error_namespace(&cfg), "CustomNS");

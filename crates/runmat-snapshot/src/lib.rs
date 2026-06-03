@@ -138,7 +138,7 @@ pub enum OptimizationLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HirCache {
     /// Standard library function HIR
-    pub functions: HashMap<String, runmat_hir::HirProgram>,
+    pub functions: HashMap<String, runmat_hir::HirAssembly>,
 
     /// Common expression patterns
     pub patterns: Vec<HirPattern>,
@@ -151,7 +151,7 @@ pub struct HirCache {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HirPattern {
     pub name: String,
-    pub pattern: runmat_hir::HirProgram,
+    pub pattern: runmat_hir::HirAssembly,
     pub frequency: u32,
     pub optimization_priority: OptimizationLevel,
 }

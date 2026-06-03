@@ -1,6 +1,10 @@
 //! MATLAB-compatible `savepath` builtin for persisting the session search path.
 
-use runmat_builtins::{CharArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::fs::{expand_user_path, home_directory};
@@ -17,10 +21,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_FILENAME: &str = "pathdef.m";
-const ERROR_ARG_TYPE: &str = "savepath: filename must be a character vector or string scalar";
-const ERROR_EMPTY_FILENAME: &str = "savepath: filename must not be empty";
-const MESSAGE_ID_CANNOT_WRITE: &str = "RunMat:savepath:cannotWriteFile";
-const MESSAGE_ID_CANNOT_RESOLVE: &str = "RunMat:savepath:cannotResolveFile";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -53,10 +53,123 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "savepath";
 
-fn savepath_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
+const SAVEPATH_OUTPUT_STATUS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "status",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "0 on success, 1 on failure.",
+}];
+const SAVEPATH_OUTPUT_STATUS_MESSAGE_ID: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "status",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "0 on success, 1 on failure.",
+    },
+    BuiltinParamDescriptor {
+        name: "message",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Failure message text, or empty on success.",
+    },
+    BuiltinParamDescriptor {
+        name: "message_id",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Failure identifier, or empty on success.",
+    },
+];
+const SAVEPATH_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
+const SAVEPATH_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "filename",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: Some("\"pathdef.m\""),
+    description: "Target file or target directory for persisted pathdef output.",
+}];
+const SAVEPATH_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "status = savepath()",
+        inputs: &SAVEPATH_INPUTS_NONE,
+        outputs: &SAVEPATH_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "status = savepath(filename)",
+        inputs: &SAVEPATH_INPUTS_FILENAME,
+        outputs: &SAVEPATH_OUTPUT_STATUS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, message, message_id] = savepath()",
+        inputs: &SAVEPATH_INPUTS_NONE,
+        outputs: &SAVEPATH_OUTPUT_STATUS_MESSAGE_ID,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[status, message, message_id] = savepath(filename)",
+        inputs: &SAVEPATH_INPUTS_FILENAME,
+        outputs: &SAVEPATH_OUTPUT_STATUS_MESSAGE_ID,
+    },
+];
+const SAVEPATH_ERROR_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVEPATH.ARG_TYPE",
+    identifier: None,
+    when: "Filename input is not a character vector, string scalar/array scalar, or tensor of character codes.",
+    message: "savepath: filename must be a character vector or string scalar",
+};
+const SAVEPATH_ERROR_EMPTY_FILENAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVEPATH.EMPTY_FILENAME",
+    identifier: None,
+    when: "Explicit filename argument is empty.",
+    message: "savepath: filename must not be empty",
+};
+const SAVEPATH_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVEPATH.TOO_MANY_INPUTS",
+    identifier: None,
+    when: "More than one positional input argument is provided.",
+    message: "savepath: too many input arguments",
+};
+const SAVEPATH_ERROR_CANNOT_WRITE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVEPATH.CANNOT_WRITE",
+    identifier: Some("RunMat:savepath:cannotWriteFile"),
+    when: "Pathdef file could not be written.",
+    message: "savepath: unable to write file",
+};
+const SAVEPATH_ERROR_CANNOT_RESOLVE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SAVEPATH.CANNOT_RESOLVE",
+    identifier: Some("RunMat:savepath:cannotResolveFile"),
+    when: "Pathdef output path could not be resolved.",
+    message: "savepath: unable to resolve output path",
+};
+const SAVEPATH_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    SAVEPATH_ERROR_ARG_TYPE,
+    SAVEPATH_ERROR_EMPTY_FILENAME,
+    SAVEPATH_ERROR_TOO_MANY_INPUTS,
+    SAVEPATH_ERROR_CANNOT_WRITE,
+    SAVEPATH_ERROR_CANNOT_RESOLVE,
+];
+pub const SAVEPATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &SAVEPATH_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &SAVEPATH_ERRORS,
+};
+
+fn savepath_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    savepath_error_with_message(error.message, error)
+}
+
+fn savepath_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -73,11 +186,12 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 #[runtime_builtin(
     name = "savepath",
     category = "io/repl_fs",
-    summary = "Persist the current MATLAB search path to pathdef.m with status outputs.",
+    summary = "Write the current MATLAB search path to pathdef.m with status outputs.",
     keywords = "savepath,pathdef,search path,runmat path,persist path",
     accel = "cpu",
     suppress_auto_output = true,
     type_resolver(crate::builtins::io::type_resolvers::savepath_type),
+    descriptor(crate::builtins::io::repl_fs::savepath::SAVEPATH_DESCRIPTOR),
     builtin_path = "crate::builtins::io::repl_fs::savepath"
 )]
 async fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -100,25 +214,25 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
     let target = match gathered.len() {
         0 => match default_target_path().await {
             Ok(path) => path,
-            Err(err) => return Ok(SavepathResult::failure(err.message, err.message_id)),
+            Err(err) => return Ok(SavepathResult::failure(err.message, err.message_error)),
         },
         1 => {
             let raw = extract_filename(&gathered[0])?;
             if raw.is_empty() {
-                return Err(savepath_error(ERROR_EMPTY_FILENAME));
+                return Err(savepath_error(&SAVEPATH_ERROR_EMPTY_FILENAME));
             }
             match resolve_explicit_path(&raw).await {
                 Ok(path) => path,
-                Err(err) => return Ok(SavepathResult::failure(err.message, err.message_id)),
+                Err(err) => return Ok(SavepathResult::failure(err.message, err.message_error)),
             }
         }
-        _ => return Err(savepath_error("savepath: too many input arguments")),
+        _ => return Err(savepath_error(&SAVEPATH_ERROR_TOO_MANY_INPUTS)),
     };
 
     let path_string = current_path_string();
     match persist_path(&target, &path_string).await {
         Ok(()) => Ok(SavepathResult::success()),
-        Err(err) => Ok(SavepathResult::failure(err.message, err.message_id)),
+        Err(err) => Ok(SavepathResult::failure(err.message, err.message_error)),
     }
 }
 
@@ -138,11 +252,11 @@ impl SavepathResult {
         }
     }
 
-    fn failure(message: String, message_id: &'static str) -> Self {
+    fn failure(message: String, message_error: &'static BuiltinErrorDescriptor) -> Self {
         Self {
             status: 1.0,
             message,
-            message_id: message_id.to_string(),
+            message_id: message_error.identifier.unwrap_or_default().to_string(),
         }
     }
 
@@ -176,14 +290,14 @@ impl SavepathResult {
 
 struct SavepathFailure {
     message: String,
-    message_id: &'static str,
+    message_error: &'static BuiltinErrorDescriptor,
 }
 
 impl SavepathFailure {
-    fn new(message: String, message_id: &'static str) -> Self {
+    fn new(message: String, message_error: &'static BuiltinErrorDescriptor) -> Self {
         Self {
             message,
-            message_id,
+            message_error,
         }
     }
 
@@ -194,7 +308,7 @@ impl SavepathFailure {
                 path.display(),
                 error
             ),
-            MESSAGE_ID_CANNOT_WRITE,
+            &SAVEPATH_ERROR_CANNOT_WRITE,
         )
     }
 }
@@ -217,7 +331,7 @@ async fn default_target_path() -> Result<PathBuf, SavepathFailure> {
         if override_path.trim().is_empty() {
             return Err(SavepathFailure::new(
                 "savepath: RUNMAT_PATHDEF is empty".to_string(),
-                MESSAGE_ID_CANNOT_RESOLVE,
+                &SAVEPATH_ERROR_CANNOT_RESOLVE,
             ));
         }
         return resolve_explicit_path(&override_path).await;
@@ -226,7 +340,7 @@ async fn default_target_path() -> Result<PathBuf, SavepathFailure> {
     let home = home_directory().ok_or_else(|| {
         SavepathFailure::new(
             "savepath: unable to determine default pathdef location".to_string(),
-            MESSAGE_ID_CANNOT_RESOLVE,
+            &SAVEPATH_ERROR_CANNOT_RESOLVE,
         )
     })?;
     Ok(home.join(".runmat").join(DEFAULT_FILENAME))
@@ -235,7 +349,7 @@ async fn default_target_path() -> Result<PathBuf, SavepathFailure> {
 async fn resolve_explicit_path(text: &str) -> Result<PathBuf, SavepathFailure> {
     let expanded = match expand_user_path(text, "savepath") {
         Ok(path) => path,
-        Err(err) => return Err(SavepathFailure::new(err, MESSAGE_ID_CANNOT_RESOLVE)),
+        Err(err) => return Err(SavepathFailure::new(err, &SAVEPATH_ERROR_CANNOT_RESOLVE)),
     };
     let mut path = PathBuf::from(&expanded);
     if path_should_be_directory(&path, text).await {
@@ -287,45 +401,46 @@ fn extract_filename(value: &Value) -> BuiltinResult<String> {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(StringArray { data, .. }) => {
             if data.len() != 1 {
-                Err(savepath_error(ERROR_ARG_TYPE))
+                Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE))
             } else {
                 Ok(data[0].clone())
             }
         }
         Value::CharArray(chars) => {
             if chars.rows != 1 {
-                return Err(savepath_error(ERROR_ARG_TYPE));
+                return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
             }
             Ok(chars.data.iter().collect())
         }
         Value::Tensor(tensor) => tensor_to_string(tensor),
-        Value::GpuTensor(_) => Err(savepath_error(ERROR_ARG_TYPE)),
-        _ => Err(savepath_error(ERROR_ARG_TYPE)),
+        Value::GpuTensor(_) => Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE)),
+        _ => Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE)),
     }
 }
 
 fn tensor_to_string(tensor: &Tensor) -> BuiltinResult<String> {
     if tensor.shape.len() > 2 {
-        return Err(savepath_error(ERROR_ARG_TYPE));
+        return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
     }
     if tensor.rows() > 1 {
-        return Err(savepath_error(ERROR_ARG_TYPE));
+        return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
     }
 
     let mut text = String::with_capacity(tensor.data.len());
     for &code in &tensor.data {
         if !code.is_finite() {
-            return Err(savepath_error(ERROR_ARG_TYPE));
+            return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
         }
         let rounded = code.round();
         if (code - rounded).abs() > 1e-6 {
-            return Err(savepath_error(ERROR_ARG_TYPE));
+            return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
         }
         let int_code = rounded as i64;
         if !(0..=0x10FFFF).contains(&int_code) {
-            return Err(savepath_error(ERROR_ARG_TYPE));
+            return Err(savepath_error(&SAVEPATH_ERROR_ARG_TYPE));
         }
-        let ch = char::from_u32(int_code as u32).ok_or_else(|| savepath_error(ERROR_ARG_TYPE))?;
+        let ch = char::from_u32(int_code as u32)
+            .ok_or_else(|| savepath_error(&SAVEPATH_ERROR_ARG_TYPE))?;
         text.push(ch);
     }
     Ok(text)
@@ -365,6 +480,20 @@ pub(crate) mod tests {
 
     fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
         futures::executor::block_on(super::evaluate(args))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn savepath_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = SAVEPATH_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"status = savepath()"));
+        assert!(labels.contains(&"status = savepath(filename)"));
+        assert!(labels.contains(&"[status, message, message_id] = savepath()"));
+        assert!(labels.contains(&"[status, message, message_id] = savepath(filename)"));
     }
 
     struct PathGuard {
@@ -461,7 +590,10 @@ pub(crate) mod tests {
         let eval = evaluate(&[]).expect("evaluate");
         assert_eq!(eval.status(), 1.0);
         assert!(eval.message().contains("RUNMAT_PATHDEF is empty"));
-        assert_eq!(eval.message_id(), MESSAGE_ID_CANNOT_RESOLVE);
+        assert_eq!(
+            eval.message_id(),
+            SAVEPATH_ERROR_CANNOT_RESOLVE.identifier.unwrap_or_default()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -539,7 +671,10 @@ pub(crate) mod tests {
             evaluate(&[Value::from(target.to_string_lossy().to_string())]).expect("evaluate");
         assert_eq!(eval.status(), 1.0);
         assert!(eval.message().contains("unable to write"));
-        assert_eq!(eval.message_id(), MESSAGE_ID_CANNOT_WRITE);
+        assert_eq!(
+            eval.message_id(),
+            SAVEPATH_ERROR_CANNOT_WRITE.identifier.unwrap_or_default()
+        );
 
         // Restore permissions so tempdir cleanup succeeds.
         let _ = fs::set_permissions(&target, original_perms);
@@ -573,7 +708,7 @@ pub(crate) mod tests {
         let _guard = PathGuard::new();
 
         let err = evaluate(&[Value::from(String::new())]).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_EMPTY_FILENAME);
+        assert_eq!(err.message(), SAVEPATH_ERROR_EMPTY_FILENAME.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -608,7 +743,7 @@ pub(crate) mod tests {
         let array = StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2])
             .expect("string array");
         let err = extract_filename(&Value::StringArray(array)).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_ARG_TYPE);
+        assert_eq!(err.message(), SAVEPATH_ERROR_ARG_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -616,7 +751,7 @@ pub(crate) mod tests {
     fn savepath_rejects_multi_row_char_array() {
         let chars = CharArray::new("abcd".chars().collect(), 2, 2).expect("char array");
         let err = extract_filename(&Value::CharArray(chars)).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_ARG_TYPE);
+        assert_eq!(err.message(), SAVEPATH_ERROR_ARG_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -624,7 +759,7 @@ pub(crate) mod tests {
     fn savepath_rejects_tensor_with_fractional_codes() {
         let tensor = Tensor::new(vec![65.5], vec![1, 1]).expect("tensor");
         let err = extract_filename(&Value::Tensor(tensor)).expect_err("expected error");
-        assert_eq!(err.message(), ERROR_ARG_TYPE);
+        assert_eq!(err.message(), SAVEPATH_ERROR_ARG_TYPE.message);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

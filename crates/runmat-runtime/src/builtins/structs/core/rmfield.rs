@@ -6,7 +6,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::structs::type_resolvers::rmfield_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::{CellArray, StringArray, StructValue, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CellArray, StringArray, StructValue, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::collections::HashSet;
 
@@ -37,16 +41,180 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Metadata mutation forces fusion planners to flush pending groups on the host.",
 };
 
-fn rmfield_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("rmfield").build()
+const BUILTIN_NAME: &str = "rmfield";
+
+const RMFIELD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Updated struct or struct array.",
+}];
+
+const RMFIELD_INPUTS_SCALAR: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct or struct array.",
+    },
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Field name to remove.",
+    },
+];
+
+const RMFIELD_INPUTS_COLLECTION: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct or struct array.",
+    },
+    BuiltinParamDescriptor {
+        name: "fields",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "String array or cell array of field names.",
+    },
+];
+
+const RMFIELD_INPUTS_VARIADIC: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "S",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input struct or struct array.",
+    },
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "First field name to remove.",
+    },
+    BuiltinParamDescriptor {
+        name: "more_fields",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Additional field names.",
+    },
+];
+
+const RMFIELD_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
+    BuiltinSignatureDescriptor {
+        label: "S = rmfield(S, field)",
+        inputs: &RMFIELD_INPUTS_SCALAR,
+        outputs: &RMFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = rmfield(S, fields)",
+        inputs: &RMFIELD_INPUTS_COLLECTION,
+        outputs: &RMFIELD_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "S = rmfield(S, field, ...)",
+        inputs: &RMFIELD_INPUTS_VARIADIC,
+        outputs: &RMFIELD_OUTPUT,
+    },
+];
+
+const RMFIELD_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.NOT_ENOUGH_INPUTS",
+    identifier: Some("RunMat:rmfield:NotEnoughInputs"),
+    when: "No field-name arguments are supplied.",
+    message: "rmfield: not enough input arguments",
+};
+
+const RMFIELD_ERROR_INVALID_TARGET: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.INVALID_TARGET",
+    identifier: Some("RunMat:rmfield:InvalidTarget"),
+    when: "First input is not a struct or struct array.",
+    message: "rmfield: expected struct or struct array",
+};
+
+const RMFIELD_ERROR_FIELD_NAME_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.FIELD_NAME_TYPE",
+    identifier: Some("RunMat:rmfield:FieldNameType"),
+    when: "Field-name argument has unsupported type or non-scalar shape.",
+    message: "rmfield: field names must be string scalars, character vectors, or single-element string arrays",
+};
+
+const RMFIELD_ERROR_FIELD_NAME_EMPTY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.FIELD_NAME_EMPTY",
+    identifier: Some("RunMat:rmfield:FieldNameEmpty"),
+    when: "A field name is empty.",
+    message: "rmfield: field names must be nonempty character vectors or strings",
+};
+
+const RMFIELD_ERROR_MISSING_FIELD: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.MISSING_FIELD",
+    identifier: Some("RunMat:rmfield:MissingField"),
+    when: "At least one requested field does not exist on the input struct.",
+    message: "Reference to non-existent field",
+};
+
+const RMFIELD_ERROR_STRUCT_ARRAY_CONTENTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.STRUCT_ARRAY_CONTENTS",
+    identifier: Some("RunMat:rmfield:StructArrayContents"),
+    when: "Struct-array input contains non-struct elements.",
+    message: "rmfield: expected struct array contents to be structs",
+};
+
+const RMFIELD_ERROR_REBUILD_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.REBUILD_FAILED",
+    identifier: Some("RunMat:rmfield:RebuildFailed"),
+    when: "Rebuilding the updated struct array failed.",
+    message: "rmfield: failed to rebuild struct array",
+};
+
+const RMFIELD_ERRORS: [BuiltinErrorDescriptor; 7] = [
+    RMFIELD_ERROR_NOT_ENOUGH_INPUTS,
+    RMFIELD_ERROR_INVALID_TARGET,
+    RMFIELD_ERROR_FIELD_NAME_TYPE,
+    RMFIELD_ERROR_FIELD_NAME_EMPTY,
+    RMFIELD_ERROR_MISSING_FIELD,
+    RMFIELD_ERROR_STRUCT_ARRAY_CONTENTS,
+    RMFIELD_ERROR_REBUILD_FAILED,
+];
+
+pub const RMFIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &RMFIELD_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &RMFIELD_ERRORS,
+};
+
+fn rmfield_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    rmfield_error_with_message(error.message, error)
+}
+
+fn rmfield_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "rmfield",
     category = "structs/core",
-    summary = "Remove one or more fields from scalar structs or struct arrays.",
+    summary = "Remove one or more named fields from structs or struct arrays.",
     keywords = "rmfield,struct,remove field,struct array",
     type_resolver(rmfield_type),
+    descriptor(crate::builtins::structs::core::rmfield::RMFIELD_DESCRIPTOR),
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 async fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -64,15 +232,16 @@ async fn rmfield_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             let updated = remove_fields_from_struct_array(&cell, &names)?;
             Ok(Value::Cell(updated))
         }
-        other => Err(rmfield_flow(format!(
-            "rmfield: expected struct or struct array, got {other:?}"
-        ))),
+        other => Err(rmfield_error_with_message(
+            format!("{} (got {other:?})", RMFIELD_ERROR_INVALID_TARGET.message),
+            &RMFIELD_ERROR_INVALID_TARGET,
+        )),
     }
 }
 
 fn parse_field_names(args: &[Value]) -> BuiltinResult<Vec<String>> {
     if args.is_empty() {
-        return Err(rmfield_flow("rmfield: not enough input arguments"));
+        return Err(rmfield_error(&RMFIELD_ERROR_NOT_ENOUGH_INPUTS));
     }
     let mut names: Vec<String> = Vec::new();
     for value in args {
@@ -85,22 +254,21 @@ fn collect_field_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(_) | Value::CharArray(_) => expect_scalar_name(value)
             .map(|name| vec![name])
-            .map_err(|err| rmfield_flow(format!("rmfield: {}", describe_field_name_error(err)))),
+            .map_err(|err| field_name_error(err, None)),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
                 expect_scalar_name(value)
                     .map(|name| vec![name])
-                    .map_err(|err| {
-                        rmfield_flow(format!("rmfield: {}", describe_field_name_error(err)))
-                    })
+                    .map_err(|err| field_name_error(err, None))
             } else {
                 string_array_to_names(sa)
             }
         }
         Value::Cell(cell) => cell_to_names(cell),
-        other => Err(rmfield_flow(format!(
-            "rmfield: field names must be strings or character vectors (got {other:?})"
-        ))),
+        other => Err(rmfield_error_with_message(
+            format!("{} (got {other:?})", RMFIELD_ERROR_FIELD_NAME_TYPE.message),
+            &RMFIELD_ERROR_FIELD_NAME_TYPE,
+        )),
     }
 }
 
@@ -108,10 +276,14 @@ fn string_array_to_names(array: &StringArray) -> BuiltinResult<Vec<String>> {
     let mut names = Vec::with_capacity(array.data.len());
     for (index, name) in array.data.iter().enumerate() {
         if name.is_empty() {
-            return Err(rmfield_flow(format!(
-                "rmfield: field names must be nonempty character vectors or strings (string array element {})",
-                index + 1
-            )));
+            return Err(rmfield_error_with_message(
+                format!(
+                    "{} (string array element {})",
+                    RMFIELD_ERROR_FIELD_NAME_EMPTY.message,
+                    index + 1
+                ),
+                &RMFIELD_ERROR_FIELD_NAME_EMPTY,
+            ));
         }
         names.push(name.clone());
     }
@@ -122,13 +294,8 @@ fn cell_to_names(cell: &CellArray) -> BuiltinResult<Vec<String>> {
     let mut output = Vec::with_capacity(cell.data.len());
     for (index, handle) in cell.data.iter().enumerate() {
         let value = unsafe { &*handle.as_raw() };
-        let name = expect_scalar_name(value).map_err(|err| {
-            rmfield_flow(format!(
-                "rmfield: {} (cell element {})",
-                describe_field_name_error(err),
-                index + 1
-            ))
-        })?;
+        let name =
+            expect_scalar_name(value).map_err(|err| field_name_error(err, Some(index + 1)))?;
         output.push(name);
     }
     Ok(output)
@@ -142,11 +309,21 @@ enum FieldNameError {
 
 fn describe_field_name_error(kind: FieldNameError) -> &'static str {
     match kind {
-        FieldNameError::Type => {
-            "field names must be string scalars, character vectors, or single-element string arrays"
-        }
-        FieldNameError::Empty => "field names must be nonempty character vectors or strings",
+        FieldNameError::Type => RMFIELD_ERROR_FIELD_NAME_TYPE.message,
+        FieldNameError::Empty => RMFIELD_ERROR_FIELD_NAME_EMPTY.message,
     }
+}
+
+fn field_name_error(kind: FieldNameError, cell_index: Option<usize>) -> RuntimeError {
+    let descriptor = match kind {
+        FieldNameError::Type => &RMFIELD_ERROR_FIELD_NAME_TYPE,
+        FieldNameError::Empty => &RMFIELD_ERROR_FIELD_NAME_EMPTY,
+    };
+    let mut message = String::from(describe_field_name_error(kind));
+    if let Some(index) = cell_index {
+        message.push_str(&format!(" (cell element {index})"));
+    }
+    rmfield_error_with_message(message, descriptor)
 }
 
 fn expect_scalar_name(value: &Value) -> Result<String, FieldNameError> {
@@ -212,19 +389,24 @@ fn remove_fields_from_struct_array(
     for handle in &array.data {
         let value = unsafe { &*handle.as_raw() };
         let Value::Struct(st) = value else {
-            return Err(rmfield_flow(
-                "rmfield: expected struct array contents to be structs",
-            ));
+            return Err(rmfield_error(&RMFIELD_ERROR_STRUCT_ARRAY_CONTENTS));
         };
         let revised = remove_fields_from_struct_owned(st.clone(), names)?;
         updated.push(Value::Struct(revised));
     }
-    CellArray::new_with_shape(updated, array.shape.clone())
-        .map_err(|e| rmfield_flow(format!("rmfield: failed to rebuild struct array: {e}")))
+    CellArray::new_with_shape(updated, array.shape.clone()).map_err(|e| {
+        rmfield_error_with_message(
+            format!("{}: {e}", RMFIELD_ERROR_REBUILD_FAILED.message),
+            &RMFIELD_ERROR_REBUILD_FAILED,
+        )
+    })
 }
 
 fn missing_field_error(name: &str) -> RuntimeError {
-    rmfield_flow(format!("Reference to non-existent field '{name}'."))
+    rmfield_error_with_message(
+        format!("{} '{name}'.", RMFIELD_ERROR_MISSING_FIELD.message),
+        &RMFIELD_ERROR_MISSING_FIELD,
+    )
 }
 
 fn is_struct_array(cell: &CellArray) -> bool {

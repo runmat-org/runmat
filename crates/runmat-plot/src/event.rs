@@ -16,6 +16,8 @@ pub struct FigureEvent {
     pub handle: u32,
     pub kind: FigureEventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub figure: Option<FigureSnapshot>,
 }
 
@@ -270,6 +272,8 @@ pub enum ScenePlot {
         axes_index: u32,
         label: Option<String>,
         visible: bool,
+        #[serde(default)]
+        force_3d: bool,
     },
     ContourFill {
         vertices: Vec<SerializedVertex>,
@@ -325,6 +329,19 @@ impl FigureSnapshot {
             metadata,
             plots,
         }
+    }
+
+    pub fn fingerprint(&self) -> String {
+        const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+
+        let bytes = serde_json::to_vec(self).unwrap_or_default();
+        let mut hash = FNV_OFFSET_BASIS;
+        for byte in bytes {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        format!("fig:{hash:016x}")
     }
 }
 
@@ -702,6 +719,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
             view_elevation_deg: value.view_elevation_deg,
+            view_revision: 0,
             grid_enabled: value.grid_enabled,
             box_enabled: value.box_enabled,
             axis_equal: value.axis_equal,
@@ -982,6 +1000,7 @@ impl ScenePlot {
                 axes_index,
                 label: contour.label.clone(),
                 visible: contour.visible,
+                force_3d: contour.force_3d,
             },
             PlotElement::ContourFill(fill) => Self::ContourFill {
                 vertices: fill
@@ -1364,13 +1383,15 @@ impl ScenePlot {
                 axes_index,
                 label,
                 visible,
+                force_3d,
             } => {
                 let mut contour = ContourPlot::from_vertices(
                     vertices.into_iter().map(Into::into).collect(),
                     base_z,
                     serialized_bounds(bounds_min, bounds_max),
                 )
-                .with_line_width(line_width);
+                .with_line_width(line_width)
+                .with_force_3d(force_3d);
                 contour.label = label;
                 contour.set_visible(visible);
                 figure.add_contour_plot_on_axes(contour, axes_index as usize);

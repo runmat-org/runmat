@@ -1,7 +1,11 @@
 //! MATLAB-compatible `num2str` builtin with GPU-aware semantics for RunMat.
 
 use regex::Regex;
-use runmat_builtins::{CharArray, ComplexTensor, Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    CharArray, ComplexTensor, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -17,12 +21,172 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 const DEFAULT_PRECISION: usize = 15;
 const MAX_PRECISION: usize = 52;
 
-fn num2str_flow(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin("num2str").build()
+const BUILTIN_NAME: &str = "num2str";
+
+const NUM2STR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "txt",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Character array containing formatted numeric values.",
+}];
+
+const NUM2STR_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Numeric or logical scalar/vector/matrix input.",
+}];
+
+const NUM2STR_INPUT_PREC: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric or logical input.",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::IntegerScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("15"),
+        description: "General-format precision (0..52).",
+    },
+];
+
+const NUM2STR_INPUT_FORMAT: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric or logical input.",
+    },
+    BuiltinParamDescriptor {
+        name: "formatSpec",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Custom format such as \"%0.3f\" or \"%.5g\".",
+    },
+];
+
+const NUM2STR_INPUT_LOCAL: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Numeric or logical input.",
+    },
+    BuiltinParamDescriptor {
+        name: "arg2",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Precision or format string.",
+    },
+    BuiltinParamDescriptor {
+        name: "local",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"local\""),
+        description: "Locale-aware decimal separator option.",
+    },
+];
+
+const NUM2STR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "txt = num2str(A)",
+        inputs: &NUM2STR_INPUT_A,
+        outputs: &NUM2STR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "txt = num2str(A, p)",
+        inputs: &NUM2STR_INPUT_PREC,
+        outputs: &NUM2STR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "txt = num2str(A, formatSpec)",
+        inputs: &NUM2STR_INPUT_FORMAT,
+        outputs: &NUM2STR_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "txt = num2str(A, arg2, \"local\")",
+        inputs: &NUM2STR_INPUT_LOCAL,
+        outputs: &NUM2STR_OUTPUT,
+    },
+];
+
+const NUM2STR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM2STR.INVALID_INPUT",
+    identifier: Some("RunMat:num2str:InvalidInput"),
+    when: "Input value is not a supported numeric/logical scalar, vector, or matrix.",
+    message: "num2str: unsupported input type",
+};
+
+const NUM2STR_ERROR_INVALID_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM2STR.INVALID_OPTION",
+    identifier: Some("RunMat:num2str:InvalidOption"),
+    when: "Optional arguments are malformed or too many were supplied.",
+    message: "num2str: invalid option arguments",
+};
+
+const NUM2STR_ERROR_INVALID_PRECISION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM2STR.INVALID_PRECISION",
+    identifier: Some("RunMat:num2str:InvalidPrecision"),
+    when: "Precision argument is non-finite, non-integer, or out of range.",
+    message: "num2str: invalid precision",
+};
+
+const NUM2STR_ERROR_INVALID_FORMAT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM2STR.INVALID_FORMAT",
+    identifier: Some("RunMat:num2str:InvalidFormat"),
+    when: "Custom format string is unsupported or malformed.",
+    message: "num2str: unsupported format string",
+};
+
+const NUM2STR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM2STR.INTERNAL",
+    identifier: Some("RunMat:num2str:InternalError"),
+    when: "Internal char-array assembly failed.",
+    message: "num2str: internal error",
+};
+
+const NUM2STR_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    NUM2STR_ERROR_INVALID_INPUT,
+    NUM2STR_ERROR_INVALID_OPTION,
+    NUM2STR_ERROR_INVALID_PRECISION,
+    NUM2STR_ERROR_INVALID_FORMAT,
+    NUM2STR_ERROR_INTERNAL,
+];
+
+pub const NUM2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &NUM2STR_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &NUM2STR_ERRORS,
+};
+
+fn num2str_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    num2str_error_with_message(error.message, error)
+}
+
+fn num2str_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn remap_num2str_flow(err: RuntimeError) -> RuntimeError {
-    map_control_flow_with_builtin(err, "num2str")
+    map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::core::num2str")]
@@ -56,10 +220,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "num2str",
     category = "strings/core",
-    summary = "Convert numeric scalars, vectors, and matrices into MATLAB-style character arrays using general or custom formats.",
+    summary = "Convert numeric values to character arrays.",
     keywords = "num2str,number to string,format,precision",
     examples = "txt = num2str([1 2 3]);",
     type_resolver(string_scalar_type),
+    descriptor(crate::builtins::strings::core::num2str::NUM2STR_DESCRIPTOR),
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
 async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -144,7 +309,10 @@ async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
         if is_local_token(&first)? {
             decimal = detect_decimal_separator(true);
             if iter.next().is_some() {
-                return Err(num2str_flow("num2str: too many input arguments"));
+                return Err(num2str_error_with_message(
+                    "num2str: too many input arguments",
+                    &NUM2STR_ERROR_INVALID_OPTION,
+                ));
             }
             return Ok(FormatOptions { spec, decimal });
         }
@@ -154,23 +322,28 @@ async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
         } else if let Some(text) = value_to_text(&first) {
             FormatSpec::Custom(parse_custom_format(&text)?)
         } else {
-            return Err(num2str_flow(
+            return Err(num2str_error_with_message(
                 "num2str: second argument must be a precision or format string",
+                &NUM2STR_ERROR_INVALID_OPTION,
             ));
         };
     }
 
     if let Some(second) = iter.next() {
         if !is_local_token(&second)? {
-            return Err(num2str_flow(
+            return Err(num2str_error_with_message(
                 "num2str: expected 'local' as the third argument",
+                &NUM2STR_ERROR_INVALID_OPTION,
             ));
         }
         decimal = detect_decimal_separator(true);
     }
 
     if iter.next().is_some() {
-        return Err(num2str_flow("num2str: too many input arguments"));
+        return Err(num2str_error_with_message(
+            "num2str: too many input arguments",
+            &NUM2STR_ERROR_INVALID_OPTION,
+        ));
     }
 
     Ok(FormatOptions { spec, decimal })
@@ -192,11 +365,17 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
         }
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(num2str_flow("num2str: precision must be finite"));
+                return Err(num2str_error_with_message(
+                    "num2str: precision must be finite",
+                    &NUM2STR_ERROR_INVALID_PRECISION,
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
-                return Err(num2str_flow("num2str: precision must be an integer"));
+                return Err(num2str_error_with_message(
+                    "num2str: precision must be an integer",
+                    &NUM2STR_ERROR_INVALID_PRECISION,
+                ));
             }
             validate_precision(rounded as i64)?;
             Ok(Some(rounded as usize))
@@ -204,11 +383,17 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
         Value::Tensor(t) if t.data.len() == 1 => {
             let value = t.data[0];
             if !value.is_finite() {
-                return Err(num2str_flow("num2str: precision must be finite"));
+                return Err(num2str_error_with_message(
+                    "num2str: precision must be finite",
+                    &NUM2STR_ERROR_INVALID_PRECISION,
+                ));
             }
             let rounded = value.round();
             if (rounded - value).abs() > f64::EPSILON {
-                return Err(num2str_flow("num2str: precision must be an integer"));
+                return Err(num2str_error_with_message(
+                    "num2str: precision must be an integer",
+                    &NUM2STR_ERROR_INVALID_PRECISION,
+                ));
             }
             validate_precision(rounded as i64)?;
             Ok(Some(rounded as usize))
@@ -228,9 +413,10 @@ fn try_extract_precision(value: &Value) -> BuiltinResult<Option<usize>> {
 
 fn validate_precision(value: i64) -> BuiltinResult<()> {
     if value < 0 || value > MAX_PRECISION as i64 {
-        return Err(num2str_flow(format!(
-            "num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"
-        )));
+        return Err(num2str_error_with_message(
+            format!("num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"),
+            &NUM2STR_ERROR_INVALID_PRECISION,
+        ));
     }
     Ok(())
 }
@@ -282,11 +468,15 @@ fn detect_decimal_separator(local: bool) -> char {
 
 fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
     if !text.starts_with('%') {
-        return Err(num2str_flow("num2str: format must start with '%'"));
+        return Err(num2str_error_with_message(
+            "num2str: format must start with '%'",
+            &NUM2STR_ERROR_INVALID_FORMAT,
+        ));
     }
     if text == "%%" {
-        return Err(num2str_flow(
+        return Err(num2str_error_with_message(
             "num2str: '%' escape is not supported for numeric conversion",
+            &NUM2STR_ERROR_INVALID_FORMAT,
         ));
     }
 
@@ -295,7 +485,13 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
     });
 
     let captures = FORMAT_RE.captures(text).ok_or_else(|| {
-        num2str_flow("num2str: unsupported format string; expected variants like '%0.3f' or '%.5g'")
+        num2str_error_with_message(
+            format!(
+                "{}; expected variants like '%0.3f' or '%.5g'",
+                NUM2STR_ERROR_INVALID_FORMAT.message
+            ),
+            &NUM2STR_ERROR_INVALID_FORMAT,
+        )
     })?;
 
     let flags = captures.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -324,19 +520,23 @@ fn parse_custom_format(text: &str) -> BuiltinResult<CustomFormat> {
             '-' => left_align = true,
             '0' => zero_pad = true,
             _ => {
-                return Err(num2str_flow(format!(
+                return Err(num2str_error_with_message(
+                    format!(
                     "num2str: unsupported format flag '{}'; only '+', '-', and '0' are supported",
                     ch
-                )))
+                ),
+                    &NUM2STR_ERROR_INVALID_FORMAT,
+                ))
             }
         }
     }
 
     if let Some(p) = precision {
         if p > MAX_PRECISION {
-            return Err(num2str_flow(format!(
-                "num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"
-            )));
+            return Err(num2str_error_with_message(
+                format!("num2str: precision must satisfy 0 <= p <= {MAX_PRECISION}"),
+                &NUM2STR_ERROR_INVALID_PRECISION,
+            ));
         }
     }
 
@@ -380,7 +580,8 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
         }),
         Value::Tensor(t) => tensor_to_numeric_data(t),
         Value::LogicalArray(la) => {
-            let tensor = tensor::logical_to_tensor(&la).map_err(num2str_flow)?;
+            let tensor = tensor::logical_to_tensor(&la)
+                .map_err(|_| num2str_error(&NUM2STR_ERROR_INVALID_INPUT))?;
             tensor_to_numeric_data(tensor)
         }
         Value::Complex(re, im) => Ok(NumericData::Complex {
@@ -395,17 +596,21 @@ async fn extract_numeric_data(value: Value) -> BuiltinResult<NumericData> {
                 .map_err(remap_num2str_flow)?;
             tensor_to_numeric_data(gathered)
         }
-        other => Err(num2str_flow(format!(
-            "num2str: unsupported input type {:?}; expected numeric or logical values",
-            other
-        ))),
+        other => Err(num2str_error_with_message(
+            format!(
+                "{} {:?}; expected numeric or logical values",
+                NUM2STR_ERROR_INVALID_INPUT.message, other
+            ),
+            &NUM2STR_ERROR_INVALID_INPUT,
+        )),
     }
 }
 
 fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
     if tensor.shape.len() > 2 {
-        return Err(num2str_flow(
+        return Err(num2str_error_with_message(
             "num2str: input must be scalar, vector, or 2-D matrix",
+            &NUM2STR_ERROR_INVALID_INPUT,
         ));
     }
     let rows = tensor.rows();
@@ -426,8 +631,9 @@ fn tensor_to_numeric_data(tensor: Tensor) -> BuiltinResult<NumericData> {
 
 fn complex_tensor_to_data(tensor: ComplexTensor) -> BuiltinResult<NumericData> {
     if tensor.shape.len() > 2 {
-        return Err(num2str_flow(
+        return Err(num2str_error_with_message(
             "num2str: complex input must be scalar, vector, or 2-D matrix",
+            &NUM2STR_ERROR_INVALID_INPUT,
         ));
     }
     let rows = tensor.rows;
@@ -461,11 +667,12 @@ fn format_real_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     if cols == 0 {
         return CharArray::new(Vec::new(), rows, 0)
-            .map_err(|e| num2str_flow(format!("num2str: {e}")));
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
 
     let mut entries = vec![
@@ -515,11 +722,12 @@ fn format_complex_matrix(
     options: &FormatOptions,
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     if cols == 0 {
         return CharArray::new(Vec::new(), rows, 0)
-            .map_err(|e| num2str_flow(format!("num2str: {e}")));
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
 
     let mut entries = vec![
@@ -585,7 +793,8 @@ fn assemble_rows(entries: Vec<Vec<CellEntry>>, col_widths: Vec<usize>) -> Vec<St
 
 fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
     if rows.is_empty() {
-        return CharArray::new(Vec::new(), 0, 0).map_err(|e| num2str_flow(format!("num2str: {e}")));
+        return CharArray::new(Vec::new(), 0, 0)
+            .map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL));
     }
     let row_count = rows.len();
     let col_count = rows
@@ -603,7 +812,7 @@ fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
         data.extend(chars);
     }
 
-    CharArray::new(data, row_count, col_count).map_err(|e| num2str_flow(format!("num2str: {e}")))
+    CharArray::new(data, row_count, col_count).map_err(|_| num2str_error(&NUM2STR_ERROR_INTERNAL))
 }
 
 fn format_real(value: f64, spec: &FormatSpec, decimal: char) -> String {

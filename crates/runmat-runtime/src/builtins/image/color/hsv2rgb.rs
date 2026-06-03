@@ -1,6 +1,10 @@
 //! MATLAB-compatible `hsv2rgb` conversion.
 
-use runmat_builtins::{NumericDType, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    NumericDType, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -9,9 +13,88 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::type_resolvers::same_shape_type;
-use crate::BuiltinResult;
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "hsv2rgb";
+
+const HSV2RGB_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "RGB",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "RGB image or colormap converted from HSV input.",
+}];
+
+const HSV2RGB_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "HSV",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "HSV image or Nx3 HSV colormap values.",
+}];
+
+const HSV2RGB_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
+    label: "RGB = hsv2rgb(HSV)",
+    inputs: &HSV2RGB_INPUTS,
+    outputs: &HSV2RGB_OUTPUT,
+}];
+
+const HSV2RGB_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HSV2RGB.TOO_MANY_INPUTS",
+    identifier: Some("RunMat:hsv2rgb:TooManyInputs"),
+    when: "More than one input argument is supplied.",
+    message: "hsv2rgb: too many input arguments",
+};
+
+const HSV2RGB_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HSV2RGB.INVALID_INPUT",
+    identifier: Some("RunMat:hsv2rgb:InvalidInput"),
+    when: "Input cannot be interpreted as an MxNx3 HSV image or Nx3 HSV colormap.",
+    message: "hsv2rgb: invalid input",
+};
+
+const HSV2RGB_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.HSV2RGB.INTERNAL",
+    identifier: Some("RunMat:hsv2rgb:Internal"),
+    when: "RGB output tensor construction fails internally.",
+    message: "hsv2rgb: internal conversion failure",
+};
+
+const HSV2RGB_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    HSV2RGB_ERROR_TOO_MANY_INPUTS,
+    HSV2RGB_ERROR_INVALID_INPUT,
+    HSV2RGB_ERROR_INTERNAL,
+];
+
+pub const HSV2RGB_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &HSV2RGB_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &HSV2RGB_ERRORS,
+};
+
+fn hsv2rgb_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    hsv2rgb_error_with_message(error.message, error)
+}
+
+fn hsv2rgb_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn hsv2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> RuntimeError {
+    if err.identifier().is_some() {
+        err
+    } else {
+        hsv2rgb_error_with_message(err.message().to_string(), fallback)
+    }
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::color::hsv2rgb")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -43,21 +126,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "hsv2rgb",
     category = "image/color",
-    summary = "Convert HSV values to RGB color space.",
+    summary = "Convert HSV values to RGB.",
     keywords = "hsv2rgb,hsv,rgb,color,image,colormap",
     accel = "sink",
     type_resolver(same_shape_type),
+    descriptor(crate::builtins::image::color::hsv2rgb::HSV2RGB_DESCRIPTOR),
     builtin_path = "crate::builtins::image::color::hsv2rgb"
 )]
 async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if !rest.is_empty() {
-        return Err(common::builtin_error(
-            NAME,
-            "hsv2rgb: too many input arguments",
-        ));
+        return Err(hsv2rgb_error(&HSV2RGB_ERROR_TOO_MANY_INPUTS));
     }
-    let tensor = common::gather_tensor(NAME, hsv).await?;
-    let layout = common::color_layout(&tensor, NAME)?;
+    let tensor = common::gather_tensor(NAME, hsv)
+        .await
+        .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
+    let layout = common::color_layout(&tensor, NAME)
+        .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INVALID_INPUT))?;
     let dtype = common::image_output_dtype(tensor.dtype);
     let mut data = vec![0.0; tensor.data.len()];
     for pixel in 0..layout.pixels() {
@@ -76,12 +160,9 @@ async fn hsv2rgb_builtin(hsv: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         data[layout.index(pixel, 1)] = cast_float(g, dtype);
         data[layout.index(pixel, 2)] = cast_float(b, dtype);
     }
-    Ok(common::image_value_from_tensor(common::tensor_with_dtype(
-        data,
-        layout.output_shape(),
-        dtype,
-        NAME,
-    )?))
+    let out = common::tensor_with_dtype(data, layout.output_shape(), dtype, NAME)
+        .map_err(|err| hsv2rgb_map_error(err, &HSV2RGB_ERROR_INTERNAL))?;
+    Ok(common::image_value_from_tensor(out))
 }
 
 pub(crate) fn hsv_to_rgb_unit(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
@@ -165,5 +246,34 @@ mod tests {
         assert_close(out.data[0], 1.0);
         assert_close(out.data[1], 0.0);
         assert_close(out.data[2], 0.0);
+    }
+
+    #[test]
+    fn hsv2rgb_descriptor_signatures_cover_surface() {
+        let labels: Vec<&str> = HSV2RGB_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert_eq!(labels, vec!["RGB = hsv2rgb(HSV)"]);
+    }
+
+    #[test]
+    fn hsv2rgb_descriptor_errors_have_stable_codes() {
+        let codes: Vec<&str> = HSV2RGB_DESCRIPTOR
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
+        assert!(codes.contains(&"RM.HSV2RGB.TOO_MANY_INPUTS"));
+        assert!(codes.contains(&"RM.HSV2RGB.INVALID_INPUT"));
+        assert!(codes.contains(&"RM.HSV2RGB.INTERNAL"));
+    }
+
+    #[test]
+    fn hsv2rgb_too_many_args_uses_stable_identifier() {
+        let err = block_on(hsv2rgb_builtin(Value::Num(1.0), vec![Value::Num(2.0)]))
+            .expect_err("expected argument error");
+        assert_eq!(err.identifier(), HSV2RGB_ERROR_TOO_MANY_INPUTS.identifier);
     }
 }

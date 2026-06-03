@@ -1,7 +1,11 @@
 //! MATLAB-compatible `zeros` builtin with GPU-aware semantics.
 
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
-use runmat_builtins::{ComplexTensor, LogicalArray, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, LogicalArray, Value,
+};
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
@@ -41,6 +45,28 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("zeros").build()
 }
 
+fn zeros_error(error: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {
+    zeros_error_with_message(error.message, error)
+}
+
+fn zeros_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> crate::RuntimeError {
+    zeros_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn zeros_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> crate::RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin("zeros");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
     if args.is_empty() {
         return Type::Num;
@@ -50,6 +76,169 @@ fn zeros_type(args: &[Type], ctx: &ResolveContext) -> Type {
     }
     tensor_type_from_rank(args, ctx)
 }
+
+const ZEROS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "A",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Output array.",
+}];
+
+const ZEROS_SIG_EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
+
+const ZEROS_SIG_N_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "n",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Square size.",
+}];
+
+const ZEROS_SIG_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "size_vector",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Size vector defining output dimensions.",
+}];
+
+const ZEROS_SIG_PROTOTYPE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "prototype",
+    ty: BuiltinParamType::LikePrototype,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Prototype value when no numeric dimension arguments are provided.",
+}];
+
+const ZEROS_SIG_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "dims",
+    ty: BuiltinParamType::SizeArg,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Dimension sizes.",
+}];
+
+const ZEROS_SIG_CLASS_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "typename",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("\"double\""),
+        description: "Class name override (double|single|logical|gpuArray).",
+    },
+];
+
+const ZEROS_SIG_LIKE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "dims",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Dimension sizes.",
+    },
+    BuiltinParamDescriptor {
+        name: "like_kw",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"like\""),
+        description: "Like keyword.",
+    },
+    BuiltinParamDescriptor {
+        name: "prototype",
+        ty: BuiltinParamType::LikePrototype,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Prototype array used for class/device.",
+    },
+];
+
+const ZEROS_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
+    BuiltinSignatureDescriptor {
+        label: "A = zeros()",
+        inputs: &ZEROS_SIG_EMPTY_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(n)",
+        inputs: &ZEROS_SIG_N_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(size_vector)",
+        inputs: &ZEROS_SIG_SIZE_VECTOR_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(m, n, ...)",
+        inputs: &ZEROS_SIG_DIMS_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(prototype)",
+        inputs: &ZEROS_SIG_PROTOTYPE_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(..., typename)",
+        inputs: &ZEROS_SIG_CLASS_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+    BuiltinSignatureDescriptor {
+        label: "A = zeros(..., \"like\", prototype)",
+        inputs: &ZEROS_SIG_LIKE_INPUTS,
+        outputs: &ZEROS_OUTPUT,
+    },
+];
+
+const ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.LIKE_EXPECTED_PROTOTYPE",
+    identifier: None,
+    when: "The 'like' keyword is provided without a prototype argument.",
+    message: "zeros: expected prototype after 'like'",
+};
+
+const ZEROS_ERROR_CLASS_CONFLICT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.CLASS_CONFLICT",
+    identifier: None,
+    when: "A class keyword and a 'like' prototype are both provided.",
+    message: "zeros: cannot combine 'like' with other class specifiers",
+};
+
+const ZEROS_ERROR_UNRECOGNIZED_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.UNRECOGNIZED_OPTION",
+    identifier: None,
+    when: "A trailing option string is not a supported class keyword.",
+    message: "zeros: unrecognised option",
+};
+
+const ZEROS_ERROR_LIKE_DUPLICATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ZEROS.LIKE_DUPLICATE",
+    identifier: None,
+    when: "The 'like' keyword is specified more than once.",
+    message: "zeros: multiple 'like' specifications are not supported",
+};
+
+const ZEROS_ERRORS: [BuiltinErrorDescriptor; 4] = [
+    ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE,
+    ZEROS_ERROR_CLASS_CONFLICT,
+    ZEROS_ERROR_UNRECOGNIZED_OPTION,
+    ZEROS_ERROR_LIKE_DUPLICATE,
+];
+
+pub const ZEROS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &ZEROS_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &ZEROS_ERRORS,
+};
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::zeros")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
@@ -76,10 +265,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "zeros",
     category = "array/creation",
-    summary = "Create arrays filled with zeros.",
+    summary = "Create arrays filled with zero values.",
     keywords = "zeros,array,logical,gpu,like",
     accel = "array_construct",
     type_resolver(zeros_type),
+    descriptor(crate::builtins::array::creation::zeros::ZEROS_DESCRIPTOR),
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
 async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -121,17 +311,13 @@ impl ParsedZeros {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: multiple 'like' specifications are not supported",
-                            ));
+                            return Err(zeros_error(&ZEROS_ERROR_LIKE_DUPLICATE));
                         }
                         if class_override.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with other class specifiers",
-                            ));
+                            return Err(zeros_error(&ZEROS_ERROR_CLASS_CONFLICT));
                         }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err(builtin_error("zeros: expected prototype after 'like'"));
+                            return Err(zeros_error(&ZEROS_ERROR_LIKE_EXPECTED_PROTOTYPE));
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -142,8 +328,9 @@ impl ParsedZeros {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'logical'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "logical class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Logical);
@@ -152,8 +339,9 @@ impl ParsedZeros {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'double'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "double class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Double);
@@ -162,8 +350,9 @@ impl ParsedZeros {
                     }
                     "single" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'single'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "single class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::Single);
@@ -172,8 +361,9 @@ impl ParsedZeros {
                     }
                     "gpuArray" | "gpuarray" => {
                         if like_proto.is_some() {
-                            return Err(builtin_error(
-                                "zeros: cannot combine 'like' with 'gpuArray'",
+                            return Err(zeros_error_with_detail(
+                                &ZEROS_ERROR_CLASS_CONFLICT,
+                                "gpuArray class override",
                             ));
                         }
                         class_override = Some(OutputTemplate::GpuArray);
@@ -181,9 +371,10 @@ impl ParsedZeros {
                         continue;
                     }
                     other => {
-                        return Err(builtin_error(format!(
-                            "zeros: unrecognised option '{other}'"
-                        )));
+                        return Err(zeros_error_with_detail(
+                            &ZEROS_ERROR_UNRECOGNIZED_OPTION,
+                            format!("'{other}'"),
+                        ));
                     }
                 }
             }
@@ -280,7 +471,10 @@ fn value_tag(value: &Value) -> &'static str {
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
-        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::MethodFunctionHandle(_)
+        | Value::BoundFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",
@@ -528,15 +722,14 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
 
-    fn clear_accel_provider_state() {
-        runmat_accelerate_api::set_thread_provider(None);
-        runmat_accelerate_api::clear_provider();
+    fn clear_accel_provider_state() -> test_support::AccelTestGuard {
+        test_support::accel_test_lock()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_default_scalar() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let result = block_on(zeros_builtin(Vec::new())).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
     }
@@ -572,7 +765,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_square_from_single_dimension() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let args = vec![Value::Num(3.0)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
@@ -583,7 +776,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_rectangular_from_dims() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
@@ -594,7 +787,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_from_size_vector() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -605,7 +798,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_logical_output() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         match result {
@@ -620,7 +813,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_tensor_infers_shape() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -632,7 +825,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_complex_scalar() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let args = vec![
             Value::Num(3.0),
             Value::from("like"),
@@ -651,7 +844,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_uses_shape_argument_when_combined_with_like() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let proto = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![
@@ -668,7 +861,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_without_explicit_shape_uses_prototype_shape() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -680,7 +873,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_empty_input_returns_empty_matrix() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
         let result = block_on(zeros_builtin(vec![Value::Tensor(empty)])).expect("zeros");
         match result {
@@ -695,7 +888,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_conflicting_like_and_logical_is_error() {
-        clear_accel_provider_state();
+        let _guard = clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let args = vec![
             Value::Num(2.0),

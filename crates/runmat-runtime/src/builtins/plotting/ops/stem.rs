@@ -1,4 +1,8 @@
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
@@ -14,6 +18,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+use crate::{build_runtime_error, RuntimeError};
 
 use super::common::numeric_pair;
 use super::gpu_helpers::gpu_xy_bounds;
@@ -25,6 +30,384 @@ use super::style::{
 };
 
 const BUILTIN_NAME: &str = "stem";
+
+const STEM_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the rendered stem plot.",
+}];
+
+const STEM_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Y",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Y samples. X defaults to 1:numel(Y).",
+}];
+
+const STEM_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples. X defaults to 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line style shorthand such as '--r'.",
+    },
+];
+
+const STEM_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples. X defaults to 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties.",
+    },
+];
+
+const STEM_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples.",
+    },
+];
+
+const STEM_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line style shorthand such as '--r'.",
+    },
+];
+
+const STEM_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties.",
+    },
+];
+
+const STEM_INPUTS_AX_Y: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples. X defaults to 1:numel(Y).",
+    },
+];
+
+const STEM_INPUTS_AX_Y_STYLE: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples. X defaults to 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line style shorthand such as '--r'.",
+    },
+];
+
+const STEM_INPUTS_AX_Y_PROPS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples. X defaults to 1:numel(Y).",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties.",
+    },
+];
+
+const STEM_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples.",
+    },
+];
+
+const STEM_INPUTS_AX_X_Y_STYLE: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "lineSpec",
+        ty: BuiltinParamType::StyleSpec,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Line style shorthand such as '--r'.",
+    },
+];
+
+const STEM_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "ax",
+        ty: BuiltinParamType::AxesHandle,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Target axes handle.",
+    },
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y samples.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value style properties.",
+    },
+];
+
+const STEM_SIGNATURES: [BuiltinSignatureDescriptor; 12] = [
+    BuiltinSignatureDescriptor {
+        label: "h = stem(Y)",
+        inputs: &STEM_INPUTS_Y,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(Y, LineSpec)",
+        inputs: &STEM_INPUTS_Y_STYLE,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(Y, Name, Value, ...)",
+        inputs: &STEM_INPUTS_Y_PROPS,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(X, Y)",
+        inputs: &STEM_INPUTS_X_Y,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(X, Y, LineSpec)",
+        inputs: &STEM_INPUTS_X_Y_STYLE,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(X, Y, Name, Value, ...)",
+        inputs: &STEM_INPUTS_X_Y_PROPS,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(ax, Y)",
+        inputs: &STEM_INPUTS_AX_Y,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(ax, Y, LineSpec)",
+        inputs: &STEM_INPUTS_AX_Y_STYLE,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(ax, Y, Name, Value, ...)",
+        inputs: &STEM_INPUTS_AX_Y_PROPS,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(ax, X, Y)",
+        inputs: &STEM_INPUTS_AX_X_Y,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(ax, X, Y, LineSpec)",
+        inputs: &STEM_INPUTS_AX_X_Y_STYLE,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+    BuiltinSignatureDescriptor {
+        label: "h = stem(ax, X, Y, Name, Value, ...)",
+        inputs: &STEM_INPUTS_AX_X_Y_PROPS,
+        outputs: &STEM_OUTPUT_HANDLE,
+    },
+];
+
+pub const STEM_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEM.INVALID_ARGUMENT",
+    identifier: Some("RunMat:stem:InvalidArgument"),
+    when: "Input data, axes targeting, or style arguments are invalid.",
+    message: "stem: invalid argument",
+};
+
+pub const STEM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STEM.INTERNAL",
+    identifier: Some("RunMat:stem:Internal"),
+    when: "Internal plot construction or rendering fails unexpectedly.",
+    message: "stem: internal operation failed",
+};
+
+const STEM_ERRORS: [BuiltinErrorDescriptor; 2] = [STEM_ERROR_INVALID_ARGUMENT, STEM_ERROR_INTERNAL];
+
+pub const STEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &STEM_SIGNATURES,
+    output_mode: BuiltinOutputMode::Fixed,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &STEM_ERRORS,
+};
+
+fn stem_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
+        .with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn map_stem_invalid_argument(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    stem_error_with_detail(&STEM_ERROR_INVALID_ARGUMENT, err.message)
+}
+
+fn map_stem_internal(err: RuntimeError) -> RuntimeError {
+    if err.identifier().is_some() {
+        return err;
+    }
+    stem_error_with_detail(&STEM_ERROR_INTERNAL, err.message)
+}
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::stem")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -56,18 +439,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "stem",
     category = "plotting",
-    summary = "Render MATLAB-compatible stem plots.",
+    summary = "Create stem plots for discrete sequences and sampled data.",
     keywords = "stem,plotting,discrete",
     sink = true,
     suppress_auto_output = true,
     type_resolver(handle_scalar_type),
+    descriptor(crate::builtins::plotting::stem::STEM_DESCRIPTOR),
     builtin_path = "crate::builtins::plotting::stem"
 )]
 pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let (target_axes, x, y, rest) = parse_stem_args(args)?;
-    let parsed = parse_stem_style_args(&rest)?;
-    let mut x_input = Some(NumericInput::from_value(x, BUILTIN_NAME)?);
-    let mut y_input = Some(NumericInput::from_value(y, BUILTIN_NAME)?);
+    let (target_axes, x, y, rest) = parse_stem_args(args).map_err(map_stem_invalid_argument)?;
+    let parsed = parse_stem_style_args(&rest).map_err(map_stem_invalid_argument)?;
+    let mut x_input =
+        Some(NumericInput::from_value(x, BUILTIN_NAME).map_err(map_stem_invalid_argument)?);
+    let mut y_input =
+        Some(NumericInput::from_value(y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?);
     let opts = PlotRenderOptions {
         title: "Stem",
         x_label: "X",
@@ -92,10 +478,14 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 Err(err) => log::warn!("stem GPU path unavailable: {err}"),
             }
         }
-        let x = x_arg.into_tensor(BUILTIN_NAME)?;
-        let y = y_arg.into_tensor(BUILTIN_NAME)?;
-        let (x, y) = numeric_pair(x, y, BUILTIN_NAME)?;
-        let plot = build_stem_plot(x, y, &parsed, &label)?;
+        let x = x_arg
+            .into_tensor(BUILTIN_NAME)
+            .map_err(map_stem_invalid_argument)?;
+        let y = y_arg
+            .into_tensor(BUILTIN_NAME)
+            .map_err(map_stem_invalid_argument)?;
+        let (x, y) = numeric_pair(x, y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?;
+        let plot = build_stem_plot(x, y, &parsed, &label).map_err(map_stem_invalid_argument)?;
         let plot_index = figure.add_stem_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -110,7 +500,7 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
             return Ok(handle);
         }
-        return Err(err);
+        return Err(map_stem_internal(err));
     }
     Ok(handle)
 }
@@ -240,8 +630,13 @@ fn build_stem_gpu_plot(
             },
             &MarkerGpuParams {
                 color: marker.face_color,
-                half_width_data: 0.0,
-                thick: false,
+                half_width_px: 0.0,
+                viewport_width_px: 1.0,
+                viewport_height_px: 1.0,
+                x_min: 0.0,
+                x_span: 1.0,
+                y_min: 0.0,
+                y_span: 1.0,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },
@@ -273,8 +668,13 @@ fn build_stem_gpu_plot(
             },
             &MarkerGpuParams {
                 color: marker.face_color,
-                half_width_data: 0.0,
-                thick: false,
+                half_width_px: 0.0,
+                viewport_width_px: 1.0,
+                viewport_height_px: 1.0,
+                x_min: 0.0,
+                x_span: 1.0,
+                y_min: 0.0,
+                y_span: 1.0,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },
@@ -489,5 +889,29 @@ mod tests {
         };
         assert_eq!(plot.x, vec![1.0]);
         assert_eq!(plot.y, vec![2.0]);
+    }
+
+    #[test]
+    fn stem_descriptor_signatures_cover_supported_forms() {
+        let labels: Vec<&str> = STEM_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"h = stem(Y)"));
+        assert!(labels.contains(&"h = stem(Y, LineSpec)"));
+        assert!(labels.contains(&"h = stem(X, Y)"));
+        assert!(labels.contains(&"h = stem(ax, Y, Name, Value, ...)"));
+        assert!(labels.contains(&"h = stem(ax, X, Y, Name, Value, ...)"));
+    }
+
+    #[test]
+    fn stem_missing_input_uses_stable_identifier() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let err = stem_builtin(vec![]).expect_err("missing args should fail");
+        assert_eq!(err.identifier(), STEM_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

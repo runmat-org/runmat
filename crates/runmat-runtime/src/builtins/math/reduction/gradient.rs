@@ -1,7 +1,11 @@
 //! MATLAB-compatible `gradient` builtin with scalar-spacing GPU residency.
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
-use runmat_builtins::{ComplexTensor, ResolveContext, Tensor, Type, Value};
+use runmat_builtins::{
+    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
+    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ComplexTensor, ResolveContext, Tensor, Type, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -16,12 +20,153 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "gradient";
 
-fn gradient_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(NAME).build()
-}
-
 fn gradient_type(args: &[Type], ctx: &ResolveContext) -> Type {
     numeric_unary_type(args, ctx)
+}
+
+const GRADIENT_OUTPUT_G: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "G",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Primary gradient component.",
+}];
+
+const GRADIENT_OUTPUT_GS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "Gi",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Variadic,
+    default: None,
+    description: "Gradient components ordered by MATLAB axis semantics.",
+}];
+
+const GRADIENT_INPUTS_F: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "F",
+    ty: BuiltinParamType::Any,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Input scalar or array.",
+}];
+
+const GRADIENT_INPUTS_F_H: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "F",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar or array.",
+    },
+    BuiltinParamDescriptor {
+        name: "h",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "Scalar spacing shared across all output dimensions.",
+    },
+];
+
+const GRADIENT_INPUTS_F_HS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "F",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Input scalar or array.",
+    },
+    BuiltinParamDescriptor {
+        name: "h_i",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Per-dimension scalar spacings (one per requested gradient component).",
+    },
+];
+
+const GRADIENT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+    BuiltinSignatureDescriptor {
+        label: "G = gradient(F)",
+        inputs: &GRADIENT_INPUTS_F,
+        outputs: &GRADIENT_OUTPUT_G,
+    },
+    BuiltinSignatureDescriptor {
+        label: "G = gradient(F, h)",
+        inputs: &GRADIENT_INPUTS_F_H,
+        outputs: &GRADIENT_OUTPUT_G,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[G1, G2, ...] = gradient(F)",
+        inputs: &GRADIENT_INPUTS_F,
+        outputs: &GRADIENT_OUTPUT_GS,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[G1, G2, ...] = gradient(F, h1, h2, ...)",
+        inputs: &GRADIENT_INPUTS_F_HS,
+        outputs: &GRADIENT_OUTPUT_GS,
+    },
+];
+
+const GRADIENT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GRADIENT.INVALID_ARGUMENT",
+    identifier: Some("RunMat:gradient:InvalidArgument"),
+    when: "Output-count or spacing argument grammar is invalid.",
+    message: "gradient: invalid argument",
+};
+
+const GRADIENT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GRADIENT.INVALID_INPUT",
+    identifier: Some("RunMat:gradient:InvalidInput"),
+    when: "Input value cannot be converted to a supported gradient domain.",
+    message: "gradient: invalid input",
+};
+
+const GRADIENT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GRADIENT.INTERNAL",
+    identifier: Some("RunMat:gradient:Internal"),
+    when: "Gradient execution fails due to gather, conversion, allocation, or indexing operations.",
+    message: "gradient: internal failure",
+};
+
+const GRADIENT_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    GRADIENT_ERROR_INVALID_ARGUMENT,
+    GRADIENT_ERROR_INVALID_INPUT,
+    GRADIENT_ERROR_INTERNAL,
+];
+
+pub const GRADIENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
+    signatures: &GRADIENT_SIGNATURES,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
+    completion_policy: BuiltinCompletionPolicy::Public,
+    errors: &GRADIENT_ERRORS,
+};
+
+fn gradient_descriptor_error_with_message(
+    message: impl Into<String>,
+    error: &'static BuiltinErrorDescriptor,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+fn gradient_descriptor_error_with_detail(
+    error: &'static BuiltinErrorDescriptor,
+    detail: impl AsRef<str>,
+) -> RuntimeError {
+    gradient_descriptor_error_with_message(format!("{}: {}", error.message, detail.as_ref()), error)
+}
+
+fn gradient_invalid_argument(detail: impl AsRef<str>) -> RuntimeError {
+    gradient_descriptor_error_with_detail(&GRADIENT_ERROR_INVALID_ARGUMENT, detail)
+}
+
+fn gradient_invalid_input(detail: impl AsRef<str>) -> RuntimeError {
+    gradient_descriptor_error_with_detail(&GRADIENT_ERROR_INVALID_INPUT, detail)
+}
+
+fn gradient_internal_error(detail: impl AsRef<str>) -> RuntimeError {
+    gradient_descriptor_error_with_detail(&GRADIENT_ERROR_INTERNAL, detail)
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::gradient")]
@@ -55,10 +200,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "gradient",
     category = "math/reduction",
-    summary = "Numerical gradients using central differences with MATLAB-compatible output ordering.",
+    summary = "Compute numerical gradients.",
     keywords = "gradient,numerical gradient,finite difference,vector field,gpu",
     accel = "gradient",
     type_resolver(gradient_type),
+    descriptor(crate::builtins::math::reduction::gradient::GRADIENT_DESCRIPTOR),
     builtin_path = "crate::builtins::math::reduction::gradient"
 )]
 async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -69,7 +215,7 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
 
     let available_outputs = gradient_output_dims(value_shape(&value), value_len(&value));
     if requested_outputs > available_outputs.len() {
-        return Err(gradient_error(format!(
+        return Err(gradient_invalid_argument(format!(
             "gradient: requested {requested_outputs} outputs, but input supports at most {}",
             available_outputs.len()
         )));
@@ -121,7 +267,7 @@ fn evaluate_host_gradient_outputs(
             Ok(outputs)
         }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(gradient_error)?;
+            let tensor = tensor::logical_to_tensor(&logical).map_err(gradient_invalid_input)?;
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
@@ -134,7 +280,8 @@ fn evaluate_host_gradient_outputs(
             Ok(outputs)
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            let tensor = tensor::value_into_tensor_for(NAME, value).map_err(gradient_error)?;
+            let tensor =
+                tensor::value_into_tensor_for(NAME, value).map_err(gradient_invalid_input)?;
             let mut outputs = Vec::with_capacity(requested_dims.len());
             for &dim in requested_dims {
                 let spacing = spacing_for_dim(dim, requested_dims, all_spacings);
@@ -176,7 +323,7 @@ fn evaluate_host_gradient_outputs(
             }
             Ok(outputs)
         }
-        other => Err(gradient_error(format!(
+        other => Err(gradient_invalid_input(format!(
             "gradient: unsupported input type {:?}; expected numeric or logical data",
             other
         ))),
@@ -239,7 +386,7 @@ async fn parse_spacings(args: &[Value], available_dims: usize) -> BuiltinResult<
             }
             Ok(spacings)
         }
-        _ => Err(gradient_error(format!(
+        _ => Err(gradient_invalid_argument(format!(
             "gradient: expected 0, 1, or {available_dims} scalar spacing arguments"
         ))),
     }
@@ -248,7 +395,7 @@ async fn parse_spacings(args: &[Value], available_dims: usize) -> BuiltinResult<
 async fn parse_scalar_spacing(value: &Value) -> BuiltinResult<f64> {
     match value {
         Value::Tensor(tensor) if tensor.data.is_empty() => {
-            return Err(gradient_error(
+            return Err(gradient_invalid_argument(
                 "gradient: empty spacing arguments are not supported",
             ))
         }
@@ -257,18 +404,22 @@ async fn parse_scalar_spacing(value: &Value) -> BuiltinResult<f64> {
 
     let Some(spacing) = tensor::scalar_f64_from_value_async(value)
         .await
-        .map_err(gradient_error)?
+        .map_err(gradient_invalid_argument)?
     else {
-        return Err(gradient_error(
+        return Err(gradient_invalid_argument(
             "gradient: only scalar spacings are supported in this implementation",
         ));
     };
 
     if !spacing.is_finite() {
-        return Err(gradient_error("gradient: spacing must be finite"));
+        return Err(gradient_invalid_argument(
+            "gradient: spacing must be finite",
+        ));
     }
     if spacing == 0.0 {
-        return Err(gradient_error("gradient: spacing must be nonzero"));
+        return Err(gradient_invalid_argument(
+            "gradient: spacing must be nonzero",
+        ));
     }
     Ok(spacing)
 }
@@ -365,7 +516,7 @@ pub fn gradient_real_tensor_host(
         // matlab_gradient_shape returned an empty vec (untyped empty tensor).
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
         return Tensor::new_with_dtype(Vec::new(), empty_shape, dtype)
-            .map_err(|e| gradient_error(format!("gradient: {e}")));
+            .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
     }
 
     while shape.len() <= dim_index {
@@ -392,11 +543,11 @@ pub fn gradient_real_tensor_host(
     if len_dim > 1 {
         let block = stride_before
             .checked_mul(len_dim)
-            .ok_or_else(|| gradient_error("gradient: block size overflow"))?;
+            .ok_or_else(|| gradient_internal_error("gradient: block size overflow"))?;
         for after in 0..stride_after {
             let base = after
                 .checked_mul(block)
-                .ok_or_else(|| gradient_error("gradient: indexing overflow"))?;
+                .ok_or_else(|| gradient_internal_error("gradient: indexing overflow"))?;
             for before in 0..stride_before {
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
@@ -412,7 +563,8 @@ pub fn gradient_real_tensor_host(
         }
     }
 
-    Tensor::new_with_dtype(out, shape, dtype).map_err(|e| gradient_error(format!("gradient: {e}")))
+    Tensor::new_with_dtype(out, shape, dtype)
+        .map_err(|e| gradient_internal_error(format!("gradient: {e}")))
 }
 
 pub fn gradient_complex_tensor_host(
@@ -429,7 +581,7 @@ pub fn gradient_complex_tensor_host(
         // before the early return, which would produce product ≠ 0 for empty data.
         let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
         return ComplexTensor::new(Vec::new(), empty_shape)
-            .map_err(|e| gradient_error(format!("gradient: {e}")));
+            .map_err(|e| gradient_internal_error(format!("gradient: {e}")));
     }
 
     while shape.len() <= dim_index {
@@ -456,11 +608,11 @@ pub fn gradient_complex_tensor_host(
     if len_dim > 1 {
         let block = stride_before
             .checked_mul(len_dim)
-            .ok_or_else(|| gradient_error("gradient: block size overflow"))?;
+            .ok_or_else(|| gradient_internal_error("gradient: block size overflow"))?;
         for after in 0..stride_after {
             let base = after
                 .checked_mul(block)
-                .ok_or_else(|| gradient_error("gradient: indexing overflow"))?;
+                .ok_or_else(|| gradient_internal_error("gradient: indexing overflow"))?;
             for before in 0..stride_before {
                 for k in 0..len_dim {
                     let idx = base + before + k * stride_before;
@@ -485,7 +637,7 @@ pub fn gradient_complex_tensor_host(
         }
     }
 
-    ComplexTensor::new(out, shape).map_err(|e| gradient_error(format!("gradient: {e}")))
+    ComplexTensor::new(out, shape).map_err(|e| gradient_internal_error(format!("gradient: {e}")))
 }
 
 fn sub_complex(lhs: (f64, f64), rhs: (f64, f64)) -> (f64, f64) {
@@ -515,6 +667,35 @@ mod tests {
 
     fn gradient_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::gradient_builtin(value, rest))
+    }
+
+    #[test]
+    fn gradient_descriptor_signatures_cover_core_forms() {
+        let labels: Vec<&str> = GRADIENT_DESCRIPTOR
+            .signatures
+            .iter()
+            .map(|sig| sig.label)
+            .collect();
+        assert!(labels.contains(&"G = gradient(F)"));
+        assert!(labels.contains(&"G = gradient(F, h)"));
+        assert!(labels.contains(&"[G1, G2, ...] = gradient(F)"));
+        assert!(labels.contains(&"[G1, G2, ...] = gradient(F, h1, h2, ...)"));
+    }
+
+    #[test]
+    fn gradient_descriptor_errors_have_stable_codes() {
+        assert!(GRADIENT_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == GRADIENT_ERROR_INVALID_ARGUMENT.code));
+        assert!(GRADIENT_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == GRADIENT_ERROR_INVALID_INPUT.code));
+        assert!(GRADIENT_DESCRIPTOR
+            .errors
+            .iter()
+            .any(|error| error.code == GRADIENT_ERROR_INTERNAL.code));
     }
 
     #[test]
@@ -598,6 +779,7 @@ mod tests {
         let spacing = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
         let err =
             gradient_builtin(Value::Tensor(tensor), vec![Value::Tensor(spacing)]).unwrap_err();
+        assert_eq!(err.identifier(), GRADIENT_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("scalar"));
     }
 
@@ -606,6 +788,7 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let _guard = crate::output_count::push_output_count(Some(2));
         let err = gradient_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
+        assert_eq!(err.identifier(), GRADIENT_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("requested 2 outputs"));
     }
 
