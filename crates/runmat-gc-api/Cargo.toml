@@ -1,6 +1,6 @@
 [package]
 name = "runmat-gc-api"
-version = "0.4.1"
+version = "0.4.9"
 edition = "2021"
 description = "Public API types for the RunMat garbage collector"
 license-file = "../LICENSE.md"
