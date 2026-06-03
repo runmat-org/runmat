@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, panic, sync::Arc};
 
 use crate::core::{Camera, PlotRenderConfig, PlotRenderer, RenderResult};
 use crate::gpu::util::map_read_async;
@@ -16,6 +16,7 @@ use egui_wgpu::ScreenDescriptor;
 
 pub const HEADLESS_GPU_ADAPTER_UNAVAILABLE: &str = "Failed to find suitable GPU adapter";
 pub const HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX: &str = "Failed to create device:";
+pub const HEADLESS_GPU_CONTEXT_PANICKED_PREFIX: &str = "Headless GPU context creation panicked:";
 
 /// Renderer adapter for external/native surface targets owned by a host runtime.
 pub struct NativeSurfaceRenderContext {
@@ -713,7 +714,13 @@ async fn create_headless_context(
         height
     );
 
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    let instance = panic::catch_unwind(|| wgpu::Instance::new(wgpu::InstanceDescriptor::default()))
+        .map_err(|payload| {
+            format!(
+                "{HEADLESS_GPU_CONTEXT_PANICKED_PREFIX} {}",
+                panic_payload_to_string(payload)
+            )
+        })?;
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -740,6 +747,17 @@ async fn create_headless_context(
 pub fn is_headless_gpu_unavailable_error(err: &str) -> bool {
     err.contains(HEADLESS_GPU_ADAPTER_UNAVAILABLE)
         || err.contains(HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX)
+        || err.contains(HEADLESS_GPU_CONTEXT_PANICKED_PREFIX)
+}
+
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
 }
 
 pub async fn render_figure_rgba_bytes_interactive_with_camera(
@@ -978,4 +996,16 @@ pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and
         rgba.len()
     );
     encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn headless_gpu_panic_errors_are_fallback_eligible() {
+        assert!(is_headless_gpu_unavailable_error(
+            "Headless GPU context creation panicked: called `Option::unwrap()` on a `None` value"
+        ));
+    }
 }
