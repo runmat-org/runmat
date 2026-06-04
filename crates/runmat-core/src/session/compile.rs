@@ -168,13 +168,51 @@ fn private_parent_dir_for_source(path: &Path) -> Option<PathBuf> {
     private_dir.parent().map(Path::to_path_buf)
 }
 
+fn source_paths_equivalent(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if let (Ok(left), Ok(right)) = (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+            if left == right {
+                return true;
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        windows_source_path_key(left) == windows_source_path_key(right)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(windows)]
+fn windows_source_path_key(path: &Path) -> String {
+    let mut text = path.to_string_lossy().replace('/', "\\");
+    if let Some(stripped) = text.strip_prefix(r"\\?\UNC\") {
+        text = format!(r"\\{stripped}");
+    } else if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        text = stripped.to_string();
+    }
+    while text.ends_with('\\') && text.len() > 3 {
+        text.pop();
+    }
+    text.to_ascii_lowercase()
+}
+
 fn private_source_visible_to(primary_source_path: &Path, source_path: &Path) -> bool {
     let Some(private_parent) = private_parent_dir_for_source(source_path) else {
         return true;
     };
     primary_source_path
         .parent()
-        .is_some_and(|caller_dir| caller_dir == private_parent)
+        .is_some_and(|caller_dir| source_paths_equivalent(caller_dir, &private_parent))
 }
 
 fn function_owner_scope_from_qualified_name(qualified_name: &str) -> String {
@@ -414,7 +452,7 @@ async fn discover_companion_from_composition_graph_async(
                         .project_root
                         .join(&source.source_root)
                         .join(&source.relative_path);
-                    if file_path == primary_source_path {
+                    if source_paths_equivalent(&file_path, primary_source_path) {
                         continue;
                     }
                     let Ok(contents) = runmat_filesystem::read_to_string_async(&file_path).await
@@ -508,7 +546,7 @@ pub(super) async fn discover_companion_source_statements_async(
         };
         for entry in entries {
             let path = entry.path().to_path_buf();
-            if path == primary_source_path {
+            if source_paths_equivalent(&path, &primary_source_path) {
                 continue;
             }
             if entry.is_dir() {

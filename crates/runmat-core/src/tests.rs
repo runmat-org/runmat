@@ -115,6 +115,43 @@ fn outcome_has_named_upsert(
     })
 }
 
+fn outcome_named_upsert_value<'a>(
+    outcome: &'a abi::ExecutionOutcome,
+    name: &str,
+) -> Option<&'a runmat_builtins::Value> {
+    outcome.workspace_delta.upserts.iter().find_map(|upsert| {
+        let matches_name = match &upsert.key {
+            abi::WorkspaceBindingKey::Interactive {
+                name: binding_name, ..
+            } => binding_name.0 == name,
+            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
+            abi::WorkspaceBindingKey::Global { .. }
+            | abi::WorkspaceBindingKey::Persistent { .. } => false,
+        };
+        matches_name.then_some(&upsert.value)
+    })
+}
+
+fn comparable_path_text(path: &str) -> String {
+    let mut text = path.replace('\\', "/");
+    if let Some(stripped) = text.strip_prefix("//?/UNC/") {
+        text = format!("//{stripped}");
+    } else if let Some(stripped) = text.strip_prefix("//?/") {
+        text = stripped.to_string();
+    }
+    while text.contains("/./") {
+        text = text.replace("/./", "/");
+    }
+    #[cfg(windows)]
+    {
+        text.to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        text
+    }
+}
+
 fn outcome_has_upsert_name(outcome: &abi::ExecutionOutcome, name: &str) -> bool {
     outcome
         .workspace_delta
@@ -1508,46 +1545,46 @@ roots = ["."]
             outcome.diagnostics
         );
     };
+    let assert_named_path = |name: &str, expected: PathBuf| {
+        let actual = outcome_named_upsert_value(&outcome, name)
+            .and_then(|value| {
+                if let runmat_builtins::Value::String(text) = value {
+                    Some(text.as_str())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected {name} to contain a string path; upserts={:?}; diagnostics={:?}",
+                    outcome.workspace_delta.upserts, outcome.diagnostics
+                )
+            });
+        let expected = expected.to_string_lossy().to_string();
+        assert_eq!(
+            comparable_path_text(actual),
+            comparable_path_text(&expected),
+            "expected {name} path {expected:?}, got {actual:?}; upserts={:?}; diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    };
 
     assert_named(
         "private_name",
         runmat_builtins::Value::String("private_where".into()),
     );
-    assert_named(
-        "private_full",
-        runmat_builtins::Value::String(
-            source_root
-                .join("./private/private_where")
-                .to_string_lossy()
-                .to_string(),
-        ),
-    );
+    assert_named_path("private_full", source_root.join("./private/private_where"));
     assert_named(
         "package_name",
         runmat_builtins::Value::String("whereami".into()),
     );
-    assert_named(
-        "package_full",
-        runmat_builtins::Value::String(
-            source_root
-                .join("./+pkg/whereami")
-                .to_string_lossy()
-                .to_string(),
-        ),
-    );
+    assert_named_path("package_full", source_root.join("./+pkg/whereami"));
     assert_named(
         "class_name",
         runmat_builtins::Value::String("whereami".into()),
     );
-    assert_named(
-        "class_full",
-        runmat_builtins::Value::String(
-            source_root
-                .join("./@C/whereami")
-                .to_string_lossy()
-                .to_string(),
-        ),
-    );
+    assert_named_path("class_full", source_root.join("./@C/whereami"));
 }
 
 #[test]
@@ -9430,6 +9467,59 @@ fn dynamic_workspace_evalin_base_and_assignin_base_work_from_path_source_functio
         "path_result",
         &runmat_builtins::Value::Num(21.0)
     ));
+}
+
+#[test]
+fn dynamic_workspace_eval_preserves_source_context_in_path_source() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source_path = tmp.path().join("dynamic_workspace_mfilename.m");
+    std::fs::write(
+        &source_path,
+        r#"
+        eval_name = eval('mfilename()');
+        eval_full = eval('mfilename("fullpath")');
+        direct_full = mfilename("fullpath");
+    "#,
+    )
+    .expect("write dynamic workspace mfilename source");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = execute_path_request(&mut session, source_path.to_string_lossy().as_ref())
+        .expect("execute path source");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "eval_name",
+        &runmat_builtins::Value::String("dynamic_workspace_mfilename".into())
+    ));
+
+    let assert_named_path = |name: &str, expected: PathBuf| {
+        let actual = outcome_named_upsert_value(&outcome, name)
+            .and_then(|value| {
+                if let runmat_builtins::Value::String(text) = value {
+                    Some(text.as_str())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected {name} to contain a string path; upserts={:?}; diagnostics={:?}",
+                    outcome.workspace_delta.upserts, outcome.diagnostics
+                )
+            });
+        let expected = expected.to_string_lossy().to_string();
+        assert_eq!(
+            comparable_path_text(actual),
+            comparable_path_text(&expected),
+            "expected {name} path {expected:?}, got {actual:?}; upserts={:?}; diagnostics={:?}",
+            outcome.workspace_delta.upserts,
+            outcome.diagnostics
+        );
+    };
+
+    let expected_full = source_path.with_extension("");
+    assert_named_path("eval_full", expected_full.clone());
+    assert_named_path("direct_full", expected_full);
 }
 
 #[test]
