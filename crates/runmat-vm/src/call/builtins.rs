@@ -1,10 +1,11 @@
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
+use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
 use crate::interpreter::runner::interpret_with_vars;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
     replace_workspace_target_state, workspace_assign_target, workspace_target_snapshot,
-    WorkspaceTarget,
+    WorkspaceSnapshot, WorkspaceTarget,
 };
 use runmat_builtins::Value;
 use runmat_hir::{QualifiedName, SymbolName};
@@ -12,6 +13,9 @@ use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_thread_local::runmat_thread_local;
 use std::collections::{HashMap, HashSet};
+
+#[cfg(not(target_arch = "wasm32"))]
+const DYNAMIC_EVAL_STACK_BYTES: usize = 32 * 1024 * 1024;
 
 #[cfg(feature = "native-accel")]
 fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
@@ -460,12 +464,14 @@ async fn eval_workspace_source(
     else {
         return Ok(Value::OutputList(Vec::new()));
     };
-    let _pending_workspace =
-        crate::runtime::workspace::push_pending_workspace(frame.names.clone(), frame.assigned);
     let target_vars = unsafe { &mut *frame.vars_ptr };
-    let outcome = interpret_with_vars(&bytecode, target_vars, Some("<eval>")).await;
-    let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
-    let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
+    let (outcome, updated_workspace) = interpret_dynamic_workspace_eval(
+        &bytecode,
+        target_vars,
+        frame.names.clone(),
+        frame.assigned,
+    )
+    .await?;
     if let Some((names, assigned)) = updated_workspace {
         replace_workspace_target_state(target, names, assigned)
             .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("eval: {err}")))?;
@@ -481,6 +487,74 @@ async fn eval_workspace_source(
             Ok(Value::Num(0.0))
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn interpret_dynamic_workspace_eval(
+    bytecode: &Bytecode,
+    target_vars: &mut Vec<Value>,
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+) -> Result<
+    (
+        Result<InterpreterOutcome, RuntimeError>,
+        Option<WorkspaceSnapshot>,
+    ),
+    RuntimeError,
+> {
+    let _pending_workspace = crate::runtime::workspace::push_pending_workspace(names, assigned);
+    let outcome = interpret_with_vars(bytecode, target_vars, Some("<eval>")).await;
+    let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
+    let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
+    Ok((outcome, updated_workspace))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn interpret_dynamic_workspace_eval(
+    bytecode: &Bytecode,
+    target_vars: &mut Vec<Value>,
+    names: HashMap<String, usize>,
+    assigned: HashSet<String>,
+) -> Result<
+    (
+        Result<InterpreterOutcome, RuntimeError>,
+        Option<WorkspaceSnapshot>,
+    ),
+    RuntimeError,
+> {
+    let source_catalog_entries = runmat_runtime::source_context::source_catalog_entries();
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name("runmat-dynamic-eval".to_string())
+            .stack_size(DYNAMIC_EVAL_STACK_BYTES)
+            .spawn_scoped(scope, move || {
+                let _source_catalog_guard =
+                    runmat_runtime::source_context::replace_source_catalog(source_catalog_entries);
+                let _pending_workspace =
+                    crate::runtime::workspace::push_pending_workspace(names, assigned);
+                let outcome = futures::executor::block_on(interpret_with_vars(
+                    bytecode,
+                    target_vars,
+                    Some("<eval>"),
+                ));
+                let updated_workspace = crate::runtime::workspace::take_updated_workspace_state();
+                let _ = crate::runtime::workspace::take_updated_workspace_assigned_report();
+                (outcome, updated_workspace)
+            })
+            .map_err(|err| {
+                mex(
+                    "DynamicWorkspaceEvalThreadSpawnFailed",
+                    &format!("eval: failed to spawn dynamic eval thread: {err}"),
+                )
+            })?;
+
+        handle.join().map_err(|_| {
+            mex(
+                "DynamicWorkspaceEvalThreadPanic",
+                "eval: dynamic eval thread panicked",
+            )
+        })
+    })
 }
 
 fn compile_dynamic_workspace_eval(

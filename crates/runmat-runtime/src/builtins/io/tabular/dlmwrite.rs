@@ -1051,6 +1051,7 @@ unsafe fn platform_snprintf(
 }
 
 #[cfg(all(windows, target_env = "msvc"))]
+#[link(name = "legacy_stdio_definitions")]
 extern "C" {
     fn _snprintf(buffer: *mut c_char, size: usize, fmt: *const c_char, ...) -> c_int;
 }
