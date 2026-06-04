@@ -7,7 +7,11 @@ use runmat_accelerate_api::{
 };
 
 fn register_provider() -> &'static dyn AccelProvider {
+    #[cfg(target_os = "windows")]
+    std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
+    #[cfg(not(target_os = "windows"))]
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f64");
+
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default());
     runmat_accelerate_api::provider().expect("wgpu provider registered")
 }
