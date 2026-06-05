@@ -215,6 +215,7 @@ fn test_request_host_policy_disables_top_level_await() {
             requested_outputs: runmat_hir::RequestedOutputCount::Zero,
             workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(13)),
         }))
+        .result
         .expect_err("request should reject top-level await when host policy disables it");
         let RunError::Semantic(err) = err else {
             panic!("expected semantic top-level-await policy error");

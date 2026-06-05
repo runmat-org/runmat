@@ -81,7 +81,7 @@ fn execute_text_request_named_source(
         abi::HostExecutionPolicy::default(),
         session.workspace_handle(),
     );
-    block_on(session.execute_request(request))
+    block_on(session.execute_request(request)).result
 }
 
 fn execute_path_request(
@@ -94,7 +94,7 @@ fn execute_path_request(
         abi::HostExecutionPolicy::default(),
         session.workspace_handle(),
     );
-    block_on(session.execute_request(request))
+    block_on(session.execute_request(request)).result
 }
 
 fn outcome_has_named_upsert(
@@ -1836,6 +1836,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(17)),
     }))
+    .result
     .expect("command syntax should execute");
     let h_is_logical_scalar = outcome.workspace_delta.upserts.iter().any(|upsert| {
         let is_h = match &upsert.key {
@@ -1872,6 +1873,7 @@ fn execute_request_rejects_command_syntax_in_strict_mode() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(18)),
     }))
+    .result
     .expect_err("strict compatibility should reject command syntax");
     let RunError::Syntax(syntax) = err else {
         panic!("expected syntax error for strict command syntax rejection");
@@ -1898,6 +1900,7 @@ fn execute_request_supports_warning_off_all_command_rewrite() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(19)),
     }))
+    .result
     .expect("warning command syntax should execute");
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -1922,6 +1925,7 @@ fn execute_request_supports_clearvars_name_command_rewrite() {
             workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(20)),
         }),
     )
+    .result
     .expect("clearvars command syntax should execute");
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -1948,6 +1952,7 @@ fn execute_request_supports_close_all_command_rewrite() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(21)),
     }))
+    .result
     .expect("close all command syntax should execute");
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -1971,6 +1976,7 @@ fn execute_request_supports_clearvars_except_command_rewrite() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(22)),
     }))
+    .result
     .expect("clearvars -except command syntax should execute");
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -2002,6 +2008,7 @@ fn execute_request_rejects_clearvars_except_without_names_command_rewrite() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(23)),
     }))
+    .result
     .expect("request should complete with runtime diagnostic");
     assert!(
         outcome.diagnostics.iter().any(|diag| diag
@@ -2087,6 +2094,7 @@ fn execute_request_supports_format_command_rewrite_through_semantic_pipeline() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(24)),
     }))
+    .result
     .expect("format command syntax should execute");
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -2345,6 +2353,7 @@ fn execute_request_uses_request_workspace_handle() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace,
     }))
+    .result
     .expect("exec succeeds");
 
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2369,10 +2378,74 @@ fn execute_request_honors_zero_requested_outputs() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(9)),
     }))
+    .result
     .expect("exec succeeds");
 
     assert!(outcome.flow.is_no_value());
     assert_eq!(outcome.display_events.len(), 1);
+}
+
+#[test]
+fn execute_request_path_error_returns_resolved_source_context() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source_path = dir.path().join("source-context-error.m");
+    let source_text = "ss\nx = 1;\n";
+    std::fs::write(&source_path, source_text).expect("write test source");
+    let source_path = source_path.to_string_lossy().to_string();
+
+    let response = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Path(source_path.clone()),
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(25)),
+    }));
+
+    assert_eq!(response.source_context.source_name(), source_path);
+    assert_eq!(response.source_context.source_text(), Some(source_text));
+    assert!(matches!(
+        response.source_context.identity,
+        Some(abi::SourceIdentity::PathAndContentHash { .. })
+    ));
+    let err = response.result.expect_err("undefined name should fail");
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic error for undefined path source name");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+    assert!(err.span.is_some(), "semantic error should carry a span");
+}
+
+#[test]
+fn execute_request_runtime_diagnostic_preserves_span_and_callstack() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "x = [1];\ny = x(2);\n";
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "runtime-span.m".to_string(),
+            text: source.to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy::default(),
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(26)),
+    }))
+    .result
+    .expect("runtime failures are returned as outcome diagnostics");
+
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == abi::DiagnosticSeverity::Error)
+        .expect("runtime error diagnostic");
+    assert!(
+        diagnostic.span.is_some(),
+        "runtime diagnostic should preserve VM source span"
+    );
+    assert!(
+        !diagnostic.callstack.is_empty(),
+        "runtime diagnostic should preserve VM callstack"
+    );
 }
 
 #[test]
@@ -2391,6 +2464,7 @@ fn execute_request_honors_top_level_await_host_policy() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(11)),
     }))
+    .result
     .expect_err("request should reject top-level await when host policy disables it");
     let RunError::Semantic(err) = err else {
         panic!("expected semantic top-level-await policy error");
@@ -9567,6 +9641,7 @@ fn dynamic_workspace_execute_request_can_disable_dynamic_eval_host_policy() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: session.workspace_handle(),
     }))
+    .result
     .expect("request should return an outcome with a policy diagnostic");
     assert_eq!(outcome.diagnostics.len(), 1);
     assert_eq!(outcome.diagnostics[0].code, "RunMat:DynamicEvalDisabled");
@@ -9592,6 +9667,7 @@ fn dynamic_workspace_execute_request_dynamic_eval_policy_does_not_block_assignin
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: session.workspace_handle(),
     }))
+    .result
     .expect("assignin should remain available");
     assert!(outcome.diagnostics.is_empty());
     assert!(outcome_has_named_upsert(
