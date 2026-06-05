@@ -2,6 +2,53 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## [v0.5.0](https://github.com/runmat-org/runmat/compare/v0.4.9...v0.5.0)
+
+_June 3, 2026_
+
+A major compiler and runtime revision. RunMat now resolves MATLAB language semantics through a staged, Rust-like compiler pipeline before bytecode is generated, and adds manifest-backed multi-file projects. See the [0.5 release post](/blog/runmat-runtime-0-5-release) and the [compiler pipeline deep dive](/blog/inside-runmat-runtime-compiler-pipeline).
+
+### Runtime
+
+#### Added
+- Add [project composition](/docs/runtime/getting-started/projects) — `runmat.toml` and `runmat.json` manifests declare the package, source roots, local dependencies, and named entrypoints runnable through `runmat run <name>`, with source-root, package-folder (`+pkg`), class-folder (`@Class`), and private-helper discovery
+- Add source [`classdef`](/docs/runtime/classes) objects — class source now produces real runtime objects with constructors, properties, methods, inheritance, access rules, value vs handle behavior, static members, super calls, and custom indexing hooks (`subsref`/`subsasgn`) instead of a struct-like fallback
+- Expand [function](/docs/runtime/functions) semantics — requested-output-aware calls observable through `nargin`/`nargout`, `varargin`/`varargout`, local functions, nested functions that share parent scope, anonymous functions, captures, recursion, function handles, `feval`, and a supported `arguments` validation subset
+- Add explicit indexing context — reads, assignment targets, deletions, `end`, comma-list reads, function-argument expansion, and overloaded object indexing are resolved as distinct operations before bytecode
+- Add typed builtin descriptors — signatures, output behavior, completion policy, documentation, and stable error identifiers are shared across runtime execution, the [language server](/docs/runtime/lsp/features), and generated reference docs
+- Add structured [execution outcomes](/docs/runtime/session/execution-requests) — workspace deltas, display events, streamed output, diagnostics, observed workspace/environment effects, figures touched, profiling data, suspension state, and fusion-plan metadata for REPLs, notebooks, Desktop, WebAssembly, and embedded hosts
+- Add control-system builtins — `ss` now constructs state-space model objects from validated `A`/`B`/`C`/`D` matrices with continuous and discrete sample-time support, and `nyquist` now computes or plots SISO `tf` frequency responses with default or explicit frequency grids
+- Add communications builtins — `qammod` now maps integer symbols to QAM constellations with Gray, binary, and custom ordering plus `UnitAveragePower` and `OutputDataType` options, and `scatterplot` now visualizes complex samples with decimation, offset, marker styling, and target-axes forms
+- Add plotting and export builtins — `contour3` now creates 3-D contour line plots with contour levels rendered at their scalar heights, and `print` now exports figures through MATLAB-style figure-handle, filename, device, and resolution arguments
+- Add optimization option support — `optimoptions` now builds solver-specific option structs, validates name-value overrides, and copies or updates existing options structs for supported optimization solvers
+
+#### Changed
+- Migrate the compiler and runtime to a staged semantic [pipeline](/docs/runtime/compiler) — `source -> AST -> semantic HIR -> MIR -> MIR analysis -> VM layout + bytecode -> runtime/providers` — so names, functions, classes, output counts, indexing context, and workspace layout are resolved once and shared by the interpreter, language server, JIT, and acceleration planner
+- Remove the legacy AST-to-bytecode execution paths in favor of the semantic pipeline
+- Compile calls from typed callable identities and fallback policies — bound functions, builtins, dynamic names, external qualified names, methods, super calls, and `feval` targets share one [dispatch](/docs/runtime/vm/dispatch) model, preserving function-handle identity
+- Make workspace-visible bindings explicit — script exports, function locals, `ans`, and dynamic workspace operations route through VM workspace context
+- Drive acceleration and [fusion](/docs/runtime/gpu/fusion) planning from semantic facts — the compiler identifies fusion candidates, operation kinds, and effects, while the runtime and provider own GPU residency and concrete execution
+- Split the WGPU provider out of a monolithic implementation into state, initialization, helper, trait, and operation modules
+- Give the [JIT](/docs/runtime/jit) a tagged value ABI boundary — semantic function identity, requested output counts, expanded arguments, and non-scalar runtime values now cross host calls, with the interpreter remaining the correctness fallback
+
+### Desktop
+
+#### Added
+- Add [RunMat Desktop](/blog/introducing-runmat-desktop) — a local, GPU-accelerated workspace for MATLAB-syntax code with an editor, plots, variables, notebooks, run history, local file access, optional cloud projects, and a project-aware Agent
+
+### Agent
+
+#### Added
+- Add runnable Agent code blocks — RunMat/MATLAB-style snippets in Agent answers now render with editor controls, can be copied, and can be sent directly to runtime execution
+- Add project-scoped Agent persistence so projects can restore Agent state through Desktop project settings such as `persist_agents` in `runmat.toml`
+- Add local-to-cloud project conversion support for Agent and history flows that need a cloud project
+
+#### Changed
+- Make Agent activity easier to follow by grouping long activity runs and replacing “Thinking” labels with clearer “Working” language
+- Improve Agent execution and project synchronization across Desktop, browser, local, and cloud runtimes
+
+---
+
 ## [v0.4.9](https://github.com/runmat-org/runmat/compare/v0.4.8...v0.4.9)
 
 _May 22, 2026_
