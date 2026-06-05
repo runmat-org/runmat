@@ -9353,6 +9353,43 @@ fn dynamic_workspace_eval_mutates_and_reads_current_workspace() {
 }
 
 #[test]
+fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+        seed = 5;
+        try
+            eval('partial = 1; error("RunMat:eval:boom", "boom");');
+            err = "NOERR";
+        catch e
+            err = e.identifier;
+        end
+        after = seed + 1;
+    "#;
+    let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "err",
+        &runmat_builtins::Value::String("RunMat:eval:boom".into())
+    ));
+    assert!(outcome_has_named_upsert(
+        &outcome,
+        "after",
+        &runmat_builtins::Value::Num(6.0)
+    ));
+    assert!(
+        !outcome_has_upsert_name(&outcome, "partial"),
+        "failed eval must not publish partially assigned workspace variables"
+    );
+
+    let outcome = execute_text_request(&mut session, "exist('partial')").expect("read workspace");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("exist result should be readable");
+    assert_eq!(value.to_string(), "0");
+}
+
+#[test]
 fn dynamic_workspace_evalin_base_and_assignin_update_base_workspace() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = r#"
