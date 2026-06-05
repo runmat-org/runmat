@@ -472,9 +472,7 @@ async fn eval_workspace_source(
         frame.assigned,
     )
     .await?;
-    let vars = match outcome? {
-        crate::interpreter::api::InterpreterOutcome::Completed(vars) => vars,
-    };
+    let crate::interpreter::api::InterpreterOutcome::Completed(vars) = outcome?;
     let result = if requested_outputs == 0 {
         Value::OutputList(Vec::new())
     } else if let Some(slot) = result_slot {
