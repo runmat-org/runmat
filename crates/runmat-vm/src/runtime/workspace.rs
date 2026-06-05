@@ -413,8 +413,9 @@ pub fn workspace_target_snapshot(
     })
 }
 
-pub fn replace_workspace_target_state(
+pub fn replace_workspace_target_vars_and_state(
     target: WorkspaceTarget,
+    vars: Vec<Value>,
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
 ) -> Result<(), String> {
@@ -425,13 +426,14 @@ pub fn replace_workspace_target_state(
         let frame = stack
             .get_mut(index)
             .ok_or_else(|| "workspace state unavailable".to_string())?;
-        let vars = unsafe { &mut *frame.vars_ptr };
+        let target_vars = unsafe { &mut *frame.vars_ptr };
+        *target_vars = vars;
         frame.state.names = names;
         frame.state.assigned = assigned;
         frame.state.slot_lifecycle =
             lifecycle_from_names(&frame.state.names, &frame.state.assigned);
-        frame.state.data_ptr = vars.as_ptr();
-        frame.state.len = vars.len();
+        frame.state.data_ptr = target_vars.as_ptr();
+        frame.state.len = target_vars.len();
         Ok(())
     })
 }
