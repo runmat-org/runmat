@@ -145,7 +145,8 @@ fn fprintf_format_error_propagates_to_session_boundary() {
         engine.workspace_handle(),
     );
 
-    match futures::executor::block_on(engine.execute_request(request)) {
+    let response = futures::executor::block_on(engine.execute_request(request));
+    match response.result {
         Ok(outcome) => {
             assert!(
                 outcome.diagnostics.iter().any(|d| d.severity

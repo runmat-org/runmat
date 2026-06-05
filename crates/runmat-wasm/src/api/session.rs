@@ -122,13 +122,6 @@ impl RunMatWasm {
             ExecuteRequestSourcePayload::Text { text, .. } => text.clone(),
             ExecuteRequestSourcePayload::Path { path } => path.clone(),
         };
-        let (source_name, source_text): (Option<String>, Option<String>) =
-            match &request_payload.source {
-                ExecuteRequestSourcePayload::Text { name, text } => {
-                    (Some(name.clone()), Some(text.clone()))
-                }
-                ExecuteRequestSourcePayload::Path { path } => (Some(path.clone()), None),
-            };
         init_logging_once();
         let exec_span = info_span!(
             "runmat.execute",
@@ -215,9 +208,9 @@ impl RunMatWasm {
                 count => runmat_hir::RequestedOutputCount::Exactly(count as usize),
             };
         }
-        let exec_result = session.execute_request(request).await;
+        let exec_response = session.execute_request(request).await;
         *self.session.borrow_mut() = session;
-        let payload = match exec_result {
+        let payload = match exec_response.result {
             Ok(outcome) => {
                 if !outcome.diagnostics.iter().any(|diagnostic| {
                     diagnostic.severity == runmat_core::abi::DiagnosticSeverity::Error
@@ -230,7 +223,7 @@ impl RunMatWasm {
                         }
                     }
                 }
-                ExecutionPayload::from_outcome(outcome, &source_for_telemetry)
+                ExecutionPayload::from_outcome(outcome, &exec_response.source_context)
             }
             Err(err) => ExecutionPayload {
                 flow: serde_json::json!({ "kind": "no-value" }),
@@ -241,8 +234,8 @@ impl RunMatWasm {
                 used_jit: false,
                 error: Some(run_error_payload(
                     &err,
-                    source_name.as_deref(),
-                    source_text.as_deref(),
+                    Some(exec_response.source_context.source_name()),
+                    exec_response.source_context.source_text(),
                 )),
                 stdout: Vec::new(),
                 display_events: Vec::new(),

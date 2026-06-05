@@ -90,7 +90,6 @@ pub(crate) async fn execute_script_contents(
             name: source_name,
             text: content.clone(),
         },
-        Some(content),
         cli,
         config,
     )
@@ -103,13 +102,12 @@ async fn execute_script_path(
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let source_name = script.to_string_lossy().to_string();
-    execute_script_request(script, SourceInput::Path(source_name), None, cli, config).await
+    execute_script_request(script, SourceInput::Path(source_name), cli, config).await
 }
 
 async fn execute_script_request(
     script: PathBuf,
     request_source: SourceInput,
-    diagnostic_source_text: Option<String>,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
@@ -133,7 +131,8 @@ async fn execute_script_request(
         HostExecutionPolicy::default(),
         engine.workspace_handle(),
     );
-    let outcome = match engine.execute_request(request).await {
+    let response = engine.execute_request(request).await;
+    let outcome = match response.result {
         Ok(outcome) => outcome,
         Err(err) => {
             let failure = err.telemetry_failure_info();
@@ -149,12 +148,9 @@ async fn execute_script_request(
                     provider: capture_provider_snapshot(),
                 });
             }
-            let source_name = script.to_string_lossy().to_string();
-            let content_for_diagnostics = diagnostic_source_text
-                .unwrap_or_else(|| fs::read_to_string(&script).unwrap_or_default());
-            if let Some(diag) =
-                format_frontend_error(&err, source_name.as_str(), &content_for_diagnostics)
-            {
+            if let Some(diag) = response.source_context.source_text().and_then(|source| {
+                format_frontend_error(&err, response.source_context.source_name(), source)
+            }) {
                 eprintln!("{diag}");
             } else {
                 eprintln!("Execution error: {err}");

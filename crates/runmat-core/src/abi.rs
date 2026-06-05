@@ -57,6 +57,29 @@ impl ExecutionRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct ExecutionSourceContext {
+    pub name: String,
+    pub text: Option<String>,
+    pub identity: Option<SourceIdentity>,
+}
+
+impl ExecutionSourceContext {
+    pub fn source_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn source_text(&self) -> Option<&str> {
+        self.text.as_deref()
+    }
+}
+
+#[derive(Debug)]
+pub struct ExecutionResponse {
+    pub source_context: ExecutionSourceContext,
+    pub result: std::result::Result<ExecutionOutcome, crate::RunError>,
+}
+
+#[derive(Debug, Clone)]
 pub struct ExecutionOutcome {
     pub flow: RuntimeFlow,
     pub workspace_delta: WorkspaceDelta,
@@ -194,6 +217,8 @@ pub struct RuntimeDiagnostic {
     pub severity: DiagnosticSeverity,
     pub message: String,
     pub span: Option<Span>,
+    pub callstack: Vec<String>,
+    pub callstack_elided: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
