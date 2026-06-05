@@ -31,6 +31,22 @@ A major compiler and runtime revision. RunMat now resolves MATLAB language seman
 - Split the WGPU provider out of a monolithic implementation into state, initialization, helper, trait, and operation modules
 - Give the [JIT](/docs/runtime/jit) a tagged value ABI boundary — semantic function identity, requested output counts, expanded arguments, and non-scalar runtime values now cross host calls, with the interpreter remaining the correctness fallback
 
+### Desktop
+
+#### Added
+- Add [RunMat Desktop](/blog/introducing-runmat-desktop) — a local, GPU-accelerated workspace for MATLAB-syntax code with an editor, plots, variables, notebooks, run history, local file access, optional cloud projects, and a project-aware Agent
+
+### Agent
+
+#### Added
+- Add runnable Agent code blocks — RunMat/MATLAB-style snippets in Agent answers now render with editor controls, can be copied, and can be sent directly to runtime execution
+- Add project-scoped Agent persistence so projects can restore Agent state through Desktop project settings such as `persist_agents` in `runmat.toml`
+- Add local-to-cloud project conversion support for Agent and history flows that need a cloud project
+
+#### Changed
+- Make Agent activity easier to follow by grouping long activity runs and replacing “Thinking” labels with clearer “Working” language
+- Improve Agent execution and project synchronization across Desktop, browser, local, and cloud runtimes
+
 ---
 
 ## [v0.4.9](https://github.com/runmat-org/runmat/compare/v0.4.8...v0.4.9)
