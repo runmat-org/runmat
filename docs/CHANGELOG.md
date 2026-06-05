@@ -2,7 +2,7 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
-## [v0.5.0](https://github.com/runmat-org/runmat/compare/v0.4.9...v0.5.0)
+## [v0.5.0 ](https://github.com/runmat-org/runmat/compare/v0.4.9...v0.5.0) - June 2026
 
 _June 3, 2026_
 
@@ -49,7 +49,7 @@ A major compiler and runtime revision. RunMat now resolves MATLAB language seman
 
 ---
 
-## [v0.4.9](https://github.com/runmat-org/runmat/compare/v0.4.8...v0.4.9)
+## [v0.4.9](https://github.com/runmat-org/runmat/compare/v0.4.8...v0.4.9) - May 2026
 
 _May 22, 2026_
 
@@ -68,7 +68,7 @@ _May 22, 2026_
 
 ---
 
-## [v0.4.8](https://github.com/runmat-org/runmat/compare/v0.4.6...v0.4.8)
+## [v0.4.8](https://github.com/runmat-org/runmat/compare/v0.4.6...v0.4.8) - May 2026
 
 _May 15, 2026_
 
@@ -101,7 +101,7 @@ _May 15, 2026_
 
 ---
 
-## [v0.4.6](https://github.com/runmat-org/runmat/compare/v0.4.5...v0.4.6)
+## [v0.4.6](https://github.com/runmat-org/runmat/compare/v0.4.5...v0.4.6) - May 2026
 
 _May 8, 2026_
 
@@ -120,7 +120,7 @@ _May 8, 2026_
 
 ---
 
-## [v0.4.5](https://github.com/runmat-org/runmat/compare/v0.4.4...v0.4.5)
+## [v0.4.5](https://github.com/runmat-org/runmat/compare/v0.4.4...v0.4.5) - May 2026
 
 _May 1, 2026_
 
@@ -150,7 +150,7 @@ _May 1, 2026_
 
 ---
 
-## [v0.4.4](https://github.com/runmat-org/runmat/compare/v0.4.1...v0.4.4)
+## [v0.4.4](https://github.com/runmat-org/runmat/compare/v0.4.1...v0.4.4) - April 2026
 
 _April 24, 2026_
 
@@ -187,7 +187,7 @@ _April 24, 2026_
 
 ---
 
-## [v0.4.1](https://github.com/runmat-org/runmat/compare/v0.4.0...v0.4.1)
+## [v0.4.1](https://github.com/runmat-org/runmat/compare/v0.4.0...v0.4.1) - April 2026
 
 _April 15, 2026_
 
@@ -218,7 +218,7 @@ _April 15, 2026_
 
 ---
 
-## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...v0.4.0)
+## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...v0.4.0) - April 2026
 
 _April 13, 2026_
 
@@ -306,7 +306,7 @@ Other:
 
 ---
 
-## [v0.3.2](https://github.com/runmat-org/runmat/compare/v0.3.0...v0.3.2)
+## [v0.3.2](https://github.com/runmat-org/runmat/compare/v0.3.0...v0.3.2) - March 2026
 
 _March 24, 2026_
 
@@ -314,7 +314,7 @@ Deployment and infrastructure improvements for macOS, Windows, and Linux — no 
 
 ---
 
-## [v0.3.0](https://github.com/runmat-org/runmat/compare/v0.2.8...v0.3.0)
+## [v0.3.0](https://github.com/runmat-org/runmat/compare/v0.2.8...v0.3.0) - March 2026
 
 _March 24, 2026_
 
@@ -358,7 +358,7 @@ _March 24, 2026_
 
 ---
 
-## [v0.2.8](https://github.com/runmat-org/runmat/compare/v0.2.7...v0.2.8)
+## [v0.2.8](https://github.com/runmat-org/runmat/compare/v0.2.7...v0.2.8) - December 2025
 
 _December 22, 2025_
 
@@ -379,7 +379,7 @@ _December 22, 2025_
 
 ---
 
-## [v0.2.7](https://github.com/runmat-org/runmat/compare/v0.2.6...v0.2.7)
+## [v0.2.7](https://github.com/runmat-org/runmat/compare/v0.2.6...v0.2.7) - December 2025
 
 _December 2, 2025_
 
@@ -391,7 +391,7 @@ _December 2, 2025_
 
 ---
 
-## [v0.2.6](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.6)
+## [v0.2.6](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.6) - November 2025
 
 _November 21 – 24, 2025_
 
@@ -410,7 +410,7 @@ _[Fusion engine](/docs/fusion-guide):_
 
 ---
 
-## [v0.0.3](https://github.com/runmat-org/runmat/compare/v0.0.2...v0.0.3)
+## [v0.0.3](https://github.com/runmat-org/runmat/compare/v0.0.2...v0.0.3) - August 2025
 
 _August 25, 2025_
 
@@ -419,7 +419,7 @@ _August 25, 2025_
 
 ---
 
-## [v0.0.2](https://github.com/runmat-org/runmat/compare/v0.0.1...v0.0.2)
+## [v0.0.2](https://github.com/runmat-org/runmat/compare/v0.0.1...v0.0.2) - August 2025
 
 _August 19, 2025_
 
@@ -428,7 +428,7 @@ _August 19, 2025_
 
 ---
 
-## [v0.0.1](https://github.com/runmat-org/runmat/releases/tag/v0.0.1)
+## [v0.0.1](https://github.com/runmat-org/runmat/releases/tag/v0.0.1) - August 2025
 
 _August 10, 2025_
 
