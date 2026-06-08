@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, LogicalArray, Tensor, Value,
+    CharArray, LogicalArray, SparseTensor, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -196,7 +196,7 @@ async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::Int(i) => Ok(Value::Num(i.to_f64())),
         Value::Bool(flag) => Ok(Value::Num(if flag { 1.0 } else { 0.0 })),
         Value::Tensor(tensor) => Ok(Value::Tensor(tensor)),
-        Value::SparseTensor(sparse) => Ok(Value::SparseTensor(sparse)),
+        Value::SparseTensor(sparse) => double_from_sparse_tensor(sparse),
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::ComplexTensor(tensor) => Ok(Value::ComplexTensor(tensor)),
         Value::LogicalArray(array) => double_from_logical(array),
@@ -224,6 +224,16 @@ fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
     let tensor = tensor::logical_to_tensor(&array)
         .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<Value> {
+    let tensor = sparse.to_dense().map_err(|err| {
+        double_error_with_detail(
+            &DOUBLE_ERROR_INTERNAL,
+            format!("failed to densify sparse input: {err}"),
+        )
+    })?;
+    Ok(Value::Tensor(tensor))
 }
 
 fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
@@ -405,7 +415,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::ProviderPrecision;
-    use runmat_builtins::{IntValue, ResolveContext, Type};
+    use runmat_builtins::{IntValue, ResolveContext, SparseTensor, Type};
 
     fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::double_builtin(value, rest))
@@ -523,6 +533,20 @@ pub(crate) mod tests {
                 assert_eq!(t.data, tensor.data);
             }
             other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn double_sparse_tensor_densifies() {
+        let sparse = SparseTensor::new(3, 2, vec![0, 1, 2], vec![1, 2], vec![4.0, -1.0]).unwrap();
+        let result = double_builtin(Value::SparseTensor(sparse), Vec::new()).expect("double");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 2]);
+                assert_eq!(t.data, vec![0.0, 4.0, 0.0, 0.0, 0.0, -1.0]);
+            }
+            other => panic!("expected dense tensor, got {other:?}"),
         }
     }
 

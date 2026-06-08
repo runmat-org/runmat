@@ -293,7 +293,7 @@ fn nnz_host_value(value: Value, dim: Option<usize>) -> BuiltinResult<Value> {
 fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
     match value {
         Value::Tensor(tensor) => Ok(count_nonzero_tensor(tensor)),
-        Value::SparseTensor(sparse) => Ok(sparse.nnz()),
+        Value::SparseTensor(sparse) => Ok(count_nonzero_sparse(sparse)),
         Value::ComplexTensor(ct) => Ok(count_nonzero_complex_tensor(ct)),
         Value::LogicalArray(logical) => Ok(count_nonzero_logical(logical)),
         Value::CharArray(chars) => Ok(count_nonzero_char(chars)),
@@ -318,6 +318,15 @@ fn count_nonzero_value(value: &Value) -> BuiltinResult<usize> {
 fn count_nonzero_tensor(tensor: &Tensor) -> usize {
     tensor
         .data
+        .iter()
+        .copied()
+        .filter(|value| is_nonzero_scalar(*value))
+        .count()
+}
+
+fn count_nonzero_sparse(sparse: &SparseTensor) -> usize {
+    sparse
+        .values
         .iter()
         .copied()
         .filter(|value| is_nonzero_scalar(*value))
@@ -513,7 +522,9 @@ fn mask_from_sparse(sparse: &SparseTensor) -> BuiltinResult<Mask> {
                 let bit_idx = col_off.checked_add(row).ok_or_else(|| {
                     nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse index overflow")
                 })?;
-                bits[bit_idx] = 1;
+                if is_nonzero_scalar(sparse.values[idx]) {
+                    bits[bit_idx] = 1;
+                }
             }
         }
     }
@@ -644,6 +655,21 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn nnz_sparse_ignores_explicit_stored_zeros() {
+        let sparse = SparseTensor::new(
+            3,
+            2,
+            vec![0, 2, 4],
+            vec![0, 2, 1, 2],
+            vec![0.0, 5.0, 0.0, f64::NAN],
+        )
+        .unwrap();
+        let result = nnz_host_value(Value::SparseTensor(sparse), None).expect("nnz");
+        assert_eq!(result, Value::Num(2.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn nnz_matrix_dimension_one() {
         let tensor = Tensor::new(vec![1.0, 0.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let result = nnz_host_value(Value::Tensor(tensor), Some(1)).expect("nnz");
@@ -665,6 +691,37 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
                 assert_eq!(out.data, vec![2.0, 1.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn nnz_sparse_dimension_ignores_explicit_stored_zeros() {
+        let sparse = SparseTensor::new(
+            3,
+            2,
+            vec![0, 2, 4],
+            vec![0, 2, 1, 2],
+            vec![0.0, 5.0, 0.0, f64::NAN],
+        )
+        .unwrap();
+
+        let per_column = nnz_host_value(Value::SparseTensor(sparse.clone()), Some(1)).expect("nnz");
+        match per_column {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![1.0, 1.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+
+        let per_row = nnz_host_value(Value::SparseTensor(sparse), Some(2)).expect("nnz");
+        match per_row {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![3, 1]);
+                assert_eq!(out.data, vec![0.0, 0.0, 2.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

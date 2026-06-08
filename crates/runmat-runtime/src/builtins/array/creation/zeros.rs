@@ -4,7 +4,7 @@ use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ComplexTensor, LogicalArray, Value,
+    ComplexTensor, LogicalArray, SparseTensor, Value,
 };
 use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
@@ -552,6 +552,7 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
             Ok(Value::ComplexTensor(tensor))
         }
         Value::GpuTensor(handle) => zeros_like_gpu(handle, shape).await,
+        Value::SparseTensor(_) => zeros_sparse(shape),
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => zeros_single(shape),
             NumericDType::F64 => zeros_double(shape),
@@ -562,6 +563,16 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         Value::Num(_) | Value::Int(_) => zeros_double(shape),
         Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
         _ => zeros_double(shape),
+    }
+}
+
+fn zeros_sparse(shape: &[usize]) -> crate::BuiltinResult<Value> {
+    match shape {
+        [rows, cols] => Ok(Value::SparseTensor(SparseTensor::zeros(*rows, *cols))),
+        other => Err(builtin_error(format!(
+            "zeros: sparse 'like' output must be 2-D, got {} dimensions",
+            other.len()
+        ))),
     }
 }
 
@@ -706,6 +717,7 @@ async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>>
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
     match value {
         Value::Tensor(t) => Ok(t.shape.clone()),
+        Value::SparseTensor(t) => Ok(t.shape()),
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
         Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
@@ -721,7 +733,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{SparseTensor, Tensor};
 
     fn clear_accel_provider_state() -> test_support::AccelTestGuard {
         test_support::accel_test_lock()
@@ -869,6 +881,48 @@ pub(crate) mod tests {
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape, vec![2, 2]);
         assert!(tensor.data.iter().all(|&x| x == 0.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn zeros_like_sparse_preserves_sparse_storage_with_explicit_shape() {
+        let _guard = clear_accel_provider_state();
+        let proto = SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![10.0, 20.0]).unwrap();
+        let args = vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::from("like"),
+            Value::SparseTensor(proto),
+        ];
+        let result = block_on(zeros_builtin(args)).expect("zeros");
+        match result {
+            Value::SparseTensor(sparse) => {
+                assert_eq!(sparse.rows, 3);
+                assert_eq!(sparse.cols, 4);
+                assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0]);
+                assert!(sparse.row_indices.is_empty());
+                assert!(sparse.values.is_empty());
+            }
+            other => panic!("expected sparse tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn zeros_like_sparse_without_explicit_shape_uses_prototype_shape() {
+        let _guard = clear_accel_provider_state();
+        let proto = SparseTensor::zeros(2, 5);
+        let args = vec![Value::from("like"), Value::SparseTensor(proto)];
+        let result = block_on(zeros_builtin(args)).expect("zeros");
+        match result {
+            Value::SparseTensor(sparse) => {
+                assert_eq!(sparse.shape(), vec![2, 5]);
+                assert_eq!(sparse.col_ptrs, vec![0, 0, 0, 0, 0, 0]);
+                assert!(sparse.row_indices.is_empty());
+                assert!(sparse.values.is_empty());
+            }
+            other => panic!("expected sparse tensor, got {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
