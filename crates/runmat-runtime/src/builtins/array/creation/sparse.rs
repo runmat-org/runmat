@@ -17,6 +17,7 @@ use crate::builtins::common::spec::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "sparse";
+const SPARSE_DENSE_INPUT_VECTOR_LIMIT: usize = 10_000_000;
 
 const SPARSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -509,6 +510,24 @@ fn numeric_vector(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
             if !is_vector_shape(&shape) {
                 return Err(numeric_vector_error(value, name));
             }
+            let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+                sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!("sparse: {name} sparse vector dimensions overflow"),
+                )
+            })?;
+            if total_elements > SPARSE_DENSE_INPUT_VECTOR_LIMIT {
+                return Err(sparse_error(
+                    &SPARSE_ERROR_INVALID_INPUT,
+                    format!(
+                        "sparse: cannot densify sparse {name} vector {}x{} with {} stored entries ({} elements exceeds safe threshold)",
+                        sparse.rows,
+                        sparse.cols,
+                        sparse.nnz(),
+                        total_elements
+                    ),
+                ));
+            }
             sparse
                 .to_dense()
                 .map(|dense| dense.data)
@@ -732,5 +751,22 @@ pub(crate) mod tests {
         let index_err = parse_subscript(too_large, "row").unwrap_err();
         assert_eq!(index_err.identifier(), Some("RunMat:sparse:InvalidInput"));
         assert!(index_err.message().contains("maximum supported size"));
+    }
+
+    #[test]
+    fn sparse_triplets_reject_oversized_sparse_vector_before_densifying() {
+        let i = SparseTensor::zeros(SPARSE_DENSE_INPUT_VECTOR_LIMIT + 1, 1);
+        let j = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let v = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+
+        let err = sparse_builtin(vec![
+            Value::SparseTensor(i),
+            Value::Tensor(j),
+            Value::Tensor(v),
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.identifier(), Some("RunMat:sparse:InvalidInput"));
+        assert!(err.message().contains("exceeds safe threshold"));
     }
 }

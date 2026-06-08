@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CellArray, CharArray, LogicalArray, StringArray, Tensor, Value,
+    CellArray, CharArray, LogicalArray, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -44,6 +44,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "char";
+const CHAR_SPARSE_DENSE_ELEMENT_LIMIT: usize = 10_000_000;
 
 const CHAR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "C",
@@ -233,6 +234,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         }
         Value::Tensor(t) => tensor_rows(t),
         Value::SparseTensor(s) => {
+            ensure_sparse_dense_conversion(s)?;
             let dense = s.to_dense().map_err(char_flow)?;
             tensor_rows(&dense)
         }
@@ -354,6 +356,28 @@ fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
         }
     }
     Ok(rows)
+}
+
+fn ensure_sparse_dense_conversion(sparse: &SparseTensor) -> BuiltinResult<()> {
+    let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+        char_error_with_message(
+            "char: sparse matrix dimensions overflow",
+            &CHAR_ERROR_INVALID_INPUT,
+        )
+    })?;
+    if total_elements > CHAR_SPARSE_DENSE_ELEMENT_LIMIT {
+        return Err(char_error_with_message(
+            format!(
+                "char: cannot convert sparse tensor {}x{} with {} stored entries to dense character array ({} elements exceeds safe threshold)",
+                sparse.rows,
+                sparse.cols,
+                sparse.nnz(),
+                total_elements
+            ),
+            &CHAR_ERROR_INVALID_INPUT,
+        ));
+    }
+    Ok(())
 }
 
 fn number_to_char(value: f64) -> BuiltinResult<char> {
@@ -584,6 +608,15 @@ pub(crate) mod tests {
             char_builtin(vec![Value::Tensor(tensor)]).expect_err("should reject >2D tensor"),
         );
         assert!(err.contains("2-D"), "expected dimension error, got {err}");
+    }
+
+    #[test]
+    fn char_rejects_oversized_sparse_tensor_before_densifying() {
+        let sparse = SparseTensor::zeros(CHAR_SPARSE_DENSE_ELEMENT_LIMIT + 1, 1);
+        let err = char_builtin(vec![Value::SparseTensor(sparse)]).unwrap_err();
+
+        assert_eq!(err.identifier(), Some("RunMat:char:InvalidInput"));
+        assert!(err.message().contains("exceeds safe threshold"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

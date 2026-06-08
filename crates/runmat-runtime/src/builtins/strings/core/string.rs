@@ -3,7 +3,7 @@
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    CharArray, ComplexTensor, IntValue, LogicalArray, StringArray, Tensor, Value,
+    CharArray, ComplexTensor, IntValue, LogicalArray, SparseTensor, StringArray, Tensor, Value,
 };
 use runmat_macros::runtime_builtin;
 
@@ -93,6 +93,7 @@ const STRING_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescripto
 };
 
 const STRING_ERRORS: [BuiltinErrorDescriptor; 1] = [STRING_ERROR_INVALID_INPUT];
+const STRING_SPARSE_DENSE_ELEMENT_LIMIT: usize = 10_000_000;
 
 pub const STRING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &STRING_SIGNATURES,
@@ -545,6 +546,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             shape: t.shape,
         }),
         Value::SparseTensor(s) => {
+            ensure_sparse_dense_conversion(&s, "format argument")?;
             let dense = s.to_dense().map_err(string_flow)?;
             Ok(ArgumentData {
                 values: dense.data.into_iter().map(Value::Num).collect(),
@@ -683,15 +685,7 @@ async fn convert_to_string_array(
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
         Value::SparseTensor(sparse) => {
-            let total_elements = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
-                string_flow("string: sparse matrix dimensions overflow")
-            })?;
-            if total_elements > 10_000_000 {
-                return Err(string_flow(format!(
-                    "string: cannot convert sparse tensor {}x{} with {} stored entries to dense string array ({} elements exceeds safe threshold)",
-                    sparse.rows, sparse.cols, sparse.nnz(), total_elements
-                )));
-            }
+            ensure_sparse_dense_conversion(&sparse, "dense string array")?;
             tensor_to_string_array(sparse.to_dense().map_err(string_flow)?)
         }
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
@@ -869,6 +863,23 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             other
         ))),
     }
+}
+
+fn ensure_sparse_dense_conversion(sparse: &SparseTensor, target: &str) -> BuiltinResult<()> {
+    let total_elements = sparse
+        .rows
+        .checked_mul(sparse.cols)
+        .ok_or_else(|| string_flow("string: sparse matrix dimensions overflow"))?;
+    if total_elements > STRING_SPARSE_DENSE_ELEMENT_LIMIT {
+        return Err(string_flow(format!(
+            "string: cannot convert sparse tensor {}x{} with {} stored entries to {target} ({} elements exceeds safe threshold)",
+            sparse.rows,
+            sparse.cols,
+            sparse.nnz(),
+            total_elements
+        )));
+    }
+    Ok(())
 }
 
 fn bool_to_string(value: bool) -> &'static str {
@@ -1091,6 +1102,25 @@ pub(crate) mod tests {
             string_builtin(Value::from("%d"), vec![Value::Cell(cell)]).expect_err("string"),
         );
         assert!(err.contains("cell format arguments must contain scalar values"));
+    }
+
+    #[test]
+    fn string_rejects_oversized_sparse_tensor_before_densifying() {
+        let sparse = SparseTensor::zeros(STRING_SPARSE_DENSE_ELEMENT_LIMIT + 1, 1);
+        let err = string_builtin(Value::SparseTensor(sparse), Vec::new()).unwrap_err();
+
+        assert_eq!(err.identifier(), Some("RunMat:string:InvalidInput"));
+        assert!(err.message().contains("exceeds safe threshold"));
+    }
+
+    #[test]
+    fn string_format_rejects_oversized_sparse_argument_before_densifying() {
+        let sparse = SparseTensor::zeros(STRING_SPARSE_DENSE_ELEMENT_LIMIT + 1, 1);
+        let err = string_builtin(Value::from("%g"), vec![Value::SparseTensor(sparse)]).unwrap_err();
+
+        assert_eq!(err.identifier(), Some("RunMat:string:InvalidInput"));
+        assert!(err.message().contains("format argument"));
+        assert!(err.message().contains("exceeds safe threshold"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
