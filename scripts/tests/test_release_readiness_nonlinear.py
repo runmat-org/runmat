@@ -1546,6 +1546,76 @@ class ReleaseReadinessTests(unittest.TestCase):
             ),
         )
 
+    def test_em_trend_assertions_match_schema_and_external_contracts(self):
+        source = inspect.getsource(evaluate_release_readiness)
+        tree = ast.parse(source)
+        em_trend_assertion_specs = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id != "fixture_assertion_trend_ratio":
+                continue
+            if not node.args:
+                continue
+            assertion_node = node.args[0]
+            if not (
+                isinstance(assertion_node, ast.Constant)
+                and isinstance(assertion_node.value, str)
+                and assertion_node.value.startswith("em_")
+            ):
+                continue
+            fixture_id = None
+            for keyword in node.keywords:
+                if keyword.arg != "fixture_id":
+                    continue
+                if isinstance(keyword.value, ast.Constant) and isinstance(
+                    keyword.value.value, str
+                ):
+                    fixture_id = keyword.value.value
+            em_trend_assertion_specs.append((fixture_id, assertion_node.value))
+
+        self.assertNotEqual(em_trend_assertion_specs, [])
+        missing_from_schema = []
+        missing_from_external = []
+        em_fixture_ids = [
+            fixture_id
+            for fixture_id in REQUIRED_FIXTURES
+            if fixture_id.startswith("electromagnetic_reference_")
+        ]
+        for fixture_id, assertion_name in em_trend_assertion_specs:
+            candidate_fixtures = [fixture_id] if fixture_id is not None else em_fixture_ids
+            in_schema = any(
+                assertion_name in REQUIRED_FIXTURES.get(candidate, set())
+                for candidate in candidate_fixtures
+            )
+            if not in_schema:
+                missing_from_schema.append(f"{fixture_id or '*'}:{assertion_name}")
+            in_external = any(
+                assertion_name in REQUIRED_METRICS_BY_FIXTURE.get(candidate, set())
+                for candidate in candidate_fixtures
+            )
+            if not in_external:
+                missing_from_external.append(f"{fixture_id or '*'}:{assertion_name}")
+
+        self.assertEqual(
+            missing_from_schema,
+            [],
+            (
+                "release-readiness EM trend assertions missing from schema assertion "
+                "contracts: " + ", ".join(sorted(missing_from_schema))
+            ),
+        )
+        self.assertEqual(
+            missing_from_external,
+            [],
+            (
+                "release-readiness EM trend assertions missing from external comparator "
+                "contracts: " + ", ".join(sorted(missing_from_external))
+            ),
+        )
+
     def test_em_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
