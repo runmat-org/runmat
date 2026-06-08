@@ -448,13 +448,6 @@ async fn call_registered_class_constructor(
             .is_some_and(|caller| runmat_builtins::is_class_or_subclass(caller, &owner)),
     };
     if !ctor_access_allowed {
-        let has_invokable_constructor =
-            crate::user_functions::resolve_semantic_function_by_name(&ctor.function_name).is_some()
-                || crate::user_functions::resolve_semantic_function_by_name(&owner_qualified)
-                    .is_some();
-        if !has_invokable_constructor {
-            return Ok(default_object);
-        }
         return Err(build_runtime_error(format!(
             "Constructor '{}' is not accessible from current context.",
             class_name
