@@ -283,6 +283,9 @@ fn nnz_host_value(value: Value, dim: Option<usize>) -> BuiltinResult<Value> {
             Ok(Value::Num(count as f64))
         }
         Some(dim) => {
+            if let Value::SparseTensor(sparse) = &value {
+                return reduce_sparse_dim(sparse, dim).map(tensor::tensor_into_value);
+            }
             let mask = mask_from_value(&value)?;
             let tensor = reduce_mask_dim(&mask, dim)?;
             Ok(tensor::tensor_into_value(tensor))
@@ -497,6 +500,91 @@ fn reduce_mask_dim(mask: &Mask, dim: usize) -> BuiltinResult<Tensor> {
         }
     }
     Tensor::new(output, out_shape)
+        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
+}
+
+fn reduce_sparse_dim(sparse: &SparseTensor, dim: usize) -> BuiltinResult<Tensor> {
+    match dim {
+        0 => Err(nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INVALID_ARGUMENT,
+            "dimension must be >= 1",
+        )),
+        1 => reduce_sparse_columns(sparse),
+        2 => reduce_sparse_rows(sparse),
+        _ => {
+            let mask = mask_from_sparse(sparse)?;
+            reduce_mask_dim(&mask, dim)
+        }
+    }
+}
+
+fn zero_counts(len: usize, context: &str) -> BuiltinResult<Vec<f64>> {
+    let mut counts = Vec::new();
+    counts.try_reserve_exact(len).map_err(|err| {
+        nnz_descriptor_error_with_detail(
+            &NNZ_ERROR_INTERNAL,
+            format!("{context} allocation failed: {err}"),
+        )
+    })?;
+    counts.resize(len, 0.0);
+    Ok(counts)
+}
+
+fn reduce_sparse_columns(sparse: &SparseTensor) -> BuiltinResult<Tensor> {
+    let mut output = zero_counts(sparse.cols, "sparse column count")?;
+    for (col, count) in output.iter_mut().enumerate() {
+        let start = sparse.col_ptrs.get(col).copied().ok_or_else(|| {
+            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse col_ptr missing")
+        })?;
+        let end = sparse.col_ptrs.get(col + 1).copied().ok_or_else(|| {
+            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse col_ptr missing")
+        })?;
+        if start > end || end > sparse.values.len() {
+            return Err(nnz_descriptor_error_with_detail(
+                &NNZ_ERROR_INTERNAL,
+                "sparse col_ptr out of bounds",
+            ));
+        }
+        *count = sparse.values[start..end]
+            .iter()
+            .copied()
+            .filter(|value| is_nonzero_scalar(*value))
+            .count() as f64;
+    }
+    Tensor::new(output, vec![1, sparse.cols])
+        .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
+}
+
+fn reduce_sparse_rows(sparse: &SparseTensor) -> BuiltinResult<Tensor> {
+    let mut output = zero_counts(sparse.rows, "sparse row count")?;
+    for col in 0..sparse.cols {
+        let start = sparse.col_ptrs.get(col).copied().ok_or_else(|| {
+            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse col_ptr missing")
+        })?;
+        let end = sparse.col_ptrs.get(col + 1).copied().ok_or_else(|| {
+            nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, "sparse col_ptr missing")
+        })?;
+        if start > end || end > sparse.values.len() || end > sparse.row_indices.len() {
+            return Err(nnz_descriptor_error_with_detail(
+                &NNZ_ERROR_INTERNAL,
+                "sparse col_ptr out of bounds",
+            ));
+        }
+        for idx in start..end {
+            if !is_nonzero_scalar(sparse.values[idx]) {
+                continue;
+            }
+            let row = sparse.row_indices[idx];
+            let Some(count) = output.get_mut(row) else {
+                return Err(nnz_descriptor_error_with_detail(
+                    &NNZ_ERROR_INTERNAL,
+                    "sparse row index out of bounds",
+                ));
+            };
+            *count += 1.0;
+        }
+    }
+    Tensor::new(output, vec![sparse.rows, 1])
         .map_err(|e| nnz_descriptor_error_with_detail(&NNZ_ERROR_INTERNAL, &e))
 }
 
@@ -722,6 +810,21 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 assert_eq!(out.data, vec![0.0, 0.0, 2.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nnz_sparse_dimension_one_avoids_dense_mask_allocation() {
+        let sparse =
+            SparseTensor::new(usize::MAX, 2, vec![0, 1, 1], vec![0], vec![7.0]).expect("sparse");
+
+        let result = nnz_host_value(Value::SparseTensor(sparse), Some(1)).expect("nnz");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![1.0, 0.0]);
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
